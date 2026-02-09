@@ -1,9 +1,40 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useInventory } from "../context/InventoryContext";
+import {
+  fetchItems,
+  deleteItemApi,
+  updateQuantityApi
+} from "../services/inventoryApi";
 
 const InventoryHome = () => {
   const navigate = useNavigate();
-  const { items, deleteItem, updateQuantity } = useInventory();
+  const [items, setItems] = useState([]);
+  const [vendors, setVendors] = useState([]);
+
+  useEffect(() => {
+    loadItems();
+    loadVendors();
+  }, []);
+
+  const loadItems = async () => {
+    const data = await fetchItems();
+    setItems(data);
+  };
+
+  const loadVendors = () => {
+    const data = JSON.parse(localStorage.getItem("vendors") || "[]");
+    setVendors(data);
+  };
+
+  const handleDelete = async (id) => {
+    await deleteItemApi(id);
+    loadItems();
+  };
+
+  const handleQtyUpdate = async (id, stock) => {
+    await updateQuantityApi(id, stock);
+    loadItems();
+  };
 
   return (
     <div className="p-6">
@@ -129,7 +160,7 @@ const InventoryHome = () => {
                 <td className="p-4 flex gap-3">
                   <button
                     onClick={() =>
-                      updateQuantity(item.id, item.stock + 1)
+                      handleQtyUpdate(item.id, item.stock + 1)
                     }
                     className="px-3 py-1 border rounded text-lg"
                     title="Increase Qty"
@@ -138,7 +169,7 @@ const InventoryHome = () => {
                   </button>
 
                   <button
-                    onClick={() => deleteItem(item.id)}
+                    onClick={() => handleDelete(item.id)}
                     className="text-red-600 text-lg"
                     title="Delete"
                   >
@@ -154,6 +185,66 @@ const InventoryHome = () => {
                   >
                     ✏️
                   </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Vendors */}
+      <div className="mt-6 bg-white rounded-lg shadow-sm overflow-x-auto">
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <h3 className="text-lg font-semibold text-slate-800">
+            Vendors
+          </h3>
+          <button
+            onClick={() => navigate("/inventory/create-vendors")}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-indigo-700"
+          >
+            + Create Vendor
+          </button>
+        </div>
+
+        <table className="w-full text-base">
+          <thead className="bg-slate-100">
+            <tr className="text-slate-700">
+              <th className="p-4 text-left min-w-[200px]">Vendor Name</th>
+              <th className="p-4 text-left min-w-[160px]">Phone</th>
+              <th className="p-4 text-left min-w-[220px]">Email</th>
+              <th className="p-4 text-left min-w-[200px]">GST</th>
+              <th className="p-4 text-left min-w-[260px]">Address</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {vendors.length === 0 && (
+              <tr>
+                <td
+                  colSpan="5"
+                  className="text-center p-6 text-slate-500"
+                >
+                  No vendors added yet
+                </td>
+              </tr>
+            )}
+
+            {vendors.map((vendor) => (
+              <tr key={vendor.id} className="border-t hover:bg-slate-50">
+                <td className="p-4 font-medium text-slate-800">
+                  {vendor.name}
+                </td>
+                <td className="p-4">
+                  {vendor.phone || "-"}
+                </td>
+                <td className="p-4">
+                  {vendor.email || "-"}
+                </td>
+                <td className="p-4">
+                  {vendor.gstNumber || "-"}
+                </td>
+                <td className="p-4 text-slate-600">
+                  {vendor.address || "-"}
                 </td>
               </tr>
             ))}
