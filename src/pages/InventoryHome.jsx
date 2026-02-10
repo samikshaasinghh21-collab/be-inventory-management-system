@@ -5,9 +5,11 @@ import {
   deleteItemApi,
   updateQuantityApi
 } from "../services/inventoryApi";
+import useSettings from "../hooks/useSettings";
 
 const InventoryHome = () => {
   const navigate = useNavigate();
+  const settings = useSettings();
   const [items, setItems] = useState([]);
   const [vendors, setVendors] = useState([]);
 
@@ -36,6 +38,34 @@ const InventoryHome = () => {
     loadItems();
   };
 
+  const currency = settings?.preferences?.currency || "INR";
+  const lowStockThreshold =
+    settings?.inventory?.lowStockThreshold ?? 0;
+  const unitLabel = settings?.inventory?.defaultUnit || "PCS";
+
+  const stockValue = items.reduce((total, item) => {
+    const price = Number(item.price) || 0;
+    const qty = Number(item.stock) || 0;
+    return total + price * qty;
+  }, 0);
+
+  const lowStockCount = items.filter((item) => {
+    const qty = Number(item.stock) || 0;
+    return qty <= lowStockThreshold;
+  }).length;
+
+  const formatCurrency = (value) => {
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(value);
+    } catch {
+      return `${currency} ${value.toLocaleString()}`;
+    }
+  };
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -58,12 +88,14 @@ const InventoryHome = () => {
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow-sm">
           <p className="text-sm text-slate-500">Stock Value</p>
-          <p className="text-2xl font-semibold">₹ 0</p>
+          <p className="text-2xl font-semibold">
+            {formatCurrency(stockValue)}
+          </p>
         </div>
 
         <div className="bg-white p-4 rounded-lg shadow-sm">
           <p className="text-sm text-orange-500">Low Stock</p>
-          <p className="text-2xl font-semibold">0</p>
+          <p className="text-2xl font-semibold">{lowStockCount}</p>
         </div>
       </div>
 
@@ -142,11 +174,11 @@ const InventoryHome = () => {
                 </td>
 
                 <td className="p-4">
-                  {item.stock} PCS
+                  {item.stock} {unitLabel}
                 </td>
 
                 <td className="p-4 font-medium">
-                  ₹ {item.price}
+                  {formatCurrency(Number(item.price) || 0)}
                 </td>
 
                 <td className="p-4">

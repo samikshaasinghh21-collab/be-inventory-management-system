@@ -4,6 +4,7 @@ import MainLayout from "../layouts/MainLayout";
 import Dashboard from "../pages/Dashboard";
 import InventoryHome from "../pages/InventoryHome";
 import ProjectsHome from "../pages/ProjectsHome";
+import Settings from "../pages/Settings";
 
 import CreateItems from "../components/inventory/CreateItems";
 import EditItems from "../components/inventory/EditItems";
@@ -14,7 +15,7 @@ import ReceiveGoods from "../components/inventory/ReceiveGoods";
 import AllocateToProjects from "../components/inventory/AllocateToProjects";
 import DeliveryChallan from "../components/inventory/DeliveryChallan";
 import Product from "../components/inventory/Product";
-import Cart  from "../components/inventory/Cart";
+import Cart from "../components/inventory/Cart";
 const AppRoutes = () => {
   return (
     <Routes>
@@ -34,6 +35,7 @@ const AppRoutes = () => {
         <Route path="/inventory/allocate-projects" element={<AllocateToProjects />} />
         <Route path="/inventory/delivery-challan" element={<DeliveryChallan />} />
         <Route path="/inventory/cart" element={<Cart />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
   );

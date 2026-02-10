@@ -285,15 +285,20 @@ const Sidebar = () => {
 
       {/* Footer */}
       <div className="absolute bottom-4 w-full px-4">
-        <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800/80 transition">
-          <span className="grid h-8 w-8 place-items-center rounded-md bg-slate-800/70">
+        <NavLink
+          to="/settings"
+          className={({ isActive }) =>
+            `${linkClass} ${isActive ? activeClass : "text-slate-300"}`
+          }
+        >
+          <Icon>
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
               <path d="M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7Z" />
               <path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2.1-1.3l-2-3.5l-2.4.7a7.6 7.6 0 0 0-1.7-1l-.3-2.5H9l-.3 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-.7l-2 3.5L4.6 13a7.9 7.9 0 0 0 .1 2l-2.1 1.3l2 3.5l2.4-.7a7.6 7.6 0 0 0 1.7 1l.3 2.5h6l.3-2.5a7.6 7.6 0 0 0 1.7-1l2.4.7l2-3.5L19.4 15Z" />
             </svg>
-          </span>
+          </Icon>
           <span className={labelClass}>Settings</span>
-        </button>
+        </NavLink>
         <button className="w-full mt-2 flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800/80 transition">
           <span className="grid h-8 w-8 place-items-center rounded-md bg-slate-800/70">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
