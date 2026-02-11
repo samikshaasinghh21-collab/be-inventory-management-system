@@ -16,6 +16,14 @@ import AllocateToProjects from "../components/inventory/AllocateToProjects";
 import DeliveryChallan from "../components/inventory/DeliveryChallan";
 import Product from "../components/inventory/Product";
 import Cart from "../components/inventory/Cart";
+import Boq from "../components/inventory/Boq";
+import Locations from "../components/inventory/Locations";
+import PurchaseOrder from "../components/inventory/PurchaseOrder";
+import Invoice from "../components/inventory/Invoice";
+import GoodsDelivered from "../components/inventory/GoodsDelivered";
+import Consumption from "../components/inventory/Consumption";
+import ReallocateReturn from "../components/inventory/ReallocateReturn";
+import ReturnDc from "../components/inventory/ReturnDc";
 const AppRoutes = () => {
   return (
     <Routes>
@@ -34,6 +42,14 @@ const AppRoutes = () => {
         <Route path="/inventory/receive-goods" element={<ReceiveGoods />} />
         <Route path="/inventory/allocate-projects" element={<AllocateToProjects />} />
         <Route path="/inventory/delivery-challan" element={<DeliveryChallan />} />
+        <Route path="/inventory/boq" element={<Boq />} />
+        <Route path="/inventory/locations" element={<Locations />} />
+        <Route path="/inventory/purchase-order" element={<PurchaseOrder />} />
+        <Route path="/inventory/invoice" element={<Invoice />} />
+        <Route path="/inventory/goods-delivered" element={<GoodsDelivered />} />
+        <Route path="/inventory/consumption" element={<Consumption />} />
+        <Route path="/inventory/reallocate-return" element={<ReallocateReturn />} />
+        <Route path="/inventory/return-dc" element={<ReturnDc />} />
         <Route path="/inventory/cart" element={<Cart />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
