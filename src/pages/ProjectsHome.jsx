@@ -7,6 +7,7 @@ const ProjectsHome = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [allocations, setAllocations] = useState([]);
+  const [actionSelection, setActionSelection] = useState("");
 
   const loadProjects = () => {
     setProjects(getProjects());
@@ -59,9 +60,95 @@ const ProjectsHome = () => {
     }, {});
   }, [allocations]);
 
+  const summary = useMemo(() => {
+    const statusCounts = projects.reduce(
+      (acc, project) => {
+        const raw = project.status || "Draft";
+        const normalized = String(raw).trim().toLowerCase();
+        acc.total += 1;
+        if (normalized.includes("draft")) acc.draft += 1;
+        else if (normalized.includes("pending")) acc.pending += 1;
+        else if (normalized.includes("approved")) acc.approved += 1;
+        else if (normalized.includes("delivered")) acc.delivered += 1;
+        else if (normalized.includes("closed")) acc.closed += 1;
+        else acc.other += 1;
+        return acc;
+      },
+      {
+        total: 0,
+        draft: 0,
+        pending: 0,
+        approved: 0,
+        delivered: 0,
+        closed: 0,
+        other: 0,
+      }
+    );
+
+    const totalAllocatedQty = allocations.reduce(
+      (sum, allocation) => sum + (Number(allocation.quantity) || 0),
+      0
+    );
+
+    const pendingActions = statusCounts.draft + statusCounts.pending;
+
+    return {
+      statusCounts,
+      totalAllocatedQty,
+      pendingActions,
+    };
+  }, [projects, allocations]);
+
+  const getStatusBadgeClass = (status) => {
+    const normalized = String(status || "Draft")
+      .trim()
+      .toLowerCase();
+    if (normalized.includes("draft")) {
+      return "bg-slate-100 text-slate-700 border-slate-200";
+    }
+    if (normalized.includes("pending")) {
+      return "bg-amber-100 text-amber-800 border-amber-200";
+    }
+    if (normalized.includes("approved")) {
+      return "bg-emerald-100 text-emerald-800 border-emerald-200";
+    }
+    if (normalized.includes("delivered")) {
+      return "bg-sky-100 text-sky-800 border-sky-200";
+    }
+    if (normalized.includes("closed")) {
+      return "bg-gray-200 text-gray-800 border-gray-300";
+    }
+    return "bg-slate-100 text-slate-700 border-slate-200";
+  };
+
   const handleDelete = (id) => {
     deleteProject(id);
     loadProjects();
+  };
+
+  const actionRoutes = {
+    "Create Project": "/inventory/create-project",
+    "Create Bill of Quantity (BOQ)": "/inventory/boq",
+    "Select / Manage Location": "/inventory/locations",
+    "Create Purchase Order (PO)": "/inventory/purchase-orders",
+    "Receive Inventory – Location based": "/inventory/receive-goods",
+    "Create Invoice": "/inventory/invoices",
+    "Allocate Inventory to Location / Project":
+      "/inventory/allocate-projects",
+    "Create Delivery Challan (DC)": "/inventory/delivery-challan",
+    "Goods Delivered to Location (Confirmation screen)":
+      "/inventory/delivery-confirmation",
+    "Consumption (Material Used)": "/inventory/consumption",
+    "Reallocate / Return Inventory": "/inventory/return-reallocate",
+    "Create DC (for Return or Reallocation)": "/inventory/return-dc",
+  };
+
+  const handleActionChange = (value) => {
+    setActionSelection(value);
+    const route = actionRoutes[value];
+    if (route) {
+      navigate(route);
+    }
   };
 
   return (
@@ -95,6 +182,94 @@ const ProjectsHome = () => {
           >
             + Create Project
           </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border border-slate-200 p-4 mb-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold text-slate-700">
+            Project Actions
+          </span>
+          <select
+            value={actionSelection}
+            onChange={(e) => handleActionChange(e.target.value)}
+            className="min-w-[320px] border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-slate-300"
+          >
+            <option value="">Select Action</option>
+            <option value="Create Project">Create Project</option>
+            <option value="Create Bill of Quantity (BOQ)">
+              Create Bill of Quantity (BOQ)
+            </option>
+            <option value="Select / Manage Location">
+              Select / Manage Location
+            </option>
+            <option value="Create Purchase Order (PO)">
+              Create Purchase Order (PO)
+            </option>
+            <option value="Receive Inventory – Location based">
+              Receive Inventory – Location based
+            </option>
+            <option value="Create Invoice">Create Invoice</option>
+            <option value="Allocate Inventory to Location / Project">
+              Allocate Inventory to Location / Project
+            </option>
+            <option value="Create Delivery Challan (DC)">
+              Create Delivery Challan (DC)
+            </option>
+            <option value="Goods Delivered to Location (Confirmation screen)">
+              Goods Delivered to Location (Confirmation screen)
+            </option>
+            <option value="Consumption (Material Used)">
+              Consumption (Material Used)
+            </option>
+            <option value="Reallocate / Return Inventory">
+              Reallocate / Return Inventory
+            </option>
+            <option value="Create DC (for Return or Reallocation)">
+              Create DC (for Return or Reallocation)
+            </option>
+          </select>
+          <span className="text-xs text-slate-500">
+            Choose an action to continue.
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+            Total Projects
+          </p>
+          <p className="text-2xl font-semibold text-slate-800">
+            {summary.statusCounts.total}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Draft: {summary.statusCounts.draft} • Pending:{" "}
+            {summary.statusCounts.pending}
+          </p>
+        </div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+            Total Allocated Qty
+          </p>
+          <p className="text-2xl font-semibold text-slate-800">
+            {summary.totalAllocatedQty.toLocaleString()}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Approved: {summary.statusCounts.approved} • Delivered:{" "}
+            {summary.statusCounts.delivered}
+          </p>
+        </div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+            Pending Actions
+          </p>
+          <p className="text-2xl font-semibold text-slate-800">
+            {summary.pendingActions}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Closed: {summary.statusCounts.closed}
+          </p>
         </div>
       </div>
 
@@ -138,7 +313,17 @@ const ProjectsHome = () => {
                     {project.client || "-"}
                   </td>
                   <td className="p-4">
-                    {project.status || "-"}
+                    {project.status ? (
+                      <span
+                        className={`inline-flex items-center px-3 py-1 text-xs font-semibold border rounded-full ${getStatusBadgeClass(
+                          project.status
+                        )}`}
+                      >
+                        {project.status}
+                      </span>
+                    ) : (
+                      "-"
+                    )}
                   </td>
                   <td className="p-4">
                     {project.startDate || "-"}
