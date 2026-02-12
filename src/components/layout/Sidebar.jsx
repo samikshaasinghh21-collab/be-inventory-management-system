@@ -15,10 +15,7 @@ const PROJECT_WORKFLOW = [
   { id: "purchase-order", label: "Purchase Order", to: "/inventory/purchase-order" },
   { id: "receive-inventory", label: "Receive Inventory - Location based", to: "/inventory/receive-goods" },
   { id: "allocate-inventory", label: "Allocate Inventory to Location / Project", to: "/inventory/allocate-projects" },
-<<<<<<< HEAD
-=======
   { id: "delivery-challan", label: "Allocate Items (DC)", to: "/inventory/allocate-projects" },
->>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
   { id: "goods-delivered", label: "Goods Delivered to Location (Confirmation screen)", to: "/inventory/goods-delivered" },
   { id: "consumption", label: "Consumption (Material Used)", to: "/inventory/consumption" },
   { id: "reallocate-return", label: "Reallocate / Return Inventory", to: "/inventory/reallocate-return" },

@@ -7,7 +7,6 @@ import {
   updateWorkflowItem,
 } from "../../services/workflowStore";
 import LineItemsEditor from "./LineItemsEditor";
-import { formatDate } from "../../utils/dateFormat";
 
 const STORAGE_KEY = "workflow_consumption";
 const LOCATION_KEY = "workflow_locations";
@@ -181,17 +180,10 @@ const Consumption = () => {
                 <td className="p-2">
                   {locationMap[String(record.locationId)]?.name || "-"}
                 </td>
-<<<<<<< HEAD
                 <td className="p-2">
                   {(record.items || []).length}
                 </td>
                 <td className="p-2">
-=======
-                <td className="p-3">{formatDate(record.consumptionDate)}</td>
-                <td className="p-3">{record.items?.length || 0}</td>
-                <td className="p-3">{record.status || "-"}</td>
-                <td className="p-3 flex gap-3">
->>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
                   <button
                     onClick={() => handleDelete(record.id)}
                     className="text-red-600"

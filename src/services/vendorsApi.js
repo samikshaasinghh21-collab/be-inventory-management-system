@@ -31,6 +31,11 @@ export const fetchVendors = async () => {
   return list.map(normalizeVendor);
 };
 
+export const createVendor = async (payload) => {
+  const response = await api.post("/vendors", payload);
+  return normalizeVendor(response.data?.vendor ?? response.data);
+};
+
 export const syncVendorsCache = (vendors) => {
   localStorage.setItem("vendors", JSON.stringify(vendors));
 };

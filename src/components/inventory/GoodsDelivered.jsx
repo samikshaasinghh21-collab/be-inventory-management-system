@@ -7,12 +7,8 @@ import {
   updateWorkflowItem,
 } from "../../services/workflowStore";
 import LineItemsEditor from "./LineItemsEditor";
-<<<<<<< HEAD
 import { formatDateDDMMYYYY } from "../../utils/dateFormat";
 import DateInput from "../common/DateInput";
-=======
-import { formatDate } from "../../utils/dateFormat";
->>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
 
 const STORAGE_KEY = "workflow_goods_delivered";
 const LOCATION_KEY = "workflow_locations";
@@ -385,11 +381,8 @@ const GoodsDelivered = () => {
                 <td className="p-3">
                   {locationMap[String(record.locationId)]?.name || "-"}
                 </td>
-<<<<<<< HEAD
                 <td className="p-3">{formatDateDDMMYYYY(record.deliveredDate)}</td>
-=======
-                <td className="p-3">{formatDate(record.deliveredDate)}</td>
->>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
+                <td className="p-3">{formatDateDDMMYYYY(record.deliveredDate)}</td>
                 <td className="p-3">{record.status || "-"}</td>
                 <td className="p-3">{record.items?.length || 0}</td>
                 <td className="p-3">{record.receivedBy || "-"}</td>

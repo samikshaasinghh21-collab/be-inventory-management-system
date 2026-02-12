@@ -1,42 +1,34 @@
-const STORAGE_KEY = "items";
+import api from "./api";
 
-const getLocalItems = () => {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-  } catch {
-    return [];
-  }
-};
-
-const setLocalItems = (items) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-};
+const normalizeItem = (item = {}) => ({
+  id: item.id ?? item.ItemId ?? null,
+  name: item.name ?? item.Name ?? "",
+  category: item.category ?? item.Category ?? "",
+  hsn: item.hsn ?? item.HSN ?? "",
+  stock: Number(item.stock ?? item.Stock ?? 0),
+  price: Number(item.price ?? item.Price ?? 0),
+  gst: item.gst ?? item.GST ?? "",
+  description: item.description ?? item.Description ?? "",
+});
 
 export const fetchItems = async () => {
-  return getLocalItems();
+  const response = await api.get("/items");
+  const list = Array.isArray(response.data) ? response.data : [];
+  return list.map(normalizeItem);
 };
 
 export const createItem = async (item) => {
-  const items = getLocalItems();
-  const payload = { id: Date.now(), ...item };
-  const next = [...items, payload];
-  setLocalItems(next);
-  return payload;
+  const response = await api.post("/items", item);
+  return normalizeItem(response.data?.item ?? response.data);
 };
 
 export const deleteItemApi = async (id) => {
-  const items = getLocalItems();
-  const next = items.filter((item) => item.id !== id);
-  setLocalItems(next);
+  await api.delete(`/items/${id}`);
 };
 
 export const updateQuantityApi = async (id, quantity) => {
-  const items = getLocalItems();
-  const next = items.map((item) =>
-    item.id === id ? { ...item, stock: quantity } : item
-  );
-  setLocalItems(next);
-  return next.find((item) => item.id === id);
+  const response = await api.patch(`/items/${id}/quantity`, { stock: quantity });
+  return normalizeItem(response.data?.item ?? response.data);
 };
 
 export const itemInfoApi = async (id, name, quantity) => {
