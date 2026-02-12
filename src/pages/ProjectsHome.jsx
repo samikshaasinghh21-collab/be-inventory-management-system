@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAllocations } from "../services/allocationsStore";
 import { deleteProject, getProjects } from "../services/projectsStore";
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from "../utils/dateFormat";
 
 const ProjectsHome = () => {
   const navigate = useNavigate();
@@ -130,12 +131,10 @@ const ProjectsHome = () => {
     "Create Project": "/inventory/create-project",
     "Create Bill of Quantity (BOQ)": "/inventory/boq",
     "Select / Manage Location": "/inventory/locations",
-    "Create Purchase Order (PO)": "/inventory/purchase-orders",
-    "Receive Inventory – Location based": "/inventory/receive-goods",
-    "Create Invoice": "/inventory/invoices",
+    "Purchase Order": "/inventory/purchase-orders",
+    "Receive Inventory â€“ Location based": "/inventory/receive-goods",
     "Allocate Inventory to Location / Project":
       "/inventory/allocate-projects",
-    "Create Delivery Challan (DC)": "/inventory/delivery-challan",
     "Goods Delivered to Location (Confirmation screen)":
       "/inventory/delivery-confirmation",
     "Consumption (Material Used)": "/inventory/consumption",
@@ -203,18 +202,12 @@ const ProjectsHome = () => {
             <option value="Select / Manage Location">
               Select / Manage Location
             </option>
-            <option value="Create Purchase Order (PO)">
-              Create Purchase Order (PO)
+            <option value="Purchase Order">Purchase Order</option>
+            <option value="Receive Inventory â€“ Location based">
+              Receive Inventory â€“ Location based
             </option>
-            <option value="Receive Inventory – Location based">
-              Receive Inventory – Location based
-            </option>
-            <option value="Create Invoice">Create Invoice</option>
             <option value="Allocate Inventory to Location / Project">
               Allocate Inventory to Location / Project
-            </option>
-            <option value="Create Delivery Challan (DC)">
-              Create Delivery Challan (DC)
             </option>
             <option value="Goods Delivered to Location (Confirmation screen)">
               Goods Delivered to Location (Confirmation screen)
@@ -244,7 +237,7 @@ const ProjectsHome = () => {
             {summary.statusCounts.total}
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            Draft: {summary.statusCounts.draft} • Pending:{" "}
+            Draft: {summary.statusCounts.draft} â€¢ Pending:{" "}
             {summary.statusCounts.pending}
           </p>
         </div>
@@ -256,7 +249,7 @@ const ProjectsHome = () => {
             {summary.totalAllocatedQty.toLocaleString()}
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            Approved: {summary.statusCounts.approved} • Delivered:{" "}
+            Approved: {summary.statusCounts.approved} â€¢ Delivered:{" "}
             {summary.statusCounts.delivered}
           </p>
         </div>
@@ -326,10 +319,10 @@ const ProjectsHome = () => {
                     )}
                   </td>
                   <td className="p-4">
-                    {project.startDate || "-"}
+                    {formatDateDDMMYYYY(project.startDate)}
                   </td>
                   <td className="p-4">
-                    {project.endDate || "-"}
+                    {formatDateDDMMYYYY(project.endDate)}
                   </td>
                   <td className="p-4">
                     <button
@@ -375,11 +368,7 @@ const ProjectsHome = () => {
                                 </p>
                               )}
                               <p className="text-xs text-slate-400">
-                                {allocation.createdAt
-                                  ? new Date(
-                                      allocation.createdAt
-                                    ).toLocaleString()
-                                  : "-"}
+                                {formatDateTimeDDMMYYYY(allocation.createdAt)}
                               </p>
                             </div>
                           ))}
@@ -398,3 +387,5 @@ const ProjectsHome = () => {
 };
 
 export default ProjectsHome;
+
+

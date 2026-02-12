@@ -1,68 +1,198 @@
-import React from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getProjects } from "../../services/projectsStore";
+import {
+  addWorkflowItem,
+  deleteWorkflowItem,
+  getWorkflowList,
+  updateWorkflowItem,
+} from "../../services/workflowStore";
+import LineItemsEditor from "./LineItemsEditor";
+
+const STORAGE_KEY = "workflow_consumption";
+const LOCATION_KEY = "workflow_locations";
+
+const createLineItem = () => ({
+  id: Date.now() + Math.random(),
+  name: "",
+  description: "",
+  unit: "PCS",
+  quantity: "",
+  rate: "",
+  notes: "",
+});
+
+const createFormState = () => ({
+  consumptionNumber: "",
+  projectId: "",
+  locationId: "",
+  consumptionDate: new Date().toISOString().slice(0, 10),
+  issuedBy: "",
+  status: "Logged",
+  notes: "",
+});
 
 const Consumption = () => {
+  const [projects, setProjects] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [form, setForm] = useState(createFormState());
+  const [items, setItems] = useState([createLineItem()]);
+  const [errors, setErrors] = useState({});
+  const [editingId, setEditingId] = useState(null);
+
+  const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
+  const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
+
+  useEffect(() => {
+    setProjects(getProjects());
+    loadLocations();
+    loadRecords();
+  }, []);
+
+  const projectMap = useMemo(() => {
+    return projects.reduce((acc, project) => {
+      acc[String(project.id)] = project;
+      return acc;
+    }, {});
+  }, [projects]);
+
+  const locationMap = useMemo(() => {
+    return locations.reduce((acc, location) => {
+      acc[String(location.id)] = location;
+      return acc;
+    }, {});
+  }, [locations]);
+
+  const totalQuantity = records.reduce((sum, record) => {
+    const qty = (record.items || []).reduce(
+      (lineSum, item) => lineSum + (Number(item.quantity) || 0),
+      0
+    );
+    return sum + qty;
+  }, 0);
+
+  const resetForm = () => {
+    setForm(createFormState());
+    setItems([createLineItem()]);
+    setErrors({});
+    setEditingId(null);
+  };
+
+  const validate = () => {
+    const nextErrors = {};
+    if (!form.consumptionNumber.trim())
+      nextErrors.consumptionNumber = "Required";
+    if (!form.projectId) nextErrors.projectId = "Required";
+    if (!form.locationId) nextErrors.locationId = "Required";
+
+    const hasValidItem = items.some(
+      (item) => item.name.trim() && Number(item.quantity) > 0
+    );
+
+    if (!hasValidItem) nextErrors.items = "Add at least one item";
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    const payload = {
+      id: editingId ?? Date.now(),
+      ...form,
+      items,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (editingId) {
+      updateWorkflowItem(STORAGE_KEY, editingId, payload);
+    } else {
+      addWorkflowItem(STORAGE_KEY, payload);
+    }
+
+    resetForm();
+    loadRecords();
+  };
+
+  const handleDelete = (id) => {
+    deleteWorkflowItem(STORAGE_KEY, id);
+    loadRecords();
+  };
+
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Usage
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">
-            Consumption (Material Used)
-          </h1>
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="bg-white p-4 rounded border">
+          <p>Total Entries</p>
+          <p className="text-xl font-semibold">{records.length}</p>
         </div>
-        <button className="bg-indigo-600 text-white px-6 py-3 rounded-md text-base font-medium hover:bg-indigo-700">
-          + Log Consumption
+        <div className="bg-white p-4 rounded border">
+          <p>Total Quantity</p>
+          <p className="text-xl font-semibold">{totalQuantity}</p>
+        </div>
+        <div className="bg-white p-4 rounded border">
+          <p>Pending</p>
+          <p className="text-xl font-semibold">
+            {records.filter((r) => r.status === "Logged").length}
+          </p>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4 mb-6">
+        <input
+          type="text"
+          placeholder="Consumption Ref"
+          value={form.consumptionNumber}
+          onChange={(e) =>
+            setForm({ ...form, consumptionNumber: e.target.value })
+          }
+          className="border p-2 w-full"
+        />
+
+        <button
+          type="submit"
+          className="bg-indigo-600 text-white px-4 py-2 rounded"
+        >
+          {editingId ? "Update" : "Save"}
         </button>
-      </div>
+      </form>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-lg border border-slate-200 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-            Total Logs
-          </p>
-          <p className="text-2xl font-semibold text-slate-800">0</p>
-          <p className="text-xs text-slate-500 mt-1">Today: 0</p>
-        </div>
-        <div className="bg-white rounded-lg border border-slate-200 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-            Consumed Qty
-          </p>
-          <p className="text-2xl font-semibold text-slate-800">0</p>
-          <p className="text-xs text-slate-500 mt-1">This month</p>
-        </div>
-        <div className="bg-white rounded-lg border border-slate-200 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-            Pending Actions
-          </p>
-          <p className="text-2xl font-semibold text-slate-800">0</p>
-          <p className="text-xs text-slate-500 mt-1">
-            Awaiting approval
-          </p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
-        <table className="w-full text-base">
-          <thead className="bg-slate-100">
-            <tr className="text-slate-700">
-              <th className="p-4 text-left min-w-[200px]">Project</th>
-              <th className="p-4 text-left min-w-[200px]">Item</th>
-              <th className="p-4 text-left min-w-[140px]">Qty</th>
-              <th className="p-4 text-left min-w-[160px]">Date</th>
-              <th className="p-4 text-left min-w-[140px]">Status</th>
+      <div className="bg-white border rounded">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="p-2 text-left">Ref</th>
+              <th className="p-2 text-left">Project</th>
+              <th className="p-2 text-left">Location</th>
+              <th className="p-2 text-left">Qty</th>
+              <th className="p-2 text-left">Actions</th>
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td
-                colSpan="5"
-                className="text-center p-6 text-slate-500"
-              >
-                No consumption logs yet
-              </td>
-            </tr>
+            {records.map((record) => (
+              <tr key={record.id} className="border-t">
+                <td className="p-2">{record.consumptionNumber}</td>
+                <td className="p-2">
+                  {projectMap[String(record.projectId)]?.name || "-"}
+                </td>
+                <td className="p-2">
+                  {locationMap[String(record.locationId)]?.name || "-"}
+                </td>
+                <td className="p-2">
+                  {(record.items || []).length}
+                </td>
+                <td className="p-2">
+                  <button
+                    onClick={() => handleDelete(record.id)}
+                    className="text-red-600"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { saveProject } from "../../services/projectsStore";
+import DateInput from "../common/DateInput";
 
 const STATUS_OPTIONS = ["Planned", "Active", "On Hold", "Completed"];
 
@@ -196,10 +197,9 @@ const CreateProjects = () => {
                     <label className="text-sm font-medium text-slate-700">
                       Start Date
                     </label>
-                    <input
+                    <DateInput
                       value={startDate}
-                      onChange={(event) => setStartDate(event.target.value)}
-                      type="date"
+                      onChange={(value) => setStartDate(value)}
                       className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
                     />
                   </div>
@@ -208,13 +208,12 @@ const CreateProjects = () => {
                     <label className="text-sm font-medium text-slate-700">
                       End Date
                     </label>
-                    <input
+                    <DateInput
                       value={endDate}
-                      onChange={(event) => {
-                        setEndDate(event.target.value);
+                      onChange={(value) => {
+                        setEndDate(value);
                         clearError("endDate");
                       }}
-                      type="date"
                       className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
                       aria-invalid={Boolean(errors.endDate)}
                     />

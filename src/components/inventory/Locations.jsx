@@ -1,66 +1,344 @@
-import React from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getProjects } from "../../services/projectsStore";
+import {
+  addWorkflowItem,
+  deleteWorkflowItem,
+  getWorkflowList,
+  updateWorkflowItem,
+} from "../../services/workflowStore";
+
+const STORAGE_KEY = "workflow_locations";
+
+const createFormState = () => ({
+  name: "",
+  code: "",
+  type: "Site",
+  projectId: "",
+  manager: "",
+  phone: "",
+  address: "",
+  status: "Active",
+});
 
 const Locations = () => {
+  const [projects, setProjects] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [form, setForm] = useState(createFormState);
+  const [errors, setErrors] = useState({});
+  const [editingId, setEditingId] = useState(null);
+
+  const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
+
+  useEffect(() => {
+    setProjects(getProjects());
+    loadRecords();
+  }, []);
+
+  useEffect(() => {
+    const handler = () => loadRecords();
+    window.addEventListener(`${STORAGE_KEY}:changed`, handler);
+    return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
+  }, []);
+
+  const projectMap = useMemo(() => {
+    return projects.reduce((acc, project) => {
+      acc[String(project.id)] = project;
+      return acc;
+    }, {});
+  }, [projects]);
+
+  const resetForm = () => {
+    setForm(createFormState());
+    setErrors({});
+    setEditingId(null);
+  };
+
+  const validate = () => {
+    const nextErrors = {};
+    if (!form.name.trim()) {
+      nextErrors.name = "Location name is required.";
+    }
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    if (!validate()) {
+      return;
+    }
+
+    const payload = {
+      id: editingId ?? Date.now(),
+      ...form,
+      updatedAt: new Date().toISOString(),
+      createdAt:
+        editingId &&
+        records.find((record) => record.id === editingId)?.createdAt
+          ? records.find((record) => record.id === editingId)?.createdAt
+          : new Date().toISOString(),
+    };
+
+    if (editingId) {
+      updateWorkflowItem(STORAGE_KEY, editingId, payload);
+    } else {
+      addWorkflowItem(STORAGE_KEY, payload);
+    }
+
+    resetForm();
+  };
+
+  const handleEdit = (record) => {
+    setEditingId(record.id);
+    setForm({
+      name: record.name || "",
+      code: record.code || "",
+      type: record.type || "Site",
+      projectId: record.projectId || "",
+      manager: record.manager || "",
+      phone: record.phone || "",
+      address: record.address || "",
+      status: record.status || "Active",
+    });
+    setErrors({});
+  };
+
+  const handleDelete = (id) => {
+    deleteWorkflowItem(STORAGE_KEY, id);
+  };
+
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Locations
+            Projects
           </p>
           <h1 className="text-3xl font-semibold text-slate-800">
-            Select / Manage Location
+            Location Management
           </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Manage warehouses, yards, and project sites.
+          </p>
         </div>
-        <button className="bg-indigo-600 text-white px-6 py-3 rounded-md text-base font-medium hover:bg-indigo-700">
-          + Add Location
+        <button
+          type="button"
+          onClick={resetForm}
+          className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+        >
+          Clear Form
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-lg border border-slate-200 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-            Total Locations
-          </p>
-          <p className="text-2xl font-semibold text-slate-800">0</p>
-          <p className="text-xs text-slate-500 mt-1">Active: 0 • Inactive: 0</p>
+      <form onSubmit={handleSubmit} className="space-y-4 mb-6">
+        <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">
+            Location Details
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Location Name *
+              </label>
+              <input
+                type="text"
+                value={form.name}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, name: event.target.value }))
+                }
+                placeholder="Main Warehouse"
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              />
+              {errors.name && (
+                <p className="text-xs text-red-600 mt-1">{errors.name}</p>
+              )}
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Code
+              </label>
+              <input
+                type="text"
+                value={form.code}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, code: event.target.value }))
+                }
+                placeholder="LOC-01"
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Type
+              </label>
+              <select
+                value={form.type}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, type: event.target.value }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                <option value="Warehouse">Warehouse</option>
+                <option value="Site">Site</option>
+                <option value="Yard">Yard</option>
+                <option value="Office">Office</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Project
+              </label>
+              <select
+                value={form.projectId}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    projectId: event.target.value,
+                  }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                <option value="">Not linked</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Manager / Contact
+              </label>
+              <input
+                type="text"
+                value={form.manager}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, manager: event.target.value }))
+                }
+                placeholder="Contact person"
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Phone
+              </label>
+              <input
+                type="text"
+                value={form.phone}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, phone: event.target.value }))
+                }
+                placeholder="+1 555 123 4567"
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-sm font-medium text-slate-700">
+                Address
+              </label>
+              <textarea
+                value={form.address}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, address: event.target.value }))
+                }
+                placeholder="Street, city, state, ZIP"
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px]"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Status
+              </label>
+              <select
+                value={form.status}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, status: event.target.value }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+                <option value="Closed">Closed</option>
+              </select>
+            </div>
+          </div>
         </div>
-        <div className="bg-white rounded-lg border border-slate-200 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-            Stock Value
-          </p>
-          <p className="text-2xl font-semibold text-slate-800">₹ 0</p>
-          <p className="text-xs text-slate-500 mt-1">All locations</p>
-        </div>
-        <div className="bg-white rounded-lg border border-slate-200 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-            Pending Actions
-          </p>
-          <p className="text-2xl font-semibold text-slate-800">0</p>
-          <p className="text-xs text-slate-500 mt-1">Awaiting updates</p>
-        </div>
-      </div>
 
-      <div className="bg-white rounded-lg shadow-sm overflow-x-auto">
-        <table className="w-full text-base">
-          <thead className="bg-slate-100">
-            <tr className="text-slate-700">
-              <th className="p-4 text-left min-w-[200px]">Location</th>
-              <th className="p-4 text-left min-w-[200px]">Address</th>
-              <th className="p-4 text-left min-w-[140px]">Type</th>
-              <th className="p-4 text-left min-w-[140px]">Status</th>
-              <th className="p-4 text-left min-w-[140px]">Stock Qty</th>
+        <div className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={resetForm}
+            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+          >
+            {editingId ? "Update Location" : "Save Location"}
+          </button>
+        </div>
+      </form>
+
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+        <div className="px-4 py-3 border-b flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-slate-800">
+            Locations Register
+          </h3>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-slate-100 text-slate-600">
+            <tr>
+              <th className="p-3 text-left min-w-[180px]">Location</th>
+              <th className="p-3 text-left min-w-[120px]">Code</th>
+              <th className="p-3 text-left min-w-[140px]">Type</th>
+              <th className="p-3 text-left min-w-[180px]">Project</th>
+              <th className="p-3 text-left min-w-[160px]">Contact</th>
+              <th className="p-3 text-left min-w-[120px]">Status</th>
+              <th className="p-3 text-left min-w-[120px]">Actions</th>
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td
-                colSpan="5"
-                className="text-center p-6 text-slate-500"
-              >
-                No locations added yet
-              </td>
-            </tr>
+            {records.length === 0 && (
+              <tr>
+                <td colSpan="7" className="p-6 text-center text-slate-500">
+                  No locations created yet.
+                </td>
+              </tr>
+            )}
+            {records.map((record) => (
+              <tr key={record.id} className="border-t hover:bg-slate-50">
+                <td className="p-3 font-medium text-slate-800">
+                  {record.name}
+                </td>
+                <td className="p-3">{record.code || "-"}</td>
+                <td className="p-3">{record.type || "-"}</td>
+                <td className="p-3">
+                  {projectMap[String(record.projectId)]?.name || "-"}
+                </td>
+                <td className="p-3">{record.manager || "-"}</td>
+                <td className="p-3">{record.status || "-"}</td>
+                <td className="p-3 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleEdit(record)}
+                    className="text-indigo-600 text-sm"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(record.id)}
+                    className="text-red-600 text-sm"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

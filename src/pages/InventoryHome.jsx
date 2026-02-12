@@ -5,26 +5,35 @@ import {
   deleteItemApi,
   updateQuantityApi
 } from "../services/inventoryApi";
+import { fetchVendors, syncVendorsCache } from "../services/vendorsApi";
+import useSettings from "../hooks/useSettings";
 
 const InventoryHome = () => {
   const navigate = useNavigate();
+  const settings = useSettings();
   const [items, setItems] = useState([]);
   const [vendors, setVendors] = useState([]);
-
-  useEffect(() => {
-    loadItems();
-    loadVendors();
-  }, []);
 
   const loadItems = async () => {
     const data = await fetchItems();
     setItems(data);
   };
 
-  const loadVendors = () => {
-    const data = JSON.parse(localStorage.getItem("vendors") || "[]");
-    setVendors(data);
+  const loadVendors = async () => {
+    try {
+      const data = await fetchVendors();
+      setVendors(data);
+      syncVendorsCache(data);
+    } catch (error) {
+      console.error("Failed to load vendors:", error);
+      setVendors([]);
+    }
   };
+
+  useEffect(() => {
+    loadItems();
+    loadVendors();
+  }, []);
 
   const handleDelete = async (id) => {
     await deleteItemApi(id);
@@ -34,6 +43,34 @@ const InventoryHome = () => {
   const handleQtyUpdate = async (id, stock) => {
     await updateQuantityApi(id, stock);
     loadItems();
+  };
+
+  const currency = settings?.preferences?.currency || "INR";
+  const lowStockThreshold =
+    settings?.inventory?.lowStockThreshold ?? 0;
+  const unitLabel = settings?.inventory?.defaultUnit || "PCS";
+
+  const stockValue = items.reduce((total, item) => {
+    const price = Number(item.price) || 0;
+    const qty = Number(item.stock) || 0;
+    return total + price * qty;
+  }, 0);
+
+  const lowStockCount = items.filter((item) => {
+    const qty = Number(item.stock) || 0;
+    return qty <= lowStockThreshold;
+  }).length;
+
+  const formatCurrency = (value) => {
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(value);
+    } catch {
+      return `${currency} ${value.toLocaleString()}`;
+    }
   };
 
   return (
@@ -58,12 +95,14 @@ const InventoryHome = () => {
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow-sm">
           <p className="text-sm text-slate-500">Stock Value</p>
-          <p className="text-2xl font-semibold">₹ 0</p>
+          <p className="text-2xl font-semibold">
+            {formatCurrency(stockValue)}
+          </p>
         </div>
 
         <div className="bg-white p-4 rounded-lg shadow-sm">
           <p className="text-sm text-orange-500">Low Stock</p>
-          <p className="text-2xl font-semibold">0</p>
+          <p className="text-2xl font-semibold">{lowStockCount}</p>
         </div>
       </div>
 
@@ -142,11 +181,11 @@ const InventoryHome = () => {
                 </td>
 
                 <td className="p-4">
-                  {item.stock} PCS
+                  {item.stock} {unitLabel}
                 </td>
 
                 <td className="p-4 font-medium">
-                  ₹ {item.price}
+                  {formatCurrency(Number(item.price) || 0)}
                 </td>
 
                 <td className="p-4">
@@ -230,21 +269,21 @@ const InventoryHome = () => {
             )}
 
             {vendors.map((vendor) => (
-              <tr key={vendor.id} className="border-t hover:bg-slate-50">
+              <tr key={vendor.id ?? vendor.VendorId} className="border-t hover:bg-slate-50">
                 <td className="p-4 font-medium text-slate-800">
-                  {vendor.name}
+                  {vendor.name || vendor.VendorName || "-"}
                 </td>
                 <td className="p-4">
-                  {vendor.phone || "-"}
+                  {vendor.phone || vendor.Phone || "-"}
                 </td>
                 <td className="p-4">
-                  {vendor.email || "-"}
+                  {vendor.email || vendor.Email || "-"}
                 </td>
                 <td className="p-4">
-                  {vendor.gstNumber || "-"}
+                  {vendor.gstNumber || vendor.GSTNumber || "-"}
                 </td>
                 <td className="p-4 text-slate-600">
-                  {vendor.address || "-"}
+                  {vendor.address || vendor.Address || "-"}
                 </td>
               </tr>
             ))}

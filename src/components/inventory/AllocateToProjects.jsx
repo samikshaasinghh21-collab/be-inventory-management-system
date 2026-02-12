@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchItems } from "../../services/inventoryApi";
 import { getProjects } from "../../services/projectsStore";
+import { getWorkflowList } from "../../services/workflowStore";
+import { formatDateTimeDDMMYYYY } from "../../utils/dateFormat";
 import {
   deleteAllocation,
   getAllocations,
@@ -9,12 +11,16 @@ import {
   updateAllocation,
 } from "../../services/allocationsStore";
 
+const LOCATION_KEY = "workflow_locations";
+
 const AllocateToProjects = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [items, setItems] = useState([]);
   const [allocations, setAllocations] = useState([]);
   const [projectId, setProjectId] = useState("");
+  const [locationId, setLocationId] = useState("");
   const [itemId, setItemId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [notes, setNotes] = useState("");
@@ -25,6 +31,10 @@ const AllocateToProjects = () => {
 
   const loadProjects = () => {
     setProjects(getProjects());
+  };
+
+  const loadLocations = () => {
+    setLocations(getWorkflowList(LOCATION_KEY));
   };
 
   const loadAllocations = () => {
@@ -45,6 +55,7 @@ const AllocateToProjects = () => {
 
   useEffect(() => {
     loadProjects();
+    loadLocations();
     loadAllocations();
     loadItems();
   }, []);
@@ -65,14 +76,20 @@ const AllocateToProjects = () => {
       loadProjects();
     };
 
+    const handleLocationChange = () => {
+      loadLocations();
+    };
+
     window.addEventListener("storage", handleStorage);
     window.addEventListener("allocations:changed", handleAllocationChange);
     window.addEventListener("projects:changed", handleProjectChange);
+    window.addEventListener(`${LOCATION_KEY}:changed`, handleLocationChange);
 
     return () => {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener("allocations:changed", handleAllocationChange);
       window.removeEventListener("projects:changed", handleProjectChange);
+      window.removeEventListener(`${LOCATION_KEY}:changed`, handleLocationChange);
     };
   }, []);
 
@@ -90,6 +107,13 @@ const AllocateToProjects = () => {
     }, {});
   }, [items]);
 
+  const locationMap = useMemo(() => {
+    return locations.reduce((acc, location) => {
+      acc[String(location.id)] = location;
+      return acc;
+    }, {});
+  }, [locations]);
+
   const clearError = (key) => {
     if (errors[key]) {
       setErrors((prev) => ({ ...prev, [key]: undefined }));
@@ -100,6 +124,9 @@ const AllocateToProjects = () => {
     const nextErrors = {};
     if (!projectId) {
       nextErrors.projectId = "Select a project.";
+    }
+    if (!locationId) {
+      nextErrors.locationId = "Select a location.";
     }
     if (!itemId) {
       nextErrors.itemId = "Select an item.";
@@ -119,10 +146,13 @@ const AllocateToProjects = () => {
     }
 
     const project = projectMap[projectId];
+    const location = locationMap[locationId];
     const item = itemMap[itemId];
     const basePayload = {
       projectId: project?.id ?? projectId,
       projectName: project?.name || "",
+      locationId: location?.id ?? locationId,
+      locationName: location?.name || "",
       itemId: item?.id ?? itemId,
       itemName: item?.name || "",
       quantity: Number(quantity),
@@ -147,6 +177,7 @@ const AllocateToProjects = () => {
 
     loadAllocations();
     setProjectId("");
+    setLocationId("");
     setItemId("");
     setQuantity("");
     setNotes("");
@@ -162,6 +193,7 @@ const AllocateToProjects = () => {
 
   const handleEdit = (allocation) => {
     setProjectId(String(allocation.projectId || ""));
+    setLocationId(String(allocation.locationId || ""));
     setItemId(String(allocation.itemId || ""));
     setQuantity(String(allocation.quantity || ""));
     setNotes(allocation.notes || "");
@@ -170,6 +202,7 @@ const AllocateToProjects = () => {
 
   const handleCancelEdit = () => {
     setProjectId("");
+    setLocationId("");
     setItemId("");
     setQuantity("");
     setNotes("");
@@ -266,27 +299,27 @@ const AllocateToProjects = () => {
 
           <div>
             <label className="text-sm font-medium text-slate-700">
-              Item *
+              Location *
             </label>
             <select
-              value={itemId}
+              value={locationId}
               onChange={(event) => {
-                setItemId(event.target.value);
-                clearError("itemId");
+                setLocationId(event.target.value);
+                clearError("locationId");
               }}
               className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-              aria-invalid={Boolean(errors.itemId)}
+              aria-invalid={Boolean(errors.locationId)}
             >
-              <option value="">Select Item</option>
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
+              <option value="">Select Location</option>
+              {locations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.name}
                 </option>
               ))}
             </select>
-            {errors.itemId && (
+            {errors.locationId && (
               <p className="mt-1 text-sm text-red-600">
-                {errors.itemId}
+                {errors.locationId}
               </p>
             )}
           </div>
@@ -310,6 +343,33 @@ const AllocateToProjects = () => {
             {errors.quantity && (
               <p className="mt-1 text-sm text-red-600">
                 {errors.quantity}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-slate-700">
+              Item *
+            </label>
+            <select
+              value={itemId}
+              onChange={(event) => {
+                setItemId(event.target.value);
+                clearError("itemId");
+              }}
+              className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+              aria-invalid={Boolean(errors.itemId)}
+            >
+              <option value="">Select Item</option>
+              {items.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+            {errors.itemId && (
+              <p className="mt-1 text-sm text-red-600">
+                {errors.itemId}
               </p>
             )}
           </div>
@@ -365,8 +425,9 @@ const AllocateToProjects = () => {
           <thead className="bg-slate-100">
             <tr className="text-slate-700">
               <th className="p-4 text-left min-w-[200px]">Project</th>
-              <th className="p-4 text-left min-w-[200px]">Item</th>
+              <th className="p-4 text-left min-w-[200px]">Location</th>
               <th className="p-4 text-left min-w-[120px]">Quantity</th>
+              <th className="p-4 text-left min-w-[200px]">Item</th>
               <th className="p-4 text-left min-w-[200px]">Notes</th>
               <th className="p-4 text-left min-w-[180px]">Date</th>
               <th className="p-4 text-left min-w-[120px]">Actions</th>
@@ -376,7 +437,7 @@ const AllocateToProjects = () => {
             {allocations.length === 0 && (
               <tr>
                 <td
-                  colSpan="6"
+                  colSpan="7"
                   className="text-center p-6 text-slate-500"
                 >
                   No allocations yet
@@ -389,6 +450,10 @@ const AllocateToProjects = () => {
                 allocation.projectName ||
                 projectMap[String(allocation.projectId)]?.name ||
                 "-";
+              const location =
+                allocation.locationName ||
+                locationMap[String(allocation.locationId)]?.name ||
+                "-";
               const item =
                 allocation.itemName ||
                 itemMap[String(allocation.itemId)]?.name ||
@@ -398,15 +463,14 @@ const AllocateToProjects = () => {
                   <td className="p-4 font-medium text-slate-800">
                     {project}
                   </td>
-                  <td className="p-4">{item}</td>
+                  <td className="p-4">{location}</td>
                   <td className="p-4">{allocation.quantity}</td>
+                  <td className="p-4">{item}</td>
                   <td className="p-4 text-slate-600">
                     {allocation.notes || "-"}
                   </td>
                   <td className="p-4 text-slate-600">
-                    {allocation.createdAt
-                      ? new Date(allocation.createdAt).toLocaleString()
-                      : "-"}
+                    {formatDateTimeDDMMYYYY(allocation.createdAt)}
                   </td>
                   <td className="p-4">
                     <div className="flex items-center gap-3">

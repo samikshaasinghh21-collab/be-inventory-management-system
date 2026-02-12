@@ -7,9 +7,10 @@ import {
   updateWorkflowItem,
 } from "../../services/workflowStore";
 import LineItemsEditor from "./LineItemsEditor";
+import { formatDateDDMMYYYY } from "../../utils/dateFormat";
 import DateInput from "../common/DateInput";
 
-const STORAGE_KEY = "workflow_delivery_challan";
+const STORAGE_KEY = "workflow_goods_delivered";
 const LOCATION_KEY = "workflow_locations";
 
 const createLineItem = () => ({
@@ -23,17 +24,16 @@ const createLineItem = () => ({
 });
 
 const createFormState = () => ({
-  dcNumber: "",
+  deliveryNumber: "",
   projectId: "",
-  fromLocationId: "",
-  toLocation: "",
-  vehicleNumber: "",
-  issueDate: new Date().toISOString().slice(0, 10),
-  status: "Draft",
+  locationId: "",
+  deliveredDate: new Date().toISOString().slice(0, 10),
+  receivedBy: "",
+  status: "Pending",
   notes: "",
 });
 
-const DeliveryChallan = () => {
+const GoodsDelivered = () => {
   const [projects, setProjects] = useState([]);
   const [locations, setLocations] = useState([]);
   const [records, setRecords] = useState([]);
@@ -47,8 +47,8 @@ const DeliveryChallan = () => {
 
   useEffect(() => {
     setProjects(getProjects());
-    loadRecords();
     loadLocations();
+    loadRecords();
   }, []);
 
   useEffect(() => {
@@ -86,25 +86,21 @@ const DeliveryChallan = () => {
 
   const validate = () => {
     const nextErrors = {};
-    if (!form.dcNumber.trim()) {
-      nextErrors.dcNumber = "DC number is required.";
+    if (!form.deliveryNumber.trim()) {
+      nextErrors.deliveryNumber = "Delivery reference is required.";
     }
     if (!form.projectId) {
       nextErrors.projectId = "Select a project.";
     }
-    if (!form.fromLocationId) {
-      nextErrors.fromLocationId = "Select dispatch location.";
-    }
-    if (!form.toLocation.trim()) {
-      nextErrors.toLocation = "Enter destination location/site.";
+    if (!form.locationId) {
+      nextErrors.locationId = "Select a location.";
     }
     const hasValidItem = items.some(
       (item) => item.name.trim() && Number(item.quantity) > 0
     );
     if (!hasValidItem) {
-      nextErrors.items = "Add at least one line item.";
+      nextErrors.items = "Add at least one delivered item.";
     }
-
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
@@ -143,13 +139,12 @@ const DeliveryChallan = () => {
   const handleEdit = (record) => {
     setEditingId(record.id);
     setForm({
-      dcNumber: record.dcNumber || "",
+      deliveryNumber: record.deliveryNumber || "",
       projectId: record.projectId || "",
-      fromLocationId: record.fromLocationId || "",
-      toLocation: record.toLocation || "",
-      vehicleNumber: record.vehicleNumber || "",
-      issueDate: record.issueDate || new Date().toISOString().slice(0, 10),
-      status: record.status || "Draft",
+      locationId: record.locationId || "",
+      deliveredDate: record.deliveredDate || new Date().toISOString().slice(0, 10),
+      receivedBy: record.receivedBy || "",
+      status: record.status || "Pending",
       notes: record.notes || "",
     });
     setItems(record.items?.length ? record.items : [createLineItem()]);
@@ -168,10 +163,10 @@ const DeliveryChallan = () => {
             Projects
           </p>
           <h1 className="text-3xl font-semibold text-slate-800">
-            Delivery Challan
+            Goods Delivered
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Create and track material dispatch to project locations.
+            Confirm deliveries to project locations and record acknowledgements.
           </p>
         </div>
         <button
@@ -183,48 +178,32 @@ const DeliveryChallan = () => {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-          <p className="text-sm text-slate-500">Total Challans</p>
-          <p className="text-2xl font-semibold text-slate-800">
-            {records.length}
-          </p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-          <p className="text-sm text-slate-500">Issued Challans</p>
-          <p className="text-2xl font-semibold text-slate-800">
-            {records.filter((record) => record.status === "Issued").length}
-          </p>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-          <p className="text-sm text-slate-500">Draft Challans</p>
-          <p className="text-2xl font-semibold text-slate-800">
-            {records.filter((record) => record.status === "Draft").length}
-          </p>
-        </div>
-      </div>
-
       <form onSubmit={handleSubmit} className="space-y-4 mb-6">
         <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
           <h2 className="text-lg font-semibold text-slate-800 mb-4">
-            Challan Details
+            Delivery Confirmation
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="text-sm font-medium text-slate-700">
-                DC Number *
+                Delivery Ref *
               </label>
               <input
                 type="text"
-                value={form.dcNumber}
+                value={form.deliveryNumber}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, dcNumber: event.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    deliveryNumber: event.target.value,
+                  }))
                 }
-                placeholder="DC-2026-001"
+                placeholder="DC-2026-009"
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
-              {errors.dcNumber && (
-                <p className="text-xs text-red-600 mt-1">{errors.dcNumber}</p>
+              {errors.deliveryNumber && (
+                <p className="text-xs text-red-600 mt-1">
+                  {errors.deliveryNumber}
+                </p>
               )}
             </div>
             <div>
@@ -246,19 +225,21 @@ const DeliveryChallan = () => {
                 ))}
               </select>
               {errors.projectId && (
-                <p className="text-xs text-red-600 mt-1">{errors.projectId}</p>
+                <p className="text-xs text-red-600 mt-1">
+                  {errors.projectId}
+                </p>
               )}
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Dispatch From *
+                Location *
               </label>
               <select
-                value={form.fromLocationId}
+                value={form.locationId}
                 onChange={(event) =>
                   setForm((prev) => ({
                     ...prev,
-                    fromLocationId: event.target.value,
+                    locationId: event.target.value,
                   }))
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
@@ -270,53 +251,41 @@ const DeliveryChallan = () => {
                   </option>
                 ))}
               </select>
-              {errors.fromLocationId && (
-                <p className="text-xs text-red-600 mt-1">{errors.fromLocationId}</p>
+              {errors.locationId && (
+                <p className="text-xs text-red-600 mt-1">
+                  {errors.locationId}
+                </p>
               )}
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Deliver To *
+                Delivered Date
               </label>
-              <input
-                type="text"
-                value={form.toLocation}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, toLocation: event.target.value }))
+              <DateInput
+                value={form.deliveredDate}
+                onChange={(value) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    deliveredDate: value,
+                  }))
                 }
-                placeholder="Project site / destination"
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
-              {errors.toLocation && (
-                <p className="text-xs text-red-600 mt-1">{errors.toLocation}</p>
-              )}
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Vehicle Number
+                Received By
               </label>
               <input
                 type="text"
-                value={form.vehicleNumber}
+                value={form.receivedBy}
                 onChange={(event) =>
                   setForm((prev) => ({
                     ...prev,
-                    vehicleNumber: event.target.value,
+                    receivedBy: event.target.value,
                   }))
                 }
-                placeholder="MH-12-AB-1234"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">
-                Issue Date
-              </label>
-              <DateInput
-                value={form.issueDate}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, issueDate: value }))
-                }
+                placeholder="Site Supervisor"
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
             </div>
@@ -331,10 +300,9 @@ const DeliveryChallan = () => {
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               >
-                <option value="Draft">Draft</option>
-                <option value="Issued">Issued</option>
-                <option value="Delivered">Delivered</option>
-                <option value="Closed">Closed</option>
+                <option value="Pending">Pending</option>
+                <option value="Confirmed">Confirmed</option>
+                <option value="Disputed">Disputed</option>
               </select>
             </div>
             <div className="md:col-span-3">
@@ -346,7 +314,7 @@ const DeliveryChallan = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, notes: event.target.value }))
                 }
-                placeholder="Transport details, remarks, or approvals."
+                placeholder="Damage notes, acceptance remarks, etc."
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px]"
               />
             </div>
@@ -354,7 +322,9 @@ const DeliveryChallan = () => {
         </div>
 
         <LineItemsEditor items={items} onChange={setItems} />
-        {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
+        {errors.items && (
+          <p className="text-xs text-red-600">{errors.items}</p>
+        )}
 
         <div className="flex justify-end gap-3">
           <button
@@ -368,7 +338,7 @@ const DeliveryChallan = () => {
             type="submit"
             className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
           >
-            {editingId ? "Update Challan" : "Save Challan"}
+            {editingId ? "Update Delivery" : "Save Delivery"}
           </button>
         </div>
       </form>
@@ -376,43 +346,45 @@ const DeliveryChallan = () => {
       <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-800">
-            Delivery Challan Register
+            Delivery Register
           </h3>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
-              <th className="p-3 text-left min-w-[150px]">DC No</th>
+              <th className="p-3 text-left min-w-[150px]">Delivery Ref</th>
               <th className="p-3 text-left min-w-[180px]">Project</th>
-              <th className="p-3 text-left min-w-[180px]">From</th>
-              <th className="p-3 text-left min-w-[180px]">To</th>
-              <th className="p-3 text-left min-w-[120px]">Status</th>
+              <th className="p-3 text-left min-w-[180px]">Location</th>
+              <th className="p-3 text-left min-w-[140px]">Date</th>
+              <th className="p-3 text-left min-w-[140px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
+              <th className="p-3 text-left min-w-[140px]">Received By</th>
               <th className="p-3 text-left min-w-[120px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {records.length === 0 && (
               <tr>
-                <td colSpan="7" className="p-6 text-center text-slate-500">
-                  No delivery challans created yet.
+                <td colSpan="8" className="p-6 text-center text-slate-500">
+                  No delivery confirmations yet.
                 </td>
               </tr>
             )}
             {records.map((record) => (
               <tr key={record.id} className="border-t hover:bg-slate-50">
                 <td className="p-3 font-medium text-slate-800">
-                  {record.dcNumber || "-"}
+                  {record.deliveryNumber}
                 </td>
                 <td className="p-3">
                   {projectMap[String(record.projectId)]?.name || "-"}
                 </td>
                 <td className="p-3">
-                  {locationMap[String(record.fromLocationId)]?.name || "-"}
+                  {locationMap[String(record.locationId)]?.name || "-"}
                 </td>
-                <td className="p-3">{record.toLocation || "-"}</td>
+                <td className="p-3">{formatDateDDMMYYYY(record.deliveredDate)}</td>
                 <td className="p-3">{record.status || "-"}</td>
                 <td className="p-3">{record.items?.length || 0}</td>
+                <td className="p-3">{record.receivedBy || "-"}</td>
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"
@@ -438,4 +410,4 @@ const DeliveryChallan = () => {
   );
 };
 
-export default DeliveryChallan;
+export default GoodsDelivered;

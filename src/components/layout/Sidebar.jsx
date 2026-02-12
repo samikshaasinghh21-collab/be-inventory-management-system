@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 
 const Icon = ({ children }) => (
   <span className="grid h-9 w-9 place-items-center rounded-md bg-slate-800/70 text-slate-200 transition group-hover:bg-slate-700">
@@ -7,7 +7,23 @@ const Icon = ({ children }) => (
   </span>
 );
 
+const PROJECT_WORKFLOW = [
+  { id: "projects", label: "Projects", to: "/inventory/projects" },
+  { id: "create-project", label: "Create Project", to: "/inventory/create-project" },
+  { id: "boq", label: "Create Bill of Quantity (BOQ)", to: "/inventory/boq" },
+  { id: "locations", label: "Select / Manage Location", to: "/inventory/locations" },
+  { id: "purchase-order", label: "Purchase Order", to: "/inventory/purchase-order" },
+  { id: "receive-inventory", label: "Receive Inventory - Location based", to: "/inventory/receive-goods" },
+  { id: "allocate-inventory", label: "Allocate Inventory to Location / Project", to: "/inventory/allocate-projects" },
+  { id: "goods-delivered", label: "Goods Delivered to Location (Confirmation screen)", to: "/inventory/goods-delivered" },
+  { id: "consumption", label: "Consumption (Material Used)", to: "/inventory/consumption" },
+  { id: "reallocate-return", label: "Reallocate / Return Inventory", to: "/inventory/reallocate-return" },
+  { id: "return-dc", label: "Create DC (for Return or Reallocation)", to: "/inventory/return-dc" },
+];
+
 const Sidebar = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
       return localStorage.getItem("sidebarCollapsed") === "true";
@@ -15,6 +31,11 @@ const Sidebar = () => {
       return false;
     }
   });
+  const [projectsOpen, setProjectsOpen] = useState(false);
+
+  const isProjectRoute = PROJECT_WORKFLOW.some(
+    (step) => step.to && location.pathname.startsWith(step.to)
+  );
 
   useEffect(() => {
     const width = isCollapsed ? "5rem" : "18rem";
@@ -25,6 +46,12 @@ const Sidebar = () => {
       // ignore storage errors
     }
   }, [isCollapsed]);
+
+  useEffect(() => {
+    if (isProjectRoute && !isCollapsed) {
+      setProjectsOpen(true);
+    }
+  }, [isProjectRoute, isCollapsed]);
 
   const linkClass = [
     "group flex items-center rounded-lg transition text-[15px] text-slate-200 hover:bg-slate-800/80",
@@ -42,7 +69,7 @@ const Sidebar = () => {
     <aside
       className={`${
         isCollapsed ? "w-20" : "w-72"
-      } h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-900 text-white fixed transition-[width] duration-200`}
+      } h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-900 text-white fixed transition-[width] duration-200 flex flex-col`}
     >
       {/* Account / Logo */}
       <div className="p-5 border-b border-slate-800">
@@ -93,7 +120,7 @@ const Sidebar = () => {
       </div>
 
       {/* Menu */}
-      <nav className="p-4 space-y-1">
+      <nav className="flex-1 overflow-y-auto p-4 space-y-1">
         {/* Dashboard */}
         <NavLink
           to="/"
@@ -151,36 +178,65 @@ const Sidebar = () => {
             <span className={labelClass}>Products</span>
           </NavLink>
 
-          <NavLink
-            to="/inventory/create-item"
-            className={({ isActive }) =>
-              `${linkClass} ${isActive ? activeClass : ""}`
-            }
-          >
-            <Icon>
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
-            </Icon>
-            <span className={labelClass}>Create Items</span>
-          </NavLink>
-
-          <NavLink
-            to="/inventory/projects"
-            className={({ isActive }) =>
-              `${linkClass} ${isActive ? activeClass : ""}`
-            }
-          >
-            <Icon>
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M4 7h16v12H4z" />
-                <path d="M8 7V5h8v2" />
-                <path d="M4 11h16" />
-              </svg>
-            </Icon>
-            <span className={labelClass}>Projects</span>
-          </NavLink>
+          <div className="px-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (isCollapsed) {
+                  navigate("/inventory/projects");
+                  return;
+                }
+                setProjectsOpen((prev) => !prev);
+              }}
+              className={`${linkClass} ${
+                isProjectRoute ? activeClass : ""
+              } w-full ${isCollapsed ? "" : "justify-between"}`}
+              aria-expanded={projectsOpen}
+              aria-controls="projects-workflow"
+            >
+              <span className={`flex items-center ${isCollapsed ? "justify-center" : "gap-4"}`}>
+                <Icon>
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M4 7h16v12H4z" />
+                    <path d="M8 7V5h8v2" />
+                    <path d="M4 11h16" />
+                  </svg>
+                </Icon>
+                <span className={labelClass}>Projects</span>
+              </span>
+              {!isCollapsed && (
+                <span
+                  className={`ml-2 grid h-7 w-7 place-items-center rounded-md bg-slate-800/70 text-slate-300 transition ${
+                    projectsOpen ? "rotate-180" : ""
+                  }`}
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M6 9l6 6l6-6" />
+                  </svg>
+                </span>
+              )}
+            </button>
+            {!isCollapsed && projectsOpen && (
+              <div id="projects-workflow" className="mt-2 space-y-1 pl-16 pr-3">
+                {PROJECT_WORKFLOW.map((step) => (
+                  <NavLink
+                    key={step.id}
+                    to={step.to}
+                    className={({ isActive }) =>
+                      [
+                        "block rounded-md px-3 py-2 text-sm transition",
+                        isActive
+                          ? "bg-slate-800/80 text-white"
+                          : "text-slate-300 hover:bg-slate-800/60 hover:text-white",
+                      ].join(" ")
+                    }
+                  >
+                    {step.label}
+                  </NavLink>
+                ))}
+              </div>
+            )}
+          </div>
 
           <NavLink
             to="/inventory/create-vendors"
@@ -197,22 +253,6 @@ const Sidebar = () => {
               </svg>
             </Icon>
             <span className={labelClass}>Create Vendors</span>
-          </NavLink>
-
-          <NavLink
-            to="/inventory/create-project"
-            className={({ isActive }) =>
-              `${linkClass} ${isActive ? activeClass : ""}`
-            }
-          >
-            <Icon>
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M5 7h14v10H5z" />
-                <path d="M9 7V5h6v2" />
-                <path d="M7 10h10" />
-              </svg>
-            </Icon>
-            <span className={labelClass}>Create Project</span>
           </NavLink>
 
           <NavLink
@@ -247,53 +287,25 @@ const Sidebar = () => {
             <span className={labelClass}>Receive Goods</span>
           </NavLink>
 
-          <NavLink
-            to="/inventory/allocate-projects"
-            className={({ isActive }) =>
-              `${linkClass} ${isActive ? activeClass : ""}`
-            }
-          >
-            <Icon>
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M4 18V8" />
-                <path d="M10 18V5" />
-                <path d="M16 18v-7" />
-                <path d="M22 18V10" />
-              </svg>
-            </Icon>
-            <span className={labelClass}>Allocate to Projects</span>
-          </NavLink>
-
-          <NavLink
-            to="/inventory/delivery-challan"
-            className={({ isActive }) =>
-              `${linkClass} ${isActive ? activeClass : ""}`
-            }
-          >
-            <Icon>
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M3 7h12v9H3z" />
-                <path d="M15 10h4l2 2v4h-6" />
-                <path d="M6 16a2 2 0 1 0 4 0" />
-                <path d="M16 16a2 2 0 1 0 4 0" />
-              </svg>
-            </Icon>
-            <span className={labelClass}>Delivery Challan</span>
-          </NavLink>
         </div>
       </nav>
 
       {/* Footer */}
-      <div className="absolute bottom-4 w-full px-4">
-        <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800/80 transition">
-          <span className="grid h-8 w-8 place-items-center rounded-md bg-slate-800/70">
+      <div className="mt-auto px-4 pb-4">
+        <NavLink
+          to="/settings"
+          className={({ isActive }) =>
+            `${linkClass} ${isActive ? activeClass : "text-slate-300"}`
+          }
+        >
+          <Icon>
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
               <path d="M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7Z" />
               <path d="M19.4 15a7.9 7.9 0 0 0 .1-2l2.1-1.3l-2-3.5l-2.4.7a7.6 7.6 0 0 0-1.7-1l-.3-2.5H9l-.3 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-.7l-2 3.5L4.6 13a7.9 7.9 0 0 0 .1 2l-2.1 1.3l2 3.5l2.4-.7a7.6 7.6 0 0 0 1.7 1l.3 2.5h6l.3-2.5a7.6 7.6 0 0 0 1.7-1l2.4.7l2-3.5L19.4 15Z" />
             </svg>
-          </span>
+          </Icon>
           <span className={labelClass}>Settings</span>
-        </button>
+        </NavLink>
         <button className="w-full mt-2 flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800/80 transition">
           <span className="grid h-8 w-8 place-items-center rounded-md bg-slate-800/70">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -309,3 +321,4 @@ const Sidebar = () => {
 };
 
 export default Sidebar;
+

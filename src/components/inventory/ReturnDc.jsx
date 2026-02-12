@@ -8,8 +8,9 @@ import {
 } from "../../services/workflowStore";
 import LineItemsEditor from "./LineItemsEditor";
 import DateInput from "../common/DateInput";
+import { fetchVendors, syncVendorsCache } from "../../services/vendorsApi";
 
-const STORAGE_KEY = "workflow_delivery_challan";
+const STORAGE_KEY = "workflow_return_dc";
 const LOCATION_KEY = "workflow_locations";
 
 const createLineItem = () => ({
@@ -24,18 +25,20 @@ const createLineItem = () => ({
 
 const createFormState = () => ({
   dcNumber: "",
+  mode: "Return",
   projectId: "",
   fromLocationId: "",
-  toLocation: "",
-  vehicleNumber: "",
+  toLocationId: "",
+  vendorId: "",
   issueDate: new Date().toISOString().slice(0, 10),
   status: "Draft",
   notes: "",
 });
 
-const DeliveryChallan = () => {
+const ReturnDc = () => {
   const [projects, setProjects] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
   const [items, setItems] = useState([createLineItem()]);
@@ -44,11 +47,21 @@ const DeliveryChallan = () => {
 
   const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
   const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
+  const loadVendors = async () => {
+    try {
+      const data = await fetchVendors();
+      setVendors(data);
+      syncVendorsCache(data);
+    } catch {
+      setVendors([]);
+    }
+  };
 
   useEffect(() => {
     setProjects(getProjects());
-    loadRecords();
     loadLocations();
+    loadVendors();
+    loadRecords();
   }, []);
 
   useEffect(() => {
@@ -77,6 +90,13 @@ const DeliveryChallan = () => {
     }, {});
   }, [locations]);
 
+  const vendorMap = useMemo(() => {
+    return vendors.reduce((acc, vendor) => {
+      acc[String(vendor.id)] = vendor;
+      return acc;
+    }, {});
+  }, [vendors]);
+
   const resetForm = () => {
     setForm(createFormState());
     setItems([createLineItem()]);
@@ -93,18 +113,20 @@ const DeliveryChallan = () => {
       nextErrors.projectId = "Select a project.";
     }
     if (!form.fromLocationId) {
-      nextErrors.fromLocationId = "Select dispatch location.";
+      nextErrors.fromLocationId = "Select a source location.";
     }
-    if (!form.toLocation.trim()) {
-      nextErrors.toLocation = "Enter destination location/site.";
+    if (form.mode === "Reallocation" && !form.toLocationId) {
+      nextErrors.toLocationId = "Select a destination location.";
+    }
+    if (form.mode === "Return" && vendors.length > 0 && !form.vendorId) {
+      nextErrors.vendorId = "Select a vendor.";
     }
     const hasValidItem = items.some(
       (item) => item.name.trim() && Number(item.quantity) > 0
     );
     if (!hasValidItem) {
-      nextErrors.items = "Add at least one line item.";
+      nextErrors.items = "Add at least one item.";
     }
-
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
@@ -144,10 +166,11 @@ const DeliveryChallan = () => {
     setEditingId(record.id);
     setForm({
       dcNumber: record.dcNumber || "",
+      mode: record.mode || "Return",
       projectId: record.projectId || "",
       fromLocationId: record.fromLocationId || "",
-      toLocation: record.toLocation || "",
-      vehicleNumber: record.vehicleNumber || "",
+      toLocationId: record.toLocationId || "",
+      vendorId: record.vendorId || "",
       issueDate: record.issueDate || new Date().toISOString().slice(0, 10),
       status: record.status || "Draft",
       notes: record.notes || "",
@@ -168,10 +191,10 @@ const DeliveryChallan = () => {
             Projects
           </p>
           <h1 className="text-3xl font-semibold text-slate-800">
-            Delivery Challan
+            Return / Reallocation DC
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Create and track material dispatch to project locations.
+            Issue delivery challans for stock returns or reallocations.
           </p>
         </div>
         <button
@@ -185,21 +208,21 @@ const DeliveryChallan = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-          <p className="text-sm text-slate-500">Total Challans</p>
+          <p className="text-sm text-slate-500">Total DCs</p>
           <p className="text-2xl font-semibold text-slate-800">
             {records.length}
           </p>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-          <p className="text-sm text-slate-500">Issued Challans</p>
+          <p className="text-sm text-slate-500">Draft DCs</p>
           <p className="text-2xl font-semibold text-slate-800">
-            {records.filter((record) => record.status === "Issued").length}
+            {records.filter((record) => record.status === "Draft").length}
           </p>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-          <p className="text-sm text-slate-500">Draft Challans</p>
+          <p className="text-sm text-slate-500">Return DCs</p>
           <p className="text-2xl font-semibold text-slate-800">
-            {records.filter((record) => record.status === "Draft").length}
+            {records.filter((record) => record.mode === "Return").length}
           </p>
         </div>
       </div>
@@ -207,7 +230,7 @@ const DeliveryChallan = () => {
       <form onSubmit={handleSubmit} className="space-y-4 mb-6">
         <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
           <h2 className="text-lg font-semibold text-slate-800 mb-4">
-            Challan Details
+            DC Details
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
@@ -220,12 +243,27 @@ const DeliveryChallan = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, dcNumber: event.target.value }))
                 }
-                placeholder="DC-2026-001"
+                placeholder="RDC-2026-003"
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
               {errors.dcNumber && (
                 <p className="text-xs text-red-600 mt-1">{errors.dcNumber}</p>
               )}
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Mode
+              </label>
+              <select
+                value={form.mode}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, mode: event.target.value }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                <option value="Return">Return to Vendor</option>
+                <option value="Reallocation">Reallocate</option>
+              </select>
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
@@ -251,7 +289,7 @@ const DeliveryChallan = () => {
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Dispatch From *
+                From Location *
               </label>
               <select
                 value={form.fromLocationId}
@@ -271,43 +309,63 @@ const DeliveryChallan = () => {
                 ))}
               </select>
               {errors.fromLocationId && (
-                <p className="text-xs text-red-600 mt-1">{errors.fromLocationId}</p>
+                <p className="text-xs text-red-600 mt-1">
+                  {errors.fromLocationId}
+                </p>
               )}
             </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">
-                Deliver To *
-              </label>
-              <input
-                type="text"
-                value={form.toLocation}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, toLocation: event.target.value }))
-                }
-                placeholder="Project site / destination"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
-              />
-              {errors.toLocation && (
-                <p className="text-xs text-red-600 mt-1">{errors.toLocation}</p>
-              )}
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">
-                Vehicle Number
-              </label>
-              <input
-                type="text"
-                value={form.vehicleNumber}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    vehicleNumber: event.target.value,
-                  }))
-                }
-                placeholder="MH-12-AB-1234"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
-              />
-            </div>
+            {form.mode === "Reallocation" ? (
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  To Location *
+                </label>
+                <select
+                  value={form.toLocationId}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      toLocationId: event.target.value,
+                    }))
+                  }
+                  className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                >
+                  <option value="">Select destination</option>
+                  {locations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.name}
+                    </option>
+                  ))}
+                </select>
+                {errors.toLocationId && (
+                  <p className="text-xs text-red-600 mt-1">
+                    {errors.toLocationId}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Vendor
+                </label>
+                <select
+                  value={form.vendorId}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, vendorId: event.target.value }))
+                  }
+                  className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                >
+                  <option value="">Select vendor</option>
+                  {vendors.map((vendor) => (
+                    <option key={vendor.id} value={vendor.id}>
+                      {vendor.name}
+                    </option>
+                  ))}
+                </select>
+                {errors.vendorId && (
+                  <p className="text-xs text-red-600 mt-1">{errors.vendorId}</p>
+                )}
+              </div>
+            )}
             <div>
               <label className="text-sm font-medium text-slate-700">
                 Issue Date
@@ -333,7 +391,6 @@ const DeliveryChallan = () => {
               >
                 <option value="Draft">Draft</option>
                 <option value="Issued">Issued</option>
-                <option value="Delivered">Delivered</option>
                 <option value="Closed">Closed</option>
               </select>
             </div>
@@ -346,7 +403,7 @@ const DeliveryChallan = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, notes: event.target.value }))
                 }
-                placeholder="Transport details, remarks, or approvals."
+                placeholder="Return reason or transport details."
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px]"
               />
             </div>
@@ -354,7 +411,9 @@ const DeliveryChallan = () => {
         </div>
 
         <LineItemsEditor items={items} onChange={setItems} />
-        {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
+        {errors.items && (
+          <p className="text-xs text-red-600">{errors.items}</p>
+        )}
 
         <div className="flex justify-end gap-3">
           <button
@@ -368,7 +427,7 @@ const DeliveryChallan = () => {
             type="submit"
             className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
           >
-            {editingId ? "Update Challan" : "Save Challan"}
+            {editingId ? "Update DC" : "Save DC"}
           </button>
         </div>
       </form>
@@ -376,16 +435,17 @@ const DeliveryChallan = () => {
       <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-800">
-            Delivery Challan Register
+            Return / Reallocation DC Register
           </h3>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">DC No</th>
+              <th className="p-3 text-left min-w-[140px]">Mode</th>
               <th className="p-3 text-left min-w-[180px]">Project</th>
               <th className="p-3 text-left min-w-[180px]">From</th>
-              <th className="p-3 text-left min-w-[180px]">To</th>
+              <th className="p-3 text-left min-w-[180px]">To / Vendor</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
               <th className="p-3 text-left min-w-[120px]">Actions</th>
@@ -394,43 +454,50 @@ const DeliveryChallan = () => {
           <tbody>
             {records.length === 0 && (
               <tr>
-                <td colSpan="7" className="p-6 text-center text-slate-500">
-                  No delivery challans created yet.
+                <td colSpan="8" className="p-6 text-center text-slate-500">
+                  No return or reallocation DCs yet.
                 </td>
               </tr>
             )}
-            {records.map((record) => (
-              <tr key={record.id} className="border-t hover:bg-slate-50">
-                <td className="p-3 font-medium text-slate-800">
-                  {record.dcNumber || "-"}
-                </td>
-                <td className="p-3">
-                  {projectMap[String(record.projectId)]?.name || "-"}
-                </td>
-                <td className="p-3">
-                  {locationMap[String(record.fromLocationId)]?.name || "-"}
-                </td>
-                <td className="p-3">{record.toLocation || "-"}</td>
-                <td className="p-3">{record.status || "-"}</td>
-                <td className="p-3">{record.items?.length || 0}</td>
-                <td className="p-3 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleEdit(record)}
-                    className="text-indigo-600 text-sm"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(record.id)}
-                    className="text-red-600 text-sm"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {records.map((record) => {
+              const destination =
+                record.mode === "Reallocation"
+                  ? locationMap[String(record.toLocationId)]?.name || "-"
+                  : vendorMap[String(record.vendorId)]?.name || "-";
+              return (
+                <tr key={record.id} className="border-t hover:bg-slate-50">
+                  <td className="p-3 font-medium text-slate-800">
+                    {record.dcNumber}
+                  </td>
+                  <td className="p-3">{record.mode}</td>
+                  <td className="p-3">
+                    {projectMap[String(record.projectId)]?.name || "-"}
+                  </td>
+                  <td className="p-3">
+                    {locationMap[String(record.fromLocationId)]?.name || "-"}
+                  </td>
+                  <td className="p-3">{destination}</td>
+                  <td className="p-3">{record.status || "-"}</td>
+                  <td className="p-3">{record.items?.length || 0}</td>
+                  <td className="p-3 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleEdit(record)}
+                      className="text-indigo-600 text-sm"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(record.id)}
+                      className="text-red-600 text-sm"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -438,4 +505,4 @@ const DeliveryChallan = () => {
   );
 };
 
-export default DeliveryChallan;
+export default ReturnDc;
