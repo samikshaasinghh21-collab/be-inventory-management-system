@@ -1,13 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchItems } from "../../services/inventoryApi";
+import { getProducts } from "../../services/productsStore";
 import { getProjects } from "../../services/projectsStore";
+import { formatDateTime } from "../../utils/dateFormat";
 import {
   deleteAllocation,
   getAllocations,
   saveAllocation,
   updateAllocation,
 } from "../../services/allocationsStore";
+
+const normalizeInventoryItem = (item) => ({
+  id: `inv:${item.id}`,
+  rawId: item.id,
+  name: item.name || "",
+  source: "Inventory",
+});
+
+const normalizeProductItem = (product) => ({
+  id: `prod:${product.id}`,
+  rawId: product.id,
+  name: product.name || "",
+  source: "Product",
+});
 
 const AllocateToProjects = () => {
   const navigate = useNavigate();
@@ -34,8 +50,17 @@ const AllocateToProjects = () => {
   const loadItems = async () => {
     setLoadError("");
     try {
-      const data = await fetchItems();
-      setItems(Array.isArray(data) ? data : []);
+      const [inventoryItems, products] = await Promise.all([
+        fetchItems(),
+        Promise.resolve(getProducts()),
+      ]);
+      const normalizedInventory = Array.isArray(inventoryItems)
+        ? inventoryItems.map(normalizeInventoryItem)
+        : [];
+      const normalizedProducts = Array.isArray(products)
+        ? products.map(normalizeProductItem)
+        : [];
+      setItems([...normalizedProducts, ...normalizedInventory]);
     } catch (error) {
       console.error("Failed to load items:", error);
       setItems([]);
@@ -51,9 +76,15 @@ const AllocateToProjects = () => {
 
   useEffect(() => {
     const handleStorage = (event) => {
-      if (event.key === "project_allocations" || event.key === "projects") {
+      if (
+        event.key === "project_allocations" ||
+        event.key === "projects" ||
+        event.key === "items" ||
+        event.key === "products"
+      ) {
         loadProjects();
         loadAllocations();
+        loadItems();
       }
     };
 
@@ -65,14 +96,20 @@ const AllocateToProjects = () => {
       loadProjects();
     };
 
+    const handleProductsChange = () => {
+      loadItems();
+    };
+
     window.addEventListener("storage", handleStorage);
     window.addEventListener("allocations:changed", handleAllocationChange);
     window.addEventListener("projects:changed", handleProjectChange);
+    window.addEventListener("products:changed", handleProductsChange);
 
     return () => {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener("allocations:changed", handleAllocationChange);
       window.removeEventListener("projects:changed", handleProjectChange);
+      window.removeEventListener("products:changed", handleProductsChange);
     };
   }, []);
 
@@ -86,6 +123,9 @@ const AllocateToProjects = () => {
   const itemMap = useMemo(() => {
     return items.reduce((acc, item) => {
       acc[String(item.id)] = item;
+      if (item.rawId !== undefined && item.rawId !== null) {
+        acc[String(item.rawId)] = item;
+      }
       return acc;
     }, {});
   }, [items]);
@@ -161,8 +201,9 @@ const AllocateToProjects = () => {
   };
 
   const handleEdit = (allocation) => {
+    const matchedItem = itemMap[String(allocation.itemId)];
     setProjectId(String(allocation.projectId || ""));
-    setItemId(String(allocation.itemId || ""));
+    setItemId(String(matchedItem?.id || allocation.itemId || ""));
     setQuantity(String(allocation.quantity || ""));
     setNotes(allocation.notes || "");
     setEditingId(allocation.id);
@@ -234,6 +275,11 @@ const AllocateToProjects = () => {
         )}
         {loadError && (
           <p className="text-sm text-red-600 mb-4">{loadError}</p>
+        )}
+        {!loadError && items.length === 0 && (
+          <p className="text-sm text-slate-500 mb-4">
+            No items available. Create a product or inventory item first.
+          </p>
         )}
 
         <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -404,9 +450,7 @@ const AllocateToProjects = () => {
                     {allocation.notes || "-"}
                   </td>
                   <td className="p-4 text-slate-600">
-                    {allocation.createdAt
-                      ? new Date(allocation.createdAt).toLocaleString()
-                      : "-"}
+                    {formatDateTime(allocation.createdAt)}
                   </td>
                   <td className="p-4">
                     <div className="flex items-center gap-3">

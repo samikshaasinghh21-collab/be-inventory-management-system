@@ -17,8 +17,10 @@ import DeliveryChallan from "../components/inventory/DeliveryChallan";
 import Product from "../components/inventory/Product";
 import Cart from "../components/inventory/Cart";
 import Boq from "../components/inventory/Boq";
+import Vendors from "../components/inventory/Vendors";
 import Locations from "../components/inventory/Locations";
 import PurchaseOrder from "../components/inventory/PurchaseOrder";
+import PurchaseOrderRegister from "../components/inventory/PurchaseOrderRegister";
 import Invoice from "../components/inventory/Invoice";
 import GoodsDelivered from "../components/inventory/GoodsDelivered";
 import Consumption from "../components/inventory/Consumption";
@@ -36,6 +38,7 @@ const AppRoutes = () => {
         <Route path="/inventory/products" element={<Product />} />
         <Route path="/inventory/create-item" element={<CreateItems />} />
         <Route path="/inventory/edit/:id" element={<EditItems />} />
+        <Route path="/inventory/vendors" element={<Vendors />} />
         <Route path="/inventory/create-vendors" element={<CreateVendors />} />
         <Route path="/inventory/create-project" element={<CreateProjects />} />
         <Route path="/inventory/create-product" element={<CreateProduct />} />
@@ -45,6 +48,10 @@ const AppRoutes = () => {
         <Route path="/inventory/boq" element={<Boq />} />
         <Route path="/inventory/locations" element={<Locations />} />
         <Route path="/inventory/purchase-order" element={<PurchaseOrder />} />
+        <Route
+          path="/inventory/purchase-order-register"
+          element={<PurchaseOrderRegister />}
+        />
         <Route path="/inventory/invoice" element={<Invoice />} />
         <Route path="/inventory/goods-delivered" element={<GoodsDelivered />} />
         <Route path="/inventory/consumption" element={<Consumption />} />

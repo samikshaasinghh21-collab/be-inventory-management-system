@@ -10,7 +10,13 @@ const createEmptyItem = () => ({
   notes: "",
 });
 
-const LineItemsEditor = ({ items, onChange, title = "Line Items" }) => {
+const LineItemsEditor = ({
+  items,
+  onChange,
+  title = "Line Items",
+  onPickFromProducts,
+  pickLabel = "Add from Products",
+}) => {
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
 
@@ -59,13 +65,24 @@ const LineItemsEditor = ({ items, onChange, title = "Line Items" }) => {
         <h3 className="text-base font-semibold text-slate-800">
           {title}
         </h3>
-        <button
-          type="button"
-          onClick={handleAdd}
-          className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
-        >
-          + Add Item
-        </button>
+        <div className="flex items-center gap-2">
+          {onPickFromProducts && (
+            <button
+              type="button"
+              onClick={onPickFromProducts}
+              className="px-3 py-1.5 rounded-md border border-slate-200 text-slate-700 text-xs font-medium hover:border-slate-300"
+            >
+              {pickLabel}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleAdd}
+            className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
+          >
+            + Add Item
+          </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

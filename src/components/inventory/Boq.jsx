@@ -8,6 +8,7 @@ import {
 } from "../../services/workflowStore";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
+import { formatDate } from "../../utils/dateFormat";
 
 const STORAGE_KEY = "workflow_boq";
 
@@ -415,7 +416,7 @@ const Boq = () => {
                 <td className="p-3 font-medium">
                   {formatCurrency(record.total || 0)}
                 </td>
-                <td className="p-3">{record.date || "-"}</td>
+                <td className="p-3">{formatDate(record.date)}</td>
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"

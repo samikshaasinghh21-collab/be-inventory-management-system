@@ -7,6 +7,7 @@ import {
   updateWorkflowItem,
 } from "../../services/workflowStore";
 import useSettings from "../../hooks/useSettings";
+import { formatDate } from "../../utils/dateFormat";
 
 const STORAGE_KEY = "workflow_purchase_orders";
 const LOCATION_KEY = "workflow_locations";
@@ -280,6 +281,20 @@ const ReceiveGoods = () => {
       return sum + qty * rate;
     }, 0);
 
+    const receiptEntry = {
+      id: Date.now(),
+      receivedAt: new Date().toISOString(),
+      receivedDate: receiveForm.receivedDate,
+      receivedBy: receiveForm.receivedBy.trim(),
+      notes: receiveForm.notes.trim(),
+      items: normalizedItems.map((item) => ({
+        id: item.id,
+        orderedQty: item.orderedQty,
+        receivedQty: item.receivedQty,
+      })),
+      status,
+    };
+
     const invoicePayload = {
       id: existingInvoice?.id ?? Date.now(),
       invoiceNumber:
@@ -302,6 +317,10 @@ const ReceiveGoods = () => {
       sourcePoNumber: selectedRecord.poNumber || "",
       receivedBy: receiveForm.receivedBy.trim(),
       receivedAt: new Date().toISOString(),
+      receiptHistory: [
+        ...(existingInvoice?.receiptHistory || []),
+        receiptEntry,
+      ],
       updatedAt: new Date().toISOString(),
       createdAt: existingInvoice?.createdAt || new Date().toISOString(),
     };
@@ -435,7 +454,7 @@ const ReceiveGoods = () => {
                     </td>
                     <td className="p-3">{record.status || "-"}</td>
                     <td className="p-3">{record.items?.length || 0}</td>
-                    <td className="p-3">{record.expectedDate || "-"}</td>
+                    <td className="p-3">{formatDate(record.expectedDate)}</td>
                     <td className="p-3 font-medium">
                       {formatCurrency(record.total || 0)}
                     </td>
@@ -504,7 +523,7 @@ const ReceiveGoods = () => {
                       Order Date
                     </span>
                     <span className="font-medium text-slate-800">
-                      {selectedRecord.orderDate || "-"}
+                      {formatDate(selectedRecord.orderDate)}
                     </span>
                   </div>
                   <div className="flex flex-col">
@@ -512,7 +531,7 @@ const ReceiveGoods = () => {
                       Expected Date
                     </span>
                     <span className="font-medium text-slate-800">
-                      {selectedRecord.expectedDate || "-"}
+                      {formatDate(selectedRecord.expectedDate)}
                     </span>
                   </div>
                   <div className="flex flex-col">
@@ -528,7 +547,7 @@ const ReceiveGoods = () => {
                       Received Date
                     </span>
                     <span className="font-medium text-slate-800">
-                      {selectedRecord.receivedDate || "-"}
+                      {formatDate(selectedRecord.receivedDate)}
                     </span>
                   </div>
                   <div className="flex flex-col">
@@ -596,18 +615,18 @@ const ReceiveGoods = () => {
                       <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
                         Start Date
                       </span>
-                      <span className="font-medium text-slate-800">
-                        {selectedProject.startDate || "-"}
-                      </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                        End Date
-                      </span>
-                      <span className="font-medium text-slate-800">
-                        {selectedProject.endDate || "-"}
-                      </span>
-                    </div>
+                    <span className="font-medium text-slate-800">
+                      {formatDate(selectedProject.startDate)}
+                    </span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                      End Date
+                    </span>
+                    <span className="font-medium text-slate-800">
+                      {formatDate(selectedProject.endDate)}
+                    </span>
+                  </div>
                     <div className="flex flex-col sm:col-span-2">
                       <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
                         Notes

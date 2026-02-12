@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   deleteProduct,
   getProducts,
@@ -294,6 +294,7 @@ export default function Product() {
   const [productSearch, setProductSearch] = useState("");
   const [hsnSearch, setHsnSearch] = useState("");
   const navigate = useNavigate();
+  const location = useLocation();
   const [editingProduct, setEditingProduct] = useState(null);
   const [editValues, setEditValues] = useState({
     name: "",
@@ -452,17 +453,50 @@ export default function Product() {
     );
     navigate("/inventory/cart");
   };
+
+  const isPickingForPo =
+    new URLSearchParams(location.search).get("pick") === "po";
+
+  const sendToPurchaseOrder = () => {
+    const selected = items
+      .filter((item) => item.qty > 0)
+      .map((item) => ({
+        id: item.id,
+        name: item.name || "",
+        description: item.description || "",
+        unit: item.unit || "PCS",
+        rate: item.rate || 0,
+        quantity: item.qty || 0,
+      }));
+
+    if (selected.length === 0) {
+      return;
+    }
+
+    localStorage.setItem("po_selected_products", JSON.stringify(selected));
+    navigate("/inventory/purchase-order");
+  };
  
   return (
     <div className="bg-gray-100 min-h-screen p-6">
       <div className="flex justify-between mb-4">
         <h2 className="text-3xl font-semibold">Products</h2>
-        <button
-          onClick={openCart}
-          className="bg-slate-900 text-white px-4 py-2 rounded"
-        >
-          Add Cart
-        </button>
+        <div className="flex gap-2">
+          {isPickingForPo && (
+            <button
+              onClick={sendToPurchaseOrder}
+              className="bg-indigo-600 text-white px-4 py-2 rounded"
+            >
+              Add to PO
+            </button>
+          )}
+          <button
+            onClick={openCart}
+            className="bg-slate-900 text-white px-4 py-2 rounded"
+          >
+            Add Cart
+          </button>
+        </div>
       </div>
  
       <div className="bg-white rounded shadow overflow-x-auto">

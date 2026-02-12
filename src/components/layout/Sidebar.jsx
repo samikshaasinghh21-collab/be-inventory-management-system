@@ -16,11 +16,15 @@ const PROJECT_WORKFLOW = [
   { id: "receive-inventory", label: "Receive Inventory - Location based", to: "/inventory/receive-goods" },
   { id: "invoice", label: "Create Invoice", to: "/inventory/invoice" },
   { id: "allocate-inventory", label: "Allocate Inventory to Location / Project", to: "/inventory/allocate-projects" },
-  { id: "delivery-challan", label: "Create Delivery Challan (DC)", to: "/inventory/delivery-challan" },
+  { id: "delivery-challan", label: "Allocate Items (DC)", to: "/inventory/allocate-projects" },
   { id: "goods-delivered", label: "Goods Delivered to Location (Confirmation screen)", to: "/inventory/goods-delivered" },
   { id: "consumption", label: "Consumption (Material Used)", to: "/inventory/consumption" },
   { id: "reallocate-return", label: "Reallocate / Return Inventory", to: "/inventory/reallocate-return" },
-  { id: "return-dc", label: "Create DC (for Return or Reallocation)", to: "/inventory/return-dc" },
+];
+
+const VENDOR_WORKFLOW = [
+  { id: "vendors", label: "Vendors", to: "/inventory/vendors" },
+  { id: "create-vendor", label: "Create Vendor", to: "/inventory/create-vendors" },
 ];
 
 const Sidebar = () => {
@@ -34,8 +38,12 @@ const Sidebar = () => {
     }
   });
   const [projectsOpen, setProjectsOpen] = useState(false);
+  const [vendorsOpen, setVendorsOpen] = useState(false);
 
   const isProjectRoute = PROJECT_WORKFLOW.some(
+    (step) => step.to && location.pathname.startsWith(step.to)
+  );
+  const isVendorRoute = VENDOR_WORKFLOW.some(
     (step) => step.to && location.pathname.startsWith(step.to)
   );
 
@@ -54,6 +62,12 @@ const Sidebar = () => {
       setProjectsOpen(true);
     }
   }, [isProjectRoute, isCollapsed]);
+
+  useEffect(() => {
+    if (isVendorRoute && !isCollapsed) {
+      setVendorsOpen(true);
+    }
+  }, [isVendorRoute, isCollapsed]);
 
   const linkClass = [
     "group flex items-center rounded-lg transition text-[15px] text-slate-200 hover:bg-slate-800/80",
@@ -240,22 +254,65 @@ const Sidebar = () => {
             )}
           </div>
 
-          <NavLink
-            to="/inventory/create-vendors"
-            className={({ isActive }) =>
-              `${linkClass} ${isActive ? activeClass : ""}`
-            }
-          >
-            <Icon>
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M7 8a3 3 0 1 0 6 0a3 3 0 0 0-6 0Z" />
-                <path d="M3.5 18a5.5 5.5 0 0 1 11 0" />
-                <path d="M16 10h5" />
-                <path d="M18.5 7.5v5" />
-              </svg>
-            </Icon>
-            <span className={labelClass}>Create Vendors</span>
-          </NavLink>
+          <div className="px-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (isCollapsed) {
+                  navigate("/inventory/vendors");
+                  return;
+                }
+                setVendorsOpen((prev) => !prev);
+              }}
+              className={`${linkClass} ${
+                isVendorRoute ? activeClass : ""
+              } w-full ${isCollapsed ? "" : "justify-between"}`}
+              aria-expanded={vendorsOpen}
+              aria-controls="vendors-workflow"
+            >
+              <span className={`flex items-center ${isCollapsed ? "justify-center" : "gap-4"}`}>
+                <Icon>
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M7 8a3 3 0 1 0 6 0a3 3 0 0 0-6 0Z" />
+                    <path d="M3.5 18a5.5 5.5 0 0 1 11 0" />
+                    <path d="M14.5 8h6" />
+                  </svg>
+                </Icon>
+                <span className={labelClass}>Vendors</span>
+              </span>
+              {!isCollapsed && (
+                <span
+                  className={`ml-2 grid h-7 w-7 place-items-center rounded-md bg-slate-800/70 text-slate-300 transition ${
+                    vendorsOpen ? "rotate-180" : ""
+                  }`}
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M6 9l6 6l6-6" />
+                  </svg>
+                </span>
+              )}
+            </button>
+            {!isCollapsed && vendorsOpen && (
+              <div id="vendors-workflow" className="mt-2 space-y-1 pl-16 pr-3">
+                {VENDOR_WORKFLOW.map((step) => (
+                  <NavLink
+                    key={step.id}
+                    to={step.to}
+                    className={({ isActive }) =>
+                      [
+                        "block rounded-md px-3 py-2 text-sm transition",
+                        isActive
+                          ? "bg-slate-800/80 text-white"
+                          : "text-slate-300 hover:bg-slate-800/60 hover:text-white",
+                      ].join(" ")
+                    }
+                  >
+                    {step.label}
+                  </NavLink>
+                ))}
+              </div>
+            )}
+          </div>
 
           <NavLink
             to="/inventory/create-product"
