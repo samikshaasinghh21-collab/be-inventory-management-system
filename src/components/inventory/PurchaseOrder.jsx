@@ -1,8 +1,12 @@
+<<<<<<< HEAD
 import { useEffect, useMemo, useRef, useState } from "react";
+=======
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
 import { getProjects } from "../../services/projectsStore";
 import {
   addWorkflowItem,
-  deleteWorkflowItem,
   getWorkflowList,
   updateWorkflowItem,
 } from "../../services/workflowStore";
@@ -14,6 +18,19 @@ import { fetchVendors, syncVendorsCache } from "../../services/vendorsApi";
 
 const STORAGE_KEY = "workflow_purchase_orders";
 const LOCATION_KEY = "workflow_locations";
+const PICK_KEY = "po_selected_products";
+const EDIT_KEY = "po_edit_id";
+
+const GST_OPTIONS = [
+  "None",
+  "GST @ 0%",
+  "GST @ 1.5%",
+  "GST @ 3%",
+  "GST @ 5%",
+  "GST @ 12%",
+  "GST @ 18%",
+  "GST @ 28%",
+];
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -33,11 +50,18 @@ const createFormState = () => ({
   status: "Draft",
   orderDate: new Date().toISOString().slice(0, 10),
   expectedDate: "",
+  gstRate: "None",
   notes: "",
+<<<<<<< HEAD
   terms: "",
+=======
+  termsConditions: "",
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
 });
 
 const PurchaseOrder = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
   const [projects, setProjects] = useState([]);
@@ -84,6 +108,67 @@ const PurchaseOrder = () => {
   }, []);
 
   useEffect(() => {
+    const stored = localStorage.getItem(PICK_KEY);
+    if (!stored) {
+      return;
+    }
+    try {
+      const selected = JSON.parse(stored);
+      if (!Array.isArray(selected) || selected.length === 0) {
+        return;
+      }
+      setItems((prev) => {
+        const hasOnlyEmpty =
+          prev.length === 1 &&
+          !prev[0].name.trim() &&
+          !prev[0].description.trim() &&
+          !prev[0].quantity &&
+          !prev[0].rate;
+        const next = hasOnlyEmpty ? [] : [...prev];
+
+        selected.forEach((product) => {
+          const qty = Number(product.quantity) || 0;
+          if (!product.name || qty <= 0) {
+            return;
+          }
+          const existingIndex = next.findIndex(
+            (item) =>
+              item.name.trim().toLowerCase() ===
+              product.name.trim().toLowerCase()
+          );
+          if (existingIndex >= 0) {
+            const existing = next[existingIndex];
+            const existingQty = Number(existing.quantity) || 0;
+            next[existingIndex] = {
+              ...existing,
+              description: existing.description || product.description || "",
+              unit: existing.unit || product.unit || "PCS",
+              quantity: String(existingQty + qty),
+              rate: existing.rate || product.rate || "",
+            };
+          } else {
+            next.push({
+              id: Date.now() + Math.random(),
+              name: product.name || "",
+              description: product.description || "",
+              unit: product.unit || "PCS",
+              quantity: String(qty),
+              rate: product.rate || "",
+              notes: "",
+            });
+          }
+        });
+
+        return next.length > 0 ? next : [createLineItem()];
+      });
+    } catch {
+      // ignore invalid data
+    } finally {
+      localStorage.removeItem(PICK_KEY);
+    }
+  }, [location.key]);
+
+  useEffect(() => {
     const handler = () => loadRecords();
     window.addEventListener(`${STORAGE_KEY}:changed`, handler);
     return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
@@ -95,26 +180,20 @@ const PurchaseOrder = () => {
     return () => window.removeEventListener(`${LOCATION_KEY}:changed`, handler);
   }, []);
 
-  const projectMap = useMemo(() => {
-    return projects.reduce((acc, project) => {
-      acc[String(project.id)] = project;
-      return acc;
-    }, {});
-  }, [projects]);
-
-  const vendorMap = useMemo(() => {
-    return vendors.reduce((acc, vendor) => {
-      acc[String(vendor.id)] = vendor;
-      return acc;
-    }, {});
-  }, [vendors]);
-
-  const locationMap = useMemo(() => {
-    return locations.reduce((acc, location) => {
-      acc[String(location.id)] = location;
-      return acc;
-    }, {});
-  }, [locations]);
+  useEffect(() => {
+    if (!records.length) {
+      return;
+    }
+    const editId = localStorage.getItem(EDIT_KEY);
+    if (!editId) {
+      return;
+    }
+    const record = records.find((item) => String(item.id) === String(editId));
+    if (record) {
+      handleEdit(record);
+    }
+    localStorage.removeItem(EDIT_KEY);
+  }, [records]);
 
   const totalValue = records.reduce(
     (sum, record) => sum + (Number(record.total) || 0),
@@ -184,6 +263,7 @@ const PurchaseOrder = () => {
     }
 
     resetForm();
+    navigate("/inventory/purchase-order-register");
   };
 
   const handleEdit = (record) => {
@@ -196,13 +276,19 @@ const PurchaseOrder = () => {
       status: record.status || "Draft",
       orderDate: record.orderDate || new Date().toISOString().slice(0, 10),
       expectedDate: record.expectedDate || "",
+      gstRate: record.gstRate || "None",
       notes: record.notes || "",
+<<<<<<< HEAD
       terms: record.terms || "",
+=======
+      termsConditions: record.termsConditions || "",
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
     });
     setItems(record.items?.length ? record.items : [createLineItem()]);
     setErrors({});
   };
 
+<<<<<<< HEAD
   const handleDelete = (id) => {
     deleteWorkflowItem(STORAGE_KEY, id);
   };
@@ -215,6 +301,8 @@ const PurchaseOrder = () => {
     });
   };
 
+=======
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
   return (
     <div className="p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
@@ -228,6 +316,13 @@ const PurchaseOrder = () => {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => navigate("/inventory/purchase-order-register")}
+            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+          >
+            View Register
+          </button>
           <button
             type="button"
             onClick={loadVendors}
@@ -375,6 +470,24 @@ const PurchaseOrder = () => {
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
+                GST Rate
+              </label>
+              <select
+                value={form.gstRate}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, gstRate: event.target.value }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                {GST_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
                 Order Date
               </label>
               <DateInput
@@ -413,10 +526,33 @@ const PurchaseOrder = () => {
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px]"
               />
             </div>
+            <div className="md:col-span-3">
+              <label className="text-sm font-medium text-slate-700">
+                Terms &amp; Conditions
+              </label>
+              <textarea
+                value={form.termsConditions}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    termsConditions: event.target.value,
+                  }))
+                }
+                placeholder="Payment terms, penalties, or special clauses."
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px]"
+              />
+            </div>
           </div>
         </div>
 
-        <LineItemsEditor items={items} onChange={setItems} />
+        <LineItemsEditor
+          items={items}
+          onChange={setItems}
+          onPickFromProducts={() =>
+            navigate("/inventory/products?pick=po")
+          }
+          pickLabel="Pick from Products"
+        />
         {errors.items && (
           <p className="text-xs text-red-600">{errors.items}</p>
         )}
@@ -451,6 +587,7 @@ const PurchaseOrder = () => {
           </button>
         </div>
       </form>
+<<<<<<< HEAD
 
       <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
         <div className="px-4 py-3 border-b flex items-center justify-between">
@@ -517,6 +654,8 @@ const PurchaseOrder = () => {
           </tbody>
         </table>
       </div>
+=======
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
     </div>
   );
 };

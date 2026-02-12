@@ -8,8 +8,12 @@ import {
 } from "../../services/workflowStore";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
+<<<<<<< HEAD
 import { formatDateDDMMYYYY } from "../../utils/dateFormat";
 import DateInput from "../common/DateInput";
+=======
+import { formatDate } from "../../utils/dateFormat";
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
 
 const STORAGE_KEY = "workflow_boq";
 
@@ -416,7 +420,11 @@ const Boq = () => {
                 <td className="p-3 font-medium">
                   {formatCurrency(record.total || 0)}
                 </td>
+<<<<<<< HEAD
                 <td className="p-3">{formatDateDDMMYYYY(record.date)}</td>
+=======
+                <td className="p-3">{formatDate(record.date)}</td>
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"

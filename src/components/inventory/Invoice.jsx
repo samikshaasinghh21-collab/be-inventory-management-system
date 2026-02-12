@@ -8,8 +8,12 @@ import {
 } from "../../services/workflowStore";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
+<<<<<<< HEAD
 import { formatDateDDMMYYYY } from "../../utils/dateFormat";
 import DateInput from "../common/DateInput";
+=======
+import { formatDate, formatDateTime } from "../../utils/dateFormat";
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
 
 const STORAGE_KEY = "workflow_invoices";
 
@@ -117,6 +121,24 @@ const Invoice = () => {
   const selectedItems = Array.isArray(selectedRecord?.items)
     ? selectedRecord.items
     : [];
+  const receiptHistory = Array.isArray(selectedRecord?.receiptHistory)
+    ? selectedRecord.receiptHistory
+    : [];
+
+  const summarizeReceipt = (entry) => {
+    const items = Array.isArray(entry?.items) ? entry.items : [];
+    const receivedItems = items.filter(
+      (item) => Number(item.receivedQty) > 0
+    );
+    const totalQty = receivedItems.reduce(
+      (sum, item) => sum + (Number(item.receivedQty) || 0),
+      0
+    );
+    return {
+      itemCount: receivedItems.length,
+      totalQty,
+    };
+  };
 
   const resetForm = () => {
     setForm(createFormState());
@@ -457,7 +479,11 @@ const Invoice = () => {
                 <td className="p-3 font-medium">
                   {formatCurrency(record.total || 0)}
                 </td>
+<<<<<<< HEAD
                 <td className="p-3">{formatDateDDMMYYYY(record.dueDate)}</td>
+=======
+                <td className="p-3">{formatDate(record.dueDate)}</td>
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"
@@ -536,7 +562,11 @@ const Invoice = () => {
                   Issue Date
                 </span>
                 <span className="font-medium text-slate-800">
+<<<<<<< HEAD
                   {formatDateDDMMYYYY(selectedRecord.issueDate)}
+=======
+                  {formatDate(selectedRecord.issueDate)}
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
                 </span>
               </div>
               <div className="flex flex-col">
@@ -544,7 +574,11 @@ const Invoice = () => {
                   Due Date
                 </span>
                 <span className="font-medium text-slate-800">
+<<<<<<< HEAD
                   {formatDateDDMMYYYY(selectedRecord.dueDate)}
+=======
+                  {formatDate(selectedRecord.dueDate)}
+>>>>>>> ab340f3402952da5e02c7b117ed4c40f3d1549b6
                 </span>
               </div>
               <div className="flex flex-col">
@@ -629,6 +663,76 @@ const Invoice = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-semibold text-slate-800">
+                  Receipt History
+                </h3>
+                <span className="text-xs text-slate-500">
+                  {receiptHistory.length} entries
+                </span>
+              </div>
+              {receiptHistory.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  No receipt history yet.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-100 text-slate-600">
+                      <tr>
+                        <th className="p-3 text-left min-w-[160px]">
+                          Received On
+                        </th>
+                        <th className="p-3 text-left min-w-[160px]">
+                          Received By
+                        </th>
+                        <th className="p-3 text-left min-w-[120px]">
+                          Items
+                        </th>
+                        <th className="p-3 text-left min-w-[120px]">
+                          Total Qty
+                        </th>
+                        <th className="p-3 text-left min-w-[220px]">
+                          Notes
+                        </th>
+                        <th className="p-3 text-left min-w-[140px]">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {receiptHistory.map((entry, index) => {
+                        const summary = summarizeReceipt(entry);
+                        const receivedAtLabel = entry.receivedAt
+                          ? formatDateTime(entry.receivedAt)
+                          : formatDate(entry.receivedDate);
+                        return (
+                          <tr
+                            key={entry.id || entry.receivedAt || index}
+                            className="border-t"
+                          >
+                            <td className="p-3">{receivedAtLabel}</td>
+                            <td className="p-3">
+                              {entry.receivedBy || "-"}
+                            </td>
+                            <td className="p-3">{summary.itemCount}</td>
+                            <td className="p-3">{summary.totalQty}</td>
+                            <td className="p-3 text-slate-600">
+                              {entry.notes || "-"}
+                            </td>
+                            <td className="p-3">
+                              {entry.status || "-"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </>
         )}
