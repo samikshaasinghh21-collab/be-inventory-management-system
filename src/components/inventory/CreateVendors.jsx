@@ -47,11 +47,11 @@ const CreateVendors = () => {
     setIsSubmitting(true);
     try {
       await createVendor({
-        VendorName: form.VendorName.trim(),
-        Phone: form.Phone.trim(),
-        Email: form.Email.trim(),
-        GSTNumber: form.GSTNumber.trim(),
-        Address: form.Address.trim(),
+        name: form.VendorName.trim(),
+        phone: form.Phone.trim(),
+        email: form.Email.trim(),
+        gstNumber: form.GSTNumber.trim(),
+        address: form.Address.trim(),
       });
 
       const vendors = await fetchVendors();

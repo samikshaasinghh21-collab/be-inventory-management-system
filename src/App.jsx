@@ -5,5 +5,4 @@ function App() {
   useThemeMode();
   return <AppRoutes />;
 }
-
 export default App;
