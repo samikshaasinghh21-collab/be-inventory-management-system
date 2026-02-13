@@ -36,6 +36,15 @@ export const createVendor = async (payload) => {
   return normalizeVendor(response.data?.vendor ?? response.data);
 };
 
+export const updateVendor = async (id, payload) => {
+  const response = await api.put(`/vendors/${id}`, payload);
+  return normalizeVendor(response.data?.vendor ?? response.data);
+};
+
+export const deleteVendor = async (id) => {
+  await api.delete(`/vendors/${id}`);
+};
+
 export const syncVendorsCache = (vendors) => {
   localStorage.setItem("vendors", JSON.stringify(vendors));
 };
