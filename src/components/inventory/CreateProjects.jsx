@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { createProject } from "../../services/projectsApi";
 import { saveProject } from "../../services/projectsStore";
 import DateInput from "../common/DateInput";
 
@@ -15,6 +16,8 @@ const CreateProjects = () => {
   const [endDate, setEndDate] = useState("");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState({});
+  const [apiError, setApiError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validate = () => {
     const nextErrors = {};
@@ -28,26 +31,45 @@ const CreateProjects = () => {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     if (!validate()) {
       return;
     }
 
-    const payload = {
-      id: Date.now(),
-      name: projectName.trim(),
-      code: projectCode.trim(),
-      client: client.trim(),
-      status,
-      startDate,
-      endDate,
-      notes: notes.trim(),
-      createdAt: new Date().toISOString(),
-    };
+    if (isSubmitting) {
+      return;
+    }
 
-    saveProject(payload);
-    navigate("/inventory/projects");
+    setIsSubmitting(true);
+    setApiError("");
+
+    try {
+      const payload = {
+        name: projectName.trim(),
+        code: projectCode.trim() || undefined,
+        client: client.trim() || undefined,
+        status: status || undefined,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        notes: notes.trim() || undefined,
+      };
+
+      const created = await createProject(payload);
+      saveProject({
+        ...created,
+        createdAt: created?.createdAt ?? new Date().toISOString(),
+      });
+      navigate("/inventory/projects");
+    } catch (error) {
+      const message =
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to create project.";
+      setApiError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const clearError = (key) => {
@@ -109,7 +131,13 @@ const CreateProjects = () => {
               className="space-y-6"
               onSubmit={handleSubmit}
               noValidate
+              aria-busy={isSubmitting}
             >
+              {apiError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {apiError}
+                </div>
+              )}
               {/* Basic Details */}
               <section className="border border-slate-200 rounded-xl p-5 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
@@ -252,15 +280,17 @@ const CreateProjects = () => {
               onClick={() => navigate(-1)}
               className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 hover:border-slate-300 hover:text-slate-900"
               type="button"
+              disabled={isSubmitting}
             >
               Cancel
             </button>
             <button
               form="create-project-form"
               type="submit"
-              className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+              disabled={isSubmitting}
+              className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              Save Project
+              {isSubmitting ? "Saving..." : "Save Project"}
             </button>
           </div>
         </div>

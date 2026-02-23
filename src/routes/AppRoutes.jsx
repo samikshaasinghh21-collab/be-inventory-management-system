@@ -5,6 +5,7 @@ import Dashboard from "../pages/Dashboard";
 import InventoryHome from "../pages/InventoryHome";
 import ProjectsHome from "../pages/ProjectsHome";
 import Settings from "../pages/Settings";
+import Profile from "../pages/Profile";
 
 import CreateItems from "../components/inventory/CreateItems";
 import EditItems from "../components/inventory/EditItems";
@@ -28,6 +29,7 @@ import GoodsDelivered from "../components/inventory/GoodsDelivered";
 import Consumption from "../components/inventory/Consumption";
 import ReturnReallocate from "../components/inventory/ReturnReallocate";
 import ReturnDc from "../components/inventory/ReturnDc";
+import BoqDetail from "../components/inventory/BoqDetail";
 
 const AppRoutes = () => {
   return (
@@ -49,6 +51,7 @@ const AppRoutes = () => {
         <Route path="/inventory/create-product" element={<CreateProduct />} />
 
         <Route path="/inventory/boq" element={<Boq />} />
+        <Route path="/inventory/boq/:id" element={<BoqDetail />} />
         <Route path="/inventory/locations" element={<Locations />} />
         <Route path="/inventory/purchase-order" element={<PurchaseOrder />} />
         <Route path="/inventory/purchase-orders" element={<PurchaseOrder />} />
@@ -68,6 +71,8 @@ const AppRoutes = () => {
         <Route path="/inventory/return-dc" element={<ReturnDc />} />
 
         <Route path="/inventory/cart" element={<Cart />} />
+        <Route path="/account" element={<Profile />} />
+        <Route path="/profile" element={<Profile />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
@@ -75,5 +80,3 @@ const AppRoutes = () => {
 };
 
 export default AppRoutes;
-
-

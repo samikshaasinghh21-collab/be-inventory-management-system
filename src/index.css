@@ -153,3 +153,33 @@
     line-height: 1.5rem;
   }
 }
+
+@media print {
+  /* Hide chrome like sidebar / navigation when printing */
+  aside,
+  nav,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Remove layout margin so content uses full page width */
+  main {
+    margin: 0 !important;
+  }
+
+  /* Only show the BOQ detail area */
+  body * {
+    visibility: hidden;
+  }
+  #boq-print-area,
+  #boq-print-area * {
+    visibility: visible;
+  }
+  #boq-print-area {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    background: #fff;
+    padding: 1rem;
+  }
+}

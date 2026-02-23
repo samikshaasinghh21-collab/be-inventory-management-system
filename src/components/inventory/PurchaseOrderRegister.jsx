@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getProjects } from "../../services/projectsStore";
+import { fetchVendors } from "../../services/vendorsApi";
 import {
-  deleteWorkflowItem,
-  getWorkflowList,
-} from "../../services/workflowStore";
+  fetchPurchaseOrders,
+  deletePurchaseOrder,
+} from "../../services/purchaseOrdersApi";
 import useSettings from "../../hooks/useSettings";
 import { formatDate } from "../../utils/dateFormat";
-
-const STORAGE_KEY = "workflow_purchase_orders";
-const EDIT_KEY = "po_edit_id";
 
 const PurchaseOrderRegister = () => {
   const navigate = useNavigate();
@@ -19,6 +17,7 @@ const PurchaseOrderRegister = () => {
   const [vendors, setVendors] = useState([]);
   const [records, setRecords] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [apiError, setApiError] = useState("");
 
   const formatCurrency = (value) => {
     const amount = Number(value) || 0;
@@ -33,12 +32,23 @@ const PurchaseOrderRegister = () => {
     }
   };
 
-  const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
-
-  const loadVendors = () => {
+  const loadRecords = async () => {
     try {
-      const stored = JSON.parse(localStorage.getItem("vendors") || "[]");
-      setVendors(Array.isArray(stored) ? stored : []);
+      setApiError("");
+      const list = await fetchPurchaseOrders();
+      setRecords(list);
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error || error?.message || "Failed to load purchase orders."
+      );
+      setRecords([]);
+    }
+  };
+
+  const loadVendors = async () => {
+    try {
+      const list = await fetchVendors();
+      setVendors(list);
     } catch {
       setVendors([]);
     }
@@ -46,14 +56,8 @@ const PurchaseOrderRegister = () => {
 
   useEffect(() => {
     setProjects(getProjects());
-    loadVendors();
-    loadRecords();
-  }, []);
-
-  useEffect(() => {
-    const handler = () => loadRecords();
-    window.addEventListener(`${STORAGE_KEY}:changed`, handler);
-    return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
+    void loadVendors();
+    void loadRecords();
   }, []);
 
   const projectMap = useMemo(() => {
@@ -80,12 +84,13 @@ const PurchaseOrderRegister = () => {
     if (!query) {
       return true;
     }
+    const poNumber = record.poNumber ?? record.id;
     const projectName =
       projectMap[String(record.projectId)]?.name?.toLowerCase() || "";
     const vendorName =
       vendorMap[String(record.vendorId)]?.name?.toLowerCase() || "";
     return [
-      record.poNumber,
+      poNumber,
       record.status,
       record.expectedDate,
       record.gstRate,
@@ -97,12 +102,19 @@ const PurchaseOrderRegister = () => {
   });
 
   const handleEdit = (record) => {
-    localStorage.setItem(EDIT_KEY, record.id);
-    navigate("/inventory/purchase-order");
+    navigate("/inventory/purchase-order", { state: { purchaseOrder: record } });
   };
 
-  const handleDelete = (id) => {
-    deleteWorkflowItem(STORAGE_KEY, id);
+  const handleDelete = async (id) => {
+    try {
+      setApiError("");
+      await deletePurchaseOrder(id);
+      await loadRecords();
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error || error?.message || "Failed to delete purchase order."
+      );
+    }
   };
 
   return (
@@ -158,6 +170,12 @@ const PurchaseOrderRegister = () => {
         </div>
       </div>
 
+      {apiError && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {apiError}
+        </div>
+      )}
+
       <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
         <div className="px-4 py-3 border-b flex items-center justify-between gap-4">
           <h3 className="text-lg font-semibold text-slate-800">
@@ -200,7 +218,7 @@ const PurchaseOrderRegister = () => {
             {filteredRecords.map((record) => (
               <tr key={record.id} className="border-t hover:bg-slate-50">
                 <td className="p-3 font-medium text-slate-800">
-                  {record.poNumber}
+                  {record.poNumber || record.id}
                 </td>
                 <td className="p-3">
                   {vendorMap[String(record.vendorId)]?.name || "-"}
@@ -209,14 +227,14 @@ const PurchaseOrderRegister = () => {
                   {projectMap[String(record.projectId)]?.name || "-"}
                 </td>
                 <td className="p-3">{record.status || "-"}</td>
-                <td className="p-3">{record.gstRate || "None"}</td>
+                <td className="p-3">{record.gstRate || record.gst || "None"}</td>
                 <td className="p-3">{record.items?.length || 0}</td>
                 <td className="p-3 font-medium">
                   {formatCurrency(record.total || 0)}
                 </td>
-                <td className="p-3">{formatDate(record.expectedDate)}</td>
+                <td className="p-3">{formatDate(record.expectedDate || record.orderDate)}</td>
                 <td className="p-3 text-slate-600">
-                  {record.termsConditions || "-"}
+                  {record.termsConditions || record.notes || "-"}
                 </td>
                 <td className="p-3 flex gap-3">
                   <button

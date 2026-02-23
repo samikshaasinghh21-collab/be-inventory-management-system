@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { getSettings } from "../../services/settingsStore";
 
 const Icon = ({ children }) => (
   <span className="grid h-9 w-9 place-items-center rounded-md bg-slate-800/70 text-slate-200 transition group-hover:bg-slate-700">
@@ -38,6 +39,13 @@ const Sidebar = () => {
   });
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [vendorsOpen, setVendorsOpen] = useState(false);
+  const [profile, setProfile] = useState(() => {
+    try {
+      return getSettings().profile || {};
+    } catch {
+      return {};
+    }
+  });
 
   const isProjectRoute = PROJECT_WORKFLOW.some(
     (step) => step.to && location.pathname.startsWith(step.to)
@@ -68,6 +76,18 @@ const Sidebar = () => {
     }
   }, [isVendorRoute, isCollapsed]);
 
+  useEffect(() => {
+    const syncProfile = () => {
+      try {
+        setProfile(getSettings().profile || {});
+      } catch {
+        // ignore storage errors
+      }
+    };
+    window.addEventListener("settings:changed", syncProfile);
+    return () => window.removeEventListener("settings:changed", syncProfile);
+  }, []);
+
   const linkClass = [
     "group flex items-center rounded-lg transition text-[15px] text-slate-200 hover:bg-slate-800/80",
     isCollapsed ? "justify-center px-2 py-3" : "gap-4 px-4 py-3",
@@ -80,6 +100,14 @@ const Sidebar = () => {
     ? "opacity-0 w-0 overflow-hidden"
     : "opacity-100";
 
+  const initials =
+    (profile.fullName || "ERP")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0].toUpperCase())
+      .join("") || "ERP";
+
   return (
     <aside
       className={`${
@@ -88,26 +116,37 @@ const Sidebar = () => {
     >
       {/* Account / Logo */}
       <div className="p-5 border-b border-slate-800">
-        <div className={`flex items-center ${isCollapsed ? "justify-center" : "gap-3"}`}>
-          <div className="h-11 w-11 rounded-xl bg-slate-800/80 border border-slate-700/70 grid place-items-center text-slate-200 text-sm font-semibold">
-            ERP
+        <button
+          type="button"
+          onClick={() => navigate("/account")}
+          className={`w-full ${isCollapsed ? "grid place-items-center" : "flex items-center gap-3"} rounded-xl border border-slate-800 bg-slate-900/40 hover:bg-slate-800/60 transition text-left`}
+        >
+          <div className="relative h-11 w-11 rounded-xl border border-slate-700/70 overflow-hidden bg-slate-800/80 text-slate-200 text-sm font-semibold grid place-items-center">
+            {profile.avatar ? (
+              <img
+                src={profile.avatar}
+                alt="Profile avatar"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              initials
+            )}
           </div>
           {!isCollapsed && (
-            <div>
+            <div className="py-3 pr-2">
               <p className="text-sm uppercase tracking-[0.2em] text-slate-400">
                 Workspace
               </p>
               <p className="text-base font-semibold text-slate-100">
-                Demo Account
+                {profile.fullName || "Demo Account"}
+              </p>
+              <p className="text-xs text-indigo-200">View profile</p>
+              <p className="text-sm text-slate-400 mt-1">
+                {profile.email || "demo@mybillbook.in"}
               </p>
             </div>
           )}
-        </div>
-        {!isCollapsed && (
-          <p className="text-sm text-slate-400 mt-2">
-            demo@mybillbook.in
-          </p>
-        )}
+        </button>
         <button
           type="button"
           onClick={() => setIsCollapsed((prev) => !prev)}
@@ -314,22 +353,6 @@ const Sidebar = () => {
           </div>
 
           <NavLink
-            to="/inventory/create-product"
-            className={({ isActive }) =>
-              `${linkClass} ${isActive ? activeClass : ""}`
-            }
-          >
-            <Icon>
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M5 7h14v10H5z" />
-                <path d="M9 7V5h6v2" />
-                <path d="M7 10h10" />
-              </svg>
-            </Icon>
-            <span className={labelClass}>Create Product</span>
-          </NavLink>
-
-          <NavLink
             to="/inventory/receive-goods"
             className={({ isActive }) =>
               `${linkClass} ${isActive ? activeClass : ""}`
@@ -379,4 +402,3 @@ const Sidebar = () => {
 };
 
 export default Sidebar;
-

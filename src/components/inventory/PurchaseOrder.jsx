@@ -1,25 +1,486 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { getProjects } from "../../services/projectsStore";
+import { getWorkflowList } from "../../services/workflowStore";
+import {
+  fetchPurchaseOrders,
+  createPurchaseOrder,
+  updatePurchaseOrder,
+} from "../../services/purchaseOrdersApi";
+import { fetchVendors } from "../../services/vendorsApi";
+import LineItemsEditor from "./LineItemsEditor";
+import useSettings from "../../hooks/useSettings";
+
+const LOCATION_KEY = "workflow_locations";
+
+const createLineItem = () => ({
+  id: Date.now() + Math.random(),
+  name: "",
+  description: "",
+  unit: "PCS",
+  quantity: "",
+  rate: "",
+  notes: "",
+});
+
+const createFormState = () => ({
+  poNumber: "",
+  projectId: "",
+  vendorId: "",
+  locationId: "",
+  status: "Draft",
+  orderDate: new Date().toISOString().slice(0, 10),
+  expectedDate: "",
+  notes: "",
+});
 
 const PurchaseOrder = () => {
-  const [poNumber, setPoNumber] = useState("");
+  const navigate = useNavigate();
+  const settings = useSettings();
+  const currency = settings?.preferences?.currency || "INR";
+  const location = useLocation();
+  const [projects, setProjects] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [form, setForm] = useState(createFormState);
+  const [items, setItems] = useState([createLineItem()]);
+  const [errors, setErrors] = useState({});
+  const [editingId, setEditingId] = useState(null);
+  const [apiError, setApiError] = useState("");
+  useEffect(() => {
+    const record = location.state?.purchaseOrder;
+    if (record && record.id !== editingId) {
+      setEditingId(record.id);
+      setForm({
+        poNumber: record.poNumber || "",
+        projectId: record.projectId || "",
+        vendorId: record.vendorId || "",
+        locationId: record.locationId || "",
+        status: record.status || "Draft",
+        orderDate: record.orderDate || new Date().toISOString().slice(0, 10),
+        expectedDate: record.expectedDate || "",
+        notes: record.notes || "",
+      });
+      const mappedItems = (record.items ?? []).map((item) => ({
+        id: item.id ?? Date.now() + Math.random(),
+        itemId: item.itemId ?? null,
+        name: "",
+        description: "",
+        unit: "PCS",
+        quantity: item.quantity ?? "",
+        rate: item.unitPrice ?? item.rate ?? "",
+        notes: item.notes ?? "",
+      }));
+      setItems(mappedItems.length ? mappedItems : [createLineItem()]);
+      setErrors({});
+      // Clear navigation state so we don't re-apply on re-render
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state, editingId]);
+
+  const formatCurrency = (value) => {
+    const amount = Number(value) || 0;
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    } catch {
+      return `${currency} ${amount.toLocaleString()}`;
+    }
+  };
+
+  const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
+  const loadVendors = async () => {
+    try {
+      const list = await fetchVendors();
+      setVendors(list);
+    } catch {
+      setVendors([]);
+    }
+  };
+  const loadRecords = async () => {
+    try {
+      const list = await fetchPurchaseOrders();
+      setRecords(list);
+    } catch {
+      setRecords([]);
+    }
+  };
+
+  useEffect(() => {
+    setProjects(getProjects());
+    void loadRecords();
+    loadLocations();
+    void loadVendors();
+  }, []);
+
+  // When returning from Products (pick=po flow), pull selected items into the PO
+  useEffect(() => {
+    try {
+      const raw =
+        localStorage.getItem("po_selected_products") ||
+        localStorage.getItem("inventoryCart");
+      if (!raw) return;
+      const selected = JSON.parse(raw);
+      if (!Array.isArray(selected) || selected.length === 0) {
+        localStorage.removeItem("po_selected_products");
+        localStorage.removeItem("inventoryCart");
+        return;
+      }
+      const mapped = selected
+        .filter((product) => (product.quantity ?? product.qty ?? 0) > 0)
+        .map((product) => ({
+          id: Date.now() + Math.random(),
+          name: product.name || "",
+          description: product.description || "",
+          unit: product.unit || "PCS",
+          quantity: product.quantity ?? product.qty ?? 1,
+          rate: product.rate ?? product.salesPrice ?? 0,
+          notes: "",
+        }));
+      if (mapped.length > 0) {
+        setItems(mapped);
+      }
+      localStorage.removeItem("po_selected_products");
+      localStorage.removeItem("inventoryCart");
+    } catch {
+      // ignore bad data; user can re-pick
+    }
+  }, []);
+
+  const totalValue = records.reduce(
+    (sum, record) => sum + (Number(record.total) || 0),
+    0
+  );
+
+  const resetForm = () => {
+    setForm(createFormState());
+    setItems([createLineItem()]);
+    setErrors({});
+    setEditingId(null);
+  };
+
+  const validate = () => {
+    const nextErrors = {};
+    if (!form.projectId) {
+      nextErrors.projectId = "Select a project.";
+    }
+    if (!form.vendorId) {
+      nextErrors.vendorId = "Select a vendor.";
+    }
+    const hasValidItem = items.some(
+      (item) => item.name.trim() && Number(item.quantity) > 0
+    );
+    if (!hasValidItem) {
+      nextErrors.items = "Add at least one line item.";
+    }
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!validate()) {
+      return;
+    }
+
+    const cleanedItems = items.filter(
+      (item) => item.name.trim() || Number(item.quantity) > 0
+    );
+    const payload = {
+      projectId: form.projectId || null,
+      vendorId: form.vendorId || null,
+      status: form.status,
+      orderDate: form.orderDate || null,
+      expectedDate: form.expectedDate || null,
+      notes: form.notes || "",
+      items: cleanedItems.map((item) => {
+        const qty = Number(item.quantity) || 0;
+        const unitPrice = Number(item.rate) || 0;
+        return {
+          itemId: item.itemId ?? null,
+          quantity: qty,
+          unitPrice,
+          totalPrice: qty * unitPrice,
+        };
+      }),
+    };
+
+    try {
+      setApiError("");
+      if (editingId) {
+        const updated = await updatePurchaseOrder(editingId, payload);
+        setRecords((prev) => prev.map((r) => (r.id === editingId ? updated : r)));
+      } else {
+        const created = await createPurchaseOrder(payload);
+        setRecords((prev) => [created, ...prev]);
+      }
+      resetForm();
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error || error?.message || "Failed to save purchase order."
+      );
+    }
+  };
+
+  const goPickProducts = () => {
+    navigate("/inventory/products?pick=po");
+  };
 
   return (
     <div className="p-6">
-      <h1 className="text-3xl font-semibold text-slate-800 mb-2">Purchase Order</h1>
-      <p className="text-sm text-slate-500 mb-6">
-        This page was reset to remove merge-conflict syntax errors.
-      </p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
+        <div>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+            Projects
+          </p>
+          <h1 className="text-3xl font-semibold text-slate-800">
+            Purchase Orders
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Issue procurement orders tied to project needs.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={loadVendors}
+            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+          >
+            Refresh Vendors
+          </button>
+          <button
+            type="button"
+            onClick={resetForm}
+            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+          >
+            Clear Form
+          </button>
+        </div>
+      </div>
 
-      <div className="bg-white border border-slate-200 rounded-lg p-4 max-w-xl">
-        <label className="block text-sm font-medium text-slate-700 mb-2">
-          PO Number
-        </label>
-        <input
-          value={poNumber}
-          onChange={(event) => setPoNumber(event.target.value)}
-          className="w-full border border-slate-200 rounded-lg px-3 py-2"
-          placeholder="PO-2026-001"
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+          <p className="text-sm text-slate-500">Total POs</p>
+          <p className="text-2xl font-semibold text-slate-800">
+            {records.length}
+          </p>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+          <p className="text-sm text-slate-500">Total Value</p>
+          <p className="text-2xl font-semibold text-slate-800">
+            {formatCurrency(totalValue)}
+          </p>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+          <p className="text-sm text-slate-500">Open Orders</p>
+          <p className="text-2xl font-semibold text-slate-800">
+            {records.filter((record) => record.status !== "Closed").length}
+          </p>
+        </div>
+      </div>
+
+      {apiError && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {apiError}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4 mb-6">
+        <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">
+            PO Details
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                PO Number *
+              </label>
+              <input
+                type="text"
+                value={form.poNumber}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, poNumber: event.target.value }))
+                }
+                placeholder="PO-2026-002"
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              />
+              {errors.poNumber && (
+                <p className="text-xs text-red-600 mt-1">{errors.poNumber}</p>
+              )}
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Project *
+              </label>
+              <select
+                value={form.projectId}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, projectId: event.target.value }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                <option value="">Select project</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              {errors.projectId && (
+                <p className="text-xs text-red-600 mt-1">{errors.projectId}</p>
+              )}
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Vendor *
+              </label>
+              <select
+                value={form.vendorId}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, vendorId: event.target.value }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                <option value="">Select vendor</option>
+                {vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>
+                    {vendor.name}
+                  </option>
+                ))}
+              </select>
+              {errors.vendorId && (
+                <p className="text-xs text-red-600 mt-1">{errors.vendorId}</p>
+              )}
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Location
+              </label>
+              <select
+                value={form.locationId}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    locationId: event.target.value,
+                  }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                <option value="">Select location</option>
+                {locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Status
+              </label>
+              <select
+                value={form.status}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, status: event.target.value }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                <option value="Draft">Draft</option>
+                <option value="Sent">Sent</option>
+                <option value="Partially Received">Partially Received</option>
+                <option value="Closed">Closed</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Order Date
+              </label>
+              <input
+                type="date"
+                value={form.orderDate}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, orderDate: event.target.value }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                Expected Date
+              </label>
+              <input
+                type="date"
+                value={form.expectedDate}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    expectedDate: event.target.value,
+                  }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div className="md:col-span-3">
+              <label className="text-sm font-medium text-slate-700">
+                Notes
+              </label>
+              <textarea
+                value={form.notes}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, notes: event.target.value }))
+                }
+                placeholder="Delivery terms, remarks, or approvals."
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px]"
+              />
+            </div>
+          </div>
+        </div>
+
+        <LineItemsEditor
+          items={items}
+          onChange={setItems}
+          onPickFromProducts={goPickProducts}
+          pickLabel="Pick from Products"
         />
+        {errors.items && (
+          <p className="text-xs text-red-600">{errors.items}</p>
+        )}
+
+        <div className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={resetForm}
+            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+          >
+            {editingId ? "Update PO" : "Save PO"}
+          </button>
+        </div>
+      </form>
+
+      <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4 flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-800">View Purchase Orders</h3>
+          <p className="text-sm text-slate-600">
+            Saved POs are listed on the Register page.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigate("/inventory/purchase-order-register")}
+          className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+        >
+          Open Register
+        </button>
       </div>
     </div>
   );

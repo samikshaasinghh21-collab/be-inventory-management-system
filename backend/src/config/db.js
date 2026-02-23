@@ -1,7 +1,21 @@
-﻿import sql from "mssql";
+import sql from "mssql";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
-dotenv.config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const loadEnv = (envPath) => {
+  dotenv.config({ path: envPath });
+};
+
+// Prefer the backend/.env in this repo, but also allow the sibling backend/.env
+// (C:\Users\adars\inventory-management-system\backend\.env) if that's what is edited.
+loadEnv(path.resolve(__dirname, "../../.env"));
+loadEnv(path.resolve(__dirname, "../../../../backend/.env"));
+
+const getEnv = (primary, fallback) =>
+  process.env[primary] ?? process.env[fallback];
 
 const toInt = (value, fallback) => {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -11,9 +25,9 @@ const toInt = (value, fallback) => {
 const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  server: process.env.DB_HOST,
+  server: getEnv("DB_HOST", "DB_SERVER"),
   port: toInt(process.env.DB_PORT, 1433),
-  database: process.env.DB_NAME,
+  database: getEnv("DB_NAME", "DB_DATABASE"),
   options: {
     encrypt: String(process.env.DB_ENCRYPT ?? "false").toLowerCase() === "true",
     trustServerCertificate:

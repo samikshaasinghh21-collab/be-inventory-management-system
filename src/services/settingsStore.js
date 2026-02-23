@@ -2,10 +2,15 @@ const STORAGE_KEY = "appSettings";
 
 export const DEFAULT_SETTINGS = {
   profile: {
-    fullName: "",
-    email: "",
-    phone: "",
+    fullName: "Demo Account",
+    email: "demo@mybillbook.in",
+    phone: "+91 98765 43210",
     role: "Admin",
+    avatar: "",
+    dob: "1983-05-01",
+    country: "India",
+    languages: "English (United States), English (India)",
+    regionFormat: "English (United States); 8/31/2000; 01:01 - 23:59",
   },
   company: {
     name: "",

@@ -453,6 +453,7 @@ export default function Product() {
     );
     navigate("/inventory/cart");
   };
+  const goToCreateProduct = () => navigate("/inventory/create-product");
 
   const isPickingForPo =
     new URLSearchParams(location.search).get("pick") === "po";
@@ -482,6 +483,12 @@ export default function Product() {
       <div className="flex justify-between mb-4">
         <h2 className="text-3xl font-semibold">Products</h2>
         <div className="flex gap-2">
+          <button
+            onClick={goToCreateProduct}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 transition"
+          >
+            Create Product
+          </button>
           {isPickingForPo && (
             <button
               onClick={sendToPurchaseOrder}

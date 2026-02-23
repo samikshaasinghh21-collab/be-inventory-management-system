@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   deleteVendor,
+  fetchVendors,
   syncVendorsCache,
   updateVendor,
 } from "../../services/vendorsApi";
@@ -17,6 +18,8 @@ const emptyForm = {
 const Vendors = () => {
   const navigate = useNavigate();
   const [vendors, setVendors] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [editingVendor, setEditingVendor] = useState(null);
   const [editForm, setEditForm] = useState(emptyForm);
@@ -28,7 +31,7 @@ const Vendors = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
 
-  const loadVendors = () => {
+  const loadVendorsFromCache = () => {
     try {
       const stored = JSON.parse(localStorage.getItem("vendors") || "[]");
       setVendors(Array.isArray(stored) ? stored : []);
@@ -38,13 +41,30 @@ const Vendors = () => {
   };
 
   useEffect(() => {
-    loadVendors();
+    const loadVendors = async () => {
+      setIsLoading(true);
+      setLoadError("");
+      try {
+        const list = await fetchVendors();
+        setVendors(list);
+        syncVendorsCache(list);
+      } catch (error) {
+        setLoadError(
+          error?.response?.data?.message || error?.message || "Failed to load vendors."
+        );
+        loadVendorsFromCache();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void loadVendors();
   }, []);
 
   useEffect(() => {
     const handleStorage = (event) => {
       if (event.key === "vendors") {
-        loadVendors();
+        loadVendorsFromCache();
       }
     };
 
@@ -166,6 +186,13 @@ const Vendors = () => {
       syncVendorsCache(nextVendors);
       setDeleteTarget(null);
     } catch (error) {
+      if (error?.response?.status === 404) {
+        const nextVendors = vendors.filter((item) => item.id !== deleteTarget.id);
+        setVendors(nextVendors);
+        syncVendorsCache(nextVendors);
+        setDeleteTarget(null);
+        return;
+      }
       setDeleteError(
         error?.response?.data?.message || error?.message || "Failed to delete vendor."
       );
@@ -199,7 +226,7 @@ const Vendors = () => {
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
           <p className="text-sm text-slate-500">Total Vendors</p>
           <p className="text-2xl font-semibold text-slate-800">
-            {vendors.length}
+            {isLoading ? "..." : vendors.length}
           </p>
         </div>
       </div>
@@ -210,6 +237,9 @@ const Vendors = () => {
             <h3 className="text-lg font-semibold text-slate-800">
               Vendor Register
             </h3>
+            {loadError && (
+              <p className="text-xs text-amber-700 mt-1">{loadError}</p>
+            )}
             {actionError && (
               <p className="text-xs text-red-600 mt-1">{actionError}</p>
             )}
