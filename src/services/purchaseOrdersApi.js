@@ -4,15 +4,35 @@ const normalizePoItem = (item = {}) => ({
   id: item.id ?? item.Id ?? null,
   purchaseOrderId: item.purchaseOrderId ?? item.PurchaseOrderId ?? null,
   itemId: item.itemId ?? item.ItemId ?? null,
-  quantity: Number(item.quantity ?? item.Quantity ?? 0),
-  unitPrice: Number(item.unitPrice ?? item.UnitPrice ?? 0),
-  totalPrice: Number(item.totalPrice ?? item.TotalPrice ?? ((item.quantity ?? 0) * (item.unitPrice ?? 0))),
+  name: item.name ?? item.Name ?? item.ItemName ?? "",
+  description: item.description ?? item.Description ?? "",
+  unit: item.unit ?? item.Unit ?? "PCS",
+  notes: item.notes ?? item.Notes ?? "",
+  quantity: Number(item.quantity ?? item.Quantity ?? item.Qty ?? 0),
+  unitPrice: Number(
+    item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0
+  ),
+  totalPrice: Number(
+    item.totalPrice ??
+      item.TotalPrice ??
+      item.total ??
+      item.Total ??
+      ((item.quantity ?? item.Quantity ?? item.Qty ?? 0) *
+        (item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0))
+  ),
 });
 
 const normalizePurchaseOrder = (order = {}) => ({
   id: order.id ?? order.PurchaseOrderId ?? null,
+  poNumber:
+    order.poNumber ??
+    order.PONumber ??
+    order.PoNumber ??
+    order.purchaseOrderNumber ??
+    "",
   projectId: order.projectId ?? order.ProjectId ?? null,
   vendorId: order.vendorId ?? order.VendorId ?? null,
+  locationId: order.locationId ?? order.LocationId ?? null,
   status: order.status ?? order.Status ?? "Draft",
   orderDate: order.orderDate ?? order.OrderDate ?? null,
   expectedDate:

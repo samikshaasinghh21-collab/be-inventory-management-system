@@ -1,0 +1,44 @@
+import api from "./api";
+
+const normalizeLocation = (location = {}) => ({
+  id: location.id ?? location.LocationId ?? null,
+  name:
+    location.name ??
+    location.Name ??
+    location.locationName ??
+    location.LocationName ??
+    "",
+  code: location.code ?? location.Code ?? "",
+  type: location.type ?? location.Type ?? "Site",
+  projectId: location.projectId ?? location.ProjectId ?? "",
+  manager: location.manager ?? location.Manager ?? "",
+  phone: location.phone ?? location.Phone ?? "",
+  address: location.address ?? location.Address ?? "",
+  status: location.status ?? location.Status ?? "Active",
+  createdAt: location.createdAt ?? location.CreatedAt ?? null,
+  updatedAt: location.updatedAt ?? location.UpdatedAt ?? null,
+});
+
+export const fetchLocations = async () => {
+  const response = await api.get("/locations");
+  const list = Array.isArray(response.data?.locations)
+    ? response.data.locations
+    : Array.isArray(response.data)
+    ? response.data
+    : [];
+  return list.map(normalizeLocation);
+};
+
+export const createLocation = async (payload) => {
+  const response = await api.post("/locations", payload);
+  return normalizeLocation(response.data?.location ?? response.data);
+};
+
+export const updateLocation = async (id, payload) => {
+  const response = await api.put(`/locations/${id}`, payload);
+  return normalizeLocation(response.data?.location ?? response.data);
+};
+
+export const deleteLocation = async (id) => {
+  await api.delete(`/locations/${id}`);
+};

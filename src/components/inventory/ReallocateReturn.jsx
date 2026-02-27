@@ -6,12 +6,12 @@ import {
   getWorkflowList,
   updateWorkflowItem,
 } from "../../services/workflowStore";
+import { fetchLocations } from "../../services/locationsApi";
 import LineItemsEditor from "./LineItemsEditor";
 import DateInput from "../common/DateInput";
 import { fetchVendors, syncVendorsCache } from "../../services/vendorsApi";
 
 const STORAGE_KEY = "workflow_reallocate_return";
-const LOCATION_KEY = "workflow_locations";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -47,7 +47,14 @@ const ReallocateReturn = () => {
   const [editingId, setEditingId] = useState(null);
 
   const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
-  const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
+  const loadLocations = async () => {
+    try {
+      const list = await fetchLocations();
+      setLocations(Array.isArray(list) ? list : []);
+    } catch {
+      setLocations([]);
+    }
+  };
   const loadVendors = async () => {
     try {
       const data = await fetchVendors();
@@ -60,8 +67,8 @@ const ReallocateReturn = () => {
 
   useEffect(() => {
     setProjects(getProjects());
-    loadLocations();
-    loadVendors();
+    void loadLocations();
+    void loadVendors();
     loadRecords();
   }, []);
 
@@ -69,12 +76,6 @@ const ReallocateReturn = () => {
     const handler = () => loadRecords();
     window.addEventListener(`${STORAGE_KEY}:changed`, handler);
     return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => loadLocations();
-    window.addEventListener(`${LOCATION_KEY}:changed`, handler);
-    return () => window.removeEventListener(`${LOCATION_KEY}:changed`, handler);
   }, []);
 
   const projectMap = useMemo(() => {

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getProjects } from "../../services/projectsStore";
 import { fetchVendors } from "../../services/vendorsApi";
+import { fetchLocations } from "../../services/locationsApi";
 import {
   fetchPurchaseOrders,
   deletePurchaseOrder,
@@ -15,9 +16,12 @@ const PurchaseOrderRegister = () => {
   const currency = settings?.preferences?.currency || "INR";
   const [projects, setProjects] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [records, setRecords] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [apiError, setApiError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
 
   const formatCurrency = (value) => {
     const amount = Number(value) || 0;
@@ -34,6 +38,7 @@ const PurchaseOrderRegister = () => {
 
   const loadRecords = async () => {
     try {
+      setLoading(true);
       setApiError("");
       const list = await fetchPurchaseOrders();
       setRecords(list);
@@ -42,6 +47,8 @@ const PurchaseOrderRegister = () => {
         error?.response?.data?.error || error?.message || "Failed to load purchase orders."
       );
       setRecords([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -54,9 +61,19 @@ const PurchaseOrderRegister = () => {
     }
   };
 
+  const loadLocations = async () => {
+    try {
+      const list = await fetchLocations();
+      setLocations(Array.isArray(list) ? list : []);
+    } catch {
+      setLocations([]);
+    }
+  };
+
   useEffect(() => {
     setProjects(getProjects());
     void loadVendors();
+    void loadLocations();
     void loadRecords();
   }, []);
 
@@ -74,6 +91,13 @@ const PurchaseOrderRegister = () => {
     }, {});
   }, [vendors]);
 
+  const locationMap = useMemo(() => {
+    return locations.reduce((acc, location) => {
+      acc[String(location.id)] = location;
+      return acc;
+    }, {});
+  }, [locations]);
+
   const totalValue = records.reduce(
     (sum, record) => sum + (Number(record.total) || 0),
     0
@@ -89,6 +113,8 @@ const PurchaseOrderRegister = () => {
       projectMap[String(record.projectId)]?.name?.toLowerCase() || "";
     const vendorName =
       vendorMap[String(record.vendorId)]?.name?.toLowerCase() || "";
+    const locationName =
+      locationMap[String(record.locationId)]?.name?.toLowerCase() || "";
     return [
       poNumber,
       record.status,
@@ -96,10 +122,30 @@ const PurchaseOrderRegister = () => {
       record.gstRate,
       projectName,
       vendorName,
+      locationName,
     ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query));
   });
+
+  const statusBadge = (status) => {
+    const label = status || "Draft";
+    const base =
+      label.toLowerCase() === "closed"
+        ? "bg-green-100 text-green-700"
+        : label.toLowerCase().includes("partial")
+        ? "bg-amber-100 text-amber-700"
+        : "bg-slate-100 text-slate-700";
+    return (
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${base}`}>
+        {label}
+      </span>
+    );
+  };
+
+  const toggleRow = (id) => {
+    setExpandedId((prev) => (prev === id ? null : id));
+  };
 
   const handleEdit = (record) => {
     navigate("/inventory/purchase-order", { state: { purchaseOrder: record } });
@@ -194,6 +240,7 @@ const PurchaseOrderRegister = () => {
               <th className="p-3 text-left min-w-[150px]">PO No</th>
               <th className="p-3 text-left min-w-[180px]">Vendor</th>
               <th className="p-3 text-left min-w-[180px]">Project</th>
+              <th className="p-3 text-left min-w-[160px]">Location</th>
               <th className="p-3 text-left min-w-[140px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">GST</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
@@ -206,54 +253,174 @@ const PurchaseOrderRegister = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredRecords.length === 0 && (
+            {loading && (
               <tr>
-                <td colSpan="10" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
+                  Loading purchase orders...
+                </td>
+              </tr>
+            )}
+            {!loading && filteredRecords.length === 0 && (
+              <tr>
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   {records.length === 0
                     ? "No purchase orders created yet."
                     : "No purchase orders match your search."}
                 </td>
               </tr>
             )}
-            {filteredRecords.map((record) => (
-              <tr key={record.id} className="border-t hover:bg-slate-50">
-                <td className="p-3 font-medium text-slate-800">
-                  {record.poNumber || record.id}
-                </td>
-                <td className="p-3">
-                  {vendorMap[String(record.vendorId)]?.name || "-"}
-                </td>
-                <td className="p-3">
-                  {projectMap[String(record.projectId)]?.name || "-"}
-                </td>
-                <td className="p-3">{record.status || "-"}</td>
-                <td className="p-3">{record.gstRate || record.gst || "None"}</td>
-                <td className="p-3">{record.items?.length || 0}</td>
-                <td className="p-3 font-medium">
-                  {formatCurrency(record.total || 0)}
-                </td>
-                <td className="p-3">{formatDate(record.expectedDate || record.orderDate)}</td>
-                <td className="p-3 text-slate-600">
-                  {record.termsConditions || record.notes || "-"}
-                </td>
-                <td className="p-3 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleEdit(record)}
-                    className="text-indigo-600 text-sm"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(record.id)}
-                    className="text-red-600 text-sm"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {!loading &&
+              filteredRecords.map((record, index) => {
+                const key = record.id ?? `po-${index}`;
+                const rowId = record.id ?? `expanded-${index}`;
+                const project = projectMap[String(record.projectId)];
+                const vendor = vendorMap[String(record.vendorId)];
+                const location = locationMap[String(record.locationId)];
+                return (
+                  <Fragment key={key}>
+                    <tr
+                      className="border-t hover:bg-slate-50 cursor-pointer"
+                      onClick={() => toggleRow(rowId)}
+                    >
+                      <td className="p-3 font-medium text-slate-800">
+                        {record.poNumber || record.id}
+                      </td>
+                      <td className="p-3">{vendor?.name || "-"}</td>
+                      <td className="p-3">{project?.name || "-"}</td>
+                      <td className="p-3">{location?.name || "-"}</td>
+                      <td className="p-3">{statusBadge(record.status)}</td>
+                      <td className="p-3">{record.gstRate || record.gst || "None"}</td>
+                      <td className="p-3">{record.items?.length || 0}</td>
+                      <td className="p-3 font-medium">
+                        {formatCurrency(record.total || 0)}
+                      </td>
+                      <td className="p-3">
+                        {formatDate(record.expectedDate || record.orderDate)}
+                      </td>
+                      <td className="p-3 text-slate-600">
+                        {record.termsConditions || record.notes || "-"}
+                      </td>
+                      <td className="p-3 flex gap-3">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleEdit(record);
+                          }}
+                          className="text-indigo-600 text-sm"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleDelete(record.id);
+                          }}
+                          className="text-red-600 text-sm"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+
+                    {expandedId === rowId && (
+                      <tr className="bg-slate-50">
+                        <td colSpan="11" className="p-4">
+                          <div className="space-y-4">
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm text-slate-700">
+                              <p>
+                                <strong>PO No:</strong> {record.poNumber || record.id}
+                              </p>
+                              <p>
+                                <strong>Status:</strong> {record.status || "-"}
+                              </p>
+                              <p>
+                                <strong>Project:</strong> {project?.name || "-"}
+                              </p>
+                              <p>
+                                <strong>Vendor:</strong> {vendor?.name || "-"}
+                              </p>
+                              <p>
+                                <strong>Location:</strong> {location?.name || "-"}
+                              </p>
+                              <p>
+                                <strong>Order Date:</strong> {formatDate(record.orderDate) || "-"}
+                              </p>
+                              <p>
+                                <strong>Expected Date:</strong>{" "}
+                                {formatDate(record.expectedDate) || "-"}
+                              </p>
+                              <p>
+                                <strong>Total Value:</strong> {formatCurrency(record.total || 0)}
+                              </p>
+                            </div>
+
+                            <div>
+                              <h4 className="font-semibold text-slate-700 mb-2">
+                                Line Items
+                              </h4>
+                              <div className="overflow-x-auto border rounded-md">
+                                <table className="w-full text-sm">
+                                  <thead className="bg-slate-100 text-slate-600">
+                                    <tr>
+                                      <th className="p-2 text-left">Item</th>
+                                      <th className="p-2 text-left">Description</th>
+                                      <th className="p-2 text-left">Unit</th>
+                                      <th className="p-2 text-left">Qty</th>
+                                      <th className="p-2 text-left">Rate</th>
+                                      <th className="p-2 text-left">Amount</th>
+                                      <th className="p-2 text-left">Notes</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {(record.items || []).length === 0 && (
+                                      <tr>
+                                        <td colSpan="7" className="p-3 text-slate-500 text-center">
+                                          No line items.
+                                        </td>
+                                      </tr>
+                                    )}
+                                    {(record.items || []).map((item, itemIndex) => {
+                                      const qty = Number(item.quantity ?? 0) || 0;
+                                      const rate = Number(item.unitPrice ?? item.rate ?? 0) || 0;
+                                      const amount =
+                                        Number(item.totalPrice ?? qty * rate) || 0;
+                                      return (
+                                        <tr
+                                          key={item.id ?? item.itemId ?? `${key}-item-${itemIndex}`}
+                                          className="border-t"
+                                        >
+                                          <td className="p-2 font-medium text-slate-800">
+                                            {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
+                                          </td>
+                                          <td className="p-2">{item.description || "-"}</td>
+                                          <td className="p-2">{item.unit || "-"}</td>
+                                          <td className="p-2">{qty}</td>
+                                          <td className="p-2">{formatCurrency(rate)}</td>
+                                          <td className="p-2">{formatCurrency(amount)}</td>
+                                          <td className="p-2">{item.notes || "-"}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            <div className="text-sm text-slate-600">
+                              <p>
+                                <strong>Terms &amp; Conditions:</strong>{" "}
+                                {record.termsConditions || record.notes || "-"}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
           </tbody>
         </table>
       </div>

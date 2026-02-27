@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  deleteProject,
+  deleteProject as deleteProjectLocal,
   getProjects,
-  updateProject,
+  setProjects as setLocalProjects,
+  updateProject as updateProjectLocal,
 } from "../services/projectsStore";
+import {
+  deleteProjectApi,
+  fetchProjects,
+  updateProjectApi,
+} from "../services/projectsApi";
 import DateInput from "../components/common/DateInput";
 
 const ProjectsHome = () => {
@@ -12,6 +18,7 @@ const ProjectsHome = () => {
   const [projects, setProjects] = useState([]);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
+  const [apiError, setApiError] = useState("");
   const [form, setForm] = useState({
     name: "",
     code: "",
@@ -24,12 +31,21 @@ const ProjectsHome = () => {
   const [errors, setErrors] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const loadProjects = () => {
-    setProjects(getProjects());
+  const loadProjects = async () => {
+    try {
+      const list = await fetchProjects();
+      setProjects(list);
+      setLocalProjects(list);
+      setApiError("");
+    } catch (error) {
+      console.error("Failed to load projects from API", error);
+      setApiError("Unable to load latest projects. Showing cached list.");
+      setProjects(getProjects());
+    }
   };
 
   useEffect(() => {
-    loadProjects();
+    void loadProjects();
   }, []);
 
   const filteredProjects = useMemo(() => {
@@ -67,10 +83,11 @@ const ProjectsHome = () => {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!editing) return;
     if (!validate()) return;
-    updateProject(editing.id, {
+
+    const payload = {
       name: form.name.trim(),
       code: form.code.trim() || undefined,
       client: form.client.trim() || undefined,
@@ -78,16 +95,45 @@ const ProjectsHome = () => {
       startDate: form.startDate || null,
       endDate: form.endDate || null,
       notes: form.notes.trim() || undefined,
-    });
-    loadProjects();
-    setEditing(null);
+    };
+
+    try {
+      const updated = await updateProjectApi(editing.id, payload);
+      setProjects((prev) =>
+        prev.map((project) => (project.id === editing.id ? updated : project))
+      );
+      updateProjectLocal(editing.id, updated);
+      setEditing(null);
+      setErrors({});
+      setApiError("");
+    } catch (error) {
+      console.error("Failed to update project", error);
+      setApiError(
+        error?.response?.data?.error ??
+          error?.message ??
+          "Failed to update project."
+      );
+    }
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    deleteProject(deleteTarget.id);
-    setDeleteTarget(null);
-    loadProjects();
+    try {
+      await deleteProjectApi(deleteTarget.id);
+      setProjects((prev) =>
+        prev.filter((project) => project.id !== deleteTarget.id)
+      );
+      deleteProjectLocal(deleteTarget.id);
+      setDeleteTarget(null);
+      setApiError("");
+    } catch (error) {
+      console.error("Failed to delete project", error);
+      setApiError(
+        error?.response?.data?.error ??
+          error?.message ??
+          "Failed to delete project."
+      );
+    }
   };
 
   return (
@@ -118,6 +164,11 @@ const ProjectsHome = () => {
         </div>
 
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+          {apiError && (
+            <div className="mx-3 mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {apiError}
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead className="bg-slate-100 text-slate-600">
               <tr>

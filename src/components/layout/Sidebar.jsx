@@ -108,6 +108,11 @@ const Sidebar = () => {
       .map((part) => part[0].toUpperCase())
       .join("") || "ERP";
 
+  const handleLogout = () => {
+    // If later we add auth tokens, clear them here.
+    navigate("/login");
+  };
+
   return (
     <aside
       className={`${
@@ -387,7 +392,11 @@ const Sidebar = () => {
           </Icon>
           <span className={labelClass}>Settings</span>
         </NavLink>
-        <button className="w-full mt-2 flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800/80 transition">
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="w-full mt-2 flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800/80 transition"
+        >
           <span className="grid h-8 w-8 place-items-center rounded-md bg-slate-800/70">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
               <path d="M12 3v10" />

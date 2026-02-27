@@ -14,6 +14,11 @@ export const getProjects = () => {
   }
 };
 
+export const setProjects = (projects = []) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  emitChange();
+};
+
 export const saveProject = (project) => {
   const projects = getProjects();
   const next = [...projects, project];

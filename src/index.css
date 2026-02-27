@@ -1,3 +1,16 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  --brand-navy: #0f1f3a;
+  --brand-green: #0f766e;
+  --brand-soft: #eef7f5;
+}
+
+.display-font {
+  font-family: 'Space Grotesk', 'Manrope', sans-serif;
+  letter-spacing: -0.02em;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -183,3 +196,4 @@
     padding: 1rem;
   }
 }
+

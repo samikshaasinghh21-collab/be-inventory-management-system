@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { getProjects } from "../../services/projectsStore";
 import {
-  addWorkflowItem,
-  deleteWorkflowItem,
-  getWorkflowList,
-  updateWorkflowItem,
-} from "../../services/workflowStore";
-
-const STORAGE_KEY = "workflow_locations";
+  createLocation,
+  deleteLocation,
+  fetchLocations,
+  updateLocation,
+} from "../../services/locationsApi";
 
 const createFormState = () => ({
   name: "",
@@ -26,18 +24,30 @@ const Locations = () => {
   const [form, setForm] = useState(createFormState);
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState("");
 
-  const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
+  const loadRecords = async () => {
+    try {
+      setLoading(true);
+      setApiError("");
+      const list = await fetchLocations();
+      setRecords(list);
+    } catch (error) {
+      setRecords([]);
+      setApiError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to load locations."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     setProjects(getProjects());
-    loadRecords();
-  }, []);
-
-  useEffect(() => {
-    const handler = () => loadRecords();
-    window.addEventListener(`${STORAGE_KEY}:changed`, handler);
-    return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
+    void loadRecords();
   }, []);
 
   const projectMap = useMemo(() => {
@@ -62,30 +72,32 @@ const Locations = () => {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     if (!validate()) {
       return;
     }
 
     const payload = {
-      id: editingId ?? Date.now(),
       ...form,
-      updatedAt: new Date().toISOString(),
-      createdAt:
-        editingId &&
-        records.find((record) => record.id === editingId)?.createdAt
-          ? records.find((record) => record.id === editingId)?.createdAt
-          : new Date().toISOString(),
     };
 
-    if (editingId) {
-      updateWorkflowItem(STORAGE_KEY, editingId, payload);
-    } else {
-      addWorkflowItem(STORAGE_KEY, payload);
+    try {
+      setApiError("");
+      if (editingId) {
+        await updateLocation(editingId, payload);
+      } else {
+        await createLocation(payload);
+      }
+      await loadRecords();
+      resetForm();
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to save location."
+      );
     }
-
-    resetForm();
   };
 
   const handleEdit = (record) => {
@@ -103,8 +115,18 @@ const Locations = () => {
     setErrors({});
   };
 
-  const handleDelete = (id) => {
-    deleteWorkflowItem(STORAGE_KEY, id);
+  const handleDelete = async (id) => {
+    try {
+      setApiError("");
+      await deleteLocation(id);
+      await loadRecords();
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to delete location."
+      );
+    }
   };
 
   return (
@@ -288,7 +310,19 @@ const Locations = () => {
           <h3 className="text-lg font-semibold text-slate-800">
             Locations Register
           </h3>
+          <button
+            type="button"
+            onClick={loadRecords}
+            className="px-3 py-1.5 border border-slate-200 rounded-md text-xs text-slate-600 bg-white"
+          >
+            Refresh
+          </button>
         </div>
+        {apiError && (
+          <div className="px-4 py-3 text-sm text-red-700 bg-red-50 border-b border-red-100">
+            {apiError}
+          </div>
+        )}
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
@@ -302,14 +336,21 @@ const Locations = () => {
             </tr>
           </thead>
           <tbody>
-            {records.length === 0 && (
+            {loading && (
+              <tr>
+                <td colSpan="7" className="p-6 text-center text-slate-500">
+                  Loading locations...
+                </td>
+              </tr>
+            )}
+            {!loading && records.length === 0 && (
               <tr>
                 <td colSpan="7" className="p-6 text-center text-slate-500">
                   No locations created yet.
                 </td>
               </tr>
             )}
-            {records.map((record) => (
+            {!loading && records.map((record) => (
               <tr key={record.id} className="border-t hover:bg-slate-50">
                 <td className="p-3 font-medium text-slate-800">
                   {record.name}

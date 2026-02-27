@@ -6,11 +6,13 @@ import {
   getWorkflowList,
   updateWorkflowItem,
 } from "../../services/workflowStore";
+import { fetchLocations } from "../../services/locationsApi";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
+import DateInput from "../common/DateInput";
+import { formatDate } from "../../utils/dateFormat";
 
 const STORAGE_KEY = "workflow_purchase_orders";
-const LOCATION_KEY = "workflow_locations";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -59,7 +61,14 @@ const PurchaseOrder = () => {
   };
 
   const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
-  const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
+  const loadLocations = async () => {
+    try {
+      const list = await fetchLocations();
+      setLocations(Array.isArray(list) ? list : []);
+    } catch {
+      setLocations([]);
+    }
+  };
   const loadVendors = () => {
     try {
       const stored = JSON.parse(localStorage.getItem("vendors") || "[]");
@@ -72,7 +81,7 @@ const PurchaseOrder = () => {
   useEffect(() => {
     setProjects(getProjects());
     loadRecords();
-    loadLocations();
+    void loadLocations();
     loadVendors();
   }, []);
 
@@ -80,12 +89,6 @@ const PurchaseOrder = () => {
     const handler = () => loadRecords();
     window.addEventListener(`${STORAGE_KEY}:changed`, handler);
     return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => loadLocations();
-    window.addEventListener(`${LOCATION_KEY}:changed`, handler);
-    return () => window.removeEventListener(`${LOCATION_KEY}:changed`, handler);
   }, []);
 
   const projectMap = useMemo(() => {
@@ -362,11 +365,10 @@ const PurchaseOrder = () => {
               <label className="text-sm font-medium text-slate-700">
                 Order Date
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.orderDate}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, orderDate: event.target.value }))
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, orderDate: value }))
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
@@ -375,13 +377,12 @@ const PurchaseOrder = () => {
               <label className="text-sm font-medium text-slate-700">
                 Expected Date
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.expectedDate}
-                onChange={(event) =>
+                onChange={(value) =>
                   setForm((prev) => ({
                     ...prev,
-                    expectedDate: event.target.value,
+                    expectedDate: value,
                   }))
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
@@ -468,7 +469,7 @@ const PurchaseOrder = () => {
                 <td className="p-3 font-medium">
                   {formatCurrency(record.total || 0)}
                 </td>
-                <td className="p-3">{record.expectedDate || "-"}</td>
+                <td className="p-3">{formatDate(record.expectedDate)}</td>
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"

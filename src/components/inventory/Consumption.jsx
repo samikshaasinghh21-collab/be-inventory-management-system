@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { getProjects } from "../../services/projectsStore";
 import {
   addWorkflowItem,
@@ -6,10 +7,12 @@ import {
   getWorkflowList,
   updateWorkflowItem,
 } from "../../services/workflowStore";
+import { fetchLocations } from "../../services/locationsApi";
 import LineItemsEditor from "./LineItemsEditor";
+import DateInput from "../common/DateInput";
+import { formatDate } from "../../utils/dateFormat";
 
 const STORAGE_KEY = "workflow_consumption";
-const LOCATION_KEY = "workflow_locations";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -32,6 +35,7 @@ const createFormState = () => ({
 });
 
 const Consumption = () => {
+  const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [locations, setLocations] = useState([]);
   const [records, setRecords] = useState([]);
@@ -39,13 +43,31 @@ const Consumption = () => {
   const [items, setItems] = useState([createLineItem()]);
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [locationsError, setLocationsError] = useState("");
 
   const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
-  const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
+  const loadLocations = async () => {
+    try {
+      setLocationsLoading(true);
+      setLocationsError("");
+      const list = await fetchLocations();
+      setLocations(Array.isArray(list) ? list : []);
+    } catch (error) {
+      setLocations([]);
+      setLocationsError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to load locations."
+      );
+    } finally {
+      setLocationsLoading(false);
+    }
+  };
 
   useEffect(() => {
     setProjects(getProjects());
-    loadLocations();
+    void loadLocations();
     loadRecords();
   }, []);
 
@@ -53,12 +75,6 @@ const Consumption = () => {
     const handler = () => loadRecords();
     window.addEventListener(`${STORAGE_KEY}:changed`, handler);
     return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => loadLocations();
-    window.addEventListener(`${LOCATION_KEY}:changed`, handler);
-    return () => window.removeEventListener(`${LOCATION_KEY}:changed`, handler);
   }, []);
 
   const projectMap = useMemo(() => {
@@ -258,9 +274,27 @@ const Consumption = () => {
               )}
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                Location *
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-slate-700">
+                  Location *
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={loadLocations}
+                    className="text-xs text-slate-600 underline"
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/inventory/locations")}
+                    className="text-xs text-indigo-600 underline"
+                  >
+                    Manage Locations
+                  </button>
+                </div>
+              </div>
               <select
                 value={form.locationId}
                 onChange={(event) =>
@@ -271,13 +305,29 @@ const Consumption = () => {
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               >
-                <option value="">Select location</option>
+                <option value="">
+                  {locationsLoading
+                    ? "Loading locations..."
+                    : locations.length > 0
+                    ? "Select location"
+                    : "No locations found"}
+                </option>
                 {locations.map((location) => (
                   <option key={location.id} value={location.id}>
                     {location.name}
                   </option>
                 ))}
               </select>
+              {!locationsLoading && locations.length === 0 && (
+                <p className="text-xs text-amber-700 mt-1">
+                  No locations available. Create one in Location Management.
+                </p>
+              )}
+              {locationsError && (
+                <p className="text-xs text-red-600 mt-1">
+                  {locationsError}
+                </p>
+              )}
               {errors.locationId && (
                 <p className="text-xs text-red-600 mt-1">
                   {errors.locationId}
@@ -288,13 +338,12 @@ const Consumption = () => {
               <label className="text-sm font-medium text-slate-700">
                 Consumption Date
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.consumptionDate}
-                onChange={(event) =>
+                onChange={(value) =>
                   setForm((prev) => ({
                     ...prev,
-                    consumptionDate: event.target.value,
+                    consumptionDate: value,
                   }))
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
@@ -404,7 +453,7 @@ const Consumption = () => {
                 <td className="p-3">
                   {locationMap[String(record.locationId)]?.name || "-"}
                 </td>
-                <td className="p-3">{record.consumptionDate || "-"}</td>
+                <td className="p-3">{formatDate(record.consumptionDate)}</td>
                 <td className="p-3">{record.items?.length || 0}</td>
                 <td className="p-3">{record.status || "-"}</td>
                 <td className="p-3 flex gap-3">

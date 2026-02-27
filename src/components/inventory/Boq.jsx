@@ -9,6 +9,8 @@ import {
   fetchBoqs,
   updateBoq,
 } from "../../services/boqApi";
+import DateInput from "../common/DateInput";
+import { formatDate } from "../../utils/dateFormat";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -33,7 +35,6 @@ const createFormState = () => ({
 const Boq = () => {
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
-  const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
@@ -43,6 +44,7 @@ const Boq = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const navigate = useNavigate();
 
   const formatCurrency = (value) => {
     const amount = Number(value) || 0;
@@ -76,6 +78,40 @@ const Boq = () => {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  // Import selected products from product picker (pick=boq flow)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("boq_selected_products");
+      if (!raw) return;
+      const selected = JSON.parse(raw);
+      if (Array.isArray(selected) && selected.length > 0) {
+        setItems((prev) => {
+          const base =
+            prev.length === 1 &&
+            !prev[0].name &&
+            !prev[0].quantity &&
+            !prev[0].rate
+              ? []
+              : prev;
+          const mapped = selected.map((item) => ({
+            id: item.id ?? Date.now() + Math.random(),
+            name: item.name ?? "",
+            description: item.description ?? "",
+            unit: item.unit ?? "PCS",
+            quantity: item.quantity ?? item.qty ?? 1,
+            rate: item.rate ?? 0,
+            notes: item.notes ?? "",
+          }));
+          return [...base, ...mapped];
+        });
+      }
+    } catch (err) {
+      console.error("Failed to import BOQ selections", err);
+    } finally {
+      localStorage.removeItem("boq_selected_products");
+    }
   }, []);
 
   const projectMap = useMemo(() => {
@@ -208,6 +244,10 @@ const Boq = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handlePickFromProducts = () => {
+    navigate("/inventory/products?pick=boq");
   };
 
   return (
@@ -370,13 +410,12 @@ const Boq = () => {
               <label className="text-sm font-medium text-slate-700">
                 Date
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.date}
-                onChange={(event) =>
+                onChange={(value) =>
                   setForm((prev) => ({
                     ...prev,
-                    date: event.target.value,
+                    date: value,
                   }))
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
@@ -401,7 +440,12 @@ const Boq = () => {
           </div>
         </div>
 
-        <LineItemsEditor items={items} onChange={setItems} />
+        <LineItemsEditor
+          items={items}
+          onChange={setItems}
+          onPickFromProducts={handlePickFromProducts}
+          pickLabel="Pick from Products"
+        />
         {errors.items && (
           <p className="text-xs text-red-600">{errors.items}</p>
         )}
@@ -472,7 +516,7 @@ const Boq = () => {
                 <td className="p-3 font-medium">
                   {formatCurrency(record.total || 0)}
                 </td>
-                <td className="p-3">{record.date || "-"}</td>
+                <td className="p-3">{formatDate(record.date) || "-"}</td>
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"

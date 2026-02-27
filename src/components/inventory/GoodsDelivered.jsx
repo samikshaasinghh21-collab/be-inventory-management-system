@@ -6,12 +6,12 @@ import {
   getWorkflowList,
   updateWorkflowItem,
 } from "../../services/workflowStore";
+import { fetchLocations } from "../../services/locationsApi";
 import LineItemsEditor from "./LineItemsEditor";
 import { formatDateDDMMYYYY } from "../../utils/dateFormat";
 import DateInput from "../common/DateInput";
 
 const STORAGE_KEY = "workflow_goods_delivered";
-const LOCATION_KEY = "workflow_locations";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -43,11 +43,18 @@ const GoodsDelivered = () => {
   const [editingId, setEditingId] = useState(null);
 
   const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
-  const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
+  const loadLocations = async () => {
+    try {
+      const list = await fetchLocations();
+      setLocations(Array.isArray(list) ? list : []);
+    } catch {
+      setLocations([]);
+    }
+  };
 
   useEffect(() => {
     setProjects(getProjects());
-    loadLocations();
+    void loadLocations();
     loadRecords();
   }, []);
 
@@ -55,12 +62,6 @@ const GoodsDelivered = () => {
     const handler = () => loadRecords();
     window.addEventListener(`${STORAGE_KEY}:changed`, handler);
     return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => loadLocations();
-    window.addEventListener(`${LOCATION_KEY}:changed`, handler);
-    return () => window.removeEventListener(`${LOCATION_KEY}:changed`, handler);
   }, []);
 
   const projectMap = useMemo(() => {

@@ -6,6 +6,9 @@ import InventoryHome from "../pages/InventoryHome";
 import ProjectsHome from "../pages/ProjectsHome";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
+import Login from "../pages/Login";
+import CreateAccount from "../pages/CreateAccount";
+import SsoCallback from "../pages/SsoCallback";
 
 import CreateItems from "../components/inventory/CreateItems";
 import EditItems from "../components/inventory/EditItems";
@@ -26,6 +29,7 @@ import DeliveryConfirmation from "../components/inventory/DeliveryConfirmation";
 import PurchaseOrderRegister from "../components/inventory/PurchaseOrderRegister";
 import Invoice from "../components/inventory/Invoice";
 import GoodsDelivered from "../components/inventory/GoodsDelivered";
+import ReceiveGoodsRegister from "../components/inventory/ReceiveGoodsRegister";
 import Consumption from "../components/inventory/Consumption";
 import ReturnReallocate from "../components/inventory/ReturnReallocate";
 import ReturnDc from "../components/inventory/ReturnDc";
@@ -34,6 +38,9 @@ import BoqDetail from "../components/inventory/BoqDetail";
 const AppRoutes = () => {
   return (
     <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/create-account" element={<CreateAccount />} />
+      <Route path="/auth/sso/callback" element={<SsoCallback />} />
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
       </Route>
@@ -56,6 +63,7 @@ const AppRoutes = () => {
         <Route path="/inventory/purchase-order" element={<PurchaseOrder />} />
         <Route path="/inventory/purchase-orders" element={<PurchaseOrder />} />
         <Route path="/inventory/receive-goods" element={<ReceiveGoods />} />
+        <Route path="/inventory/receive-goods-register" element={<ReceiveGoodsRegister />} />
         <Route path="/inventory/allocate-projects" element={<AllocateToProjects />} />
         <Route path="/inventory/delivery-challan" element={<DeliveryChallan />} />
         <Route path="/inventory/delivery-confirmation" element={<DeliveryConfirmation />} />

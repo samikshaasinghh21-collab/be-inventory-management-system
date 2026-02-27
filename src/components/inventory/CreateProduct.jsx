@@ -1,15 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { saveProduct } from "../../services/productsStore";
-
-const CATEGORY_OPTIONS = [
-  "Networking",
-  "Hardware",
-  "Software",
-  "Electrical",
-  "Consumables",
-  "Services",
-];
+import { addCategory, getCategories } from "../../services/categoryStore";
 
 const UNIT_OPTIONS = [
   "Nos",
@@ -40,6 +32,8 @@ const CreateProduct = () => {
   const [productName, setProductName] = useState("");
   const [sku, setSku] = useState("");
   const [category, setCategory] = useState("");
+  const [categories, setCategories] = useState(() => getCategories());
+  const [newCategory, setNewCategory] = useState("");
   const [brand, setBrand] = useState("");
   const [hsn, setHsn] = useState("");
   const [unit, setUnit] = useState("Nos");
@@ -51,6 +45,15 @@ const CreateProduct = () => {
   const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    const handleCategoriesChanged = () => setCategories(getCategories());
+    setCategories(getCategories());
+    window.addEventListener("categories:changed", handleCategoriesChanged);
+    return () => {
+      window.removeEventListener("categories:changed", handleCategoriesChanged);
+    };
+  }, []);
 
   const validate = () => {
     const nextErrors = {};
@@ -104,6 +107,15 @@ const CreateProduct = () => {
 
     saveProduct(payload);
     navigate("/inventory/products");
+  };
+
+  const handleAddCategory = () => {
+    const cleaned = newCategory.trim();
+    if (!cleaned) return;
+    const updated = addCategory(cleaned);
+    setCategories(updated);
+    setCategory(cleaned);
+    setNewCategory("");
   };
 
   const clearError = (key) => {
@@ -218,18 +230,45 @@ const CreateProduct = () => {
                     <label className="text-sm font-medium text-slate-700">
                       Category
                     </label>
-                    <select
-                      value={category}
-                      onChange={(event) => setCategory(event.target.value)}
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                    >
-                      <option value="">Select Category</option>
-                      {CATEGORY_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="space-y-2 mt-1">
+                      <select
+                        value={category}
+                        onChange={(event) => setCategory(event.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                      >
+                        <option value="">Select Category</option>
+                        {categories.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2">
+                        <input
+                          value={newCategory}
+                          onChange={(event) => setNewCategory(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              handleAddCategory();
+                            }
+                          }}
+                          type="text"
+                          placeholder="Add new category"
+                          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddCategory}
+                          className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white hover:border-indigo-500 hover:text-indigo-700"
+                        >
+                          Add
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        Add it once and it will stay in the dropdown.
+                      </p>
+                    </div>
                   </div>
 
                   <div>

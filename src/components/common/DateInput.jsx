@@ -39,10 +39,12 @@ const DateInput = ({
   onChange,
   className = "",
   placeholder = "dd/mm/yyyy",
+  showCalendarButton = true,
   ...rest
 }) => {
   const externalDisplay = useMemo(() => isoToDisplay(value), [value]);
   const [inputValue, setInputValue] = useState(externalDisplay);
+  const [hiddenId] = useState(() => `date-input-${Math.random().toString(36).slice(2, 8)}`);
 
   useEffect(() => {
     setInputValue(externalDisplay);
@@ -73,18 +75,66 @@ const DateInput = ({
     setInputValue(externalDisplay);
   };
 
+  const openNativePicker = () => {
+    const hidden = document.getElementById(hiddenId);
+    if (hidden) hidden.showPicker?.();
+  };
+
+  const handleNativeChange = (event) => {
+    const iso = event.target.value;
+    const display = isoToDisplay(iso);
+    setInputValue(display);
+    if (iso) {
+      onChange(iso);
+    } else {
+      onChange("");
+    }
+  };
+
   return (
-    <input
-      type="text"
-      inputMode="numeric"
-      pattern="\d{2}/\d{2}/\d{4}"
-      placeholder={placeholder}
-      value={inputValue}
-      onChange={handleChange}
-      onBlur={handleBlur}
-      className={className}
-      {...rest}
-    />
+    <div className="relative flex items-center gap-2">
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="\d{2}/\d{2}/\d{4}"
+        placeholder={placeholder}
+        value={inputValue}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        className={className}
+        {...rest}
+      />
+      {showCalendarButton && (
+        <>
+          <input
+            id={hiddenId}
+            type="date"
+            value={value || ""}
+            onChange={handleNativeChange}
+            className="sr-only"
+            tabIndex={-1}
+          />
+          <button
+            type="button"
+            onClick={openNativePicker}
+            className="p-2 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            aria-label="Open calendar"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              className="h-4 w-4"
+            >
+              <rect x="3" y="5" width="18" height="16" rx="2" />
+              <path d="M16 3v4M8 3v4M3 11h18" />
+            </svg>
+          </button>
+        </>
+      )}
+    </div>
   );
 };
 

@@ -455,8 +455,9 @@ export default function Product() {
   };
   const goToCreateProduct = () => navigate("/inventory/create-product");
 
-  const isPickingForPo =
-    new URLSearchParams(location.search).get("pick") === "po";
+  const pickParam = new URLSearchParams(location.search).get("pick");
+  const isPickingForPo = pickParam === "po";
+  const isPickingForBoq = pickParam === "boq";
 
   const sendToPurchaseOrder = () => {
     const selected = items
@@ -476,6 +477,27 @@ export default function Product() {
 
     localStorage.setItem("po_selected_products", JSON.stringify(selected));
     navigate("/inventory/purchase-order");
+  };
+
+  const sendToBoq = () => {
+    const selected = items
+      .filter((item) => item.qty > 0)
+      .map((item) => ({
+        id: item.id,
+        name: item.name || "",
+        description: item.description || "",
+        unit: item.unit || "PCS",
+        rate: item.rate || 0,
+        quantity: item.qty || 0,
+        notes: "",
+      }));
+
+    if (selected.length === 0) {
+      return;
+    }
+
+    localStorage.setItem("boq_selected_products", JSON.stringify(selected));
+    navigate("/inventory/boq");
   };
  
   return (
@@ -503,6 +525,14 @@ export default function Product() {
           >
             Add Cart
           </button>
+          {isPickingForBoq && (
+            <button
+              onClick={sendToBoq}
+              className="bg-emerald-600 text-white px-4 py-2 rounded"
+            >
+              Add to BOQ
+            </button>
+          )}
         </div>
       </div>
  

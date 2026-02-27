@@ -1,37 +1,71 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getProjects } from "../../services/projectsStore";
+import useSettings from "../../hooks/useSettings";
+import DateInput from "../common/DateInput";
+import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
+import { fetchProjects } from "../../services/projectsApi";
+import { fetchVendors } from "../../services/vendorsApi";
+import { fetchLocations } from "../../services/locationsApi";
+import {
+  fetchReceiveGoods,
+  saveReceiveGoods,
+} from "../../services/receiveGoodsApi";
 import {
   addWorkflowItem,
   getWorkflowList,
   updateWorkflowItem,
 } from "../../services/workflowStore";
-import useSettings from "../../hooks/useSettings";
+import { formatDate } from "../../utils/dateFormat";
 
-const STORAGE_KEY = "workflow_purchase_orders";
-const LOCATION_KEY = "workflow_locations";
 const INVOICE_KEY = "workflow_invoices";
 
-const buildReceiveItems = (record) => {
-  const receivedMap = (record?.receivedItems || []).reduce((acc, item) => {
-    acc[String(item.id)] = Number(item.receivedQty) || 0;
-    return acc;
-  }, {});
-
-  return (record?.items || []).map((item) => ({
-    id: item.id,
-    name: item.name || "",
-    unit: item.unit || "PCS",
-    orderedQty: Number(item.quantity) || 0,
-    receivedQty: receivedMap[String(item.id)] ?? 0,
-  }));
+const toNullableInt = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
-const createReceiveForm = (record) => ({
-  receivedDate: record?.receivedDate || new Date().toISOString().slice(0, 10),
-  receivedBy: record?.receivedBy || "",
-  notes: record?.receivedNotes || "",
-  items: buildReceiveItems(record),
+const buildReceiveItems = (record, receipt) => {
+  const receivedByItemId = new Map();
+  const receivedWithoutItemId = [];
+
+  for (const item of receipt?.items || []) {
+    const itemId = toNullableInt(item.itemId ?? item.ItemId);
+    const qty = Number(item.receivedQty ?? item.ReceivedQty ?? 0) || 0;
+    if (itemId !== null) {
+      receivedByItemId.set(itemId, qty);
+    } else {
+      receivedWithoutItemId.push(qty);
+    }
+  }
+
+  let fallbackIndex = 0;
+  return (record?.items || []).map((item, idx) => {
+    const lineId = item.id ?? item.itemId ?? `po-line-${idx}`;
+    const itemId = toNullableInt(item.itemId ?? item.ItemId);
+    const receivedQty =
+      itemId !== null
+        ? receivedByItemId.get(itemId) ?? 0
+        : receivedWithoutItemId[fallbackIndex++] ?? 0;
+
+    return {
+      id: lineId,
+      itemId,
+      name: item.name || (itemId ? `Item ${itemId}` : ""),
+      unit: item.unit || "PCS",
+      orderedQty: Number(item.quantity) || 0,
+      receivedQty,
+    };
+  });
+};
+
+const createReceiveForm = (record, receipt) => ({
+  receivedDate:
+    receipt?.receivedDate ||
+    record?.receivedDate ||
+    new Date().toISOString().slice(0, 10),
+  receivedBy: receipt?.receivedBy || record?.receivedBy || "",
+  notes: receipt?.notes || record?.receivedNotes || "",
+  items: buildReceiveItems(record, receipt),
 });
 
 const computeReceiveStatus = (items, fallback = "Draft") => {
@@ -66,47 +100,72 @@ const ReceiveGoods = () => {
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
   const [records, setRecords] = useState([]);
+  const [receipts, setReceipts] = useState([]);
   const [projects, setProjects] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [receiveForm, setReceiveForm] = useState(() => createReceiveForm());
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
-  const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
-  const loadProjects = () => setProjects(getProjects());
-  const loadVendors = () => {
+  const loadRecords = async () => {
     try {
-      const stored = JSON.parse(localStorage.getItem("vendors") || "[]");
-      setVendors(Array.isArray(stored) ? stored : []);
+      setLoading(true);
+      setError("");
+      const list = await fetchPurchaseOrders();
+      setRecords(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setRecords([]);
+      setError(err?.message || "Failed to load purchase orders");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadReceipts = async () => {
+    try {
+      const list = await fetchReceiveGoods();
+      setReceipts(Array.isArray(list) ? list : []);
+    } catch {
+      setReceipts([]);
+    }
+  };
+
+  const loadLocations = async () => {
+    try {
+      const list = await fetchLocations();
+      setLocations(Array.isArray(list) ? list : []);
+    } catch {
+      setLocations([]);
+    }
+  };
+
+  const loadProjects = async () => {
+    try {
+      const list = await fetchProjects();
+      setProjects(Array.isArray(list) ? list : []);
+    } catch {
+      setProjects([]);
+    }
+  };
+
+  const loadVendors = async () => {
+    try {
+      const list = await fetchVendors();
+      setVendors(Array.isArray(list) ? list : []);
     } catch {
       setVendors([]);
     }
   };
 
   useEffect(() => {
-    loadProjects();
-    loadLocations();
-    loadVendors();
-    loadRecords();
-  }, []);
-
-  useEffect(() => {
-    const handler = () => loadRecords();
-    window.addEventListener(`${STORAGE_KEY}:changed`, handler);
-    return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => loadLocations();
-    window.addEventListener(`${LOCATION_KEY}:changed`, handler);
-    return () => window.removeEventListener(`${LOCATION_KEY}:changed`, handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => loadProjects();
-    window.addEventListener("projects:changed", handler);
-    return () => window.removeEventListener("projects:changed", handler);
+    void loadProjects();
+    void loadLocations();
+    void loadVendors();
+    void loadRecords();
+    void loadReceipts();
   }, []);
 
   useEffect(() => {
@@ -138,6 +197,12 @@ const ReceiveGoods = () => {
 
   const selectedRecord =
     records.find((record) => record.id === selectedId) || null;
+  const selectedReceipt = selectedRecord
+    ? receipts.find(
+        (receipt) =>
+          Number(receipt.purchaseOrderId) === Number(selectedRecord.id)
+      )
+    : null;
   const selectedProject = selectedRecord
     ? projectMap[String(selectedRecord.projectId)]
     : null;
@@ -145,7 +210,9 @@ const ReceiveGoods = () => {
     ? vendorMap[String(selectedRecord.vendorId)]
     : null;
   const selectedLocation = selectedRecord
-    ? locationMap[String(selectedRecord.locationId)]
+    ? locationMap[
+        String(selectedRecord.locationId ?? selectedReceipt?.locationId)
+      ]
     : null;
   const selectedItems = Array.isArray(selectedRecord?.items)
     ? selectedRecord.items
@@ -153,13 +220,17 @@ const ReceiveGoods = () => {
 
   useEffect(() => {
     if (selectedRecord) {
-      setReceiveForm(createReceiveForm(selectedRecord));
+      const matchedReceipt = receipts.find(
+        (receipt) =>
+          Number(receipt.purchaseOrderId) === Number(selectedRecord.id)
+      );
+      setReceiveForm(createReceiveForm(selectedRecord, matchedReceipt));
     } else {
       setReceiveForm(createReceiveForm());
     }
-  }, [selectedRecord]);
+  }, [selectedRecord, receipts]);
 
-  const receiveItems = receiveForm.items.map((item) => ({
+  const receiveItems = (receiveForm.items || []).map((item) => ({
     ...item,
     orderedQty: Number(item.orderedQty) || 0,
     receivedQty: Number(item.receivedQty) || 0,
@@ -209,11 +280,14 @@ const ReceiveGoods = () => {
     }));
   };
 
-  const handleReceiveSubmit = (event) => {
+  const handleReceiveSubmit = async (event) => {
     event.preventDefault();
     if (!selectedRecord) {
       return;
     }
+
+    setSaving(true);
+    setError("");
 
     const normalizedItems = receiveForm.items.map((item) => {
       const orderedQty = Number(item.orderedQty) || 0;
@@ -226,6 +300,7 @@ const ReceiveGoods = () => {
       }
       return {
         id: item.id,
+        itemId: toNullableInt(item.itemId),
         orderedQty,
         receivedQty,
       };
@@ -236,127 +311,164 @@ const ReceiveGoods = () => {
       selectedRecord.status || "Draft"
     );
 
-    updateWorkflowItem(STORAGE_KEY, selectedRecord.id, {
-      status,
-      receivedItems: normalizedItems.map((item) => ({
-        id: item.id,
-        receivedQty: item.receivedQty,
-      })),
-      receivedDate: receiveForm.receivedDate,
-      receivedBy: receiveForm.receivedBy.trim(),
-      receivedNotes: receiveForm.notes.trim(),
-      receivedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
+    try {
+      const receipt = await saveReceiveGoods({
+        purchaseOrderId: selectedRecord.id,
+        projectId: selectedRecord.projectId,
+        vendorId: selectedRecord.vendorId,
+        locationId: selectedRecord.locationId,
+        receivedDate: receiveForm.receivedDate,
+        receivedBy: receiveForm.receivedBy.trim(),
+        notes: receiveForm.notes.trim(),
+        status,
+        items: normalizedItems,
+      });
 
-    const invoiceList = getWorkflowList(INVOICE_KEY);
-    const existingInvoice = invoiceList.find(
-      (invoice) => invoice.sourcePoId === selectedRecord.id
-    );
-    const invoiceItems = (selectedRecord.items || [])
-      .map((item) => {
-        const receivedMatch = normalizedItems.find(
-          (received) => received.id === item.id
-        );
-        const qty = Number(receivedMatch?.receivedQty) || 0;
-        if (qty <= 0) {
-          return null;
-        }
-        return {
-          id: item.id,
-          name: item.name || "",
-          description: item.description || "",
-          unit: item.unit || "PCS",
-          quantity: qty,
-          rate: item.rate || 0,
-          notes: item.notes || "",
-        };
-      })
-      .filter(Boolean);
+      await Promise.all([loadReceipts(), loadRecords()]);
+      setReceiveForm(createReceiveForm(selectedRecord, receipt));
 
-    const invoiceTotal = invoiceItems.reduce((sum, item) => {
-      const qty = Number(item.quantity) || 0;
-      const rate = Number(item.rate) || 0;
-      return sum + qty * rate;
-    }, 0);
+      const invoiceList = getWorkflowList(INVOICE_KEY);
+      const existingInvoice = invoiceList.find(
+        (invoice) => invoice.sourcePoId === selectedRecord.id
+      );
+      const invoiceItems = (selectedRecord.items || [])
+        .map((item) => {
+          const receivedMatch = normalizedItems.find(
+            (received) => received.id === item.id
+          );
+          const qty = Number(receivedMatch?.receivedQty) || 0;
+          if (qty <= 0) {
+            return null;
+          }
+          return {
+            id: item.id,
+            name: item.name || "",
+            description: item.description || "",
+            unit: item.unit || "PCS",
+            quantity: qty,
+            rate: item.rate ?? item.unitPrice ?? 0,
+            notes: item.notes || "",
+          };
+        })
+        .filter(Boolean);
 
-    const invoicePayload = {
-      id: existingInvoice?.id ?? Date.now(),
-      invoiceNumber:
-        existingInvoice?.invoiceNumber ||
-        `INV-${selectedRecord.poNumber || Date.now()}`,
-      clientName:
-        selectedProject?.client ||
-        selectedProject?.name ||
-        selectedVendor?.name ||
-        "",
-      projectId: selectedRecord.projectId || "",
-      status: existingInvoice?.status || "Draft",
-      issueDate:
-        receiveForm.receivedDate || new Date().toISOString().slice(0, 10),
-      dueDate: existingInvoice?.dueDate || "",
-      notes: receiveForm.notes.trim(),
-      items: invoiceItems,
-      total: invoiceTotal,
-      sourcePoId: selectedRecord.id,
-      sourcePoNumber: selectedRecord.poNumber || "",
-      receivedBy: receiveForm.receivedBy.trim(),
-      receivedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      createdAt: existingInvoice?.createdAt || new Date().toISOString(),
-    };
+      const invoiceTotal = invoiceItems.reduce((sum, item) => {
+        const qty = Number(item.quantity) || 0;
+        const rate = Number(item.rate) || 0;
+        return sum + qty * rate;
+      }, 0);
 
-    if (existingInvoice) {
-      updateWorkflowItem(INVOICE_KEY, existingInvoice.id, invoicePayload);
-    } else {
-      addWorkflowItem(INVOICE_KEY, invoicePayload);
+      const invoicePayload = {
+        id: existingInvoice?.id ?? Date.now(),
+        invoiceNumber:
+          existingInvoice?.invoiceNumber ||
+          `INV-${selectedRecord.poNumber || Date.now()}`,
+        clientName:
+          selectedProject?.client ||
+          selectedProject?.name ||
+          selectedVendor?.name ||
+          "",
+        projectId: selectedRecord.projectId || "",
+        status: existingInvoice?.status || "Draft",
+        issueDate:
+          receiveForm.receivedDate || new Date().toISOString().slice(0, 10),
+        dueDate: existingInvoice?.dueDate || "",
+        notes: receiveForm.notes.trim(),
+        items: invoiceItems,
+        total: invoiceTotal,
+        sourcePoId: selectedRecord.id,
+        sourcePoNumber: selectedRecord.poNumber || "",
+        receivedBy: receiveForm.receivedBy.trim(),
+        receivedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdAt: existingInvoice?.createdAt || new Date().toISOString(),
+      };
+
+      if (existingInvoice) {
+        updateWorkflowItem(INVOICE_KEY, existingInvoice.id, invoicePayload);
+      } else {
+        addWorkflowItem(INVOICE_KEY, invoicePayload);
+      }
+
+      navigate("/inventory/receive-goods-register");
+    } catch (err) {
+      const message =
+        err?.code === "ECONNABORTED"
+          ? "Receipt save timed out. Please retry; if it repeats, restart backend and check server logs."
+          : err?.response?.data?.error ||
+            err?.message ||
+            "Failed to save receipt";
+      setError(message);
+    } finally {
+      setSaving(false);
     }
   };
 
   const resetReceiveForm = () => {
     if (selectedRecord) {
-      setReceiveForm(createReceiveForm(selectedRecord));
+      const receipt = receipts.find(
+        (r) => Number(r.purchaseOrderId) === Number(selectedRecord.id)
+      );
+      setReceiveForm(createReceiveForm(selectedRecord, receipt));
+    } else {
+      setReceiveForm(createReceiveForm());
     }
   };
 
   return (
     <div className="p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Inventory
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">
-            Receive Goods
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Review purchase orders and project details before receiving stock.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={loadRecords}
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+              Inventory
+            </p>
+            <h1 className="text-3xl font-semibold text-slate-800">
+              Receive Goods
+            </h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Review purchase orders and project details before receiving stock.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                loadRecords();
+                loadReceipts();
+            }}
             className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
-          >
-            Refresh POs
-          </button>
-          <button
-            type="button"
-            onClick={loadVendors}
-            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
-          >
-            Refresh Vendors
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("/inventory/purchase-order")}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
-          >
-            Create PO
-          </button>
+            >
+              Refresh POs
+            </button>
+            <button
+              type="button"
+              onClick={loadVendors}
+              className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+            >
+              Refresh Vendors
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/inventory/purchase-order")}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            >
+              Create PO
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/inventory/receive-goods-register")}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200"
+            >
+              View Receipts
+            </button>
+          </div>
         </div>
-      </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
@@ -402,46 +514,58 @@ const ReceiveGoods = () => {
               </tr>
             </thead>
             <tbody>
-              {records.length === 0 && (
+              {loading && (
+                <tr>
+                  <td colSpan="7" className="p-6 text-center text-slate-500">
+                    Loading purchase orders...
+                  </td>
+                </tr>
+              )}
+              {!loading && records.length === 0 && (
                 <tr>
                   <td colSpan="7" className="p-6 text-center text-slate-500">
                     No purchase orders created yet.
                   </td>
                 </tr>
               )}
-              {records.map((record) => {
-                const isSelected = selectedId === record.id;
-                return (
-                  <tr
-                    key={record.id}
-                    onClick={() => {
-                      setSelectedId(record.id);
-                      setReceiveForm(createReceiveForm(record));
-                    }}
-                    className={`border-t hover:bg-slate-50 cursor-pointer ${
-                      isSelected ? "bg-indigo-50/70" : ""
-                    }`}
-                  >
-                    <td className="p-3 font-medium text-slate-800">
-                      {record.poNumber}
-                    </td>
-                    <td className="p-3">
-                      <span className="text-indigo-600 font-medium">
-                        {projectMap[String(record.projectId)]?.name || "-"}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      {vendorMap[String(record.vendorId)]?.name || "-"}
-                    </td>
-                    <td className="p-3">{record.status || "-"}</td>
-                    <td className="p-3">{record.items?.length || 0}</td>
-                    <td className="p-3">{record.expectedDate || "-"}</td>
-                    <td className="p-3 font-medium">
-                      {formatCurrency(record.total || 0)}
-                    </td>
-                  </tr>
-                );
-              })}
+              {!loading &&
+                records.map((record, idx) => {
+                  const isSelected = selectedId === record.id;
+                  return (
+                    <tr
+                      key={record.id ?? `po-${idx}`}
+                      onClick={() => {
+                        setSelectedId(record.id);
+                        const receipt = receipts.find(
+                          (r) =>
+                            Number(r.purchaseOrderId) === Number(record.id)
+                        );
+                        setReceiveForm(createReceiveForm(record, receipt));
+                      }}
+                      className={`border-t hover:bg-slate-50 cursor-pointer ${
+                        isSelected ? "bg-indigo-50/70" : ""
+                      }`}
+                    >
+                      <td className="p-3 font-medium text-slate-800">
+                        {record.poNumber}
+                      </td>
+                      <td className="p-3">
+                        <span className="text-indigo-600 font-medium">
+                          {projectMap[String(record.projectId)]?.name || "-"}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        {vendorMap[String(record.vendorId)]?.name || "-"}
+                      </td>
+                      <td className="p-3">{record.status || "-"}</td>
+                      <td className="p-3">{record.items?.length || 0}</td>
+                      <td className="p-3">{formatDate(record.expectedDate) || "-"}</td>
+                      <td className="p-3 font-medium">
+                        {formatCurrency(record.total || 0)}
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
@@ -504,7 +628,7 @@ const ReceiveGoods = () => {
                       Order Date
                     </span>
                     <span className="font-medium text-slate-800">
-                      {selectedRecord.orderDate || "-"}
+                      {formatDate(selectedRecord.orderDate) || "-"}
                     </span>
                   </div>
                   <div className="flex flex-col">
@@ -512,7 +636,7 @@ const ReceiveGoods = () => {
                       Expected Date
                     </span>
                     <span className="font-medium text-slate-800">
-                      {selectedRecord.expectedDate || "-"}
+                      {formatDate(selectedRecord.expectedDate) || "-"}
                     </span>
                   </div>
                   <div className="flex flex-col">
@@ -528,7 +652,7 @@ const ReceiveGoods = () => {
                       Received Date
                     </span>
                     <span className="font-medium text-slate-800">
-                      {selectedRecord.receivedDate || "-"}
+                      {formatDate(selectedReceipt?.receivedDate) || "-"}
                     </span>
                   </div>
                   <div className="flex flex-col">
@@ -536,7 +660,7 @@ const ReceiveGoods = () => {
                       Received By
                     </span>
                     <span className="font-medium text-slate-800">
-                      {selectedRecord.receivedBy || "-"}
+                      {selectedReceipt?.receivedBy || "-"}
                     </span>
                   </div>
                 </div>
@@ -548,12 +672,12 @@ const ReceiveGoods = () => {
                     {selectedRecord.notes}
                   </div>
                 )}
-                {selectedRecord.receivedNotes && (
+                {selectedReceipt?.notes && (
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
                     <span className="font-medium text-slate-700">
                       Receiving Notes:
                     </span>{" "}
-                    {selectedRecord.receivedNotes}
+                    {selectedReceipt.notes}
                   </div>
                 )}
               </div>
@@ -597,7 +721,7 @@ const ReceiveGoods = () => {
                         Start Date
                       </span>
                       <span className="font-medium text-slate-800">
-                        {selectedProject.startDate || "-"}
+                        {formatDate(selectedProject.startDate) || "-"}
                       </span>
                     </div>
                     <div className="flex flex-col">
@@ -605,7 +729,7 @@ const ReceiveGoods = () => {
                         End Date
                       </span>
                       <span className="font-medium text-slate-800">
-                        {selectedProject.endDate || "-"}
+                        {formatDate(selectedProject.endDate) || "-"}
                       </span>
                     </div>
                     <div className="flex flex-col sm:col-span-2">
@@ -652,14 +776,18 @@ const ReceiveGoods = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedItems.map((item) => {
+                        {selectedItems.map((item, idx) => {
                           const qty = Number(item.quantity) || 0;
-                          const rate = Number(item.rate) || 0;
+                          const rate =
+                            Number(item.rate ?? item.unitPrice) || 0;
                           const amount = qty * rate;
                           return (
-                            <tr key={item.id} className="border-t">
+                            <tr
+                              key={item.id ?? item.itemId ?? `line-${idx}`}
+                              className="border-t"
+                            >
                               <td className="p-3 font-medium text-slate-800">
-                                {item.name || "-"}
+                                {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
                               </td>
                               <td className="p-3 text-slate-600">
                                 {item.description || "-"}
@@ -669,7 +797,9 @@ const ReceiveGoods = () => {
                                 {item.quantity ? qty : "-"}
                               </td>
                               <td className="p-3">
-                                {item.rate ? formatCurrency(rate) : "-"}
+                                {item.rate || item.unitPrice
+                                  ? formatCurrency(rate)
+                                  : "-"}
                               </td>
                               <td className="p-3 font-medium">
                                 {amount ? formatCurrency(amount) : "-"}
@@ -719,16 +849,13 @@ const ReceiveGoods = () => {
                     <label className="text-sm font-medium text-slate-700">
                       Received Date
                     </label>
-                    <input
-                      type="date"
+                    <DateInput
                       value={receiveForm.receivedDate}
-                      onChange={(event) =>
-                        handleReceiveFieldChange(
-                          "receivedDate",
-                          event.target.value
-                        )
+                      onChange={(value) =>
+                        handleReceiveFieldChange("receivedDate", value)
                       }
                       className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                      placeholder="dd/mm/yyyy"
                     />
                   </div>
                   <div>
@@ -794,15 +921,18 @@ const ReceiveGoods = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {receiveItems.map((item) => {
+                        {receiveItems.map((item, idx) => {
                           const balance = Math.max(
                             item.orderedQty - item.receivedQty,
                             0
                           );
                           return (
-                            <tr key={item.id} className="border-t">
+                            <tr
+                              key={item.id ?? item.itemId ?? `receive-${idx}`}
+                              className="border-t"
+                            >
                               <td className="p-3 font-medium text-slate-800">
-                                {item.name || "-"}
+                                {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
                               </td>
                               <td className="p-3">{item.unit || "-"}</td>
                               <td className="p-3">{item.orderedQty}</td>
@@ -850,9 +980,10 @@ const ReceiveGoods = () => {
                   </div>
                   <button
                     type="submit"
+                    disabled={saving}
                     className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
                   >
-                    Save Receipt
+                    {saving ? "Saving..." : "Save Receipt"}
                   </button>
                 </div>
               </form>

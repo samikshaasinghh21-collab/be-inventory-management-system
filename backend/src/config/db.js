@@ -28,6 +28,8 @@ const dbConfig = {
   server: getEnv("DB_HOST", "DB_SERVER"),
   port: toInt(process.env.DB_PORT, 1433),
   database: getEnv("DB_NAME", "DB_DATABASE"),
+  connectionTimeout: toInt(process.env.DB_CONNECTION_TIMEOUT_MS, 30000),
+  requestTimeout: toInt(process.env.DB_REQUEST_TIMEOUT_MS, 120000),
   options: {
     encrypt: String(process.env.DB_ENCRYPT ?? "false").toLowerCase() === "true",
     trustServerCertificate:

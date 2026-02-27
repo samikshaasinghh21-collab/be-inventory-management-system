@@ -1,17 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getProjects } from "../../services/projectsStore";
-import { getWorkflowList } from "../../services/workflowStore";
 import {
   fetchPurchaseOrders,
   createPurchaseOrder,
   updatePurchaseOrder,
 } from "../../services/purchaseOrdersApi";
 import { fetchVendors } from "../../services/vendorsApi";
+import { fetchBoqs } from "../../services/boqApi";
+import { fetchLocations } from "../../services/locationsApi";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
-
-const LOCATION_KEY = "workflow_locations";
+import DateInput from "../common/DateInput";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -48,6 +48,10 @@ const PurchaseOrder = () => {
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [apiError, setApiError] = useState("");
+  const [boqs, setBoqs] = useState([]);
+  const [boqsLoading, setBoqsLoading] = useState(false);
+  const [boqError, setBoqError] = useState("");
+  const [selectedBoqId, setSelectedBoqId] = useState("");
   useEffect(() => {
     const record = location.state?.purchaseOrder;
     if (record && record.id !== editingId) {
@@ -64,10 +68,10 @@ const PurchaseOrder = () => {
       });
       const mappedItems = (record.items ?? []).map((item) => ({
         id: item.id ?? Date.now() + Math.random(),
-        itemId: item.itemId ?? null,
-        name: "",
-        description: "",
-        unit: "PCS",
+        itemId: item.itemId ?? item.id ?? null,
+        name: item.name ?? "",
+        description: item.description ?? "",
+        unit: item.unit ?? "PCS",
         quantity: item.quantity ?? "",
         rate: item.unitPrice ?? item.rate ?? "",
         notes: item.notes ?? "",
@@ -92,7 +96,14 @@ const PurchaseOrder = () => {
     }
   };
 
-  const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
+  const loadLocations = async () => {
+    try {
+      const list = await fetchLocations();
+      setLocations(Array.isArray(list) ? list : []);
+    } catch {
+      setLocations([]);
+    }
+  };
   const loadVendors = async () => {
     try {
       const list = await fetchVendors();
@@ -109,12 +120,30 @@ const PurchaseOrder = () => {
       setRecords([]);
     }
   };
+  const loadBoqs = async () => {
+    try {
+      setBoqsLoading(true);
+      const list = await fetchBoqs();
+      setBoqs(list);
+      setBoqError("");
+    } catch (error) {
+      setBoqs([]);
+      setBoqError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Could not load BOQs. Refresh to retry."
+      );
+    } finally {
+      setBoqsLoading(false);
+    }
+  };
 
   useEffect(() => {
     setProjects(getProjects());
     void loadRecords();
-    loadLocations();
+    void loadLocations();
     void loadVendors();
+    void loadBoqs();
   }, []);
 
   // When returning from Products (pick=po flow), pull selected items into the PO
@@ -151,10 +180,35 @@ const PurchaseOrder = () => {
     }
   }, []);
 
+  // Keep BOQ selection aligned with the chosen project
+  useEffect(() => {
+    if (!form.projectId) {
+      setSelectedBoqId("");
+      return;
+    }
+    if (selectedBoqId) {
+      const match = boqs.find(
+        (boq) =>
+          String(boq.id) === String(selectedBoqId) &&
+          String(boq.projectId) === String(form.projectId)
+      );
+      if (!match) {
+        setSelectedBoqId("");
+      }
+    }
+  }, [form.projectId, selectedBoqId, boqs]);
+
   const totalValue = records.reduce(
     (sum, record) => sum + (Number(record.total) || 0),
     0
   );
+
+  const boqsForProject = useMemo(() => {
+    if (!form.projectId) return [];
+    return boqs.filter(
+      (boq) => String(boq.projectId) === String(form.projectId)
+    );
+  }, [boqs, form.projectId]);
 
   const resetForm = () => {
     setForm(createFormState());
@@ -165,6 +219,9 @@ const PurchaseOrder = () => {
 
   const validate = () => {
     const nextErrors = {};
+    if (!form.poNumber.trim()) {
+      nextErrors.poNumber = "PO number is required.";
+    }
     if (!form.projectId) {
       nextErrors.projectId = "Select a project.";
     }
@@ -191,8 +248,10 @@ const PurchaseOrder = () => {
       (item) => item.name.trim() || Number(item.quantity) > 0
     );
     const payload = {
+      poNumber: form.poNumber.trim(),
       projectId: form.projectId || null,
       vendorId: form.vendorId || null,
+      locationId: form.locationId || null,
       status: form.status,
       orderDate: form.orderDate || null,
       expectedDate: form.expectedDate || null,
@@ -202,6 +261,10 @@ const PurchaseOrder = () => {
         const unitPrice = Number(item.rate) || 0;
         return {
           itemId: item.itemId ?? null,
+          name: item.name?.trim() || "",
+          description: item.description || "",
+          unit: item.unit || "PCS",
+          notes: item.notes || "",
           quantity: qty,
           unitPrice,
           totalPrice: qty * unitPrice,
@@ -212,18 +275,56 @@ const PurchaseOrder = () => {
     try {
       setApiError("");
       if (editingId) {
-        const updated = await updatePurchaseOrder(editingId, payload);
-        setRecords((prev) => prev.map((r) => (r.id === editingId ? updated : r)));
+        await updatePurchaseOrder(editingId, payload);
       } else {
-        const created = await createPurchaseOrder(payload);
-        setRecords((prev) => [created, ...prev]);
+        await createPurchaseOrder(payload);
       }
+      const fresh = await fetchPurchaseOrders();
+      setRecords(fresh);
       resetForm();
     } catch (error) {
       setApiError(
         error?.response?.data?.error || error?.message || "Failed to save purchase order."
       );
     }
+  };
+
+  const applyBoqToItems = () => {
+    const boq = boqs.find((b) => String(b.id) === String(selectedBoqId));
+    if (!boq) {
+      setBoqError("Select a BOQ to import.");
+      return;
+    }
+
+    const mapped = boq.items.map((item) => {
+      const qty = Number(item.quantity ?? 0) || 0;
+      const directRate = Number(item.rate ?? item.Rate);
+      const rate =
+        Number.isFinite(directRate) && directRate >= 0
+          ? directRate
+          : qty > 0
+          ? (Number(item.amount ?? 0) || 0) / qty
+          : 0;
+
+      return {
+        id: item.id ?? Date.now() + Math.random(),
+        itemId: item.itemId ?? null,
+        name: item.name || "",
+        description: item.description || "",
+        unit: item.unit || "PCS",
+        quantity: qty,
+        rate,
+        notes: item.notes || "",
+      };
+    });
+
+    if (!mapped.length) {
+      setBoqError("The selected BOQ has no line items to import.");
+      return;
+    }
+
+    setItems(mapped);
+    setBoqError("");
   };
 
   const goPickProducts = () => {
@@ -399,11 +500,10 @@ const PurchaseOrder = () => {
               <label className="text-sm font-medium text-slate-700">
                 Order Date
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.orderDate}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, orderDate: event.target.value }))
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, orderDate: value }))
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
@@ -412,17 +512,109 @@ const PurchaseOrder = () => {
               <label className="text-sm font-medium text-slate-700">
                 Expected Date
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={form.expectedDate}
-                onChange={(event) =>
+                onChange={(value) =>
                   setForm((prev) => ({
                     ...prev,
-                    expectedDate: event.target.value,
+                    expectedDate: value,
                   }))
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
+            </div>
+            <div className="md:col-span-3 border border-slate-200 rounded-lg p-4 bg-slate-50/70">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-700">
+                    Link a BOQ (optional)
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Import scope and quantities from an approved BOQ for this project.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                  <select
+                    value={selectedBoqId}
+                    onChange={(event) => setSelectedBoqId(event.target.value)}
+                    disabled={!form.projectId || boqsLoading}
+                    className="w-full md:w-64 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">
+                      {boqsLoading
+                        ? "Loading BOQs..."
+                        : form.projectId
+                        ? boqsForProject.length
+                          ? "Select BOQ"
+                          : "No BOQs for this project"
+                        : "Select a project first"}
+                    </option>
+                    {boqsForProject.map((boq) => (
+                      <option key={boq.id} value={boq.id}>
+                        {boq.boqNumber} | v{boq.version} | {boq.status || "Draft"}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={applyBoqToItems}
+                    disabled={!selectedBoqId || boqsLoading}
+                    className="md:ml-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    Use BOQ Items
+                  </button>
+                </div>
+              </div>
+              {(boqError || boqsLoading) && (
+                <p className="mt-2 text-xs text-amber-700">
+                  {boqsLoading ? "Fetching BOQs..." : boqError}
+                </p>
+              )}
+              {selectedBoqId && (
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-600">
+                  {(() => {
+                    const selectedBoq = boqs.find(
+                      (b) => String(b.id) === String(selectedBoqId)
+                    );
+                    if (!selectedBoq) return null;
+                    return (
+                      <>
+                        <div className="rounded-md bg-white border border-slate-200 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                            BOQ
+                          </p>
+                          <p className="font-semibold text-slate-800">
+                            {selectedBoq.boqNumber} (v{selectedBoq.version})
+                          </p>
+                          <p className="text-slate-500">{selectedBoq.status || "Draft"}</p>
+                        </div>
+                        <div className="rounded-md bg-white border border-slate-200 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                            Prepared By
+                          </p>
+                          <p className="font-semibold text-slate-800">
+                            {selectedBoq.preparedBy || "-"}
+                          </p>
+                          <p className="text-slate-500">
+                            {selectedBoq.date || "No date"}
+                          </p>
+                        </div>
+                        <div className="rounded-md bg-white border border-slate-200 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                            Estimated Value
+                          </p>
+                          <p className="font-semibold text-slate-800">
+                            {formatCurrency(selectedBoq.total || 0)}
+                          </p>
+                          <p className="text-slate-500">
+                            {selectedBoq.items?.length || 0} items
+                          </p>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
             <div className="md:col-span-3">
               <label className="text-sm font-medium text-slate-700">
@@ -487,3 +679,5 @@ const PurchaseOrder = () => {
 };
 
 export default PurchaseOrder;
+
+
