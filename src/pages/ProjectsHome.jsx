@@ -12,6 +12,7 @@ import {
   updateProjectApi,
 } from "../services/projectsApi";
 import DateInput from "../components/common/DateInput";
+import { formatTimelineRange } from "../utils/dateFormat";
 
 const ProjectsHome = () => {
   const navigate = useNavigate();
@@ -204,8 +205,8 @@ const ProjectsHome = () => {
                     </span>
                   </td>
                   <td className="p-3 text-sm text-slate-600">
-                    {project.startDate || "—"} → {project.endDate || "—"}
-                  </td>
+                  {formatTimelineRange(project.startDate, project.endDate)}
+                </td>
                   <td className="p-3">
                     <div className="flex gap-3 text-sm">
                       <button

@@ -7,7 +7,8 @@ const normalizePoItem = (item = {}) => ({
   name: item.name ?? item.Name ?? item.ItemName ?? "",
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",
-  notes: item.notes ?? item.Notes ?? "",
+  location: item.location ?? item.Location ?? item.notes ?? item.Notes ?? "",
+  notes: item.notes ?? item.Notes ?? item.location ?? item.Location ?? "",
   quantity: Number(item.quantity ?? item.Quantity ?? item.Qty ?? 0),
   unitPrice: Number(
     item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0

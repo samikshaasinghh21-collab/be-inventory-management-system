@@ -7,25 +7,18 @@ import {
   updateWorkflowItem,
 } from "../../services/workflowStore";
 import { fetchLocations } from "../../services/locationsApi";
-import LineItemsEditor from "./LineItemsEditor";
 import DateInput from "../common/DateInput";
 import { fetchVendors, syncVendorsCache } from "../../services/vendorsApi";
+import { fetchConsumptions } from "../../services/consumptionApi";
+import { fetchItems, updateQuantityApi } from "../../services/inventoryApi";
+import { formatDate } from "../../utils/dateFormat";
 
 const STORAGE_KEY = "workflow_reallocate_return";
-
-const createLineItem = () => ({
-  id: Date.now() + Math.random(),
-  name: "",
-  description: "",
-  unit: "PCS",
-  quantity: "",
-  rate: "",
-  notes: "",
-});
 
 const createFormState = () => ({
   referenceNumber: "",
   type: "Reallocate",
+  consumptionId: "",
   projectId: "",
   fromLocationId: "",
   toLocationId: "",
@@ -36,17 +29,27 @@ const createFormState = () => ({
   notes: "",
 });
 
+const toQuantity = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const ReallocateReturn = () => {
   const [projects, setProjects] = useState([]);
   const [locations, setLocations] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [consumptions, setConsumptions] = useState([]);
+  const [inventoryItems, setInventoryItems] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
-  const [items, setItems] = useState([createLineItem()]);
+  const [items, setItems] = useState([]);
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
+
   const loadLocations = async () => {
     try {
       const list = await fetchLocations();
@@ -55,13 +58,32 @@ const ReallocateReturn = () => {
       setLocations([]);
     }
   };
+
   const loadVendors = async () => {
     try {
       const data = await fetchVendors();
-      setVendors(data);
-      syncVendorsCache(data);
+      setVendors(Array.isArray(data) ? data : []);
+      syncVendorsCache(Array.isArray(data) ? data : []);
     } catch {
       setVendors([]);
+    }
+  };
+
+  const loadConsumptions = async () => {
+    try {
+      const list = await fetchConsumptions();
+      setConsumptions(Array.isArray(list) ? list : []);
+    } catch {
+      setConsumptions([]);
+    }
+  };
+
+  const loadInventory = async () => {
+    try {
+      const list = await fetchItems();
+      setInventoryItems(Array.isArray(list) ? list : []);
+    } catch {
+      setInventoryItems([]);
     }
   };
 
@@ -69,13 +91,19 @@ const ReallocateReturn = () => {
     setProjects(getProjects());
     void loadLocations();
     void loadVendors();
+    void loadConsumptions();
+    void loadInventory();
     loadRecords();
   }, []);
 
   useEffect(() => {
     const handler = () => loadRecords();
     window.addEventListener(`${STORAGE_KEY}:changed`, handler);
-    return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
+    window.addEventListener("consumptions:changed", handler);
+    return () => {
+      window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
+      window.removeEventListener("consumptions:changed", handler);
+    };
   }, []);
 
   const projectMap = useMemo(() => {
@@ -99,10 +127,111 @@ const ReallocateReturn = () => {
     }, {});
   }, [vendors]);
 
+  const consumptionMap = useMemo(() => {
+    return consumptions.reduce((acc, record) => {
+      acc[String(record.id)] = record;
+      return acc;
+    }, {});
+  }, [consumptions]);
+
+  const inventoryByName = useMemo(() => {
+    return inventoryItems.reduce((acc, item) => {
+      const key = String(item.name ?? "").trim().toLowerCase();
+      if (!key || acc[key]) {
+        return acc;
+      }
+      acc[key] = item;
+      return acc;
+    }, {});
+  }, [inventoryItems]);
+
+  const returnedQtyByConsumptionMaterial = useMemo(() => {
+    return records.reduce((acc, record) => {
+      if (record.type !== "Return") {
+        return acc;
+      }
+      if (editingId && record.id === editingId) {
+        return acc;
+      }
+      const consumptionId = String(record.consumptionId || "");
+      if (!consumptionId) {
+        return acc;
+      }
+      (record.items || []).forEach((item) => {
+        const material = String(item.name || "").trim().toLowerCase();
+        if (!material) {
+          return;
+        }
+        const key = `${consumptionId}::${material}`;
+        acc[key] = (acc[key] || 0) + toQuantity(item.quantity);
+      });
+      return acc;
+    }, {});
+  }, [records, editingId]);
+
+  const buildItemsFromConsumption = (consumptionId, existingItems = []) => {
+    const source = consumptionMap[String(consumptionId)];
+    if (!source) {
+      return [];
+    }
+
+    const existingByMaterial = (existingItems || []).reduce((acc, item) => {
+      const key = String(item.name || "").trim().toLowerCase();
+      if (key) {
+        acc[key] = toQuantity(item.quantity);
+      }
+      return acc;
+    }, {});
+
+    return (source.items || []).map((item, index) => {
+      const name = String(item.name || "").trim();
+      const key = name.toLowerCase();
+      const consumedQty = toQuantity(item.quantity);
+      const alreadyReturned =
+        returnedQtyByConsumptionMaterial[`${String(consumptionId)}::${key}`] || 0;
+      const availableQty = Math.max(consumedQty - alreadyReturned, 0);
+      const presetQty =
+        existingByMaterial[key] !== undefined
+          ? Math.min(existingByMaterial[key], availableQty)
+          : availableQty;
+
+      return {
+        id: item.id ?? `${consumptionId}-${index}`,
+        name,
+        unit: item.unit || "PCS",
+        consumedQty,
+        availableQty,
+        quantity: presetQty,
+      };
+    });
+  };
+
+  const applyConsumptionSelection = (consumptionId, options = {}) => {
+    const source = consumptionMap[String(consumptionId)] || null;
+    if (!source) {
+      setItems([]);
+      setForm((prev) => ({
+        ...prev,
+        consumptionId: consumptionId ? String(consumptionId) : "",
+      }));
+      return;
+    }
+
+    const existingItems = options.existingItems || [];
+    setItems(buildItemsFromConsumption(source.id, existingItems));
+    setForm((prev) => ({
+      ...prev,
+      consumptionId: String(source.id),
+      projectId: String(source.projectId || ""),
+      fromLocationId: String(source.locationId || ""),
+    }));
+  };
+
   const resetForm = () => {
     setForm(createFormState());
-    setItems([createLineItem()]);
+    setItems([]);
     setErrors({});
+    setSaveError("");
     setEditingId(null);
   };
 
@@ -110,6 +239,9 @@ const ReallocateReturn = () => {
     const nextErrors = {};
     if (!form.referenceNumber.trim()) {
       nextErrors.referenceNumber = "Reference number is required.";
+    }
+    if (!form.consumptionId) {
+      nextErrors.consumptionId = "Select a consumption record.";
     }
     if (!form.projectId) {
       nextErrors.projectId = "Select a project.";
@@ -120,36 +252,60 @@ const ReallocateReturn = () => {
     if (form.type === "Reallocate" && !form.toLocationId) {
       nextErrors.toLocationId = "Select a destination location.";
     }
-    if (
-      form.type === "Return" &&
-      vendors.length > 0 &&
-      !form.returnVendorId
-    ) {
+    if (form.type === "Return" && vendors.length > 0 && !form.returnVendorId) {
       nextErrors.returnVendorId = "Select a vendor.";
     }
+
     const hasValidItem = items.some(
-      (item) => item.name.trim() && Number(item.quantity) > 0
+      (item) => String(item.name || "").trim() && toQuantity(item.quantity) > 0
     );
     if (!hasValidItem) {
-      nextErrors.items = "Add at least one item.";
+      nextErrors.items = "Select at least one consumed material quantity.";
     }
+
+    const hasOverQty = items.some(
+      (item) => toQuantity(item.quantity) > toQuantity(item.availableQty)
+    );
+    if (hasOverQty) {
+      nextErrors.items = "Request quantity cannot exceed available consumed quantity.";
+    }
+
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     if (!validate()) {
       return;
     }
 
-    const cleanedItems = items.filter(
-      (item) => item.name.trim() || Number(item.quantity) > 0
-    );
+    const cleanedItems = items
+      .map((item) => ({
+        id: item.id,
+        name: String(item.name || "").trim(),
+        unit: item.unit || "PCS",
+        consumedQty: toQuantity(item.consumedQty),
+        availableQty: toQuantity(item.availableQty),
+        quantity: toQuantity(item.quantity),
+      }))
+      .filter((item) => item.name && item.quantity > 0);
 
+    const source = consumptionMap[String(form.consumptionId)] || null;
     const payload = {
       id: editingId ?? Date.now(),
-      ...form,
+      referenceNumber: form.referenceNumber.trim(),
+      type: form.type,
+      consumptionId: Number(form.consumptionId),
+      consumptionNumber: source?.consumptionNumber || "",
+      projectId: Number(form.projectId),
+      fromLocationId: Number(form.fromLocationId),
+      toLocationId: form.toLocationId ? Number(form.toLocationId) : null,
+      returnVendorId: form.returnVendorId ? Number(form.returnVendorId) : null,
+      requestDate: form.requestDate,
+      requestedBy: form.requestedBy.trim(),
+      status: form.status,
+      notes: form.notes,
       items: cleanedItems,
       updatedAt: new Date().toISOString(),
       createdAt:
@@ -159,13 +315,46 @@ const ReallocateReturn = () => {
           : new Date().toISOString(),
     };
 
-    if (editingId) {
-      updateWorkflowItem(STORAGE_KEY, editingId, payload);
-    } else {
-      addWorkflowItem(STORAGE_KEY, payload);
-    }
+    try {
+      setSaving(true);
+      setSaveError("");
 
-    resetForm();
+      if (form.type === "Return" && !editingId) {
+        const missingMaterials = [];
+        for (const line of cleanedItems) {
+          const key = line.name.toLowerCase();
+          const inv = inventoryByName[key];
+          if (!inv?.id) {
+            missingMaterials.push(line.name);
+            continue;
+          }
+          await updateQuantityApi(inv.id, toQuantity(inv.stock) + line.quantity);
+        }
+        await loadInventory();
+
+        if (missingMaterials.length > 0) {
+          setSaveError(
+            `Saved request, but stock was not updated for: ${missingMaterials.join(", ")}`
+          );
+        }
+      }
+
+      if (editingId) {
+        updateWorkflowItem(STORAGE_KEY, editingId, payload);
+      } else {
+        addWorkflowItem(STORAGE_KEY, payload);
+      }
+
+      resetForm();
+    } catch (error) {
+      setSaveError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to save reallocate/return request."
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleEdit = (record) => {
@@ -173,60 +362,78 @@ const ReallocateReturn = () => {
     setForm({
       referenceNumber: record.referenceNumber || "",
       type: record.type || "Reallocate",
-      projectId: record.projectId || "",
-      fromLocationId: record.fromLocationId || "",
-      toLocationId: record.toLocationId || "",
-      returnVendorId: record.returnVendorId || "",
+      consumptionId: record.consumptionId ? String(record.consumptionId) : "",
+      projectId: record.projectId ? String(record.projectId) : "",
+      fromLocationId: record.fromLocationId ? String(record.fromLocationId) : "",
+      toLocationId: record.toLocationId ? String(record.toLocationId) : "",
+      returnVendorId: record.returnVendorId ? String(record.returnVendorId) : "",
       requestDate: record.requestDate || new Date().toISOString().slice(0, 10),
       requestedBy: record.requestedBy || "",
       status: record.status || "Pending",
       notes: record.notes || "",
     });
-    setItems(record.items?.length ? record.items : [createLineItem()]);
+    setItems(
+      buildItemsFromConsumption(record.consumptionId, record.items || [])
+    );
     setErrors({});
+    setSaveError("");
   };
 
   const handleDelete = (id) => {
     deleteWorkflowItem(STORAGE_KEY, id);
+    if (editingId === id) {
+      resetForm();
+    }
+  };
+
+  const handleQuantityChange = (id, value) => {
+    setItems((prev) =>
+      (prev || []).map((item) => {
+        if (item.id !== id) {
+          return item;
+        }
+        const nextQty =
+          value === ""
+            ? ""
+            : Math.min(Math.max(toQuantity(value), 0), toQuantity(item.availableQty));
+        return { ...item, quantity: nextQty };
+      })
+    );
   };
 
   return (
     <div className="p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Projects
-          </p>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Projects</p>
           <h1 className="text-3xl font-semibold text-slate-800">
             Reallocate / Return Inventory
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Move surplus stock between locations or return it to vendors.
+          <p className="mt-1 text-sm text-slate-500">
+            Create requests using consumed materials and update stock on returns.
           </p>
         </div>
         <button
           type="button"
           onClick={resetForm}
-          className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700"
         >
           Clear Form
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-sm text-slate-500">Total Requests</p>
-          <p className="text-2xl font-semibold text-slate-800">
-            {records.length}
-          </p>
+          <p className="text-2xl font-semibold text-slate-800">{records.length}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-sm text-slate-500">Pending</p>
           <p className="text-2xl font-semibold text-slate-800">
             {records.filter((record) => record.status === "Pending").length}
           </p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-sm text-slate-500">Returns</p>
           <p className="text-2xl font-semibold text-slate-800">
             {records.filter((record) => record.type === "Return").length}
@@ -234,59 +441,73 @@ const ReallocateReturn = () => {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4 mb-6">
-        <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
-          <h2 className="text-lg font-semibold text-slate-800 mb-4">
-            Request Details
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {saveError && (
+        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {saveError}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="mb-6 space-y-4">
+        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-4 text-lg font-semibold text-slate-800">Request Details</h2>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                Reference *
-              </label>
+              <label className="text-sm font-medium text-slate-700">Reference *</label>
               <input
                 type="text"
                 value={form.referenceNumber}
                 onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    referenceNumber: event.target.value,
-                  }))
+                  setForm((prev) => ({ ...prev, referenceNumber: event.target.value }))
                 }
                 placeholder="RR-2026-002"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               />
               {errors.referenceNumber && (
-                <p className="text-xs text-red-600 mt-1">
-                  {errors.referenceNumber}
-                </p>
+                <p className="mt-1 text-xs text-red-600">{errors.referenceNumber}</p>
               )}
             </div>
+
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                Type
-              </label>
+              <label className="text-sm font-medium text-slate-700">Type</label>
               <select
                 value={form.type}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, type: event.target.value }))
                 }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
                 <option value="Reallocate">Reallocate</option>
                 <option value="Return">Return</option>
               </select>
             </div>
+
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                Project *
-              </label>
+              <label className="text-sm font-medium text-slate-700">Consumption Ref *</label>
+              <select
+                value={form.consumptionId}
+                onChange={(event) => applyConsumptionSelection(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+              >
+                <option value="">Select consumption</option>
+                {consumptions.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.consumptionNumber || `CON-${entry.id}`} | {formatDate(entry.consumptionDate)}
+                  </option>
+                ))}
+              </select>
+              {errors.consumptionId && (
+                <p className="mt-1 text-xs text-red-600">{errors.consumptionId}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700">Project *</label>
               <select
                 value={form.projectId}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, projectId: event.target.value }))
                 }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
                 <option value="">Select project</option>
                 {projects.map((project) => (
@@ -295,25 +516,17 @@ const ReallocateReturn = () => {
                   </option>
                 ))}
               </select>
-              {errors.projectId && (
-                <p className="text-xs text-red-600 mt-1">
-                  {errors.projectId}
-                </p>
-              )}
+              {errors.projectId && <p className="mt-1 text-xs text-red-600">{errors.projectId}</p>}
             </div>
+
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                From Location *
-              </label>
+              <label className="text-sm font-medium text-slate-700">From Location *</label>
               <select
                 value={form.fromLocationId}
                 onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    fromLocationId: event.target.value,
-                  }))
+                  setForm((prev) => ({ ...prev, fromLocationId: event.target.value }))
                 }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
                 <option value="">Select location</option>
                 {locations.map((location) => (
@@ -323,25 +536,19 @@ const ReallocateReturn = () => {
                 ))}
               </select>
               {errors.fromLocationId && (
-                <p className="text-xs text-red-600 mt-1">
-                  {errors.fromLocationId}
-                </p>
+                <p className="mt-1 text-xs text-red-600">{errors.fromLocationId}</p>
               )}
             </div>
+
             {form.type === "Reallocate" ? (
               <div>
-                <label className="text-sm font-medium text-slate-700">
-                  To Location *
-                </label>
+                <label className="text-sm font-medium text-slate-700">To Location *</label>
                 <select
                   value={form.toLocationId}
                   onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      toLocationId: event.target.value,
-                    }))
+                    setForm((prev) => ({ ...prev, toLocationId: event.target.value }))
                   }
-                  className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
                 >
                   <option value="">Select destination</option>
                   {locations.map((location) => (
@@ -351,25 +558,18 @@ const ReallocateReturn = () => {
                   ))}
                 </select>
                 {errors.toLocationId && (
-                  <p className="text-xs text-red-600 mt-1">
-                    {errors.toLocationId}
-                  </p>
+                  <p className="mt-1 text-xs text-red-600">{errors.toLocationId}</p>
                 )}
               </div>
             ) : (
               <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Return Vendor
-                </label>
+                <label className="text-sm font-medium text-slate-700">Return Vendor</label>
                 <select
                   value={form.returnVendorId}
                   onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      returnVendorId: event.target.value,
-                    }))
+                    setForm((prev) => ({ ...prev, returnVendorId: event.target.value }))
                   }
-                  className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
                 >
                   <option value="">Select vendor</option>
                   {vendors.map((vendor) => (
@@ -379,100 +579,128 @@ const ReallocateReturn = () => {
                   ))}
                 </select>
                 {errors.returnVendorId && (
-                  <p className="text-xs text-red-600 mt-1">
-                    {errors.returnVendorId}
-                  </p>
+                  <p className="mt-1 text-xs text-red-600">{errors.returnVendorId}</p>
                 )}
               </div>
             )}
+
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                Request Date
-              </label>
+              <label className="text-sm font-medium text-slate-700">Request Date</label>
               <DateInput
                 value={form.requestDate}
-                onChange={(value) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    requestDate: value,
-                  }))
-                }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                onChange={(value) => setForm((prev) => ({ ...prev, requestDate: value }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               />
             </div>
+
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                Requested By
-              </label>
+              <label className="text-sm font-medium text-slate-700">Requested By</label>
               <input
                 type="text"
                 value={form.requestedBy}
                 onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    requestedBy: event.target.value,
-                  }))
+                  setForm((prev) => ({ ...prev, requestedBy: event.target.value }))
                 }
                 placeholder="Store Manager"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               />
             </div>
+
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                Status
-              </label>
+              <label className="text-sm font-medium text-slate-700">Status</label>
               <select
                 value={form.status}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, status: event.target.value }))
                 }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
                 <option value="Pending">Pending</option>
                 <option value="In Transit">In Transit</option>
                 <option value="Completed">Completed</option>
               </select>
             </div>
+
             <div className="md:col-span-3">
-              <label className="text-sm font-medium text-slate-700">
-                Notes
-              </label>
+              <label className="text-sm font-medium text-slate-700">Notes</label>
               <textarea
                 value={form.notes}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, notes: event.target.value }))
-                }
+                onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
                 placeholder="Reason for movement or return."
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px]"
+                className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2"
               />
             </div>
           </div>
         </div>
 
-        <LineItemsEditor items={items} onChange={setItems} />
-        {errors.items && (
-          <p className="text-xs text-red-600">{errors.items}</p>
-        )}
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="mb-4 text-base font-semibold text-slate-800">
+            Materials From Consumption
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-100 text-slate-600">
+                <tr>
+                  <th className="min-w-[200px] p-3 text-left">Material</th>
+                  <th className="min-w-[120px] p-3 text-left">Consumed Qty</th>
+                  <th className="min-w-[120px] p-3 text-left">Available Qty</th>
+                  <th className="min-w-[160px] p-3 text-left">Request Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.length === 0 && (
+                  <tr>
+                    <td colSpan="4" className="p-4 text-center text-slate-500">
+                      Select a consumption record to load materials.
+                    </td>
+                  </tr>
+                )}
+                {items.map((item) => (
+                  <tr key={item.id} className="border-t">
+                    <td className="p-3 font-medium text-slate-800">{item.name || "-"}</td>
+                    <td className="p-3">{toQuantity(item.consumedQty)}</td>
+                    <td className="p-3">{toQuantity(item.availableQty)}</td>
+                    <td className="p-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max={toQuantity(item.availableQty)}
+                        value={item.quantity}
+                        onChange={(event) =>
+                          handleQuantityChange(item.id, event.target.value)
+                        }
+                        className="w-full rounded-md border border-slate-200 px-3 py-2"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
 
         <div className="flex justify-end gap-3">
           <button
             type="button"
             onClick={resetForm}
-            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700"
           >
             Cancel
           </button>
           <button
             type="submit"
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            disabled={saving}
+            className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {editingId ? "Update Request" : "Save Request"}
+            {saving ? "Saving..." : editingId ? "Update Request" : "Save Request"}
           </button>
         </div>
       </form>
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
-        <div className="px-4 py-3 border-b flex items-center justify-between">
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b px-4 py-3">
           <h3 className="text-lg font-semibold text-slate-800">
             Reallocation / Return Register
           </h3>
@@ -480,20 +708,21 @@ const ReallocateReturn = () => {
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
-              <th className="p-3 text-left min-w-[150px]">Reference</th>
-              <th className="p-3 text-left min-w-[120px]">Type</th>
-              <th className="p-3 text-left min-w-[180px]">Project</th>
-              <th className="p-3 text-left min-w-[180px]">From</th>
-              <th className="p-3 text-left min-w-[180px]">To / Vendor</th>
-              <th className="p-3 text-left min-w-[140px]">Status</th>
-              <th className="p-3 text-left min-w-[120px]">Items</th>
-              <th className="p-3 text-left min-w-[120px]">Actions</th>
+              <th className="min-w-[150px] p-3 text-left">Reference</th>
+              <th className="min-w-[120px] p-3 text-left">Type</th>
+              <th className="min-w-[170px] p-3 text-left">Consumption Ref</th>
+              <th className="min-w-[180px] p-3 text-left">Project</th>
+              <th className="min-w-[180px] p-3 text-left">From</th>
+              <th className="min-w-[180px] p-3 text-left">To / Vendor</th>
+              <th className="min-w-[120px] p-3 text-left">Status</th>
+              <th className="min-w-[120px] p-3 text-left">Items</th>
+              <th className="min-w-[120px] p-3 text-left">Actions</th>
             </tr>
           </thead>
           <tbody>
             {records.length === 0 && (
               <tr>
-                <td colSpan="8" className="p-6 text-center text-slate-500">
+                <td colSpan="9" className="p-6 text-center text-slate-500">
                   No reallocation or return requests yet.
                 </td>
               </tr>
@@ -505,16 +734,11 @@ const ReallocateReturn = () => {
                   : locationMap[String(record.toLocationId)]?.name || "-";
               return (
                 <tr key={record.id} className="border-t hover:bg-slate-50">
-                  <td className="p-3 font-medium text-slate-800">
-                    {record.referenceNumber}
-                  </td>
+                  <td className="p-3 font-medium text-slate-800">{record.referenceNumber}</td>
                   <td className="p-3">{record.type}</td>
-                  <td className="p-3">
-                    {projectMap[String(record.projectId)]?.name || "-"}
-                  </td>
-                  <td className="p-3">
-                    {locationMap[String(record.fromLocationId)]?.name || "-"}
-                  </td>
+                  <td className="p-3">{record.consumptionNumber || "-"}</td>
+                  <td className="p-3">{projectMap[String(record.projectId)]?.name || "-"}</td>
+                  <td className="p-3">{locationMap[String(record.fromLocationId)]?.name || "-"}</td>
                   <td className="p-3">{destination}</td>
                   <td className="p-3">{record.status || "-"}</td>
                   <td className="p-3">{record.items?.length || 0}</td>
@@ -522,14 +746,14 @@ const ReallocateReturn = () => {
                     <button
                       type="button"
                       onClick={() => handleEdit(record)}
-                      className="text-indigo-600 text-sm"
+                      className="text-sm text-indigo-600"
                     >
                       Edit
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDelete(record.id)}
-                      className="text-red-600 text-sm"
+                      className="text-sm text-red-600"
                     >
                       Delete
                     </button>

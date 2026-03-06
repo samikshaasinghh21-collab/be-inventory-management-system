@@ -1,17 +1,45 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
 import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import { getProjects } from "../../services/projectsStore";
 import { fetchVendors } from "../../services/vendorsApi";
 import { fetchLocations } from "../../services/locationsApi";
-import useSettings from "../../hooks/useSettings";
 import { formatDate } from "../../utils/dateFormat";
+import useSettings from "../../hooks/useSettings";
+import { printSection } from "../../utils/printUtils";
+import { resolveBrandLogo } from "../../utils/branding";
+import DocumentViewPanel from "./DocumentViewPanel";
+
+const toQuantity = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getReceiptTotals = (receipt) => {
+  const lines = Array.isArray(receipt?.items) ? receipt.items : [];
+  return lines.reduce(
+    (acc, item) => {
+      const ordered = toQuantity(
+        item.orderedQty ?? item.quantity ?? item.OrderedQty
+      );
+      const received = toQuantity(item.receivedQty ?? item.ReceivedQty);
+      const balance = Math.max(
+        toQuantity(item.balanceQty ?? item.BalanceQty),
+        Math.max(ordered - received, 0)
+      );
+      return {
+        ordered: acc.ordered + ordered,
+        received: acc.received + received,
+        balance: acc.balance + balance,
+      };
+    },
+    { ordered: 0, received: 0, balance: 0 }
+  );
+};
 
 const ReceiveGoodsRegister = () => {
   const navigate = useNavigate();
-  const settings = useSettings();
-  const currency = settings?.preferences?.currency || "INR";
 
   const [receipts, setReceipts] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
@@ -22,22 +50,15 @@ const ReceiveGoodsRegister = () => {
   const [apiError, setApiError] = useState("");
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
+  const [viewReceipt, setViewReceipt] = useState(null);
   const [filterProject, setFilterProject] = useState("");
   const [filterVendor, setFilterVendor] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-
-  const formatCurrency = (value) => {
-    const amount = Number(value) || 0;
-    try {
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      return `${currency} ${amount.toLocaleString()}`;
-    }
-  };
+  const settings = useSettings();
+  const company = settings?.company || {};
+  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const brandName = company.name || "Bangalore Electronics";
+  const brandDescription = company.address || "Company address";
 
   const loadData = async () => {
     try {
@@ -129,10 +150,24 @@ const ReceiveGoodsRegister = () => {
     return matchesProject && matchesVendor && matchesStatus;
   });
 
-  const totalReceivedLines = receipts.reduce(
-    (sum, rec) => sum + (rec.items?.length || 0),
-    0
+  const totalReceivedLines = useMemo(
+    () => receipts.reduce((sum, rec) => sum + (rec.items?.length || 0), 0),
+    [receipts]
   );
+
+  const openOrdersImpacted = useMemo(() => {
+    const set = new Set(
+      receipts
+        .filter((receipt) => {
+          const po = poMap[String(receipt.purchaseOrderId)];
+          const status = (po?.status || "").toLowerCase();
+          return status !== "closed";
+        })
+        .map((receipt) => receipt.purchaseOrderId)
+        .filter(Boolean)
+    );
+    return set.size;
+  }, [receipts, poMap]);
 
   const statusBadge = (status) => {
     const label = status || "Draft";
@@ -151,6 +186,23 @@ const ReceiveGoodsRegister = () => {
 
   const toggleRow = (id) => {
     setExpandedId((prev) => (prev === id ? null : id));
+  };
+
+  const handleViewReceipt = (receipt) => {
+    setViewReceipt(receipt);
+  };
+
+  const handlePrintReceipt = (receipt) => {
+    setViewReceipt(receipt);
+    setTimeout(() => {
+      printSection({
+        selector: "#receipts-view-panel",
+        title: "Receipt Details",
+        logoUrl,
+        brandName,
+        brandDescription,
+      });
+    }, 80);
   };
 
   return (
@@ -201,13 +253,7 @@ const ReceiveGoodsRegister = () => {
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
           <p className="text-sm text-slate-500">Open POs Impacted</p>
           <p className="text-2xl font-semibold text-slate-800">
-            {
-              new Set(
-                receipts
-                  .filter((rec) => (poMap[String(rec.purchaseOrderId)]?.status ?? "").toLowerCase() !== "closed")
-                  .map((rec) => rec.purchaseOrderId)
-              ).size
-            }
+            {openOrdersImpacted}
           </p>
         </div>
       </div>
@@ -218,15 +264,22 @@ const ReceiveGoodsRegister = () => {
         </div>
       )}
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
-        <div className="px-4 py-3 border-b flex items-center justify-between gap-4">
-          <h3 className="text-lg font-semibold text-slate-800">Receipts</h3>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search PO, project, vendor, received by..."
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 max-w-full"
-          />
+      <div
+        id="receipts-register"
+        className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto"
+      >
+        <div className="px-4 py-3 border-b space-y-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <h3 className="text-lg font-semibold text-slate-800">Receipts</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search PO, project, vendor, received by..."
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 max-w-full"
+            />
+          </div>
+          </div>
           <div className="flex flex-wrap gap-2">
             <select
               value={filterProject}
@@ -275,19 +328,21 @@ const ReceiveGoodsRegister = () => {
               <th className="p-3 text-left min-w-[140px]">Received By</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[110px]">Items</th>
+              <th className="p-3 text-left min-w-[120px]">Balance Qty</th>
+              <th className="p-3 text-left min-w-[120px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="8" className="p-6 text-center text-slate-500">
+                <td colSpan="10" className="p-6 text-center text-slate-500">
                   Loading receipts...
                 </td>
               </tr>
             )}
             {!loading && filteredReceipts.length === 0 && (
               <tr>
-                <td colSpan="8" className="p-6 text-center text-slate-500">
+                <td colSpan="10" className="p-6 text-center text-slate-500">
                   No receipts found.
                 </td>
               </tr>
@@ -298,10 +353,10 @@ const ReceiveGoodsRegister = () => {
                 const project = projectMap[String(receipt.projectId || po?.projectId)];
                 const vendor = vendorMap[String(receipt.vendorId || po?.vendorId)];
                 const location = locationMap[String(receipt.locationId || po?.locationId)];
+                const totals = getReceiptTotals(receipt);
                 return (
-                  <>
+                  <Fragment key={receipt.id}>
                     <tr
-                      key={receipt.id}
                       className="border-t hover:bg-slate-50 cursor-pointer"
                       onClick={() => toggleRow(receipt.id)}
                     >
@@ -319,10 +374,35 @@ const ReceiveGoodsRegister = () => {
                         {statusBadge(receipt.status || po?.status)}
                       </td>
                       <td className="p-3">{receipt.items?.length || 0}</td>
+                      <td className="p-3 font-medium text-slate-800">
+                        {totals.balance}
+                      </td>
+                      <td className="p-3 flex gap-3">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleViewReceipt(receipt);
+                          }}
+                          className="text-slate-700 text-sm underline"
+                        >
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handlePrintReceipt(receipt);
+                          }}
+                          className="text-slate-600 text-sm"
+                        >
+                          Print
+                        </button>
+                      </td>
                     </tr>
                     {expandedId === receipt.id && (
                       <tr className="bg-slate-50">
-                        <td colSpan="8" className="p-4">
+                        <td colSpan="10" className="p-4">
                           <div className="space-y-4">
                             <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                               <span>
@@ -351,6 +431,8 @@ const ReceiveGoodsRegister = () => {
                                   <thead className="bg-slate-100 text-slate-600">
                                     <tr>
                                       <th className="p-2 text-left">Item</th>
+                                      <th className="p-2 text-left">Description</th>
+                                      <th className="p-2 text-left">Unit</th>
                                       <th className="p-2 text-left">Ordered</th>
                                       <th className="p-2 text-left">Received</th>
                                       <th className="p-2 text-left">Balance</th>
@@ -371,22 +453,30 @@ const ReceiveGoodsRegister = () => {
                                         item.balanceQty ??
                                         item.BalanceQty ??
                                         ordered - received;
-                                      const poItem =
+                                      const poItemById =
                                         po?.items?.find(
                                           (poLine) =>
                                             String(poLine.itemId ?? poLine.id) ===
                                             String(item.itemId ?? item.id)
-                                        ) || {};
+                                        ) || null;
+                                      const poItemByIndex =
+                                        po?.items?.[idx] || null;
+                                      const poItem = poItemById || poItemByIndex || {};
                                       const displayItemName =
                                         item.name ||
                                         poItem.name ||
                                         (item.itemId ? `Item ${item.itemId}` : "-");
+                                      const displayDescription =
+                                        item.description || poItem.description || "-";
+                                      const displayUnit = item.unit || poItem.unit || "-";
                                       return (
                                         <tr
                                           key={item.id ?? item.itemId ?? idx}
                                           className="border-t"
                                         >
                                           <td className="p-2">{displayItemName}</td>
+                                          <td className="p-2">{displayDescription}</td>
+                                          <td className="p-2">{displayUnit}</td>
                                           <td className="p-2">{ordered}</td>
                                           <td className="p-2">{received}</td>
                                           <td className="p-2">{balance}</td>
@@ -412,12 +502,109 @@ const ReceiveGoodsRegister = () => {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
           </tbody>
         </table>
       </div>
+      {viewReceipt && (
+        <DocumentViewPanel
+          id="receipts-view-panel"
+          title="GOODS RECEIPT"
+          onClose={() => setViewReceipt(null)}
+          companyName={brandName}
+          companyAddress={brandDescription}
+          companyGstin={company.gstin}
+          companyPhone={company.phone}
+          companyEmail={company.email}
+          logoUrl={logoUrl}
+          primaryPairs={[
+            {
+              label: "Receipt Ref",
+              value:
+                poMap[String(viewReceipt.purchaseOrderId)]?.poNumber ||
+                viewReceipt.id,
+            },
+            { label: "Received Date", value: formatDate(viewReceipt.receivedDate) },
+            {
+              label: "Status",
+              value:
+                viewReceipt.status ||
+                poMap[String(viewReceipt.purchaseOrderId)]?.status ||
+                "Draft",
+            },
+            { label: "Received By", value: viewReceipt.receivedBy },
+          ]}
+          leftBlockTitle="Project"
+          leftBlockLines={[
+            projectMap[
+              String(
+                viewReceipt.projectId ||
+                  poMap[String(viewReceipt.purchaseOrderId)]?.projectId
+              )
+            ]?.name || "-",
+          ]}
+          rightBlockTitle="Vendor / Location"
+          rightBlockLines={[
+            vendorMap[
+              String(
+                viewReceipt.vendorId ||
+                  poMap[String(viewReceipt.purchaseOrderId)]?.vendorId
+              )
+            ]?.name || "-",
+            locationMap[
+              String(
+                viewReceipt.locationId ||
+                  poMap[String(viewReceipt.purchaseOrderId)]?.locationId
+              )
+            ]?.name || "-",
+          ]}
+          tableColumns={[
+            { key: "serial", label: "Sl No", widthClass: "w-16" },
+            { key: "name", label: "Item" },
+            { key: "unit", label: "Unit", widthClass: "w-20" },
+            { key: "ordered", label: "Ordered", align: "right", widthClass: "w-24" },
+            { key: "received", label: "Received", align: "right", widthClass: "w-24" },
+            { key: "balance", label: "Balance", align: "right", widthClass: "w-24" },
+          ]}
+          tableRows={(viewReceipt.items || []).map((item, index) => {
+            const po = poMap[String(viewReceipt.purchaseOrderId)];
+            const poItemById =
+              po?.items?.find(
+                (poLine) =>
+                  String(poLine.itemId ?? poLine.id) ===
+                  String(item.itemId ?? item.id)
+              ) || null;
+            const poItemByIndex = po?.items?.[index] || null;
+            const poItem = poItemById || poItemByIndex || {};
+            const ordered =
+              item.orderedQty ?? item.quantity ?? item.OrderedQty ?? 0;
+            const received = item.receivedQty ?? item.ReceivedQty ?? 0;
+            const balance =
+              item.balanceQty ??
+              item.BalanceQty ??
+              Number(ordered) - Number(received);
+            return {
+              id: item.id ?? item.itemId ?? index,
+              serial: index + 1,
+              name:
+                item.name ||
+                poItem.name ||
+                (item.itemId ? `Item ${item.itemId}` : "-"),
+              unit: item.unit || poItem.unit || "-",
+              ordered,
+              received,
+              balance,
+            };
+          })}
+          bottomLeftTitle="Notes"
+          bottomLeftValue={viewReceipt.notes || "-"}
+          bottomRightTitle="Total Items"
+          bottomRightValue={(viewReceipt.items || []).length}
+          footerCompanyName={brandName || "Company"}
+        />
+      )}
     </div>
   );
 };

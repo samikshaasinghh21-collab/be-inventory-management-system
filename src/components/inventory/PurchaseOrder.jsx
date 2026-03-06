@@ -21,6 +21,7 @@ const createLineItem = () => ({
   quantity: "",
   rate: "",
   notes: "",
+  location: "",
 });
 
 const createFormState = () => ({
@@ -74,7 +75,8 @@ const PurchaseOrder = () => {
         unit: item.unit ?? "PCS",
         quantity: item.quantity ?? "",
         rate: item.unitPrice ?? item.rate ?? "",
-        notes: item.notes ?? "",
+        location: item.location ?? item.notes ?? "",
+        notes: item.notes ?? item.location ?? "",
       }));
       setItems(mappedItems.length ? mappedItems : [createLineItem()]);
       setErrors({});
@@ -168,7 +170,7 @@ const PurchaseOrder = () => {
           unit: product.unit || "PCS",
           quantity: product.quantity ?? product.qty ?? 1,
           rate: product.rate ?? product.salesPrice ?? 0,
-          notes: "",
+          location: "",
         }));
       if (mapped.length > 0) {
         setItems(mapped);
@@ -259,12 +261,14 @@ const PurchaseOrder = () => {
       items: cleanedItems.map((item) => {
         const qty = Number(item.quantity) || 0;
         const unitPrice = Number(item.rate) || 0;
+        const lineLocation = String(item.location ?? item.notes ?? "").trim();
         return {
           itemId: item.itemId ?? null,
           name: item.name?.trim() || "",
           description: item.description || "",
           unit: item.unit || "PCS",
-          notes: item.notes || "",
+          location: lineLocation,
+          notes: lineLocation,
           quantity: qty,
           unitPrice,
           totalPrice: qty * unitPrice,
@@ -314,7 +318,8 @@ const PurchaseOrder = () => {
         unit: item.unit || "PCS",
         quantity: qty,
         rate,
-        notes: item.notes || "",
+        location: item.location || item.notes || "",
+        notes: item.notes || item.location || "",
       };
     });
 
@@ -637,6 +642,9 @@ const PurchaseOrder = () => {
           onChange={setItems}
           onPickFromProducts={goPickProducts}
           pickLabel="Pick from Products"
+          extraFieldKey="location"
+          extraFieldLabel="Location"
+          extraFieldPlaceholder="Site/store location"
         />
         {errors.items && (
           <p className="text-xs text-red-600">{errors.items}</p>

@@ -1,14 +1,22 @@
 import useSettings from "../../hooks/useSettings";
 
-const createEmptyItem = () => ({
-  id: Date.now() + Math.random(),
-  name: "",
-  description: "",
-  unit: "PCS",
-  quantity: "",
-  rate: "",
-  notes: "",
-});
+const createEmptyItem = (extraFieldKey = "notes") => {
+  const base = {
+    id: Date.now() + Math.random(),
+    name: "",
+    description: "",
+    unit: "PCS",
+    quantity: "",
+    rate: "",
+    notes: "",
+  };
+
+  if (extraFieldKey && extraFieldKey !== "notes") {
+    base[extraFieldKey] = "";
+  }
+
+  return base;
+};
 
 const LineItemsEditor = ({
   items,
@@ -16,6 +24,9 @@ const LineItemsEditor = ({
   title = "Line Items",
   onPickFromProducts,
   pickLabel = "Add from Products",
+  extraFieldKey = "notes",
+  extraFieldLabel = "Notes",
+  extraFieldPlaceholder = "Notes",
 }) => {
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
@@ -34,13 +45,13 @@ const LineItemsEditor = ({
   };
 
   const handleAdd = () => {
-    onChange([...(items || []), createEmptyItem()]);
+    onChange([...(items || []), createEmptyItem(extraFieldKey)]);
   };
 
   const handleRemove = (id) => {
     const next = (items || []).filter((item) => item.id !== id);
     if (next.length === 0) {
-      onChange([createEmptyItem()]);
+      onChange([createEmptyItem(extraFieldKey)]);
       return;
     }
     onChange(next);
@@ -94,12 +105,15 @@ const LineItemsEditor = ({
               <th className="p-3 text-left min-w-[90px]">Qty</th>
               <th className="p-3 text-left min-w-[110px]">Rate</th>
               <th className="p-3 text-left min-w-[120px]">Amount</th>
-              <th className="p-3 text-left min-w-[160px]">Notes</th>
+              <th className="p-3 text-left min-w-[160px]">{extraFieldLabel}</th>
               <th className="p-3 text-left min-w-[80px]">Action</th>
             </tr>
           </thead>
           <tbody>
             {(items || []).map((item) => {
+              const resolvedExtraFieldValue =
+                item[extraFieldKey] ??
+                (extraFieldKey !== "notes" ? item.notes ?? "" : "");
               const qty = Number(item.quantity) || 0;
               const rate = Number(item.rate) || 0;
               const amount = qty * rate;
@@ -166,11 +180,11 @@ const LineItemsEditor = ({
                   <td className="p-3">
                     <input
                       type="text"
-                      value={item.notes}
+                      value={resolvedExtraFieldValue}
                       onChange={(event) =>
-                        handleUpdate(item.id, "notes", event.target.value)
+                        handleUpdate(item.id, extraFieldKey, event.target.value)
                       }
-                      placeholder="Notes"
+                      placeholder={extraFieldPlaceholder}
                       className="w-full border border-slate-200 rounded-md px-3 py-2"
                     />
                   </td>

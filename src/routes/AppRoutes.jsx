@@ -16,7 +16,6 @@ import CreateVendors from "../components/inventory/CreateVendors";
 import CreateProjects from "../components/inventory/CreateProjects";
 import CreateProduct from "../components/inventory/CreateProduct";
 import ReceiveGoods from "../components/inventory/ReceiveGoods";
-import AllocateToProjects from "../components/inventory/AllocateToProjects";
 import DeliveryChallan from "../components/inventory/DeliveryChallan";
 import Product from "../components/inventory/Product";
 
@@ -25,10 +24,8 @@ import Boq from "../components/inventory/Boq";
 import Vendors from "../components/inventory/Vendors";
 import Locations from "../components/inventory/Locations";
 import PurchaseOrder from "../components/inventory/PurchaseOrder";
-import DeliveryConfirmation from "../components/inventory/DeliveryConfirmation";
 import PurchaseOrderRegister from "../components/inventory/PurchaseOrderRegister";
 import Invoice from "../components/inventory/Invoice";
-import GoodsDelivered from "../components/inventory/GoodsDelivered";
 import ReceiveGoodsRegister from "../components/inventory/ReceiveGoodsRegister";
 import Consumption from "../components/inventory/Consumption";
 import ReturnReallocate from "../components/inventory/ReturnReallocate";
@@ -64,15 +61,13 @@ const AppRoutes = () => {
         <Route path="/inventory/purchase-orders" element={<PurchaseOrder />} />
         <Route path="/inventory/receive-goods" element={<ReceiveGoods />} />
         <Route path="/inventory/receive-goods-register" element={<ReceiveGoodsRegister />} />
-        <Route path="/inventory/allocate-projects" element={<AllocateToProjects />} />
+        <Route path="/inventory/allocate-projects" element={<DeliveryChallan />} />
         <Route path="/inventory/delivery-challan" element={<DeliveryChallan />} />
-        <Route path="/inventory/delivery-confirmation" element={<DeliveryConfirmation />} />
         <Route
           path="/inventory/purchase-order-register"
           element={<PurchaseOrderRegister />}
         />
         <Route path="/inventory/invoice" element={<Invoice />} />
-        <Route path="/inventory/goods-delivered" element={<GoodsDelivered />} />
         <Route path="/inventory/consumption" element={<Consumption />} />
         <Route path="/inventory/return-reallocate" element={<ReturnReallocate />} />
         <Route path="/inventory/reallocate-return" element={<ReturnReallocate />} />

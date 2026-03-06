@@ -53,14 +53,57 @@ const getLanAddresses = () => {
 };
 
 const normalizeItem = (row = {}) => ({
-  id: row.ItemId ?? row.id ?? null,
-  name: row.Name ?? row.name ?? "",
-  category: row.Category ?? row.category ?? "",
-  hsn: row.HSN ?? row.hsn ?? "",
-  stock: Number(row.Stock ?? row.stock ?? 0),
-  price: Number(row.Price ?? row.price ?? 0),
-  gst: row.GST ?? row.gst ?? "",
-  description: row.Description ?? row.description ?? "",
+  id:
+    row.ItemId ??
+    row.ItemID ??
+    row.ID ??
+    row.Id ??
+    row.id ??
+    row.ProductId ??
+    row.ProductID ??
+    null,
+  name:
+    row.Name ??
+    row.ItemName ??
+    row.ProductName ??
+    row.name ??
+    row.itemName ??
+    row.productName ??
+    "",
+  category:
+    row.Category ??
+    row.ItemCategory ??
+    row.category ??
+    row.itemCategory ??
+    "",
+  hsn: row.HSN ?? row.HsnCode ?? row.hsn ?? row.hsnCode ?? "",
+  stock: Number(
+    row.Stock ??
+      row.Quantity ??
+      row.Qty ??
+      row.stock ??
+      row.quantity ??
+      row.qty ??
+      0
+  ),
+  price: Number(
+    row.Price ??
+      row.Rate ??
+      row.UnitPrice ??
+      row.price ??
+      row.rate ??
+      row.unitPrice ??
+      0
+  ),
+  gst: row.GST ?? row.Gst ?? row.gst ?? "",
+  description:
+    row.Description ??
+    row.ItemDescription ??
+    row.Details ??
+    row.description ??
+    row.itemDescription ??
+    row.details ??
+    "",
 });
 
 const normalizeProject = (row = {}) => ({
@@ -122,7 +165,8 @@ const normalizePoItem = (row = {}) => {
     totalPrice:
       Number(row.TotalPrice ?? row.totalPrice ?? row.Total ?? 0) ||
       quantity * unitPrice,
-    notes: row.Notes ?? row.notes ?? "",
+    location: row.Location ?? row.location ?? row.Notes ?? row.notes ?? "",
+    notes: row.Notes ?? row.notes ?? row.Location ?? row.location ?? "",
   };
 };
 
@@ -154,6 +198,86 @@ const normalizeBoqItem = (row = {}) => {
     amount: quantity * rate,
   };
 };
+
+const normalizeDeliveryChallan = (row = {}) => {
+  const id =
+    row.DeliveryChallanId ??
+    row.deliveryChallanId ??
+    row.Id ??
+    row.id ??
+    null;
+  return {
+    id,
+    deliveryChallanId: id,
+    dcNumber: row.DCNumber ?? row.DcNumber ?? row.dcNumber ?? "",
+    projectId: row.ProjectId ?? row.projectId ?? null,
+    fromLocationId: row.FromLocationId ?? row.fromLocationId ?? null,
+    toLocation: row.ToLocation ?? row.toLocation ?? "",
+    vehicleNumber: row.VehicleNumber ?? row.vehicleNumber ?? "",
+    eWayBillNumber:
+      row.EWayBillNumber ??
+      row.EwayBillNumber ??
+      row.eWayBillNumber ??
+      row.EBN ??
+      row.ebn ??
+      "",
+    issueDate: row.IssueDate ?? row.issueDate ?? null,
+    status: row.Status ?? row.status ?? "Draft",
+    notes: row.Notes ?? row.notes ?? "",
+    createdAt: row.CreatedAt ?? row.createdAt ?? null,
+    updatedAt: row.UpdatedAt ?? row.updatedAt ?? null,
+  };
+};
+
+const normalizeDeliveryChallanItem = (row = {}) => ({
+  id: row.Id ?? row.id ?? null,
+  deliveryChallanId:
+    row.DeliveryChallanId ??
+    row.DeliveryChallanID ??
+    row.deliveryChallanId ??
+    row.ChallanId ??
+    null,
+  name: row.ItemName ?? row.itemName ?? row.Name ?? row.name ?? "",
+  description: row.Description ?? row.description ?? "",
+  unit: row.Unit ?? row.unit ?? "PCS",
+  quantity: Number(row.Quantity ?? row.quantity ?? 0) || 0,
+  rate: Number(row.Rate ?? row.rate ?? 0) || 0,
+  notes: row.Notes ?? row.notes ?? "",
+});
+
+const normalizeConsumption = (row = {}) => {
+  const id = row.ConsumptionId ?? row.consumptionId ?? row.Id ?? row.id ?? null;
+  return {
+    id,
+    consumptionId: id,
+    consumptionNumber: row.ConsumptionNumber ?? row.consumptionNumber ?? "",
+    projectId: row.ProjectId ?? row.projectId ?? null,
+    locationId: row.LocationId ?? row.locationId ?? null,
+    consumptionDate:
+      row.ConsumptionDate ?? row.consumptionDate ?? row.Date ?? row.date ?? null,
+    issuedBy: row.IssuedBy ?? row.issuedBy ?? "",
+    status: row.Status ?? row.status ?? "Logged",
+    notes: row.Notes ?? row.notes ?? "",
+    createdAt: row.CreatedAt ?? row.createdAt ?? null,
+    updatedAt: row.UpdatedAt ?? row.updatedAt ?? null,
+  };
+};
+
+const normalizeConsumptionItem = (row = {}) => ({
+  id: row.Id ?? row.id ?? null,
+  consumptionId:
+    row.ConsumptionId ??
+    row.ConsumptionID ??
+    row.consumptionId ??
+    row.ParentId ??
+    null,
+  name: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
+  description: row.Description ?? row.description ?? "",
+  unit: row.Unit ?? row.unit ?? "PCS",
+  quantity: Number(row.Quantity ?? row.quantity ?? 0) || 0,
+  rate: Number(row.Rate ?? row.rate ?? 0) || 0,
+  notes: row.Notes ?? row.notes ?? "",
+});
 
 const normalizeOptionalString = (value) => {
   if (value === undefined) {
@@ -252,6 +376,10 @@ const normalizeReceiveGoodsItem = (row = {}) => {
     purchaseOrderId:
       row.PurchaseOrderId ?? row.purchaseOrderId ?? row.PurchaseorderId ?? null,
     itemId: row.ItemId ?? row.itemId ?? null,
+    name: row.ItemName ?? row.itemName ?? row.Name ?? row.name ?? "",
+    description: row.Description ?? row.description ?? "",
+    unit: row.Unit ?? row.unit ?? "PCS",
+    notes: row.ItemNotes ?? row.itemNotes ?? row.Notes ?? row.notes ?? "",
     orderedQty,
     receivedQty,
     balanceQty:
@@ -278,6 +406,53 @@ const ensureItemsTable = async () => {
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
       )
     END
+  `);
+
+  await pool.request().query(`
+    IF COL_LENGTH('dbo.Items', 'Name') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD Name NVARCHAR(255) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'Category') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD Category NVARCHAR(100) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'HSN') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD HSN NVARCHAR(50) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'Stock') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD Stock INT NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'Price') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD Price DECIMAL(18, 2) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'GST') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD GST NVARCHAR(100) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'Description') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD Description NVARCHAR(MAX) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'CreatedAt') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD CreatedAt DATETIME2 NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'UpdatedAt') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD UpdatedAt DATETIME2 NULL;
+    END;
   `);
 };
 
@@ -627,6 +802,22 @@ const ensureReceiveTables = async () => {
     BEGIN
       ALTER TABLE dbo.ReceiveGoodsItems ADD ItemId INT NULL;
     END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'ItemName') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD ItemName NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'Description') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD Description NVARCHAR(MAX) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'Unit') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD Unit NVARCHAR(50) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'ItemNotes') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD ItemNotes NVARCHAR(MAX) NULL;
+    END;
     IF COL_LENGTH('dbo.ReceiveGoodsItems', 'OrderedQty') IS NULL
     BEGIN
       ALTER TABLE dbo.ReceiveGoodsItems ADD OrderedQty INT NOT NULL CONSTRAINT DF_ReceiveGoodsItems_OrderedQty DEFAULT 0;
@@ -766,6 +957,435 @@ const ensureBoqTables = async () => {
   `);
 };
 
+let deliveryChallanPk = "DeliveryChallanId";
+let deliveryChallanItemsFk = "DeliveryChallanId";
+let ensureDeliveryChallanTablesPromise = null;
+
+const refreshDeliveryChallanPk = async () => {
+  const pool = await getPool();
+  const colsResult = await pool.request().query(`
+    SELECT name AS ColumnName FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeliveryChallan')
+  `);
+  const cols = new Set((colsResult.recordset ?? []).map((row) => row.ColumnName));
+  if (cols.has("DeliveryChallanId")) {
+    deliveryChallanPk = "DeliveryChallanId";
+  } else if (cols.has("Id")) {
+    deliveryChallanPk = "Id";
+  } else {
+    deliveryChallanPk = "DeliveryChallanId";
+  }
+  return deliveryChallanPk;
+};
+
+const refreshDeliveryChallanItemsFk = async () => {
+  const pool = await getPool();
+  const colsResult = await pool.request().query(`
+    SELECT name AS ColumnName FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeliveryChallanItems')
+  `);
+  const cols = new Set((colsResult.recordset ?? []).map((row) => row.ColumnName));
+  if (cols.has("DeliveryChallanId")) {
+    deliveryChallanItemsFk = "DeliveryChallanId";
+  } else if (cols.has("DeliveryChallanID")) {
+    deliveryChallanItemsFk = "DeliveryChallanID";
+  } else if (cols.has("ChallanId")) {
+    deliveryChallanItemsFk = "ChallanId";
+  } else {
+    deliveryChallanItemsFk = "DeliveryChallanId";
+  }
+  return deliveryChallanItemsFk;
+};
+
+const ensureDeliveryChallanTables = async () => {
+  if (ensureDeliveryChallanTablesPromise) {
+    return ensureDeliveryChallanTablesPromise;
+  }
+
+  ensureDeliveryChallanTablesPromise = (async () => {
+    const pool = await getPool();
+
+    await pool.request().query(`
+      IF OBJECT_ID('dbo.DeliveryChallan', 'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.DeliveryChallan (
+          DeliveryChallanId BIGINT IDENTITY(1,1) PRIMARY KEY,
+          DCNumber NVARCHAR(100) NULL,
+          ProjectId INT NULL,
+          FromLocationId INT NULL,
+          ToLocation NVARCHAR(200) NULL,
+          VehicleNumber NVARCHAR(50) NULL,
+          EWayBillNumber NVARCHAR(100) NULL,
+          IssueDate DATE NULL,
+          Status NVARCHAR(50) NULL,
+          Notes NVARCHAR(MAX) NULL,
+          CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        )
+      END
+    `);
+
+    const challanColsResult = await pool.request().query(`
+      SELECT name AS ColumnName FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeliveryChallan')
+    `);
+    const challanCols = new Set(
+      (challanColsResult.recordset ?? []).map((row) => row.ColumnName)
+    );
+    const challanIdentity = await pool.request().query(`
+      SELECT name AS ColumnName FROM sys.identity_columns
+      WHERE OBJECT_NAME(object_id) = 'DeliveryChallan'
+    `);
+    const hasChallanIdentity = (challanIdentity.recordset ?? []).length > 0;
+
+    if (
+      !challanCols.has("DeliveryChallanId") &&
+      !challanCols.has("Id") &&
+      !hasChallanIdentity
+    ) {
+      await pool.request().query(`
+        ALTER TABLE dbo.DeliveryChallan ADD DeliveryChallanId BIGINT IDENTITY(1,1);
+        ALTER TABLE dbo.DeliveryChallan ADD CONSTRAINT PK_DeliveryChallan PRIMARY KEY (DeliveryChallanId);
+      `);
+    }
+
+    await pool.request().query(`
+      IF COL_LENGTH('dbo.DeliveryChallan', 'DCNumber') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD DCNumber NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'ProjectId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD ProjectId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'FromLocationId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD FromLocationId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'ToLocation') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD ToLocation NVARCHAR(200) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'VehicleNumber') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD VehicleNumber NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'EWayBillNumber') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD EWayBillNumber NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'IssueDate') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD IssueDate DATE NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'Status') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD Status NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'Notes') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD Notes NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'CreatedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD CreatedAt DATETIME2 NOT NULL
+          CONSTRAINT DF_DeliveryChallan_CreatedAt DEFAULT SYSUTCDATETIME();
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'UpdatedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD UpdatedAt DATETIME2 NOT NULL
+          CONSTRAINT DF_DeliveryChallan_UpdatedAt DEFAULT SYSUTCDATETIME();
+      END;
+    `);
+
+    await pool.request().query(`
+      IF OBJECT_ID('dbo.DeliveryChallanItems', 'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.DeliveryChallanItems (
+          Id BIGINT IDENTITY(1,1) PRIMARY KEY,
+          DeliveryChallanId BIGINT NOT NULL,
+          ItemName NVARCHAR(200) NULL,
+          Description NVARCHAR(500) NULL,
+          Unit NVARCHAR(50) NULL,
+          Quantity DECIMAL(18,2) NOT NULL DEFAULT 0,
+          Rate DECIMAL(18,2) NOT NULL DEFAULT 0,
+          Notes NVARCHAR(500) NULL
+        )
+      END
+    `);
+
+    const itemColsResult = await pool.request().query(`
+      SELECT name AS ColumnName FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeliveryChallanItems')
+    `);
+    const itemCols = new Set((itemColsResult.recordset ?? []).map((row) => row.ColumnName));
+    const itemIdentity = await pool.request().query(`
+      SELECT name AS ColumnName FROM sys.identity_columns
+      WHERE OBJECT_NAME(object_id) = 'DeliveryChallanItems'
+    `);
+    const hasItemIdentity = (itemIdentity.recordset ?? []).length > 0;
+
+    if (!itemCols.has("Id") && !hasItemIdentity) {
+      await pool.request().query(`
+        ALTER TABLE dbo.DeliveryChallanItems ADD Id BIGINT IDENTITY(1,1);
+        ALTER TABLE dbo.DeliveryChallanItems ADD CONSTRAINT PK_DeliveryChallanItems PRIMARY KEY (Id);
+      `);
+    }
+
+    await pool.request().query(`
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'DeliveryChallanId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD DeliveryChallanId BIGINT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'ItemName') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD ItemName NVARCHAR(200) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'Description') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD Description NVARCHAR(500) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'Unit') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD Unit NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'Quantity') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD Quantity DECIMAL(18,2) NOT NULL
+          CONSTRAINT DF_DeliveryChallanItems_Quantity DEFAULT 0;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'Rate') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD Rate DECIMAL(18,2) NOT NULL
+          CONSTRAINT DF_DeliveryChallanItems_Rate DEFAULT 0;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'Notes') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD Notes NVARCHAR(500) NULL;
+      END;
+    `);
+
+    await refreshDeliveryChallanPk();
+    await refreshDeliveryChallanItemsFk();
+  })();
+
+  try {
+    await ensureDeliveryChallanTablesPromise;
+  } catch (error) {
+    ensureDeliveryChallanTablesPromise = null;
+    throw error;
+  }
+};
+
+let consumptionPk = "Id";
+let consumptionItemsFk = "ConsumptionId";
+let ensureConsumptionTablesPromise = null;
+
+const refreshConsumptionPk = async () => {
+  const pool = await getPool();
+  const colsResult = await pool.request().query(`
+    SELECT name AS ColumnName FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Consumption')
+  `);
+  const cols = new Set((colsResult.recordset ?? []).map((row) => row.ColumnName));
+  if (cols.has("Id")) {
+    consumptionPk = "Id";
+  } else if (cols.has("ConsumptionId")) {
+    consumptionPk = "ConsumptionId";
+  } else {
+    consumptionPk = "Id";
+  }
+  return consumptionPk;
+};
+
+const refreshConsumptionItemsFk = async () => {
+  const pool = await getPool();
+  const colsResult = await pool.request().query(`
+    SELECT name AS ColumnName FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ConsumptionItems')
+  `);
+  const cols = new Set((colsResult.recordset ?? []).map((row) => row.ColumnName));
+  if (cols.has("ConsumptionId")) {
+    consumptionItemsFk = "ConsumptionId";
+  } else if (cols.has("ConsumptionID")) {
+    consumptionItemsFk = "ConsumptionID";
+  } else if (cols.has("ParentId")) {
+    consumptionItemsFk = "ParentId";
+  } else {
+    consumptionItemsFk = "ConsumptionId";
+  }
+  return consumptionItemsFk;
+};
+
+const ensureConsumptionTables = async () => {
+  if (ensureConsumptionTablesPromise) {
+    return ensureConsumptionTablesPromise;
+  }
+
+  ensureConsumptionTablesPromise = (async () => {
+    const pool = await getPool();
+
+    await pool.request().query(`
+      IF OBJECT_ID('dbo.Consumption', 'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.Consumption (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          ConsumptionNumber NVARCHAR(50) NULL,
+          ProjectId INT NULL,
+          LocationId INT NULL,
+          ConsumptionDate DATE NULL,
+          IssuedBy NVARCHAR(200) NULL,
+          Status NVARCHAR(50) NULL,
+          Notes NVARCHAR(MAX) NULL,
+          CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        )
+      END
+    `);
+
+    const consumptionColsResult = await pool.request().query(`
+      SELECT name AS ColumnName FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Consumption')
+    `);
+    const consumptionCols = new Set(
+      (consumptionColsResult.recordset ?? []).map((row) => row.ColumnName)
+    );
+    const consumptionIdentity = await pool.request().query(`
+      SELECT name AS ColumnName FROM sys.identity_columns
+      WHERE OBJECT_NAME(object_id) = 'Consumption'
+    `);
+    const hasConsumptionIdentity = (consumptionIdentity.recordset ?? []).length > 0;
+
+    if (
+      !consumptionCols.has("Id") &&
+      !consumptionCols.has("ConsumptionId") &&
+      !hasConsumptionIdentity
+    ) {
+      await pool.request().query(`
+        ALTER TABLE dbo.Consumption ADD Id INT IDENTITY(1,1);
+        ALTER TABLE dbo.Consumption ADD CONSTRAINT PK_Consumption PRIMARY KEY (Id);
+      `);
+    }
+
+    await pool.request().query(`
+      IF COL_LENGTH('dbo.Consumption', 'ConsumptionNumber') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD ConsumptionNumber NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'ProjectId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD ProjectId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'LocationId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD LocationId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'ConsumptionDate') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD ConsumptionDate DATE NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'IssuedBy') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD IssuedBy NVARCHAR(200) NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'Status') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD Status NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'Notes') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD Notes NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'CreatedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD CreatedAt DATETIME2 NOT NULL
+          CONSTRAINT DF_Consumption_CreatedAt DEFAULT SYSUTCDATETIME();
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'UpdatedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD UpdatedAt DATETIME2 NOT NULL
+          CONSTRAINT DF_Consumption_UpdatedAt DEFAULT SYSUTCDATETIME();
+      END;
+    `);
+
+    await pool.request().query(`
+      IF OBJECT_ID('dbo.ConsumptionItems', 'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.ConsumptionItems (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          ConsumptionId INT NULL,
+          Item NVARCHAR(200) NULL,
+          Description NVARCHAR(500) NULL,
+          Unit NVARCHAR(100) NULL,
+          Quantity DECIMAL(18,2) NOT NULL DEFAULT 0,
+          Rate DECIMAL(18,2) NOT NULL DEFAULT 0,
+          Notes NVARCHAR(500) NULL
+        )
+      END
+    `);
+
+    const consumptionItemsColsResult = await pool.request().query(`
+      SELECT name AS ColumnName FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ConsumptionItems')
+    `);
+    const consumptionItemsCols = new Set(
+      (consumptionItemsColsResult.recordset ?? []).map((row) => row.ColumnName)
+    );
+    const consumptionItemsIdentity = await pool.request().query(`
+      SELECT name AS ColumnName FROM sys.identity_columns
+      WHERE OBJECT_NAME(object_id) = 'ConsumptionItems'
+    `);
+    const hasConsumptionItemsIdentity =
+      (consumptionItemsIdentity.recordset ?? []).length > 0;
+
+    if (
+      !consumptionItemsCols.has("Id") &&
+      !consumptionItemsCols.has("ItemId") &&
+      !hasConsumptionItemsIdentity
+    ) {
+      await pool.request().query(`
+        ALTER TABLE dbo.ConsumptionItems ADD Id INT IDENTITY(1,1);
+        ALTER TABLE dbo.ConsumptionItems ADD CONSTRAINT PK_ConsumptionItems PRIMARY KEY (Id);
+      `);
+    }
+
+    await pool.request().query(`
+      IF COL_LENGTH('dbo.ConsumptionItems', 'ConsumptionId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD ConsumptionId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'Item') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD Item NVARCHAR(200) NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'Description') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD Description NVARCHAR(500) NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'Unit') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD Unit NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'Quantity') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD Quantity DECIMAL(18,2) NOT NULL
+          CONSTRAINT DF_ConsumptionItems_Quantity DEFAULT 0;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'Rate') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD Rate DECIMAL(18,2) NOT NULL
+          CONSTRAINT DF_ConsumptionItems_Rate DEFAULT 0;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'Notes') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD Notes NVARCHAR(500) NULL;
+      END;
+    `);
+
+    await refreshConsumptionPk();
+    await refreshConsumptionItemsFk();
+  })();
+
+  try {
+    await ensureConsumptionTablesPromise;
+  } catch (error) {
+    ensureConsumptionTablesPromise = null;
+    throw error;
+  }
+};
+
 app.get("/api/health", async (_req, res) => {
   try {
     await checkDbConnection();
@@ -805,18 +1425,37 @@ app.get("/api/items", async (_req, res) => {
   try {
     await ensureItemsTable();
     const pool = await getPool();
+    const columnsResult = await pool.request().query(`
+      SELECT name AS ColumnName
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.Items')
+    `);
+
+    const columnNames = new Set(
+      (columnsResult.recordset ?? []).map((row) =>
+        String(row.ColumnName || "").toLowerCase()
+      )
+    );
+
+    const pickColumn = (...candidates) =>
+      candidates.find((candidate) =>
+        columnNames.has(String(candidate).toLowerCase())
+      ) || null;
+
+    const toIdentifier = (name) => `[${String(name).replace(/]/g, "]]")}]`;
+
+    const idColumn = pickColumn("ItemId", "Id", "itemId", "ID");
+    const nameColumn = pickColumn("Name", "ItemName", "ProductName");
+
     const result = await pool.request().query(`
-      SELECT
-        ItemId,
-        Name,
-        Category,
-        HSN,
-        Stock,
-        Price,
-        GST,
-        Description
-      FROM dbo.Items
-      ORDER BY ItemId DESC
+      SELECT * FROM dbo.Items
+      ORDER BY ${
+        idColumn
+          ? `${toIdentifier(idColumn)} DESC`
+          : nameColumn
+          ? `${toIdentifier(nameColumn)} ASC`
+          : "(SELECT NULL)"
+      }
     `);
     res.json((result.recordset ?? []).map(normalizeItem));
   } catch (error) {
@@ -1847,7 +2486,10 @@ app.post("/api/purchase-orders", async (req, res) => {
           req.input("UnitPrice", sql.Decimal(18, 2), unitPrice);
           req.input("Total", sql.Decimal(18, 2), lineTotal);
           req.input("Unit", sql.NVarChar(50), item.unit ?? "PCS");
-          req.input("Notes", sql.NVarChar(sql.MAX), item.notes ?? null);
+          const lineLocation = normalizeOptionalString(
+            item.location ?? item.Location ?? item.notes ?? item.Notes
+          );
+          req.input("Notes", sql.NVarChar(sql.MAX), lineLocation ?? null);
 
           const colsToUse = [
             "PurchaseOrderId",
@@ -2031,7 +2673,10 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
           req.input("UnitPrice", sql.Decimal(18, 2), unitPrice);
           req.input("Total", sql.Decimal(18, 2), lineTotal);
           req.input("Unit", sql.NVarChar(50), item.unit ?? "PCS");
-          req.input("Notes", sql.NVarChar(sql.MAX), item.notes ?? null);
+          const lineLocation = normalizeOptionalString(
+            item.location ?? item.Location ?? item.notes ?? item.Notes
+          );
+          req.input("Notes", sql.NVarChar(sql.MAX), lineLocation ?? null);
 
           const colsToUse = [
             "PurchaseOrderId",
@@ -2286,6 +2931,11 @@ app.post("/api/receive-goods", async (req, res) => {
       orderedQty > 0 ? Math.min(receivedQty, orderedQty) : receivedQty;
     return {
       itemId: toNullableInt(item.itemId ?? item.ItemId ?? null),
+      name: normalizeOptionalString(item.name ?? item.Name ?? item.itemName) ?? null,
+      description:
+        normalizeOptionalString(item.description ?? item.Description) ?? null,
+      unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+      itemNotes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
       orderedQty,
       receivedQty: cappedReceived,
       balanceQty: Math.max(orderedQty - cappedReceived, 0),
@@ -2397,14 +3047,18 @@ app.post("/api/receive-goods", async (req, res) => {
       insertItemReq.input("ReceiptId", sql.Int, receiptId);
       insertItemReq.input("PurchaseOrderId", sql.Int, poId);
       insertItemReq.input("ItemId", sql.Int, item.itemId ?? null);
+      insertItemReq.input("ItemName", sql.NVarChar(255), item.name);
+      insertItemReq.input("Description", sql.NVarChar(sql.MAX), item.description);
+      insertItemReq.input("Unit", sql.NVarChar(50), item.unit ?? "PCS");
+      insertItemReq.input("ItemNotes", sql.NVarChar(sql.MAX), item.itemNotes);
       insertItemReq.input("OrderedQty", sql.Int, item.orderedQty);
       insertItemReq.input("ReceivedQty", sql.Int, item.receivedQty);
       insertItemReq.input("BalanceQty", sql.Int, item.balanceQty ?? Math.max(item.orderedQty - item.receivedQty, 0));
       await insertItemReq.query(`
         INSERT INTO dbo.ReceiveGoodsItems
-          (${fkCol}, PurchaseOrderId, ItemId, OrderedQty, ReceivedQty, BalanceQty)
+          (${fkCol}, PurchaseOrderId, ItemId, ItemName, Description, Unit, ItemNotes, OrderedQty, ReceivedQty, BalanceQty)
         VALUES
-          (@ReceiptId, @PurchaseOrderId, @ItemId, @OrderedQty, @ReceivedQty, @BalanceQty)
+          (@ReceiptId, @PurchaseOrderId, @ItemId, @ItemName, @Description, @Unit, @ItemNotes, @OrderedQty, @ReceivedQty, @BalanceQty)
       `);
     }
 
@@ -2538,16 +3192,33 @@ app.post("/api/boqs", async (req, res) => {
     return res.status(400).json({ ok: false, error: "At least one line item is required" });
   }
 
+  const normalizedBoqNumber = String(boqNumber).trim();
+
   let tx;
   try {
     await ensureBoqTables();
     const pool = await getPool();
+
+    const duplicateBoq = await pool
+      .request()
+      .input("BOQNumber", sql.NVarChar(50), normalizedBoqNumber)
+      .query(`
+        SELECT TOP 1 BOQId
+        FROM dbo.BOQProjects
+        WHERE BOQNumber = @BOQNumber
+      `);
+    if (duplicateBoq.recordset?.length) {
+      return res
+        .status(409)
+        .json({ ok: false, error: "BOQ number already exists. Please use another." });
+    }
+
     tx = pool.transaction();
     await tx.begin();
 
     const insertBoq = new sql.Request(tx);
     insertBoq.input("ProjectId", sql.Int, Number(projectId));
-    insertBoq.input("BOQNumber", sql.NVarChar(50), String(boqNumber).trim());
+    insertBoq.input("BOQNumber", sql.NVarChar(50), normalizedBoqNumber);
     insertBoq.input("Version", sql.Int, Number.parseInt(version, 10) || 1);
     insertBoq.input("PreparedBy", sql.NVarChar(100), preparedBy || null);
     insertBoq.input("Status", sql.NVarChar(50), status || "Draft");
@@ -2639,17 +3310,36 @@ app.put("/api/boqs/:id", async (req, res) => {
     return res.status(400).json({ ok: false, error: "At least one line item is required" });
   }
 
+  const normalizedBoqNumber = String(boqNumber).trim();
+
   let tx;
   try {
     await ensureBoqTables();
     const pool = await getPool();
+
+    const duplicateBoq = await pool
+      .request()
+      .input("BOQNumber", sql.NVarChar(50), normalizedBoqNumber)
+      .input("BOQId", sql.Int, id)
+      .query(`
+        SELECT TOP 1 BOQId
+        FROM dbo.BOQProjects
+        WHERE BOQNumber = @BOQNumber
+          AND BOQId <> @BOQId
+      `);
+    if (duplicateBoq.recordset?.length) {
+      return res
+        .status(409)
+        .json({ ok: false, error: "BOQ number already exists. Please use another." });
+    }
+
     tx = pool.transaction();
     await tx.begin();
 
     const updateBoq = new sql.Request(tx);
     updateBoq.input("BOQId", sql.Int, id);
     updateBoq.input("ProjectId", sql.Int, Number(projectId));
-    updateBoq.input("BOQNumber", sql.NVarChar(50), String(boqNumber).trim());
+    updateBoq.input("BOQNumber", sql.NVarChar(50), normalizedBoqNumber);
     updateBoq.input("Version", sql.Int, Number.parseInt(version, 10) || 1);
     updateBoq.input("PreparedBy", sql.NVarChar(100), preparedBy || null);
     updateBoq.input("Status", sql.NVarChar(50), status || "Draft");
@@ -2763,7 +3453,857 @@ app.delete("/api/boqs/:id", async (req, res) => {
   }
 });
 
+app.get("/api/delivery-challans", async (_req, res) => {
+  try {
+    await ensureDeliveryChallanTables();
+    const pkCol = await refreshDeliveryChallanPk();
+    await refreshDeliveryChallanItemsFk();
+    const pool = await getPool();
+
+    const challansResult = await pool.request().query(`
+      SELECT * FROM dbo.DeliveryChallan ORDER BY ${pkCol} DESC
+    `);
+    const itemsResult = await pool.request().query(`
+      SELECT * FROM dbo.DeliveryChallanItems
+    `);
+
+    const itemsByChallan = (itemsResult.recordset ?? []).reduce((acc, row) => {
+      const item = normalizeDeliveryChallanItem(row);
+      const parentId = item.deliveryChallanId;
+      if (!parentId) {
+        return acc;
+      }
+      if (!acc[parentId]) {
+        acc[parentId] = [];
+      }
+      acc[parentId].push(item);
+      return acc;
+    }, {});
+
+    const data = (challansResult.recordset ?? []).map((row) => {
+      const challan = normalizeDeliveryChallan(row);
+      return {
+        ...challan,
+        items: itemsByChallan[challan.id] ?? [],
+      };
+    });
+
+    return res.json({ ok: true, deliveryChallans: data });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch delivery challans",
+    });
+  }
+});
+
+app.get("/api/delivery-challans/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid delivery challan id" });
+  }
+
+  try {
+    await ensureDeliveryChallanTables();
+    const pkCol = await refreshDeliveryChallanPk();
+    const fkCol = await refreshDeliveryChallanItemsFk();
+    const pool = await getPool();
+
+    const challanResult = await pool
+      .request()
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .query(`
+        SELECT * FROM dbo.DeliveryChallan WHERE ${pkCol} = @DeliveryChallanId
+      `);
+
+    const challanRow = challanResult.recordset?.[0];
+    if (!challanRow) {
+      return res.status(404).json({ ok: false, error: "Delivery challan not found" });
+    }
+
+    const itemsResult = await pool
+      .request()
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .query(`
+        SELECT * FROM dbo.DeliveryChallanItems WHERE ${fkCol} = @DeliveryChallanId
+      `);
+
+    return res.json({
+      ok: true,
+      deliveryChallan: {
+        ...normalizeDeliveryChallan(challanRow),
+        items: (itemsResult.recordset ?? []).map(normalizeDeliveryChallanItem),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch delivery challan",
+    });
+  }
+});
+
+app.post("/api/delivery-challans", async (req, res) => {
+  const {
+    dcNumber,
+    projectId,
+    fromLocationId,
+    toLocation,
+    vehicleNumber = null,
+    eWayBillNumber = null,
+    issueDate = null,
+    status = "Draft",
+    notes = null,
+    items = [],
+  } = req.body ?? {};
+
+  const safeDcNumber = normalizeOptionalString(dcNumber);
+  const safeProjectId = toNullableInt(projectId);
+  const safeFromLocationId = toNullableInt(fromLocationId);
+  const safeToLocation = normalizeOptionalString(toLocation);
+  const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? null;
+  const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? null;
+  const safeStatus = normalizeOptionalString(status) ?? "Draft";
+  const safeNotes = normalizeOptionalString(notes) ?? null;
+  const parsedIssueDate = parseDateInput(issueDate);
+
+  if (!safeDcNumber) {
+    return res.status(400).json({ ok: false, error: "dcNumber is required" });
+  }
+  if (!safeProjectId) {
+    return res.status(400).json({ ok: false, error: "projectId is required" });
+  }
+  if (!safeFromLocationId) {
+    return res.status(400).json({ ok: false, error: "fromLocationId is required" });
+  }
+  if (!safeToLocation) {
+    return res.status(400).json({ ok: false, error: "toLocation is required" });
+  }
+  if (Number.isNaN(parsedIssueDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid issueDate" });
+  }
+
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const name = String(item.name ?? item.ItemName ?? "").trim();
+      const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
+      const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
+      return {
+        name,
+        description: normalizeOptionalString(item.description ?? item.Description) ?? null,
+        unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        quantity,
+        rate,
+        notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
+      };
+    })
+    .filter((item) => item.name && item.quantity > 0);
+
+  if (!normalizedItems.length) {
+    return res.status(400).json({
+      ok: false,
+      error: "At least one line item is required",
+    });
+  }
+
+  let tx;
+  try {
+    await ensureDeliveryChallanTables();
+    const pkCol = await refreshDeliveryChallanPk();
+    const fkCol = await refreshDeliveryChallanItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const insertHeaderReq = new sql.Request(tx);
+    insertHeaderReq.input("DCNumber", sql.NVarChar(100), safeDcNumber);
+    insertHeaderReq.input("ProjectId", sql.Int, safeProjectId);
+    insertHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
+    insertHeaderReq.input("ToLocation", sql.NVarChar(200), safeToLocation);
+    insertHeaderReq.input("VehicleNumber", sql.NVarChar(50), safeVehicleNumber);
+    insertHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
+    insertHeaderReq.input("IssueDate", sql.Date, parsedIssueDate ?? null);
+    insertHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
+    insertHeaderReq.input("Notes", sql.NVarChar(sql.MAX), safeNotes);
+
+    const headerResult = await insertHeaderReq.query(`
+      INSERT INTO dbo.DeliveryChallan
+        (DCNumber, ProjectId, FromLocationId, ToLocation, VehicleNumber, EWayBillNumber, IssueDate, Status, Notes)
+      OUTPUT INSERTED.*
+      VALUES
+        (@DCNumber, @ProjectId, @FromLocationId, @ToLocation, @VehicleNumber, @EWayBillNumber, @IssueDate, @Status, @Notes)
+    `);
+
+    const headerRow = headerResult.recordset?.[0];
+    const challanId = headerRow?.[pkCol] ?? headerRow?.Id ?? null;
+    if (!challanId) {
+      throw new Error("Failed to create delivery challan");
+    }
+
+    for (const item of normalizedItems) {
+      const insertItemReq = new sql.Request(tx);
+      insertItemReq.input("DeliveryChallanId", sql.BigInt, challanId);
+      insertItemReq.input("ItemName", sql.NVarChar(200), item.name);
+      insertItemReq.input("Description", sql.NVarChar(500), item.description);
+      insertItemReq.input("Unit", sql.NVarChar(50), item.unit);
+      insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
+      insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
+      insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
+      await insertItemReq.query(`
+        INSERT INTO dbo.DeliveryChallanItems
+          (${fkCol}, ItemName, Description, Unit, Quantity, Rate, Notes)
+        VALUES
+          (@DeliveryChallanId, @ItemName, @Description, @Unit, @Quantity, @Rate, @Notes)
+      `);
+    }
+
+    await tx.commit();
+
+    const itemsResult = await pool
+      .request()
+      .input("DeliveryChallanId", sql.BigInt, challanId)
+      .query(`
+        SELECT * FROM dbo.DeliveryChallanItems WHERE ${fkCol} = @DeliveryChallanId
+      `);
+
+    return res.status(201).json({
+      ok: true,
+      deliveryChallan: {
+        ...normalizeDeliveryChallan(headerRow),
+        items: (itemsResult.recordset ?? []).map(normalizeDeliveryChallanItem),
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to create delivery challan",
+    });
+  }
+});
+
+app.put("/api/delivery-challans/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid delivery challan id" });
+  }
+
+  const {
+    dcNumber,
+    projectId,
+    fromLocationId,
+    toLocation,
+    vehicleNumber = null,
+    eWayBillNumber = null,
+    issueDate = null,
+    status = "Draft",
+    notes = null,
+    items = [],
+  } = req.body ?? {};
+
+  const safeDcNumber = normalizeOptionalString(dcNumber);
+  const safeProjectId = toNullableInt(projectId);
+  const safeFromLocationId = toNullableInt(fromLocationId);
+  const safeToLocation = normalizeOptionalString(toLocation);
+  const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? null;
+  const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? null;
+  const safeStatus = normalizeOptionalString(status) ?? "Draft";
+  const safeNotes = normalizeOptionalString(notes) ?? null;
+  const parsedIssueDate = parseDateInput(issueDate);
+
+  if (!safeDcNumber) {
+    return res.status(400).json({ ok: false, error: "dcNumber is required" });
+  }
+  if (!safeProjectId) {
+    return res.status(400).json({ ok: false, error: "projectId is required" });
+  }
+  if (!safeFromLocationId) {
+    return res.status(400).json({ ok: false, error: "fromLocationId is required" });
+  }
+  if (!safeToLocation) {
+    return res.status(400).json({ ok: false, error: "toLocation is required" });
+  }
+  if (Number.isNaN(parsedIssueDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid issueDate" });
+  }
+
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const name = String(item.name ?? item.ItemName ?? "").trim();
+      const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
+      const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
+      return {
+        name,
+        description: normalizeOptionalString(item.description ?? item.Description) ?? null,
+        unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        quantity,
+        rate,
+        notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
+      };
+    })
+    .filter((item) => item.name && item.quantity > 0);
+
+  if (!normalizedItems.length) {
+    return res.status(400).json({
+      ok: false,
+      error: "At least one line item is required",
+    });
+  }
+
+  let tx;
+  try {
+    await ensureDeliveryChallanTables();
+    const pkCol = await refreshDeliveryChallanPk();
+    const fkCol = await refreshDeliveryChallanItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const updateHeaderReq = new sql.Request(tx);
+    updateHeaderReq.input("DeliveryChallanId", sql.BigInt, id);
+    updateHeaderReq.input("DCNumber", sql.NVarChar(100), safeDcNumber);
+    updateHeaderReq.input("ProjectId", sql.Int, safeProjectId);
+    updateHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
+    updateHeaderReq.input("ToLocation", sql.NVarChar(200), safeToLocation);
+    updateHeaderReq.input("VehicleNumber", sql.NVarChar(50), safeVehicleNumber);
+    updateHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
+    updateHeaderReq.input("IssueDate", sql.Date, parsedIssueDate ?? null);
+    updateHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
+    updateHeaderReq.input("Notes", sql.NVarChar(sql.MAX), safeNotes);
+
+    const headerResult = await updateHeaderReq.query(`
+      UPDATE dbo.DeliveryChallan
+      SET DCNumber = @DCNumber,
+          ProjectId = @ProjectId,
+          FromLocationId = @FromLocationId,
+          ToLocation = @ToLocation,
+          VehicleNumber = @VehicleNumber,
+          EWayBillNumber = @EWayBillNumber,
+          IssueDate = @IssueDate,
+          Status = @Status,
+          Notes = @Notes,
+          UpdatedAt = SYSUTCDATETIME()
+      OUTPUT INSERTED.*
+      WHERE ${pkCol} = @DeliveryChallanId
+    `);
+
+    const headerRow = headerResult.recordset?.[0];
+    if (!headerRow) {
+      await tx.rollback();
+      return res.status(404).json({ ok: false, error: "Delivery challan not found" });
+    }
+
+    const deleteItemsReq = new sql.Request(tx);
+    deleteItemsReq.input("DeliveryChallanId", sql.BigInt, id);
+    await deleteItemsReq.query(`
+      DELETE FROM dbo.DeliveryChallanItems WHERE ${fkCol} = @DeliveryChallanId
+    `);
+
+    for (const item of normalizedItems) {
+      const insertItemReq = new sql.Request(tx);
+      insertItemReq.input("DeliveryChallanId", sql.BigInt, id);
+      insertItemReq.input("ItemName", sql.NVarChar(200), item.name);
+      insertItemReq.input("Description", sql.NVarChar(500), item.description);
+      insertItemReq.input("Unit", sql.NVarChar(50), item.unit);
+      insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
+      insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
+      insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
+      await insertItemReq.query(`
+        INSERT INTO dbo.DeliveryChallanItems
+          (${fkCol}, ItemName, Description, Unit, Quantity, Rate, Notes)
+        VALUES
+          (@DeliveryChallanId, @ItemName, @Description, @Unit, @Quantity, @Rate, @Notes)
+      `);
+    }
+
+    await tx.commit();
+
+    const itemsResult = await pool
+      .request()
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .query(`
+        SELECT * FROM dbo.DeliveryChallanItems WHERE ${fkCol} = @DeliveryChallanId
+      `);
+
+    return res.json({
+      ok: true,
+      deliveryChallan: {
+        ...normalizeDeliveryChallan(headerRow),
+        items: (itemsResult.recordset ?? []).map(normalizeDeliveryChallanItem),
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to update delivery challan",
+    });
+  }
+});
+
+app.delete("/api/delivery-challans/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid delivery challan id" });
+  }
+
+  let tx;
+  try {
+    await ensureDeliveryChallanTables();
+    const pkCol = await refreshDeliveryChallanPk();
+    const fkCol = await refreshDeliveryChallanItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const deleteItemsReq = new sql.Request(tx);
+    deleteItemsReq.input("DeliveryChallanId", sql.BigInt, id);
+    await deleteItemsReq.query(`
+      DELETE FROM dbo.DeliveryChallanItems WHERE ${fkCol} = @DeliveryChallanId
+    `);
+
+    const deleteHeaderReq = new sql.Request(tx);
+    deleteHeaderReq.input("DeliveryChallanId", sql.BigInt, id);
+    const deleteResult = await deleteHeaderReq.query(`
+      DELETE FROM dbo.DeliveryChallan WHERE ${pkCol} = @DeliveryChallanId
+    `);
+
+    await tx.commit();
+
+    if ((deleteResult.rowsAffected?.[0] ?? 0) === 0) {
+      return res.status(404).json({ ok: false, error: "Delivery challan not found" });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to delete delivery challan",
+    });
+  }
+});
+
+app.get("/api/consumptions", async (_req, res) => {
+  try {
+    await ensureConsumptionTables();
+    const pkCol = await refreshConsumptionPk();
+    await refreshConsumptionItemsFk();
+    const pool = await getPool();
+
+    const consumptionsResult = await pool.request().query(`
+      SELECT * FROM dbo.Consumption ORDER BY ${pkCol} DESC
+    `);
+    const itemsResult = await pool.request().query(`
+      SELECT * FROM dbo.ConsumptionItems
+    `);
+
+    const itemsByConsumption = (itemsResult.recordset ?? []).reduce((acc, row) => {
+      const item = normalizeConsumptionItem(row);
+      const parentId = item.consumptionId;
+      if (parentId === null || parentId === undefined) {
+        return acc;
+      }
+      if (!acc[parentId]) {
+        acc[parentId] = [];
+      }
+      acc[parentId].push(item);
+      return acc;
+    }, {});
+
+    const data = (consumptionsResult.recordset ?? []).map((row) => {
+      const consumption = normalizeConsumption(row);
+      return {
+        ...consumption,
+        items: itemsByConsumption[consumption.id] ?? [],
+      };
+    });
+
+    return res.json({ ok: true, consumptions: data });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch consumptions",
+    });
+  }
+});
+
+app.get("/api/consumptions/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid consumption id" });
+  }
+
+  try {
+    await ensureConsumptionTables();
+    const pkCol = await refreshConsumptionPk();
+    const fkCol = await refreshConsumptionItemsFk();
+    const pool = await getPool();
+
+    const consumptionResult = await pool
+      .request()
+      .input("ConsumptionId", sql.Int, id)
+      .query(`
+        SELECT * FROM dbo.Consumption WHERE ${pkCol} = @ConsumptionId
+      `);
+
+    const consumptionRow = consumptionResult.recordset?.[0];
+    if (!consumptionRow) {
+      return res.status(404).json({ ok: false, error: "Consumption not found" });
+    }
+
+    const itemsResult = await pool
+      .request()
+      .input("ConsumptionId", sql.Int, id)
+      .query(`
+        SELECT * FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
+      `);
+
+    return res.json({
+      ok: true,
+      consumption: {
+        ...normalizeConsumption(consumptionRow),
+        items: (itemsResult.recordset ?? []).map(normalizeConsumptionItem),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch consumption",
+    });
+  }
+});
+
+app.post("/api/consumptions", async (req, res) => {
+  const {
+    consumptionNumber,
+    projectId,
+    locationId,
+    consumptionDate = null,
+    issuedBy = null,
+    status = "Logged",
+    notes = null,
+    items = [],
+  } = req.body ?? {};
+
+  const safeConsumptionNumber = normalizeOptionalString(consumptionNumber);
+  const safeProjectId = toNullableInt(projectId);
+  const safeLocationId = toNullableInt(locationId);
+  const safeIssuedBy = normalizeOptionalString(issuedBy) ?? null;
+  const safeStatus = normalizeOptionalString(status) ?? "Logged";
+  const safeNotes = normalizeOptionalString(notes) ?? null;
+  const parsedConsumptionDate = parseDateInput(consumptionDate);
+
+  if (!safeConsumptionNumber) {
+    return res.status(400).json({
+      ok: false,
+      error: "consumptionNumber is required",
+    });
+  }
+  if (!safeProjectId) {
+    return res.status(400).json({ ok: false, error: "projectId is required" });
+  }
+  if (!safeLocationId) {
+    return res.status(400).json({ ok: false, error: "locationId is required" });
+  }
+  if (Number.isNaN(parsedConsumptionDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid consumptionDate" });
+  }
+
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const name = String(item.name ?? item.Item ?? "").trim();
+      const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
+      const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
+      return {
+        name,
+        description: normalizeOptionalString(item.description ?? item.Description) ?? null,
+        unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        quantity,
+        rate,
+        notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
+      };
+    })
+    .filter((item) => item.name && item.quantity > 0);
+
+  if (!normalizedItems.length) {
+    return res.status(400).json({
+      ok: false,
+      error: "At least one consumed item is required",
+    });
+  }
+
+  let tx;
+  try {
+    await ensureConsumptionTables();
+    const pkCol = await refreshConsumptionPk();
+    const fkCol = await refreshConsumptionItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const insertHeaderReq = new sql.Request(tx);
+    insertHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
+    insertHeaderReq.input("ProjectId", sql.Int, safeProjectId);
+    insertHeaderReq.input("LocationId", sql.Int, safeLocationId);
+    insertHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
+    insertHeaderReq.input("IssuedBy", sql.NVarChar(200), safeIssuedBy);
+    insertHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
+    insertHeaderReq.input("Notes", sql.NVarChar(sql.MAX), safeNotes);
+
+    const headerResult = await insertHeaderReq.query(`
+      INSERT INTO dbo.Consumption
+        (ConsumptionNumber, ProjectId, LocationId, ConsumptionDate, IssuedBy, Status, Notes)
+      OUTPUT INSERTED.*
+      VALUES
+        (@ConsumptionNumber, @ProjectId, @LocationId, @ConsumptionDate, @IssuedBy, @Status, @Notes)
+    `);
+
+    const headerRow = headerResult.recordset?.[0];
+    const consumptionId =
+      headerRow?.[pkCol] ?? headerRow?.Id ?? headerRow?.ConsumptionId ?? null;
+    if (!consumptionId) {
+      throw new Error("Failed to create consumption entry");
+    }
+
+    for (const item of normalizedItems) {
+      const insertItemReq = new sql.Request(tx);
+      insertItemReq.input("ConsumptionId", sql.Int, consumptionId);
+      insertItemReq.input("Item", sql.NVarChar(200), item.name);
+      insertItemReq.input("Description", sql.NVarChar(500), item.description);
+      insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
+      insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
+      insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
+      insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
+      await insertItemReq.query(`
+        INSERT INTO dbo.ConsumptionItems
+          (${fkCol}, Item, Description, Unit, Quantity, Rate, Notes)
+        VALUES
+          (@ConsumptionId, @Item, @Description, @Unit, @Quantity, @Rate, @Notes)
+      `);
+    }
+
+    await tx.commit();
+
+    const itemsResult = await pool
+      .request()
+      .input("ConsumptionId", sql.Int, consumptionId)
+      .query(`
+        SELECT * FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
+      `);
+
+    return res.status(201).json({
+      ok: true,
+      consumption: {
+        ...normalizeConsumption(headerRow),
+        items: (itemsResult.recordset ?? []).map(normalizeConsumptionItem),
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to create consumption",
+    });
+  }
+});
+
+app.put("/api/consumptions/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid consumption id" });
+  }
+
+  const {
+    consumptionNumber,
+    projectId,
+    locationId,
+    consumptionDate = null,
+    issuedBy = null,
+    status = "Logged",
+    notes = null,
+    items = [],
+  } = req.body ?? {};
+
+  const safeConsumptionNumber = normalizeOptionalString(consumptionNumber);
+  const safeProjectId = toNullableInt(projectId);
+  const safeLocationId = toNullableInt(locationId);
+  const safeIssuedBy = normalizeOptionalString(issuedBy) ?? null;
+  const safeStatus = normalizeOptionalString(status) ?? "Logged";
+  const safeNotes = normalizeOptionalString(notes) ?? null;
+  const parsedConsumptionDate = parseDateInput(consumptionDate);
+
+  if (!safeConsumptionNumber) {
+    return res.status(400).json({
+      ok: false,
+      error: "consumptionNumber is required",
+    });
+  }
+  if (!safeProjectId) {
+    return res.status(400).json({ ok: false, error: "projectId is required" });
+  }
+  if (!safeLocationId) {
+    return res.status(400).json({ ok: false, error: "locationId is required" });
+  }
+  if (Number.isNaN(parsedConsumptionDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid consumptionDate" });
+  }
+
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const name = String(item.name ?? item.Item ?? "").trim();
+      const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
+      const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
+      return {
+        name,
+        description: normalizeOptionalString(item.description ?? item.Description) ?? null,
+        unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        quantity,
+        rate,
+        notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
+      };
+    })
+    .filter((item) => item.name && item.quantity > 0);
+
+  if (!normalizedItems.length) {
+    return res.status(400).json({
+      ok: false,
+      error: "At least one consumed item is required",
+    });
+  }
+
+  let tx;
+  try {
+    await ensureConsumptionTables();
+    const pkCol = await refreshConsumptionPk();
+    const fkCol = await refreshConsumptionItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const updateHeaderReq = new sql.Request(tx);
+    updateHeaderReq.input("ConsumptionId", sql.Int, id);
+    updateHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
+    updateHeaderReq.input("ProjectId", sql.Int, safeProjectId);
+    updateHeaderReq.input("LocationId", sql.Int, safeLocationId);
+    updateHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
+    updateHeaderReq.input("IssuedBy", sql.NVarChar(200), safeIssuedBy);
+    updateHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
+    updateHeaderReq.input("Notes", sql.NVarChar(sql.MAX), safeNotes);
+
+    const headerResult = await updateHeaderReq.query(`
+      UPDATE dbo.Consumption
+      SET ConsumptionNumber = @ConsumptionNumber,
+          ProjectId = @ProjectId,
+          LocationId = @LocationId,
+          ConsumptionDate = @ConsumptionDate,
+          IssuedBy = @IssuedBy,
+          Status = @Status,
+          Notes = @Notes,
+          UpdatedAt = SYSUTCDATETIME()
+      OUTPUT INSERTED.*
+      WHERE ${pkCol} = @ConsumptionId
+    `);
+
+    const headerRow = headerResult.recordset?.[0];
+    if (!headerRow) {
+      await tx.rollback();
+      return res.status(404).json({ ok: false, error: "Consumption not found" });
+    }
+
+    const deleteItemsReq = new sql.Request(tx);
+    deleteItemsReq.input("ConsumptionId", sql.Int, id);
+    await deleteItemsReq.query(`
+      DELETE FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
+    `);
+
+    for (const item of normalizedItems) {
+      const insertItemReq = new sql.Request(tx);
+      insertItemReq.input("ConsumptionId", sql.Int, id);
+      insertItemReq.input("Item", sql.NVarChar(200), item.name);
+      insertItemReq.input("Description", sql.NVarChar(500), item.description);
+      insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
+      insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
+      insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
+      insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
+      await insertItemReq.query(`
+        INSERT INTO dbo.ConsumptionItems
+          (${fkCol}, Item, Description, Unit, Quantity, Rate, Notes)
+        VALUES
+          (@ConsumptionId, @Item, @Description, @Unit, @Quantity, @Rate, @Notes)
+      `);
+    }
+
+    await tx.commit();
+
+    const itemsResult = await pool
+      .request()
+      .input("ConsumptionId", sql.Int, id)
+      .query(`
+        SELECT * FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
+      `);
+
+    return res.json({
+      ok: true,
+      consumption: {
+        ...normalizeConsumption(headerRow),
+        items: (itemsResult.recordset ?? []).map(normalizeConsumptionItem),
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to update consumption",
+    });
+  }
+});
+
+app.delete("/api/consumptions/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid consumption id" });
+  }
+
+  let tx;
+  try {
+    await ensureConsumptionTables();
+    const pkCol = await refreshConsumptionPk();
+    const fkCol = await refreshConsumptionItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const deleteItemsReq = new sql.Request(tx);
+    deleteItemsReq.input("ConsumptionId", sql.Int, id);
+    await deleteItemsReq.query(`
+      DELETE FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
+    `);
+
+    const deleteHeaderReq = new sql.Request(tx);
+    deleteHeaderReq.input("ConsumptionId", sql.Int, id);
+    const deleteResult = await deleteHeaderReq.query(`
+      DELETE FROM dbo.Consumption WHERE ${pkCol} = @ConsumptionId
+    `);
+
+    await tx.commit();
+
+    if ((deleteResult.rowsAffected?.[0] ?? 0) === 0) {
+      return res.status(404).json({ ok: false, error: "Consumption not found" });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to delete consumption",
+    });
+  }
+});
+
 app.use((err, _req, res, _next) => {
+  void _next;
   res.status(500).json({
     ok: false,
     error: err?.message ?? "Internal server error",
@@ -2780,6 +4320,8 @@ const warmupSchema = async () => {
       ensurePurchaseTables(),
       ensureReceiveTables(),
       ensureBoqTables(),
+      ensureDeliveryChallanTables(),
+      ensureConsumptionTables(),
     ]);
     console.log("Schema warmup complete");
   } catch (error) {

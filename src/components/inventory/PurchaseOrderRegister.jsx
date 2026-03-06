@@ -9,6 +9,9 @@ import {
 } from "../../services/purchaseOrdersApi";
 import useSettings from "../../hooks/useSettings";
 import { formatDate } from "../../utils/dateFormat";
+import { printSection } from "../../utils/printUtils";
+import { resolveBrandLogo } from "../../utils/branding";
+import DocumentViewPanel from "./DocumentViewPanel";
 
 const PurchaseOrderRegister = () => {
   const navigate = useNavigate();
@@ -22,6 +25,11 @@ const PurchaseOrderRegister = () => {
   const [apiError, setApiError] = useState("");
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
+  const [viewRecord, setViewRecord] = useState(null);
+  const company = settings?.company || {};
+  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const brandName = company.name || "Bangalore Electronics";
+  const brandDescription = company.address || "Company address";
 
   const formatCurrency = (value) => {
     const amount = Number(value) || 0;
@@ -103,6 +111,11 @@ const PurchaseOrderRegister = () => {
     0
   );
 
+  const openOrdersCount = useMemo(
+    () => records.filter((record) => record.status !== "Closed").length,
+    [records]
+  );
+
   const filteredRecords = records.filter((record) => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) {
@@ -151,11 +164,31 @@ const PurchaseOrderRegister = () => {
     navigate("/inventory/purchase-order", { state: { purchaseOrder: record } });
   };
 
+  const handleView = (record) => {
+    setViewRecord(record);
+  };
+
+  const handlePrint = (record) => {
+    setViewRecord(record);
+    setTimeout(() => {
+      printSection({
+        selector: "#purchase-order-view-panel",
+        title: "Purchase Order Details",
+        logoUrl,
+        brandName,
+        brandDescription,
+      });
+    }, 80);
+  };
+
   const handleDelete = async (id) => {
     try {
       setApiError("");
       await deletePurchaseOrder(id);
       await loadRecords();
+      if (viewRecord?.id === id) {
+        setViewRecord(null);
+      }
     } catch (error) {
       setApiError(
         error?.response?.data?.error || error?.message || "Failed to delete purchase order."
@@ -211,7 +244,7 @@ const PurchaseOrderRegister = () => {
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
           <p className="text-sm text-slate-500">Open Orders</p>
           <p className="text-2xl font-semibold text-slate-800">
-            {records.filter((record) => record.status !== "Closed").length}
+            {openOrdersCount}
           </p>
         </div>
       </div>
@@ -222,17 +255,22 @@ const PurchaseOrderRegister = () => {
         </div>
       )}
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
-        <div className="px-4 py-3 border-b flex items-center justify-between gap-4">
+      <div
+        id="purchase-order-register"
+        className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto"
+      >
+        <div className="px-4 py-3 border-b flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <h3 className="text-lg font-semibold text-slate-800">
             Purchase Orders
           </h3>
-          <input
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search PO number, vendor, project..."
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 max-w-full"
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search PO number, vendor, project..."
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 max-w-full"
+            />
+          </div>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600">
@@ -305,6 +343,26 @@ const PurchaseOrderRegister = () => {
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
+                            handleView(record);
+                          }}
+                          className="text-slate-700 text-sm underline"
+                        >
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handlePrint(record);
+                          }}
+                          className="text-slate-600 text-sm"
+                        >
+                          Print
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
                             handleEdit(record);
                           }}
                           className="text-indigo-600 text-sm"
@@ -370,7 +428,7 @@ const PurchaseOrderRegister = () => {
                                       <th className="p-2 text-left">Qty</th>
                                       <th className="p-2 text-left">Rate</th>
                                       <th className="p-2 text-left">Amount</th>
-                                      <th className="p-2 text-left">Notes</th>
+                                      <th className="p-2 text-left">Location</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -399,7 +457,9 @@ const PurchaseOrderRegister = () => {
                                           <td className="p-2">{qty}</td>
                                           <td className="p-2">{formatCurrency(rate)}</td>
                                           <td className="p-2">{formatCurrency(amount)}</td>
-                                          <td className="p-2">{item.notes || "-"}</td>
+                                          <td className="p-2">
+                                            {item.location || item.notes || "-"}
+                                          </td>
                                         </tr>
                                       );
                                     })}
@@ -424,6 +484,62 @@ const PurchaseOrderRegister = () => {
           </tbody>
         </table>
       </div>
+      {viewRecord && (
+        <DocumentViewPanel
+          id="purchase-order-view-panel"
+          title="PURCHASE ORDER"
+          onClose={() => setViewRecord(null)}
+          companyName={brandName}
+          companyAddress={brandDescription}
+          companyGstin={company.gstin}
+          companyPhone={company.phone}
+          companyEmail={company.email}
+          logoUrl={logoUrl}
+          primaryPairs={[
+            { label: "PO No", value: viewRecord.poNumber || viewRecord.id },
+            { label: "Date", value: formatDate(viewRecord.orderDate) },
+            { label: "Expected", value: formatDate(viewRecord.expectedDate) },
+            { label: "Status", value: viewRecord.status },
+          ]}
+          leftBlockTitle="Vendor"
+          leftBlockLines={[
+            vendorMap[String(viewRecord.vendorId)]?.name || "-",
+            viewRecord.termsConditions || viewRecord.notes || "-",
+          ]}
+          rightBlockTitle="Project"
+          rightBlockLines={[
+            projectMap[String(viewRecord.projectId)]?.name || "-",
+            locationMap[String(viewRecord.locationId)]?.name || "-",
+          ]}
+          tableColumns={[
+            { key: "serial", label: "Sl No", widthClass: "w-16" },
+            { key: "name", label: "Item" },
+            { key: "unit", label: "Unit", widthClass: "w-20" },
+            { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
+            { key: "rate", label: "Rate", align: "right", widthClass: "w-24" },
+            { key: "amount", label: "Amount", align: "right", widthClass: "w-28" },
+          ]}
+          tableRows={(viewRecord.items || []).map((item, index) => {
+            const qty = Number(item.quantity || 0);
+            const rate = Number(item.rate ?? item.unitPrice ?? 0);
+            const amount = Number(item.totalPrice ?? qty * rate);
+            return {
+              id: item.id || index,
+              serial: index + 1,
+              name: item.name,
+              unit: item.unit,
+              quantity: qty,
+              rate: formatCurrency(rate),
+              amount: formatCurrency(amount),
+            };
+          })}
+          bottomLeftTitle="GST"
+          bottomLeftValue={viewRecord.gstRate || viewRecord.gst || "None"}
+          bottomRightTitle="Total Value"
+          bottomRightValue={formatCurrency(viewRecord.total || 0)}
+          footerCompanyName={brandName || "Company"}
+        />
+      )}
     </div>
   );
 };

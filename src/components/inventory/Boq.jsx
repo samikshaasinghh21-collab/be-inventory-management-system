@@ -11,6 +11,9 @@ import {
 } from "../../services/boqApi";
 import DateInput from "../common/DateInput";
 import { formatDate } from "../../utils/dateFormat";
+import { printSection } from "../../utils/printUtils";
+import { resolveBrandLogo } from "../../utils/branding";
+import DocumentViewPanel from "./DocumentViewPanel";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -22,15 +25,50 @@ const createLineItem = () => ({
   notes: "",
 });
 
-const createFormState = () => ({
+const createFormState = (boqNumber = "") => ({
   projectId: "",
-  boqNumber: "",
+  boqNumber,
   version: "1",
   preparedBy: "",
   status: "Draft",
   date: new Date().toISOString().slice(0, 10),
   notes: "",
 });
+
+const generateNextBoqNumber = (records = []) => {
+  const year = new Date().getFullYear();
+  const prefix = `BOQ-${year}-`;
+  const sequencePattern = new RegExp(`^BOQ-${year}-(\\d+)$`, "i");
+  const usedNumbers = new Set();
+  let maxSequence = 0;
+
+  for (const record of records) {
+    const currentNumber = String(record?.boqNumber ?? "").trim();
+    if (!currentNumber) {
+      continue;
+    }
+
+    usedNumbers.add(currentNumber.toUpperCase());
+    const match = currentNumber.match(sequencePattern);
+    if (!match) {
+      continue;
+    }
+
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed)) {
+      maxSequence = Math.max(maxSequence, parsed);
+    }
+  }
+
+  let sequence = maxSequence + 1;
+  let candidate = `${prefix}${String(sequence).padStart(3, "0")}`;
+  while (usedNumbers.has(candidate.toUpperCase())) {
+    sequence += 1;
+    candidate = `${prefix}${String(sequence).padStart(3, "0")}`;
+  }
+
+  return candidate;
+};
 
 const Boq = () => {
   const settings = useSettings();
@@ -44,7 +82,12 @@ const Boq = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [viewRecord, setViewRecord] = useState(null);
   const navigate = useNavigate();
+  const company = settings?.company || {};
+  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const brandName = company.name || "Bangalore Electronics";
+  const brandDescription = company.address || "Company address";
 
   const formatCurrency = (value) => {
     const amount = Number(value) || 0;
@@ -79,6 +122,20 @@ const Boq = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (editingId) {
+      return;
+    }
+
+    const nextBoqNumber = generateNextBoqNumber(records);
+    setForm((prev) => {
+      if (prev.boqNumber === nextBoqNumber) {
+        return prev;
+      }
+      return { ...prev, boqNumber: nextBoqNumber };
+    });
+  }, [records, editingId]);
 
   // Import selected products from product picker (pick=boq flow)
   useEffect(() => {
@@ -128,8 +185,17 @@ const Boq = () => {
 
   const draftCount = records.filter((record) => record.status === "Draft").length;
 
-  const resetForm = () => {
-    setForm(createFormState());
+  const boqRegisterMeta = useMemo(
+    () => [
+      { label: "Total BOQs", value: records.length },
+      { label: "Draft BOQs", value: draftCount },
+      { label: "Estimated Value", value: formatCurrency(totalValue) },
+    ],
+    [records.length, draftCount, totalValue, currency]
+  );
+
+  const resetForm = (nextRecords = records) => {
+    setForm(createFormState(generateNextBoqNumber(nextRecords)));
     setItems([createLineItem()]);
     setErrors({});
     setEditingId(null);
@@ -197,7 +263,7 @@ const Boq = () => {
       }
       const fresh = await fetchBoqs();
       setRecords(fresh);
-      resetForm();
+      resetForm(fresh);
     } catch (error) {
       console.error("Failed to save BOQ", error);
       setErrorMessage(error?.response?.data?.error ?? "Failed to save BOQ");
@@ -238,6 +304,9 @@ const Boq = () => {
       setSaving(true);
       await deleteBoq(id);
       setRecords((prev) => prev.filter((record) => record.id !== id));
+      if (viewRecord?.id === id) {
+        setViewRecord(null);
+      }
     } catch (error) {
       console.error("Failed to delete BOQ", error);
       setErrorMessage(error?.response?.data?.error ?? "Failed to delete BOQ");
@@ -248,6 +317,23 @@ const Boq = () => {
 
   const handlePickFromProducts = () => {
     navigate("/inventory/products?pick=boq");
+  };
+
+  const handleView = (record) => {
+    setViewRecord(record);
+  };
+
+  const handlePrint = (record) => {
+    setViewRecord(record);
+    setTimeout(() => {
+      printSection({
+        selector: "#boq-view-panel",
+        title: "BOQ Details",
+        logoUrl,
+        brandName,
+        brandDescription,
+      });
+    }, 80);
   };
 
   return (
@@ -339,15 +425,12 @@ const Boq = () => {
               <input
                 type="text"
                 value={form.boqNumber}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    boqNumber: event.target.value,
-                  }))
-                }
-                placeholder="BOQ-2026-001"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                readOnly
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 bg-slate-100 text-slate-600 cursor-not-allowed"
               />
+              <p className="text-xs text-slate-500 mt-1">
+                Auto-generated by system.
+              </p>
               {errors.boqNumber && (
                 <p className="text-xs text-red-600 mt-1">
                   {errors.boqNumber}
@@ -468,11 +551,33 @@ const Boq = () => {
         </div>
       </form>
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
-        <div className="px-4 py-3 border-b flex items-center justify-between">
+      <div
+        id="boq-register"
+        className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto"
+      >
+        <div className="px-4 py-3 border-b flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-slate-800">
             BOQ Register
           </h3>
+          <div className="flex gap-2 ml-auto">
+                <button
+                  type="button"
+                  onClick={() =>
+                    printSection({
+                      selector: "#boq-register",
+                      title: "BOQ Register",
+                      subtitle: "Approved bill of quantities log",
+                      metaRows: boqRegisterMeta,
+                      logoUrl,
+                      brandName,
+                      brandDescription,
+                    })
+                  }
+                  className="px-3 py-1 rounded-full border border-slate-300 text-xs text-slate-600 hover:border-slate-400 hover:text-slate-800"
+                >
+              Print register
+            </button>
+          </div>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600">
@@ -520,10 +625,17 @@ const Boq = () => {
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"
-                    onClick={() => navigate(`/inventory/boq/${record.id}`)}
+                    onClick={() => handleView(record)}
                     className="text-slate-700 text-sm underline"
                   >
                     View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePrint(record)}
+                    className="text-slate-600 text-sm"
+                  >
+                    Print
                   </button>
                   <button
                     type="button"
@@ -546,6 +658,55 @@ const Boq = () => {
           </tbody>
         </table>
       </div>
+      {viewRecord && (
+        <DocumentViewPanel
+          id="boq-view-panel"
+          title="BILL OF QUANTITY"
+          onClose={() => setViewRecord(null)}
+          companyName={brandName}
+          companyAddress={brandDescription}
+          companyGstin={company.gstin}
+          companyPhone={company.phone}
+          companyEmail={company.email}
+          logoUrl={logoUrl}
+          primaryPairs={[
+            { label: "BOQ No", value: viewRecord.boqNumber || viewRecord.id },
+            { label: "Date", value: formatDate(viewRecord.date) },
+            { label: "Version", value: viewRecord.version },
+            { label: "Status", value: viewRecord.status },
+          ]}
+          leftBlockTitle="Project"
+          leftBlockLines={[projectMap[String(viewRecord.projectId)]?.name || "-"]}
+          rightBlockTitle="Prepared By / Notes"
+          rightBlockLines={[viewRecord.preparedBy || "-", viewRecord.notes || "-"]}
+          tableColumns={[
+            { key: "serial", label: "Sl No", widthClass: "w-16" },
+            { key: "name", label: "Item" },
+            { key: "unit", label: "Unit", widthClass: "w-20" },
+            { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
+            { key: "rate", label: "Rate", align: "right", widthClass: "w-24" },
+            { key: "amount", label: "Amount", align: "right", widthClass: "w-28" },
+          ]}
+          tableRows={(viewRecord.items || []).map((item, index) => {
+            const qty = Number(item.quantity || 0);
+            const rate = Number(item.rate || 0);
+            return {
+              id: item.id || index,
+              serial: index + 1,
+              name: item.name || "-",
+              unit: item.unit || "-",
+              quantity: qty,
+              rate: formatCurrency(rate),
+              amount: formatCurrency(qty * rate),
+            };
+          })}
+          bottomLeftTitle="Notes"
+          bottomLeftValue={viewRecord.notes || "-"}
+          bottomRightTitle="Total Value"
+          bottomRightValue={formatCurrency(viewRecord.total || 0)}
+          footerCompanyName={brandName}
+        />
+      )}
     </div>
   );
 };

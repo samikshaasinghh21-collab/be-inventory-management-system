@@ -6,6 +6,10 @@ import {
   fetchLocations,
   updateLocation,
 } from "../../services/locationsApi";
+import useSettings from "../../hooks/useSettings";
+import { printSection } from "../../utils/printUtils";
+import { resolveBrandLogo } from "../../utils/branding";
+import DocumentViewPanel from "./DocumentViewPanel";
 
 const createFormState = () => ({
   name: "",
@@ -24,8 +28,14 @@ const Locations = () => {
   const [form, setForm] = useState(createFormState);
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
+  const [viewRecord, setViewRecord] = useState(null);
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
+  const settings = useSettings();
+  const company = settings?.company || {};
+  const brandName = company.name || "Bangalore Electronics";
+  const brandDescription = company.address || "Company address";
+  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
 
   const loadRecords = async () => {
     try {
@@ -113,6 +123,23 @@ const Locations = () => {
       status: record.status || "Active",
     });
     setErrors({});
+  };
+
+  const handleView = (record) => {
+    setViewRecord(record);
+  };
+
+  const handlePrint = (record) => {
+    setViewRecord(record);
+    setTimeout(() => {
+      printSection({
+        selector: "#locations-view-panel",
+        title: "Location Details",
+        logoUrl,
+        brandName,
+        brandDescription,
+      });
+    }, 80);
   };
 
   const handleDelete = async (id) => {
@@ -305,18 +332,23 @@ const Locations = () => {
         </div>
       </form>
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
-        <div className="px-4 py-3 border-b flex items-center justify-between">
+      <div
+        id="locations-register"
+        className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto"
+      >
+        <div className="px-4 py-3 border-b flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-slate-800">
             Locations Register
           </h3>
-          <button
-            type="button"
-            onClick={loadRecords}
-            className="px-3 py-1.5 border border-slate-200 rounded-md text-xs text-slate-600 bg-white"
-          >
-            Refresh
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={loadRecords}
+              className="px-3 py-1.5 border border-slate-200 rounded-md text-xs text-slate-600 bg-white"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
         {apiError && (
           <div className="px-4 py-3 text-sm text-red-700 bg-red-50 border-b border-red-100">
@@ -365,6 +397,20 @@ const Locations = () => {
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"
+                    onClick={() => handleView(record)}
+                    className="text-slate-700 text-sm underline"
+                  >
+                    View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePrint(record)}
+                    className="text-slate-600 text-sm"
+                  >
+                    Print
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => handleEdit(record)}
                     className="text-indigo-600 text-sm"
                   >
@@ -383,6 +429,48 @@ const Locations = () => {
           </tbody>
         </table>
       </div>
+      {viewRecord && (
+        <DocumentViewPanel
+          id="locations-view-panel"
+          title="LOCATION DETAILS"
+          onClose={() => setViewRecord(null)}
+          companyName={brandName}
+          companyAddress={brandDescription}
+          companyGstin={company.gstin}
+          companyPhone={company.phone}
+          companyEmail={company.email}
+          logoUrl={logoUrl}
+          primaryPairs={[
+            { label: "Location", value: viewRecord.name },
+            { label: "Code", value: viewRecord.code },
+            { label: "Status", value: viewRecord.status },
+            { label: "Type", value: viewRecord.type },
+          ]}
+          leftBlockTitle="Project"
+          leftBlockLines={[projectMap[String(viewRecord.projectId)]?.name || "-"]}
+          rightBlockTitle="Contact"
+          rightBlockLines={[viewRecord.manager || "-", viewRecord.phone || "-"]}
+          tableColumns={[
+            { key: "field", label: "Field" },
+            { key: "value", label: "Value" },
+          ]}
+          tableRows={[
+            { id: "name", field: "Location Name", value: viewRecord.name },
+            { id: "code", field: "Code", value: viewRecord.code },
+            { id: "type", field: "Type", value: viewRecord.type },
+            {
+              id: "project",
+              field: "Project",
+              value: projectMap[String(viewRecord.projectId)]?.name || "-",
+            },
+            { id: "manager", field: "Manager", value: viewRecord.manager },
+            { id: "phone", field: "Phone", value: viewRecord.phone },
+            { id: "address", field: "Address", value: viewRecord.address },
+            { id: "status", field: "Status", value: viewRecord.status },
+          ]}
+          footerCompanyName={brandName || "Company"}
+        />
+      )}
     </div>
   );
 };

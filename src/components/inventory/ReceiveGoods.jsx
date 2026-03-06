@@ -24,17 +24,36 @@ const toNullableInt = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const toQuantity = (value) => {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+  const sanitized =
+    typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+  const parsed = Number(sanitized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const calculateBalanceQty = (orderedQty, receivedQty) =>
+  Math.max(toQuantity(orderedQty) - toQuantity(receivedQty), 0);
+
 const buildReceiveItems = (record, receipt) => {
   const receivedByItemId = new Map();
   const receivedWithoutItemId = [];
 
   for (const item of receipt?.items || []) {
     const itemId = toNullableInt(item.itemId ?? item.ItemId);
-    const qty = Number(item.receivedQty ?? item.ReceivedQty ?? 0) || 0;
+    const row = {
+      receivedQty: toQuantity(item.receivedQty ?? item.ReceivedQty ?? 0),
+      name: item.name ?? "",
+      description: item.description ?? "",
+      unit: item.unit ?? "",
+      notes: item.notes ?? "",
+    };
     if (itemId !== null) {
-      receivedByItemId.set(itemId, qty);
+      receivedByItemId.set(itemId, row);
     } else {
-      receivedWithoutItemId.push(qty);
+      receivedWithoutItemId.push(row);
     }
   }
 
@@ -42,31 +61,40 @@ const buildReceiveItems = (record, receipt) => {
   return (record?.items || []).map((item, idx) => {
     const lineId = item.id ?? item.itemId ?? `po-line-${idx}`;
     const itemId = toNullableInt(item.itemId ?? item.ItemId);
-    const receivedQty =
+    const matched =
       itemId !== null
-        ? receivedByItemId.get(itemId) ?? 0
-        : receivedWithoutItemId[fallbackIndex++] ?? 0;
+        ? receivedByItemId.get(itemId) ?? {}
+        : receivedWithoutItemId[fallbackIndex++] ?? {};
 
     return {
       id: lineId,
       itemId,
-      name: item.name || (itemId ? `Item ${itemId}` : ""),
-      unit: item.unit || "PCS",
-      orderedQty: Number(item.quantity) || 0,
-      receivedQty,
+      name:
+        matched.name || item.name || (itemId ? `Item ${itemId}` : ""),
+      description: matched.description || item.description || "",
+      unit: matched.unit || item.unit || "PCS",
+      orderedQty: toQuantity(item.quantity),
+      receivedQty: toQuantity(matched.receivedQty),
+      notes: matched.notes || item.notes || "",
     };
   });
 };
 
-const createReceiveForm = (record, receipt) => ({
-  receivedDate:
-    receipt?.receivedDate ||
-    record?.receivedDate ||
-    new Date().toISOString().slice(0, 10),
-  receivedBy: receipt?.receivedBy || record?.receivedBy || "",
-  notes: receipt?.notes || record?.receivedNotes || "",
-  items: buildReceiveItems(record, receipt),
-});
+const createReceiveForm = (record, receipt) => {
+  const items = buildReceiveItems(record, receipt);
+  return {
+    receivedDate:
+      receipt?.receivedDate ||
+      record?.receivedDate ||
+      new Date().toISOString().slice(0, 10),
+    receivedBy: receipt?.receivedBy || record?.receivedBy || "",
+    notes: receipt?.notes || record?.receivedNotes || "",
+    status:
+      receipt?.status ||
+      computeReceiveStatus(items, record?.status || "Draft"),
+    items,
+  };
+};
 
 const computeReceiveStatus = (items, fallback = "Draft") => {
   const normalized = Array.isArray(items) ? items : [];
@@ -75,11 +103,11 @@ const computeReceiveStatus = (items, fallback = "Draft") => {
   }
 
   const anyReceived = normalized.some(
-    (item) => Number(item.receivedQty) > 0
+    (item) => toQuantity(item.receivedQty) > 0
   );
   const allReceived = normalized.every((item) => {
-    const ordered = Number(item.orderedQty) || 0;
-    const received = Number(item.receivedQty) || 0;
+    const ordered = toQuantity(item.orderedQty);
+    const received = toQuantity(item.receivedQty);
     if (ordered === 0) {
       return true;
     }
@@ -232,8 +260,8 @@ const ReceiveGoods = () => {
 
   const receiveItems = (receiveForm.items || []).map((item) => ({
     ...item,
-    orderedQty: Number(item.orderedQty) || 0,
-    receivedQty: Number(item.receivedQty) || 0,
+    orderedQty: toQuantity(item.orderedQty),
+    receivedQty: toQuantity(item.receivedQty),
   }));
 
   const totalOrderedQty = receiveItems.reduce(
@@ -244,8 +272,11 @@ const ReceiveGoods = () => {
     (sum, item) => sum + item.receivedQty,
     0
   );
-  const totalBalanceQty = Math.max(totalOrderedQty - totalReceivedQty, 0);
-  const nextStatusPreview = selectedRecord
+  const totalBalanceQty = calculateBalanceQty(
+    totalOrderedQty,
+    totalReceivedQty
+  );
+  const suggestedStatus = selectedRecord
     ? computeReceiveStatus(receiveItems, selectedRecord.status || "Draft")
     : "Draft";
 
@@ -267,6 +298,26 @@ const ReceiveGoods = () => {
     0
   );
 
+  const selectPurchaseOrder = (record, options = {}) => {
+    if (!record) {
+      return;
+    }
+
+    const receipt = receipts.find(
+      (r) => Number(r.purchaseOrderId) === Number(record.id)
+    );
+    setSelectedId(record.id);
+    setReceiveForm(createReceiveForm(record, receipt));
+
+    if (options.scrollToForm) {
+      setTimeout(() => {
+        document
+          .getElementById("receive-goods-form")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    }
+  };
+
   const handleReceiveFieldChange = (field, value) => {
     setReceiveForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -275,7 +326,7 @@ const ReceiveGoods = () => {
     setReceiveForm((prev) => ({
       ...prev,
       items: prev.items.map((item) =>
-        item.id === id ? { ...item, receivedQty: value } : item
+        item.id === id ? { ...item, receivedQty: toQuantity(value) } : item
       ),
     }));
   };
@@ -290,8 +341,8 @@ const ReceiveGoods = () => {
     setError("");
 
     const normalizedItems = receiveForm.items.map((item) => {
-      const orderedQty = Number(item.orderedQty) || 0;
-      let receivedQty = Number(item.receivedQty) || 0;
+      const orderedQty = toQuantity(item.orderedQty);
+      let receivedQty = toQuantity(item.receivedQty);
       if (Number.isNaN(receivedQty) || receivedQty < 0) {
         receivedQty = 0;
       }
@@ -301,15 +352,21 @@ const ReceiveGoods = () => {
       return {
         id: item.id,
         itemId: toNullableInt(item.itemId),
+        name: String(item.name ?? "").trim(),
+        description: String(item.description ?? "").trim(),
+        unit: String(item.unit ?? "PCS").trim() || "PCS",
+        notes: String(item.notes ?? "").trim(),
         orderedQty,
         receivedQty,
       };
     });
 
-    const status = computeReceiveStatus(
-      normalizedItems,
-      selectedRecord.status || "Draft"
-    );
+    const status = String(
+      receiveForm.status ||
+        suggestedStatus ||
+        selectedRecord.status ||
+        "Draft"
+    ).trim();
 
     try {
       const receipt = await saveReceiveGoods({
@@ -491,14 +548,14 @@ const ReceiveGoods = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-6">
+      <div className="grid grid-cols-1 gap-6">
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
           <div className="px-4 py-3 border-b flex items-center justify-between">
             <h3 className="text-lg font-semibold text-slate-800">
               Purchase Orders
             </h3>
             <p className="text-sm text-slate-500">
-              Click a PO to view details.
+              Use View or Save Receipt for each PO.
             </p>
           </div>
           <table className="w-full text-sm">
@@ -511,19 +568,20 @@ const ReceiveGoods = () => {
                 <th className="p-3 text-left min-w-[120px]">Items</th>
                 <th className="p-3 text-left min-w-[140px]">Expected</th>
                 <th className="p-3 text-left min-w-[140px]">Value</th>
+                <th className="p-3 text-left min-w-[190px]">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan="7" className="p-6 text-center text-slate-500">
+                  <td colSpan="8" className="p-6 text-center text-slate-500">
                     Loading purchase orders...
                   </td>
                 </tr>
               )}
               {!loading && records.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="p-6 text-center text-slate-500">
+                  <td colSpan="8" className="p-6 text-center text-slate-500">
                     No purchase orders created yet.
                   </td>
                 </tr>
@@ -534,14 +592,7 @@ const ReceiveGoods = () => {
                   return (
                     <tr
                       key={record.id ?? `po-${idx}`}
-                      onClick={() => {
-                        setSelectedId(record.id);
-                        const receipt = receipts.find(
-                          (r) =>
-                            Number(r.purchaseOrderId) === Number(record.id)
-                        );
-                        setReceiveForm(createReceiveForm(record, receipt));
-                      }}
+                      onClick={() => selectPurchaseOrder(record)}
                       className={`border-t hover:bg-slate-50 cursor-pointer ${
                         isSelected ? "bg-indigo-50/70" : ""
                       }`}
@@ -562,6 +613,32 @@ const ReceiveGoods = () => {
                       <td className="p-3">{formatDate(record.expectedDate) || "-"}</td>
                       <td className="p-3 font-medium">
                         {formatCurrency(record.total || 0)}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              selectPurchaseOrder(record);
+                            }}
+                            className="px-2.5 py-1.5 text-xs rounded-md border border-slate-200 text-slate-700 hover:border-slate-300"
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              selectPurchaseOrder(record, {
+                                scrollToForm: true,
+                              });
+                            }}
+                            className="px-2.5 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+                          >
+                            Save Receipt
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -824,6 +901,7 @@ const ReceiveGoods = () => {
 
               <form
                 onSubmit={handleReceiveSubmit}
+                id="receive-goods-form"
                 className="bg-white rounded-lg shadow-sm border border-slate-200 p-5"
               >
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -877,11 +955,24 @@ const ReceiveGoods = () => {
                   </div>
                   <div>
                     <label className="text-sm font-medium text-slate-700">
-                      Status Preview
+                      Receipt Status
                     </label>
-                    <div className="mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-700">
-                      {nextStatusPreview}
-                    </div>
+                    <select
+                      value={receiveForm.status || suggestedStatus}
+                      onChange={(event) =>
+                        handleReceiveFieldChange("status", event.target.value)
+                      }
+                      className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="Draft">Draft</option>
+                      <option value="Partially Received">
+                        Partially Received
+                      </option>
+                      <option value="Closed">Closed</option>
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Suggested status from quantities: {suggestedStatus}
+                    </p>
                   </div>
                   <div className="sm:col-span-3">
                     <label className="text-sm font-medium text-slate-700">
@@ -908,6 +999,9 @@ const ReceiveGoods = () => {
                       <thead className="bg-slate-100 text-slate-600">
                         <tr>
                           <th className="p-3 text-left min-w-[160px]">Item</th>
+                          <th className="p-3 text-left min-w-[200px]">
+                            Description
+                          </th>
                           <th className="p-3 text-left min-w-[100px]">Unit</th>
                           <th className="p-3 text-left min-w-[110px]">
                             Ordered
@@ -922,9 +1016,9 @@ const ReceiveGoods = () => {
                       </thead>
                       <tbody>
                         {receiveItems.map((item, idx) => {
-                          const balance = Math.max(
-                            item.orderedQty - item.receivedQty,
-                            0
+                          const balance = calculateBalanceQty(
+                            item.orderedQty,
+                            item.receivedQty
                           );
                           return (
                             <tr
@@ -933,6 +1027,9 @@ const ReceiveGoods = () => {
                             >
                               <td className="p-3 font-medium text-slate-800">
                                 {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
+                              </td>
+                              <td className="p-3 text-slate-600">
+                                {item.description || "-"}
                               </td>
                               <td className="p-3">{item.unit || "-"}</td>
                               <td className="p-3">{item.orderedQty}</td>

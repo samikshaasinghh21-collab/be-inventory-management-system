@@ -1,8 +1,20 @@
 import api from "./api";
 
+const toQuantity = (value) => {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+  const sanitized =
+    typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+  const parsed = Number(sanitized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 export const normalizeReceiveGoodsItem = (item = {}) => {
-  const orderedQty = Number(item.orderedQty ?? item.OrderedQty ?? 0) || 0;
-  const receivedQty = Number(item.receivedQty ?? item.ReceivedQty ?? 0) || 0;
+  const orderedQty = toQuantity(item.orderedQty ?? item.OrderedQty ?? 0);
+  const receivedQty = toQuantity(item.receivedQty ?? item.ReceivedQty ?? 0);
+  const explicitBalance = toQuantity(item.balanceQty ?? item.BalanceQty);
+  const computedBalance = Math.max(orderedQty - receivedQty, 0);
   return {
     id: item.id ?? item.Id ?? null,
     receiveGoodsId:
@@ -12,11 +24,18 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
       null,
     purchaseOrderId: item.purchaseOrderId ?? item.PurchaseOrderId ?? null,
     itemId: item.itemId ?? item.ItemId ?? null,
+    name: item.name ?? item.Name ?? item.ItemName ?? "",
+    description: item.description ?? item.Description ?? "",
+    unit: item.unit ?? item.Unit ?? "PCS",
+    notes: item.notes ?? item.Notes ?? "",
     orderedQty,
     receivedQty,
-    balanceQty:
-      Number(item.balanceQty ?? item.BalanceQty ?? orderedQty - receivedQty) ||
-      0,
+    balanceQty: Math.max(
+      explicitBalance > 0 || computedBalance === 0
+        ? explicitBalance
+        : computedBalance,
+      0
+    ),
     createdAt: item.createdAt ?? item.CreatedAt ?? null,
   };
 };
