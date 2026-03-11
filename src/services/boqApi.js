@@ -3,6 +3,9 @@ import api from "./api";
 const normalizeBoqItem = (item = {}) => {
   const quantity = Number(item.quantity ?? item.Quantity ?? 0);
   const rate = Number(item.rate ?? item.Rate ?? 0);
+  const rawAvailable =
+    item.availableQty ?? item.AvailableQty ?? item.remainingQty ?? item.RemainingQty ?? null;
+  const availableQty = Number.isFinite(Number(rawAvailable)) ? Number(rawAvailable) : null;
   const amountFromValues = quantity * rate;
   const amount = Number(item.amount ?? item.Amount ?? amountFromValues) || amountFromValues;
   return {
@@ -12,6 +15,7 @@ const normalizeBoqItem = (item = {}) => {
     description: item.description ?? item.Description ?? "",
     unit: item.unit ?? item.Unit ?? "",
     quantity,
+    availableQty,
     rate,
     notes: item.notes ?? item.Notes ?? "",
     amount,

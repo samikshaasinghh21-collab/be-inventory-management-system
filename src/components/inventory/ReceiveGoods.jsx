@@ -1,100 +1,38 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import useSettings from "../../hooks/useSettings";
-import DateInput from "../common/DateInput";
-import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
-import { fetchProjects } from "../../services/projectsApi";
-import { fetchVendors } from "../../services/vendorsApi";
-import { fetchLocations } from "../../services/locationsApi";
-import {
-  fetchReceiveGoods,
-  saveReceiveGoods,
-} from "../../services/receiveGoodsApi";
+import { getProjects } from "../../services/projectsStore";
 import {
   addWorkflowItem,
   getWorkflowList,
   updateWorkflowItem,
 } from "../../services/workflowStore";
-import { formatDate } from "../../utils/dateFormat";
+import useSettings from "../../hooks/useSettings";
 
+const STORAGE_KEY = "workflow_purchase_orders";
+const LOCATION_KEY = "workflow_locations";
 const INVOICE_KEY = "workflow_invoices";
 
-const toNullableInt = (value) => {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : null;
+const buildReceiveItems = (record) => {
+  const receivedMap = (record?.receivedItems || []).reduce((acc, item) => {
+    acc[String(item.id)] = Number(item.receivedQty) || 0;
+    return acc;
+  }, {});
+
+  return (record?.items || []).map((item) => ({
+    id: item.id,
+    name: item.name || "",
+    unit: item.unit || "PCS",
+    orderedQty: Number(item.quantity) || 0,
+    receivedQty: receivedMap[String(item.id)] ?? 0,
+  }));
 };
 
-const toQuantity = (value) => {
-  if (value === null || value === undefined || value === "") {
-    return 0;
-  }
-  const sanitized =
-    typeof value === "string" ? value.replace(/,/g, "").trim() : value;
-  const parsed = Number(sanitized);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const calculateBalanceQty = (orderedQty, receivedQty) =>
-  Math.max(toQuantity(orderedQty) - toQuantity(receivedQty), 0);
-
-const buildReceiveItems = (record, receipt) => {
-  const receivedByItemId = new Map();
-  const receivedWithoutItemId = [];
-
-  for (const item of receipt?.items || []) {
-    const itemId = toNullableInt(item.itemId ?? item.ItemId);
-    const row = {
-      receivedQty: toQuantity(item.receivedQty ?? item.ReceivedQty ?? 0),
-      name: item.name ?? "",
-      description: item.description ?? "",
-      unit: item.unit ?? "",
-      notes: item.notes ?? "",
-    };
-    if (itemId !== null) {
-      receivedByItemId.set(itemId, row);
-    } else {
-      receivedWithoutItemId.push(row);
-    }
-  }
-
-  let fallbackIndex = 0;
-  return (record?.items || []).map((item, idx) => {
-    const lineId = item.id ?? item.itemId ?? `po-line-${idx}`;
-    const itemId = toNullableInt(item.itemId ?? item.ItemId);
-    const matched =
-      itemId !== null
-        ? receivedByItemId.get(itemId) ?? {}
-        : receivedWithoutItemId[fallbackIndex++] ?? {};
-
-    return {
-      id: lineId,
-      itemId,
-      name:
-        matched.name || item.name || (itemId ? `Item ${itemId}` : ""),
-      description: matched.description || item.description || "",
-      unit: matched.unit || item.unit || "PCS",
-      orderedQty: toQuantity(item.quantity),
-      receivedQty: toQuantity(matched.receivedQty),
-      notes: matched.notes || item.notes || "",
-    };
-  });
-};
-
-const createReceiveForm = (record, receipt) => {
-  const items = buildReceiveItems(record, receipt);
-  return {
-    receivedDate:
-      receipt?.receivedDate ||
-      record?.receivedDate ||
-      new Date().toISOString().slice(0, 10),
-    receivedBy: receipt?.receivedBy || record?.receivedBy || "",
-    notes: receipt?.notes || record?.receivedNotes || "",
-    status:
-      receipt?.status ||
-      computeReceiveStatus(items, record?.status || "Draft"),
-    items,
-  };
-};
+const createReceiveForm = (record) => ({
+  receivedDate: record?.receivedDate || new Date().toISOString().slice(0, 10),
+  receivedBy: record?.receivedBy || "",
+  notes: record?.receivedNotes || "",
+  items: buildReceiveItems(record),
+});
 
 const computeReceiveStatus = (items, fallback = "Draft") => {
   const normalized = Array.isArray(items) ? items : [];
@@ -103,11 +41,11 @@ const computeReceiveStatus = (items, fallback = "Draft") => {
   }
 
   const anyReceived = normalized.some(
-    (item) => toQuantity(item.receivedQty) > 0
+    (item) => Number(item.receivedQty) > 0
   );
   const allReceived = normalized.every((item) => {
-    const ordered = toQuantity(item.orderedQty);
-    const received = toQuantity(item.receivedQty);
+    const ordered = Number(item.orderedQty) || 0;
+    const received = Number(item.receivedQty) || 0;
     if (ordered === 0) {
       return true;
     }
@@ -128,72 +66,47 @@ const ReceiveGoods = () => {
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
   const [records, setRecords] = useState([]);
-  const [receipts, setReceipts] = useState([]);
   const [projects, setProjects] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [receiveForm, setReceiveForm] = useState(() => createReceiveForm());
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
 
-  const loadRecords = async () => {
+  const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
+  const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
+  const loadProjects = () => setProjects(getProjects());
+  const loadVendors = () => {
     try {
-      setLoading(true);
-      setError("");
-      const list = await fetchPurchaseOrders();
-      setRecords(Array.isArray(list) ? list : []);
-    } catch (err) {
-      setRecords([]);
-      setError(err?.message || "Failed to load purchase orders");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadReceipts = async () => {
-    try {
-      const list = await fetchReceiveGoods();
-      setReceipts(Array.isArray(list) ? list : []);
-    } catch {
-      setReceipts([]);
-    }
-  };
-
-  const loadLocations = async () => {
-    try {
-      const list = await fetchLocations();
-      setLocations(Array.isArray(list) ? list : []);
-    } catch {
-      setLocations([]);
-    }
-  };
-
-  const loadProjects = async () => {
-    try {
-      const list = await fetchProjects();
-      setProjects(Array.isArray(list) ? list : []);
-    } catch {
-      setProjects([]);
-    }
-  };
-
-  const loadVendors = async () => {
-    try {
-      const list = await fetchVendors();
-      setVendors(Array.isArray(list) ? list : []);
+      const stored = JSON.parse(localStorage.getItem("vendors") || "[]");
+      setVendors(Array.isArray(stored) ? stored : []);
     } catch {
       setVendors([]);
     }
   };
 
   useEffect(() => {
-    void loadProjects();
-    void loadLocations();
-    void loadVendors();
-    void loadRecords();
-    void loadReceipts();
+    loadProjects();
+    loadLocations();
+    loadVendors();
+    loadRecords();
+  }, []);
+
+  useEffect(() => {
+    const handler = () => loadRecords();
+    window.addEventListener(`${STORAGE_KEY}:changed`, handler);
+    return () => window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = () => loadLocations();
+    window.addEventListener(`${LOCATION_KEY}:changed`, handler);
+    return () => window.removeEventListener(`${LOCATION_KEY}:changed`, handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = () => loadProjects();
+    window.addEventListener("projects:changed", handler);
+    return () => window.removeEventListener("projects:changed", handler);
   }, []);
 
   useEffect(() => {
@@ -225,12 +138,6 @@ const ReceiveGoods = () => {
 
   const selectedRecord =
     records.find((record) => record.id === selectedId) || null;
-  const selectedReceipt = selectedRecord
-    ? receipts.find(
-        (receipt) =>
-          Number(receipt.purchaseOrderId) === Number(selectedRecord.id)
-      )
-    : null;
   const selectedProject = selectedRecord
     ? projectMap[String(selectedRecord.projectId)]
     : null;
@@ -238,9 +145,7 @@ const ReceiveGoods = () => {
     ? vendorMap[String(selectedRecord.vendorId)]
     : null;
   const selectedLocation = selectedRecord
-    ? locationMap[
-        String(selectedRecord.locationId ?? selectedReceipt?.locationId)
-      ]
+    ? locationMap[String(selectedRecord.locationId)]
     : null;
   const selectedItems = Array.isArray(selectedRecord?.items)
     ? selectedRecord.items
@@ -248,20 +153,16 @@ const ReceiveGoods = () => {
 
   useEffect(() => {
     if (selectedRecord) {
-      const matchedReceipt = receipts.find(
-        (receipt) =>
-          Number(receipt.purchaseOrderId) === Number(selectedRecord.id)
-      );
-      setReceiveForm(createReceiveForm(selectedRecord, matchedReceipt));
+      setReceiveForm(createReceiveForm(selectedRecord));
     } else {
       setReceiveForm(createReceiveForm());
     }
-  }, [selectedRecord, receipts]);
+  }, [selectedRecord]);
 
-  const receiveItems = (receiveForm.items || []).map((item) => ({
+  const receiveItems = receiveForm.items.map((item) => ({
     ...item,
-    orderedQty: toQuantity(item.orderedQty),
-    receivedQty: toQuantity(item.receivedQty),
+    orderedQty: Number(item.orderedQty) || 0,
+    receivedQty: Number(item.receivedQty) || 0,
   }));
 
   const totalOrderedQty = receiveItems.reduce(
@@ -272,11 +173,8 @@ const ReceiveGoods = () => {
     (sum, item) => sum + item.receivedQty,
     0
   );
-  const totalBalanceQty = calculateBalanceQty(
-    totalOrderedQty,
-    totalReceivedQty
-  );
-  const suggestedStatus = selectedRecord
+  const totalBalanceQty = Math.max(totalOrderedQty - totalReceivedQty, 0);
+  const nextStatusPreview = selectedRecord
     ? computeReceiveStatus(receiveItems, selectedRecord.status || "Draft")
     : "Draft";
 
@@ -298,26 +196,6 @@ const ReceiveGoods = () => {
     0
   );
 
-  const selectPurchaseOrder = (record, options = {}) => {
-    if (!record) {
-      return;
-    }
-
-    const receipt = receipts.find(
-      (r) => Number(r.purchaseOrderId) === Number(record.id)
-    );
-    setSelectedId(record.id);
-    setReceiveForm(createReceiveForm(record, receipt));
-
-    if (options.scrollToForm) {
-      setTimeout(() => {
-        document
-          .getElementById("receive-goods-form")
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 0);
-    }
-  };
-
   const handleReceiveFieldChange = (field, value) => {
     setReceiveForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -326,23 +204,20 @@ const ReceiveGoods = () => {
     setReceiveForm((prev) => ({
       ...prev,
       items: prev.items.map((item) =>
-        item.id === id ? { ...item, receivedQty: toQuantity(value) } : item
+        item.id === id ? { ...item, receivedQty: value } : item
       ),
     }));
   };
 
-  const handleReceiveSubmit = async (event) => {
+  const handleReceiveSubmit = (event) => {
     event.preventDefault();
     if (!selectedRecord) {
       return;
     }
 
-    setSaving(true);
-    setError("");
-
     const normalizedItems = receiveForm.items.map((item) => {
-      const orderedQty = toQuantity(item.orderedQty);
-      let receivedQty = toQuantity(item.receivedQty);
+      const orderedQty = Number(item.orderedQty) || 0;
+      let receivedQty = Number(item.receivedQty) || 0;
       if (Number.isNaN(receivedQty) || receivedQty < 0) {
         receivedQty = 0;
       }
@@ -351,181 +226,137 @@ const ReceiveGoods = () => {
       }
       return {
         id: item.id,
-        itemId: toNullableInt(item.itemId),
-        name: String(item.name ?? "").trim(),
-        description: String(item.description ?? "").trim(),
-        unit: String(item.unit ?? "PCS").trim() || "PCS",
-        notes: String(item.notes ?? "").trim(),
         orderedQty,
         receivedQty,
       };
     });
 
-    const status = String(
-      receiveForm.status ||
-        suggestedStatus ||
-        selectedRecord.status ||
-        "Draft"
-    ).trim();
+    const status = computeReceiveStatus(
+      normalizedItems,
+      selectedRecord.status || "Draft"
+    );
 
-    try {
-      const receipt = await saveReceiveGoods({
-        purchaseOrderId: selectedRecord.id,
-        projectId: selectedRecord.projectId,
-        vendorId: selectedRecord.vendorId,
-        locationId: selectedRecord.locationId,
-        receivedDate: receiveForm.receivedDate,
-        receivedBy: receiveForm.receivedBy.trim(),
-        notes: receiveForm.notes.trim(),
-        status,
-        items: normalizedItems,
-      });
+    updateWorkflowItem(STORAGE_KEY, selectedRecord.id, {
+      status,
+      receivedItems: normalizedItems.map((item) => ({
+        id: item.id,
+        receivedQty: item.receivedQty,
+      })),
+      receivedDate: receiveForm.receivedDate,
+      receivedBy: receiveForm.receivedBy.trim(),
+      receivedNotes: receiveForm.notes.trim(),
+      receivedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
 
-      await Promise.all([loadReceipts(), loadRecords()]);
-      setReceiveForm(createReceiveForm(selectedRecord, receipt));
+    const invoiceList = getWorkflowList(INVOICE_KEY);
+    const existingInvoice = invoiceList.find(
+      (invoice) => invoice.sourcePoId === selectedRecord.id
+    );
+    const invoiceItems = (selectedRecord.items || [])
+      .map((item) => {
+        const receivedMatch = normalizedItems.find(
+          (received) => received.id === item.id
+        );
+        const qty = Number(receivedMatch?.receivedQty) || 0;
+        if (qty <= 0) {
+          return null;
+        }
+        return {
+          id: item.id,
+          name: item.name || "",
+          description: item.description || "",
+          unit: item.unit || "PCS",
+          quantity: qty,
+          rate: item.rate || 0,
+          notes: item.notes || "",
+        };
+      })
+      .filter(Boolean);
 
-      const invoiceList = getWorkflowList(INVOICE_KEY);
-      const existingInvoice = invoiceList.find(
-        (invoice) => invoice.sourcePoId === selectedRecord.id
-      );
-      const invoiceItems = (selectedRecord.items || [])
-        .map((item) => {
-          const receivedMatch = normalizedItems.find(
-            (received) => received.id === item.id
-          );
-          const qty = Number(receivedMatch?.receivedQty) || 0;
-          if (qty <= 0) {
-            return null;
-          }
-          return {
-            id: item.id,
-            name: item.name || "",
-            description: item.description || "",
-            unit: item.unit || "PCS",
-            quantity: qty,
-            rate: item.rate ?? item.unitPrice ?? 0,
-            notes: item.notes || "",
-          };
-        })
-        .filter(Boolean);
+    const invoiceTotal = invoiceItems.reduce((sum, item) => {
+      const qty = Number(item.quantity) || 0;
+      const rate = Number(item.rate) || 0;
+      return sum + qty * rate;
+    }, 0);
 
-      const invoiceTotal = invoiceItems.reduce((sum, item) => {
-        const qty = Number(item.quantity) || 0;
-        const rate = Number(item.rate) || 0;
-        return sum + qty * rate;
-      }, 0);
+    const invoicePayload = {
+      id: existingInvoice?.id ?? Date.now(),
+      invoiceNumber:
+        existingInvoice?.invoiceNumber ||
+        `INV-${selectedRecord.poNumber || Date.now()}`,
+      clientName:
+        selectedProject?.client ||
+        selectedProject?.name ||
+        selectedVendor?.name ||
+        "",
+      projectId: selectedRecord.projectId || "",
+      status: existingInvoice?.status || "Draft",
+      issueDate:
+        receiveForm.receivedDate || new Date().toISOString().slice(0, 10),
+      dueDate: existingInvoice?.dueDate || "",
+      notes: receiveForm.notes.trim(),
+      items: invoiceItems,
+      total: invoiceTotal,
+      sourcePoId: selectedRecord.id,
+      sourcePoNumber: selectedRecord.poNumber || "",
+      receivedBy: receiveForm.receivedBy.trim(),
+      receivedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdAt: existingInvoice?.createdAt || new Date().toISOString(),
+    };
 
-      const invoicePayload = {
-        id: existingInvoice?.id ?? Date.now(),
-        invoiceNumber:
-          existingInvoice?.invoiceNumber ||
-          `INV-${selectedRecord.poNumber || Date.now()}`,
-        clientName:
-          selectedProject?.client ||
-          selectedProject?.name ||
-          selectedVendor?.name ||
-          "",
-        projectId: selectedRecord.projectId || "",
-        status: existingInvoice?.status || "Draft",
-        issueDate:
-          receiveForm.receivedDate || new Date().toISOString().slice(0, 10),
-        dueDate: existingInvoice?.dueDate || "",
-        notes: receiveForm.notes.trim(),
-        items: invoiceItems,
-        total: invoiceTotal,
-        sourcePoId: selectedRecord.id,
-        sourcePoNumber: selectedRecord.poNumber || "",
-        receivedBy: receiveForm.receivedBy.trim(),
-        receivedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        createdAt: existingInvoice?.createdAt || new Date().toISOString(),
-      };
-
-      if (existingInvoice) {
-        updateWorkflowItem(INVOICE_KEY, existingInvoice.id, invoicePayload);
-      } else {
-        addWorkflowItem(INVOICE_KEY, invoicePayload);
-      }
-
-      navigate("/inventory/receive-goods-register");
-    } catch (err) {
-      const message =
-        err?.code === "ECONNABORTED"
-          ? "Receipt save timed out. Please retry; if it repeats, restart backend and check server logs."
-          : err?.response?.data?.error ||
-            err?.message ||
-            "Failed to save receipt";
-      setError(message);
-    } finally {
-      setSaving(false);
+    if (existingInvoice) {
+      updateWorkflowItem(INVOICE_KEY, existingInvoice.id, invoicePayload);
+    } else {
+      addWorkflowItem(INVOICE_KEY, invoicePayload);
     }
   };
 
   const resetReceiveForm = () => {
     if (selectedRecord) {
-      const receipt = receipts.find(
-        (r) => Number(r.purchaseOrderId) === Number(selectedRecord.id)
-      );
-      setReceiveForm(createReceiveForm(selectedRecord, receipt));
-    } else {
-      setReceiveForm(createReceiveForm());
+      setReceiveForm(createReceiveForm(selectedRecord));
     }
   };
 
   return (
     <div className="p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-              Inventory
-            </p>
-            <h1 className="text-3xl font-semibold text-slate-800">
-              Receive Goods
-            </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Review purchase orders and project details before receiving stock.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                loadRecords();
-                loadReceipts();
-            }}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
+        <div>
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
+            Inventory
+          </p>
+          <h1 className="text-3xl font-semibold text-slate-800">
+            Receive Goods
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Review purchase orders and project details before receiving stock.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={loadRecords}
             className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
-            >
-              Refresh POs
-            </button>
-            <button
-              type="button"
-              onClick={loadVendors}
-              className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
-            >
-              Refresh Vendors
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate("/inventory/purchase-order")}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
-            >
-              Create PO
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate("/inventory/receive-goods-register")}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200"
-            >
-              View Receipts
-            </button>
-          </div>
+          >
+            Refresh POs
+          </button>
+          <button
+            type="button"
+            onClick={loadVendors}
+            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
+          >
+            Refresh Vendors
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("/inventory/purchase-order")}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+          >
+            Create PO
+          </button>
         </div>
-
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
@@ -548,14 +379,14 @@ const ReceiveGoods = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-6">
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
           <div className="px-4 py-3 border-b flex items-center justify-between">
             <h3 className="text-lg font-semibold text-slate-800">
               Purchase Orders
             </h3>
             <p className="text-sm text-slate-500">
-              Use View or Save Receipt for each PO.
+              Click a PO to view details.
             </p>
           </div>
           <table className="w-full text-sm">
@@ -568,81 +399,49 @@ const ReceiveGoods = () => {
                 <th className="p-3 text-left min-w-[120px]">Items</th>
                 <th className="p-3 text-left min-w-[140px]">Expected</th>
                 <th className="p-3 text-left min-w-[140px]">Value</th>
-                <th className="p-3 text-left min-w-[190px]">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {loading && (
+              {records.length === 0 && (
                 <tr>
-                  <td colSpan="8" className="p-6 text-center text-slate-500">
-                    Loading purchase orders...
-                  </td>
-                </tr>
-              )}
-              {!loading && records.length === 0 && (
-                <tr>
-                  <td colSpan="8" className="p-6 text-center text-slate-500">
+                  <td colSpan="7" className="p-6 text-center text-slate-500">
                     No purchase orders created yet.
                   </td>
                 </tr>
               )}
-              {!loading &&
-                records.map((record, idx) => {
-                  const isSelected = selectedId === record.id;
-                  return (
-                    <tr
-                      key={record.id ?? `po-${idx}`}
-                      onClick={() => selectPurchaseOrder(record)}
-                      className={`border-t hover:bg-slate-50 cursor-pointer ${
-                        isSelected ? "bg-indigo-50/70" : ""
-                      }`}
-                    >
-                      <td className="p-3 font-medium text-slate-800">
-                        {record.poNumber}
-                      </td>
-                      <td className="p-3">
-                        <span className="text-indigo-600 font-medium">
-                          {projectMap[String(record.projectId)]?.name || "-"}
-                        </span>
-                      </td>
-                      <td className="p-3">
-                        {vendorMap[String(record.vendorId)]?.name || "-"}
-                      </td>
-                      <td className="p-3">{record.status || "-"}</td>
-                      <td className="p-3">{record.items?.length || 0}</td>
-                      <td className="p-3">{formatDate(record.expectedDate) || "-"}</td>
-                      <td className="p-3 font-medium">
-                        {formatCurrency(record.total || 0)}
-                      </td>
-                      <td className="p-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              selectPurchaseOrder(record);
-                            }}
-                            className="px-2.5 py-1.5 text-xs rounded-md border border-slate-200 text-slate-700 hover:border-slate-300"
-                          >
-                            View
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              selectPurchaseOrder(record, {
-                                scrollToForm: true,
-                              });
-                            }}
-                            className="px-2.5 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
-                          >
-                            Save Receipt
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+              {records.map((record) => {
+                const isSelected = selectedId === record.id;
+                return (
+                  <tr
+                    key={record.id}
+                    onClick={() => {
+                      setSelectedId(record.id);
+                      setReceiveForm(createReceiveForm(record));
+                    }}
+                    className={`border-t hover:bg-slate-50 cursor-pointer ${
+                      isSelected ? "bg-indigo-50/70" : ""
+                    }`}
+                  >
+                    <td className="p-3 font-medium text-slate-800">
+                      {record.poNumber}
+                    </td>
+                    <td className="p-3">
+                      <span className="text-indigo-600 font-medium">
+                        {projectMap[String(record.projectId)]?.name || "-"}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      {vendorMap[String(record.vendorId)]?.name || "-"}
+                    </td>
+                    <td className="p-3">{record.status || "-"}</td>
+                    <td className="p-3">{record.items?.length || 0}</td>
+                    <td className="p-3">{record.expectedDate || "-"}</td>
+                    <td className="p-3 font-medium">
+                      {formatCurrency(record.total || 0)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -705,7 +504,7 @@ const ReceiveGoods = () => {
                       Order Date
                     </span>
                     <span className="font-medium text-slate-800">
-                      {formatDate(selectedRecord.orderDate) || "-"}
+                      {selectedRecord.orderDate || "-"}
                     </span>
                   </div>
                   <div className="flex flex-col">
@@ -713,7 +512,7 @@ const ReceiveGoods = () => {
                       Expected Date
                     </span>
                     <span className="font-medium text-slate-800">
-                      {formatDate(selectedRecord.expectedDate) || "-"}
+                      {selectedRecord.expectedDate || "-"}
                     </span>
                   </div>
                   <div className="flex flex-col">
@@ -729,7 +528,7 @@ const ReceiveGoods = () => {
                       Received Date
                     </span>
                     <span className="font-medium text-slate-800">
-                      {formatDate(selectedReceipt?.receivedDate) || "-"}
+                      {selectedRecord.receivedDate || "-"}
                     </span>
                   </div>
                   <div className="flex flex-col">
@@ -737,7 +536,7 @@ const ReceiveGoods = () => {
                       Received By
                     </span>
                     <span className="font-medium text-slate-800">
-                      {selectedReceipt?.receivedBy || "-"}
+                      {selectedRecord.receivedBy || "-"}
                     </span>
                   </div>
                 </div>
@@ -749,12 +548,12 @@ const ReceiveGoods = () => {
                     {selectedRecord.notes}
                   </div>
                 )}
-                {selectedReceipt?.notes && (
+                {selectedRecord.receivedNotes && (
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
                     <span className="font-medium text-slate-700">
                       Receiving Notes:
                     </span>{" "}
-                    {selectedReceipt.notes}
+                    {selectedRecord.receivedNotes}
                   </div>
                 )}
               </div>
@@ -798,7 +597,7 @@ const ReceiveGoods = () => {
                         Start Date
                       </span>
                       <span className="font-medium text-slate-800">
-                        {formatDate(selectedProject.startDate) || "-"}
+                        {selectedProject.startDate || "-"}
                       </span>
                     </div>
                     <div className="flex flex-col">
@@ -806,7 +605,7 @@ const ReceiveGoods = () => {
                         End Date
                       </span>
                       <span className="font-medium text-slate-800">
-                        {formatDate(selectedProject.endDate) || "-"}
+                        {selectedProject.endDate || "-"}
                       </span>
                     </div>
                     <div className="flex flex-col sm:col-span-2">
@@ -853,18 +652,14 @@ const ReceiveGoods = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedItems.map((item, idx) => {
+                        {selectedItems.map((item) => {
                           const qty = Number(item.quantity) || 0;
-                          const rate =
-                            Number(item.rate ?? item.unitPrice) || 0;
+                          const rate = Number(item.rate) || 0;
                           const amount = qty * rate;
                           return (
-                            <tr
-                              key={item.id ?? item.itemId ?? `line-${idx}`}
-                              className="border-t"
-                            >
+                            <tr key={item.id} className="border-t">
                               <td className="p-3 font-medium text-slate-800">
-                                {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
+                                {item.name || "-"}
                               </td>
                               <td className="p-3 text-slate-600">
                                 {item.description || "-"}
@@ -874,9 +669,7 @@ const ReceiveGoods = () => {
                                 {item.quantity ? qty : "-"}
                               </td>
                               <td className="p-3">
-                                {item.rate || item.unitPrice
-                                  ? formatCurrency(rate)
-                                  : "-"}
+                                {item.rate ? formatCurrency(rate) : "-"}
                               </td>
                               <td className="p-3 font-medium">
                                 {amount ? formatCurrency(amount) : "-"}
@@ -901,7 +694,6 @@ const ReceiveGoods = () => {
 
               <form
                 onSubmit={handleReceiveSubmit}
-                id="receive-goods-form"
                 className="bg-white rounded-lg shadow-sm border border-slate-200 p-5"
               >
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
@@ -927,13 +719,16 @@ const ReceiveGoods = () => {
                     <label className="text-sm font-medium text-slate-700">
                       Received Date
                     </label>
-                    <DateInput
+                    <input
+                      type="date"
                       value={receiveForm.receivedDate}
-                      onChange={(value) =>
-                        handleReceiveFieldChange("receivedDate", value)
+                      onChange={(event) =>
+                        handleReceiveFieldChange(
+                          "receivedDate",
+                          event.target.value
+                        )
                       }
                       className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                      placeholder="dd/mm/yyyy"
                     />
                   </div>
                   <div>
@@ -955,24 +750,11 @@ const ReceiveGoods = () => {
                   </div>
                   <div>
                     <label className="text-sm font-medium text-slate-700">
-                      Receipt Status
+                      Status Preview
                     </label>
-                    <select
-                      value={receiveForm.status || suggestedStatus}
-                      onChange={(event) =>
-                        handleReceiveFieldChange("status", event.target.value)
-                      }
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                    >
-                      <option value="Draft">Draft</option>
-                      <option value="Partially Received">
-                        Partially Received
-                      </option>
-                      <option value="Closed">Closed</option>
-                    </select>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Suggested status from quantities: {suggestedStatus}
-                    </p>
+                    <div className="mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-700">
+                      {nextStatusPreview}
+                    </div>
                   </div>
                   <div className="sm:col-span-3">
                     <label className="text-sm font-medium text-slate-700">
@@ -999,9 +781,6 @@ const ReceiveGoods = () => {
                       <thead className="bg-slate-100 text-slate-600">
                         <tr>
                           <th className="p-3 text-left min-w-[160px]">Item</th>
-                          <th className="p-3 text-left min-w-[200px]">
-                            Description
-                          </th>
                           <th className="p-3 text-left min-w-[100px]">Unit</th>
                           <th className="p-3 text-left min-w-[110px]">
                             Ordered
@@ -1015,21 +794,15 @@ const ReceiveGoods = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {receiveItems.map((item, idx) => {
-                          const balance = calculateBalanceQty(
-                            item.orderedQty,
-                            item.receivedQty
+                        {receiveItems.map((item) => {
+                          const balance = Math.max(
+                            item.orderedQty - item.receivedQty,
+                            0
                           );
                           return (
-                            <tr
-                              key={item.id ?? item.itemId ?? `receive-${idx}`}
-                              className="border-t"
-                            >
+                            <tr key={item.id} className="border-t">
                               <td className="p-3 font-medium text-slate-800">
-                                {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
-                              </td>
-                              <td className="p-3 text-slate-600">
-                                {item.description || "-"}
+                                {item.name || "-"}
                               </td>
                               <td className="p-3">{item.unit || "-"}</td>
                               <td className="p-3">{item.orderedQty}</td>
@@ -1077,10 +850,9 @@ const ReceiveGoods = () => {
                   </div>
                   <button
                     type="submit"
-                    disabled={saving}
                     className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
                   >
-                    {saving ? "Saving..." : "Save Receipt"}
+                    Save Receipt
                   </button>
                 </div>
               </form>
@@ -1093,3 +865,4 @@ const ReceiveGoods = () => {
 };
 
 export default ReceiveGoods;
+ 

@@ -14,6 +14,18 @@ import {
 import DateInput from "../components/common/DateInput";
 import { formatTimelineRange } from "../utils/dateFormat";
 
+const normalizeText = (value) => String(value ?? "").trim();
+
+const normalizeOptional = (value) => {
+  const trimmed = normalizeText(value);
+  return trimmed.length ? trimmed : null;
+};
+
+const normalizeDateValue = (value) => {
+  const trimmed = normalizeText(value);
+  return trimmed.length ? trimmed : null;
+};
+
 const ProjectsHome = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
@@ -74,10 +86,25 @@ const ProjectsHome = () => {
     setErrors({});
   };
 
-  const validate = () => {
+  const buildNormalizedProject = (source, fallbackStatus = "Planned") => ({
+    name: normalizeText(source?.name),
+    code: normalizeOptional(source?.code),
+    client: normalizeOptional(source?.client),
+    status: normalizeText(source?.status) || fallbackStatus,
+    startDate: normalizeDateValue(source?.startDate),
+    endDate: normalizeDateValue(source?.endDate),
+    notes: normalizeOptional(source?.notes),
+  });
+
+  const pickFinalValue = (currentValue, baselineValue) =>
+    currentValue === baselineValue ? baselineValue : currentValue;
+
+  const validate = (baseline, current) => {
     const nextErrors = {};
-    if (!form.name.trim()) nextErrors.name = "Project name is required.";
-    if (form.startDate && form.endDate && form.endDate < form.startDate) {
+    if (!current.name) nextErrors.name = "Project name is required.";
+    const finalStart = pickFinalValue(current.startDate, baseline.startDate);
+    const finalEnd = pickFinalValue(current.endDate, baseline.endDate);
+    if (finalStart && finalEnd && finalEnd < finalStart) {
       nextErrors.endDate = "End date must be after the start date.";
     }
     setErrors(nextErrors);
@@ -86,17 +113,26 @@ const ProjectsHome = () => {
 
   const saveEdit = async () => {
     if (!editing) return;
-    if (!validate()) return;
 
-    const payload = {
-      name: form.name.trim(),
-      code: form.code.trim() || undefined,
-      client: form.client.trim() || undefined,
-      status: form.status,
-      startDate: form.startDate || null,
-      endDate: form.endDate || null,
-      notes: form.notes.trim() || undefined,
-    };
+    const baseline = buildNormalizedProject(editing, "Planned");
+    const current = buildNormalizedProject(form, baseline.status || "Planned");
+    if (!validate(baseline, current)) return;
+
+    const payload = {};
+    if (current.name !== baseline.name) payload.name = current.name;
+    if (current.code !== baseline.code) payload.code = current.code;
+    if (current.client !== baseline.client) payload.client = current.client;
+    if (current.status !== baseline.status) payload.status = current.status;
+    if (current.startDate !== baseline.startDate)
+      payload.startDate = current.startDate;
+    if (current.endDate !== baseline.endDate) payload.endDate = current.endDate;
+    if (current.notes !== baseline.notes) payload.notes = current.notes;
+
+    if (Object.keys(payload).length === 0) {
+      setEditing(null);
+      setErrors({});
+      return;
+    }
 
     try {
       const updated = await updateProjectApi(editing.id, payload);

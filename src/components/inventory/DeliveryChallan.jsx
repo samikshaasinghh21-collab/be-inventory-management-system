@@ -197,8 +197,6 @@ const DeliveryChallan = () => {
       notes: record.notes || "",
     });
     setItems(record.items?.length ? record.items : [createLineItem()]);
-    setSelectedBoqId("");
-    setBoqError("");
     setErrors({});
   };
 
@@ -381,7 +379,7 @@ const DeliveryChallan = () => {
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                 Pick From *
+                 Ship From *
               </label>
               <select
                 value={form.fromLocationId}
@@ -406,7 +404,7 @@ const DeliveryChallan = () => {
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Deliver To *
+                Ship To *
               </label>
               <input
                 type="text"
@@ -533,7 +531,7 @@ const DeliveryChallan = () => {
           items={items}
           onChange={setItems}
           onPickFromProducts={handlePickFromBoq}
-          pickLabel="Pick Materials from BOQ"
+          pickLabel="Pick from BOQ"
         />
         {boqError && <p className="text-xs text-red-600">{boqError}</p>}
         {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
@@ -586,7 +584,7 @@ const DeliveryChallan = () => {
             <tr>
               <th className="p-3 text-left min-w-[150px]">DC No</th>
               <th className="p-3 text-left min-w-[180px]">Project</th>
-              <th className="p-3 text-left min-w-[180px]">Slip To (DC Pick From)</th>
+              <th className="p-3 text-left min-w-[180px]"> (Pick From)</th>
               <th className="p-3 text-left min-w-[180px]">Ship To</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
@@ -707,7 +705,7 @@ const DeliveryChallan = () => {
                   <p className="font-semibold">{selectedProject.client || "-"}</p>
                   <p className="text-slate-600">Deliver To:</p>
                   <p className="font-semibold">{selectedChallan.toLocation || "-"}</p>
-                  <p className="text-slate-600">Slip To (DC Pick From):</p>
+                  <p className="text-slate-600"> ( Pick From):</p>
                   <p className="font-semibold">{selectedFromLocation.name || "-"}</p>
                 </div>
               </div>
@@ -715,7 +713,7 @@ const DeliveryChallan = () => {
 
             <div className="grid grid-cols-2 border-b border-slate-800 text-[11px]">
               <div className="p-3 border-r border-slate-800">
-                <p className="font-semibold">Slip To (DC Pick From)</p>
+                <p className="font-semibold">Ship From</p>
                 <p>{selectedFromLocation.name || "-"}</p>
                 <p className="whitespace-pre-line mt-1">
                   {selectedFromLocation.address || "-"}

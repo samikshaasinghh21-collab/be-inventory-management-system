@@ -52,8 +52,270 @@ const getLanAddresses = () => {
   return addresses;
 };
 
+const toIdentifier = (name) => `[${String(name).replace(/]/g, "]]")}]`;
+
+const getSqlErrorNumber = (error) =>
+  error?.number ??
+  error?.originalError?.info?.number ??
+  error?.originalError?.number ??
+  error?.info?.number ??
+  null;
+
+const isSqlMissingTableError = (error) => {
+  const number = getSqlErrorNumber(error);
+  return number === 208 || number === 207;
+};
+const isSqlForeignKeyViolation = (error) => getSqlErrorNumber(error) === 547;
+
+const uniqueColumnNames = (columns = []) => {
+  const seen = new Set();
+  return columns.filter((column) => {
+    const normalized = String(column ?? "").toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      return false;
+    }
+    seen.add(normalized);
+    return true;
+  });
+};
+
+const buildTextCoalesceExpr = (columns = [], fallback = "N''") => {
+  const normalizedColumns = uniqueColumnNames(columns);
+  if (!normalizedColumns.length) {
+    return fallback;
+  }
+  return `COALESCE(${normalizedColumns
+    .map(
+      (column) =>
+        `NULLIF(LTRIM(RTRIM(CAST(${toIdentifier(column)} AS NVARCHAR(MAX)))), N'')`
+    )
+    .join(", ")}, ${fallback})`;
+};
+
+const buildNumberCoalesceExpr = (columns = [], fallback = "0") => {
+  const normalizedColumns = uniqueColumnNames(columns);
+  if (!normalizedColumns.length) {
+    return fallback;
+  }
+  return `COALESCE(${normalizedColumns
+    .map((column) => `TRY_CONVERT(DECIMAL(18, 2), ${toIdentifier(column)})`)
+    .join(", ")}, ${fallback})`;
+};
+
+const buildIdCoalesceExpr = (columns = [], fallback = "NULL") => {
+  const normalizedColumns = uniqueColumnNames(columns);
+  if (!normalizedColumns.length) {
+    return fallback;
+  }
+  return `COALESCE(${normalizedColumns
+    .map((column) => `TRY_CONVERT(BIGINT, ${toIdentifier(column)})`)
+    .join(", ")}, ${fallback})`;
+};
+
+const buildDateCoalesceExpr = (columns = [], fallback = "NULL") => {
+  const normalizedColumns = uniqueColumnNames(columns);
+  if (!normalizedColumns.length) {
+    return fallback;
+  }
+  return `COALESCE(${normalizedColumns
+    .map((column) => `TRY_CONVERT(DATETIME2, ${toIdentifier(column)})`)
+    .join(", ")}, ${fallback})`;
+};
+
+const projectDependencySources = [
+  { key: "locations", table: "Locations", singular: "location", plural: "locations" },
+  {
+    key: "purchaseOrders",
+    table: "PurchaseOrders",
+    singular: "purchase order",
+    plural: "purchase orders",
+  },
+  {
+    key: "receiveGoods",
+    table: "ReceiveGoods",
+    singular: "receive goods receipt",
+    plural: "receive goods receipts",
+  },
+  { key: "boqs", table: "BOQProjects", singular: "BOQ", plural: "BOQs" },
+  {
+    key: "deliveryChallans",
+    table: "DeliveryChallan",
+    singular: "delivery challan",
+    plural: "delivery challans",
+  },
+  {
+    key: "consumptions",
+    table: "Consumption",
+    singular: "consumption record",
+    plural: "consumption records",
+  },
+];
+
+const formatCountLabel = (count, singular, plural) =>
+  `${count} ${count === 1 ? singular : plural}`;
+
+const loadProjectDependencyCounts = async (pool, projectId) => {
+  const counts = {};
+  for (const source of projectDependencySources) {
+    try {
+      const result = await pool
+        .request()
+        .input("ProjectId", sql.Int, projectId)
+        .query(
+          `SELECT COUNT(1) AS count FROM dbo.${toIdentifier(source.table)} WHERE ProjectId = @ProjectId`
+        );
+      counts[source.key] = Number(result.recordset?.[0]?.count ?? 0);
+    } catch (error) {
+      if (isSqlMissingTableError(error)) {
+        counts[source.key] = 0;
+        continue;
+      }
+      throw error;
+    }
+  }
+  return counts;
+};
+
+const buildProjectDependencySummary = (counts = {}) => {
+  const parts = projectDependencySources
+    .map((source) => {
+      const count = Number(counts[source.key] ?? 0);
+      if (!count) {
+        return null;
+      }
+      return formatCountLabel(count, source.singular, source.plural);
+    })
+    .filter(Boolean);
+  return parts.join(", ");
+};
+
+const resolveItemsSchema = async () => {
+  const pool = await getPool();
+  const [columnsResult, identityResult] = await Promise.all([
+    pool.request().query(`
+      SELECT name AS ColumnName
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.Items')
+    `),
+    pool.request().query(`
+      SELECT name AS ColumnName
+      FROM sys.identity_columns
+      WHERE object_id = OBJECT_ID('dbo.Items')
+    `),
+  ]);
+
+  const columnsByName = new Map(
+    (columnsResult.recordset ?? []).map((row) => {
+      const actualName = String(row.ColumnName ?? "");
+      return [actualName.toLowerCase(), actualName];
+    })
+  );
+  const identityColumns = new Set(
+    (identityResult.recordset ?? []).map((row) =>
+      String(row.ColumnName ?? "").toLowerCase()
+    )
+  );
+
+  const findColumns = (...candidates) =>
+    uniqueColumnNames(
+      candidates
+        .map((candidate) => columnsByName.get(String(candidate).toLowerCase()) ?? null)
+        .filter(Boolean)
+    );
+
+  const idColumns = findColumns(
+    "item_id",
+    "ItemId",
+    "itemid",
+    "itemId",
+    "ID",
+    "Id",
+    "id",
+    "product_id",
+    "ProductId",
+    "ProductID"
+  );
+  const nameColumns = findColumns(
+    "item_name",
+    "ItemName",
+    "Name",
+    "name",
+    "ProductName",
+    "product_name"
+  );
+  const categoryColumns = findColumns(
+    "item_category",
+    "ItemCategory",
+    "Category",
+    "category"
+  );
+  const hsnColumns = findColumns("hsn_code", "HSNCode", "HsnCode", "HSN", "hsn");
+  const stockColumns = findColumns(
+    "stock_qty",
+    "StockQty",
+    "stock",
+    "Stock",
+    "opening_stock",
+    "OpeningStock",
+    "quantity",
+    "Quantity",
+    "qty",
+    "Qty"
+  );
+  const priceColumns = findColumns(
+    "unit_price",
+    "UnitPrice",
+    "price",
+    "Price",
+    "selling_price",
+    "SellingPrice",
+    "rate",
+    "Rate"
+  );
+  const gstColumns = findColumns("gst_rate", "GSTRate", "GST", "Gst", "gst");
+  const descriptionColumns = findColumns(
+    "item_description",
+    "ItemDescription",
+    "description",
+    "Description",
+    "details",
+    "Details"
+  );
+  const createdAtColumns = findColumns(
+    "created_at",
+    "CreatedAt",
+    "createdAt"
+  );
+  const updatedAtColumns = findColumns(
+    "updated_at",
+    "UpdatedAt",
+    "updatedAt"
+  );
+
+  const idColumn =
+    idColumns.find((column) => identityColumns.has(column.toLowerCase())) ??
+    idColumns[0] ??
+    null;
+
+  return {
+    idColumn,
+    sortColumn: idColumn ?? nameColumns[0] ?? categoryColumns[0] ?? null,
+    idColumns,
+    nameColumns,
+    categoryColumns,
+    hsnColumns,
+    stockColumns,
+    priceColumns,
+    gstColumns,
+    descriptionColumns,
+    createdAtColumns,
+    updatedAtColumns,
+  };
+};
+
 const normalizeItem = (row = {}) => ({
   id:
+    row.item_id ??
     row.ItemId ??
     row.ItemID ??
     row.ID ??
@@ -63,6 +325,7 @@ const normalizeItem = (row = {}) => ({
     row.ProductID ??
     null,
   name:
+    row.item_name ??
     row.Name ??
     row.ItemName ??
     row.ProductName ??
@@ -71,23 +334,35 @@ const normalizeItem = (row = {}) => ({
     row.productName ??
     "",
   category:
+    row.item_category ??
     row.Category ??
     row.ItemCategory ??
     row.category ??
     row.itemCategory ??
     "",
-  hsn: row.HSN ?? row.HsnCode ?? row.hsn ?? row.hsnCode ?? "",
+  hsn:
+    row.hsn_code ??
+    row.HSN ??
+    row.HSNCode ??
+    row.HsnCode ??
+    row.hsn ??
+    row.hsnCode ??
+    "",
   stock: Number(
+    row.stock_qty ??
+    row.opening_stock ??
     row.Stock ??
-      row.Quantity ??
-      row.Qty ??
-      row.stock ??
-      row.quantity ??
+    row.Quantity ??
+    row.Qty ??
+    row.stock ??
+    row.quantity ??
       row.qty ??
       0
   ),
   price: Number(
-    row.Price ??
+    row.unit_price ??
+      row.selling_price ??
+      row.Price ??
       row.Rate ??
       row.UnitPrice ??
       row.price ??
@@ -95,8 +370,9 @@ const normalizeItem = (row = {}) => ({
       row.unitPrice ??
       0
   ),
-  gst: row.GST ?? row.Gst ?? row.gst ?? "",
+  gst: row.gst_rate ?? row.GST ?? row.Gst ?? row.gst ?? "",
   description:
+    row.item_description ??
     row.Description ??
     row.ItemDescription ??
     row.Details ??
@@ -106,14 +382,33 @@ const normalizeItem = (row = {}) => ({
     "",
 });
 
+const formatDateOnlyValue = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return null;
+  }
+  const directMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+  if (directMatch) {
+    return `${directMatch[1]}-${directMatch[2]}-${directMatch[3]}`;
+  }
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+};
+
 const normalizeProject = (row = {}) => ({
   id: row.ProjectId ?? row.id ?? null,
   name: row.ProjectName ?? row.name ?? "",
   code: row.ProjectCode ?? row.code ?? "",
   client: row.Client ?? row.client ?? "",
   status: row.Status ?? row.status ?? "",
-  startDate: row.StartDate ?? row.startDate ?? null,
-  endDate: row.EndDate ?? row.endDate ?? null,
+  startDate: formatDateOnlyValue(row.StartDate ?? row.startDate),
+  endDate: formatDateOnlyValue(row.EndDate ?? row.endDate),
   notes: row.Notes ?? row.notes ?? "",
 });
 
@@ -186,6 +481,9 @@ const normalizeBoq = (row = {}) => ({
 const normalizeBoqItem = (row = {}) => {
   const quantity = Number(row.Quantity ?? row.quantity ?? 0) || 0;
   const rate = Number(row.Rate ?? row.rate ?? 0) || 0;
+  const rawAvailable =
+    row.AvailableQty ?? row.availableQty ?? row.RemainingQty ?? row.remainingQty ?? null;
+  const availableQty = Number.isFinite(Number(rawAvailable)) ? Number(rawAvailable) : null;
   return {
     id: row.LineItemId ?? row.lineItemId ?? null,
     boqId: row.BOQId ?? row.boqId ?? null,
@@ -193,6 +491,7 @@ const normalizeBoqItem = (row = {}) => {
     description: row.Description ?? row.description ?? "",
     unit: row.Unit ?? row.unit ?? "",
     quantity,
+    availableQty,
     rate,
     notes: row.Notes ?? row.notes ?? "",
     amount: quantity * rate,
@@ -271,6 +570,7 @@ const normalizeConsumptionItem = (row = {}) => ({
     row.consumptionId ??
     row.ParentId ??
     null,
+  boqItemId: row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null,
   name: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
   description: row.Description ?? row.description ?? "",
   unit: row.Unit ?? row.unit ?? "PCS",
@@ -278,6 +578,93 @@ const normalizeConsumptionItem = (row = {}) => ({
   rate: Number(row.Rate ?? row.rate ?? 0) || 0,
   notes: row.Notes ?? row.notes ?? "",
 });
+
+const normalizeReallocateInventory = (row = {}) => {
+  const id = row.Id ?? row.id ?? row.TransferId ?? row.transferId ?? null;
+  const rawNotes = row.Notes ?? row.notes ?? "";
+  let metadata = {};
+
+  if (typeof rawNotes === "string") {
+    const trimmed = rawNotes.trim();
+    if (trimmed.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          metadata = parsed;
+        }
+      } catch {
+        metadata = {};
+      }
+    } else if (trimmed) {
+      metadata = { notes: trimmed };
+    }
+  }
+
+  return {
+    id,
+    transferId: id,
+    referenceNumber: metadata.referenceNumber ?? `REL-${id}`,
+    type: metadata.type === "Return" ? "Return" : "Reallocate",
+    consumptionId: metadata.consumptionId ?? null,
+    consumptionNumber: metadata.consumptionNumber ?? "",
+    projectId: row.ProjectId ?? row.projectId ?? metadata.projectId ?? null,
+    fromLocationId: row.FromLocationId ?? row.fromLocationId ?? null,
+    toLocationId: row.ToLocationId ?? row.toLocationId ?? null,
+    returnVendorId: metadata.returnVendorId ?? null,
+    requestDate:
+      row.TransferDate ?? row.transferDate ?? metadata.requestDate ?? null,
+    transferDate: row.TransferDate ?? row.transferDate ?? null,
+    requestedBy: metadata.requestedBy ?? "",
+    status: metadata.status ?? "Pending",
+    notes: metadata.notes ?? rawNotes ?? "",
+    createdAt: row.CreatedAt ?? row.createdAt ?? metadata.createdAt ?? null,
+    updatedAt: row.UpdatedAt ?? row.updatedAt ?? metadata.updatedAt ?? null,
+  };
+};
+
+const normalizeReallocateInventoryItem = (row = {}) => ({
+  id: row.Id ?? row.id ?? null,
+  transferId:
+    row.TransferId ??
+    row.transferId ??
+    row.ReallocateInventoryId ??
+    row.reallocateInventoryId ??
+    null,
+  item: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
+  name: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
+  description: row.Description ?? row.description ?? "",
+  unit: row.Unit ?? row.unit ?? "PCS",
+  quantity: Number(row.Quantity ?? row.quantity ?? 0) || 0,
+});
+
+const buildReallocateNotesPayload = ({
+  referenceNumber = null,
+  type = "Reallocate",
+  consumptionId = null,
+  consumptionNumber = "",
+  projectId = null,
+  returnVendorId = null,
+  requestDate = null,
+  requestedBy = "",
+  status = "Pending",
+  notes = "",
+  createdAt = null,
+  updatedAt = null,
+} = {}) =>
+  JSON.stringify({
+    referenceNumber,
+    type,
+    consumptionId,
+    consumptionNumber,
+    projectId,
+    returnVendorId,
+    requestDate,
+    requestedBy,
+    status,
+    notes,
+    createdAt,
+    updatedAt,
+  });
 
 const normalizeOptionalString = (value) => {
   if (value === undefined) {
@@ -493,6 +880,76 @@ const ensureProjectsTable = async () => {
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
       )
     END
+  `);
+
+  await pool.request().query(`
+    IF COL_LENGTH('dbo.Projects', 'CreatedAt') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Projects ADD CreatedAt DATETIME2 NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Projects', 'UpdatedAt') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Projects ADD UpdatedAt DATETIME2 NULL;
+    END;
+  `);
+
+  await pool.request().query(`
+    UPDATE dbo.Projects
+    SET
+      CreatedAt = COALESCE(CreatedAt, SYSUTCDATETIME()),
+      UpdatedAt = COALESCE(UpdatedAt, CreatedAt, SYSUTCDATETIME())
+    WHERE CreatedAt IS NULL OR UpdatedAt IS NULL;
+
+    BEGIN TRY
+      IF COLUMNPROPERTY(OBJECT_ID('dbo.Projects'), 'CreatedAt', 'AllowsNull') = 1
+      BEGIN
+        ALTER TABLE dbo.Projects ALTER COLUMN CreatedAt DATETIME2 NOT NULL;
+      END;
+    END TRY
+    BEGIN CATCH
+      -- Ignore if dependent objects prevent tightening the column definition.
+    END CATCH;
+
+    BEGIN TRY
+      IF COLUMNPROPERTY(OBJECT_ID('dbo.Projects'), 'UpdatedAt', 'AllowsNull') = 1
+      BEGIN
+        ALTER TABLE dbo.Projects ALTER COLUMN UpdatedAt DATETIME2 NOT NULL;
+      END;
+    END TRY
+    BEGIN CATCH
+      -- Ignore if dependent objects prevent tightening the column definition.
+    END CATCH;
+  `);
+
+  await pool.request().query(`
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.default_constraints dc
+      INNER JOIN sys.columns c
+        ON c.object_id = dc.parent_object_id
+       AND c.column_id = dc.parent_column_id
+      WHERE dc.parent_object_id = OBJECT_ID('dbo.Projects')
+        AND c.name = 'CreatedAt'
+    )
+    BEGIN
+      ALTER TABLE dbo.Projects
+      ADD CONSTRAINT DF_Projects_CreatedAt DEFAULT SYSUTCDATETIME() FOR CreatedAt;
+    END;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.default_constraints dc
+      INNER JOIN sys.columns c
+        ON c.object_id = dc.parent_object_id
+       AND c.column_id = dc.parent_column_id
+      WHERE dc.parent_object_id = OBJECT_ID('dbo.Projects')
+        AND c.name = 'UpdatedAt'
+    )
+    BEGIN
+      ALTER TABLE dbo.Projects
+      ADD CONSTRAINT DF_Projects_UpdatedAt DEFAULT SYSUTCDATETIME() FOR UpdatedAt;
+    END;
   `);
 };
 
@@ -942,6 +1399,7 @@ const ensureBoqTables = async () => {
         Unit NVARCHAR(50) NULL,
         Quantity DECIMAL(18, 2) NOT NULL DEFAULT 0,
         Rate DECIMAL(18, 2) NOT NULL DEFAULT 0,
+        AvailableQty DECIMAL(18, 2) NULL,
         Notes NVARCHAR(MAX) NULL,
         CONSTRAINT FK_BOQLineItems_BOQ FOREIGN KEY (BOQId)
           REFERENCES dbo.BOQProjects(BOQId) ON DELETE CASCADE
@@ -954,7 +1412,59 @@ const ensureBoqTables = async () => {
     BEGIN
       ALTER TABLE dbo.BOQLineItems ADD Notes NVARCHAR(MAX) NULL;
     END;
+    IF COL_LENGTH('dbo.BOQLineItems', 'AvailableQty') IS NULL
+    BEGIN
+      ALTER TABLE dbo.BOQLineItems ADD AvailableQty DECIMAL(18, 2) NULL;
+    END;
   `);
+
+  await pool.request().query(`
+    UPDATE dbo.BOQLineItems
+    SET AvailableQty = Quantity
+    WHERE AvailableQty IS NULL
+  `);
+};
+
+const uniqueBoqItemIds = (values = []) => {
+  const set = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const id = toNullableInt(value);
+    if (id) {
+      set.add(id);
+    }
+  });
+  return Array.from(set);
+};
+
+const refreshBoqAvailability = async (tx, boqItemIds = []) => {
+  const ids = uniqueBoqItemIds(boqItemIds);
+  if (!ids.length) {
+    return;
+  }
+
+  for (const boqItemId of ids) {
+    const consumedResult = await new sql.Request(tx)
+      .input("BoqItemId", sql.Int, boqItemId)
+      .query(`
+        SELECT SUM(Quantity) AS total
+        FROM dbo.ConsumptionItems
+        WHERE BoqItemId = @BoqItemId
+      `);
+
+    const consumed = Number(consumedResult.recordset?.[0]?.total ?? 0) || 0;
+
+    const updateReq = new sql.Request(tx);
+    updateReq.input("BoqItemId", sql.Int, boqItemId);
+    updateReq.input("ConsumedQty", sql.Decimal(18, 2), consumed);
+    await updateReq.query(`
+      UPDATE dbo.BOQLineItems
+      SET AvailableQty = CASE
+        WHEN Quantity - @ConsumedQty < 0 THEN 0
+        ELSE Quantity - @ConsumedQty
+      END
+      WHERE LineItemId = @BoqItemId
+    `);
+  }
 };
 
 let deliveryChallanPk = "DeliveryChallanId";
@@ -1307,6 +1817,7 @@ const ensureConsumptionTables = async () => {
         CREATE TABLE dbo.ConsumptionItems (
           Id INT IDENTITY(1,1) PRIMARY KEY,
           ConsumptionId INT NULL,
+          BoqItemId INT NULL,
           Item NVARCHAR(200) NULL,
           Description NVARCHAR(500) NULL,
           Unit NVARCHAR(100) NULL,
@@ -1346,6 +1857,10 @@ const ensureConsumptionTables = async () => {
       BEGIN
         ALTER TABLE dbo.ConsumptionItems ADD ConsumptionId INT NULL;
       END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'BoqItemId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD BoqItemId INT NULL;
+      END;
       IF COL_LENGTH('dbo.ConsumptionItems', 'Item') IS NULL
       BEGIN
         ALTER TABLE dbo.ConsumptionItems ADD Item NVARCHAR(200) NULL;
@@ -1382,6 +1897,140 @@ const ensureConsumptionTables = async () => {
     await ensureConsumptionTablesPromise;
   } catch (error) {
     ensureConsumptionTablesPromise = null;
+    throw error;
+  }
+};
+
+let reallocateInventoryPk = "Id";
+let reallocateInventoryItemsFk = "TransferId";
+let ensureReallocateInventoryTablesPromise = null;
+
+const refreshReallocateInventoryPk = async () => {
+  const pool = await getPool();
+  const colsResult = await pool.request().query(`
+    SELECT name AS ColumnName
+    FROM sys.columns
+    WHERE object_id = OBJECT_ID('dbo.ReallocateInventory')
+  `);
+  const colsByName = new Map(
+    (colsResult.recordset ?? []).map((row) => {
+      const actualName = String(row.ColumnName ?? "");
+      return [actualName.toLowerCase(), actualName];
+    })
+  );
+  reallocateInventoryPk =
+    colsByName.get("id") ?? colsByName.get("transferid") ?? "Id";
+  return reallocateInventoryPk;
+};
+
+const refreshReallocateInventoryItemsFk = async () => {
+  const pool = await getPool();
+  const colsResult = await pool.request().query(`
+    SELECT name AS ColumnName
+    FROM sys.columns
+    WHERE object_id = OBJECT_ID('dbo.ReallocateInventoryItems')
+  `);
+  const colsByName = new Map(
+    (colsResult.recordset ?? []).map((row) => {
+      const actualName = String(row.ColumnName ?? "");
+      return [actualName.toLowerCase(), actualName];
+    })
+  );
+  reallocateInventoryItemsFk =
+    colsByName.get("transferid") ??
+    colsByName.get("reallocateinventoryid") ??
+    colsByName.get("reallocationid") ??
+    "TransferId";
+  return reallocateInventoryItemsFk;
+};
+
+const ensureReallocateInventoryTables = async () => {
+  if (ensureReallocateInventoryTablesPromise) {
+    return ensureReallocateInventoryTablesPromise;
+  }
+
+  ensureReallocateInventoryTablesPromise = (async () => {
+    const pool = await getPool();
+
+    await pool.request().query(`
+      IF OBJECT_ID('dbo.ReallocateInventory', 'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.ReallocateInventory (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          FromLocationId INT NULL,
+          ToLocationId INT NULL,
+          TransferDate DATETIME NULL,
+          Notes NVARCHAR(1000) NULL
+        )
+      END
+    `);
+
+    await pool.request().query(`
+      IF COL_LENGTH('dbo.ReallocateInventory', 'FromLocationId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventory ADD FromLocationId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventory', 'ToLocationId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventory ADD ToLocationId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventory', 'TransferDate') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventory ADD TransferDate DATETIME NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventory', 'Notes') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventory ADD Notes NVARCHAR(1000) NULL;
+      END;
+    `);
+
+    await pool.request().query(`
+      IF OBJECT_ID('dbo.ReallocateInventoryItems', 'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.ReallocateInventoryItems (
+          Id INT IDENTITY(1,1) PRIMARY KEY,
+          TransferId INT NULL,
+          Item NVARCHAR(200) NULL,
+          Description NVARCHAR(500) NULL,
+          Unit NVARCHAR(100) NULL,
+          Quantity DECIMAL(18,2) NOT NULL DEFAULT 0
+        )
+      END
+    `);
+
+    await pool.request().query(`
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'TransferId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD TransferId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'Item') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD Item NVARCHAR(200) NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'Description') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD Description NVARCHAR(500) NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'Unit') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD Unit NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'Quantity') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems
+          ADD Quantity DECIMAL(18,2) NOT NULL
+          CONSTRAINT DF_ReallocateInventoryItems_Quantity DEFAULT 0;
+      END;
+    `);
+
+    await refreshReallocateInventoryPk();
+    await refreshReallocateInventoryItemsFk();
+  })();
+
+  try {
+    await ensureReallocateInventoryTablesPromise;
+  } catch (error) {
+    ensureReallocateInventoryTablesPromise = null;
     throw error;
   }
 };
@@ -1425,35 +2074,26 @@ app.get("/api/items", async (_req, res) => {
   try {
     await ensureItemsTable();
     const pool = await getPool();
-    const columnsResult = await pool.request().query(`
-      SELECT name AS ColumnName
-      FROM sys.columns
-      WHERE object_id = OBJECT_ID('dbo.Items')
-    `);
-
-    const columnNames = new Set(
-      (columnsResult.recordset ?? []).map((row) =>
-        String(row.ColumnName || "").toLowerCase()
-      )
-    );
-
-    const pickColumn = (...candidates) =>
-      candidates.find((candidate) =>
-        columnNames.has(String(candidate).toLowerCase())
-      ) || null;
-
-    const toIdentifier = (name) => `[${String(name).replace(/]/g, "]]")}]`;
-
-    const idColumn = pickColumn("ItemId", "Id", "itemId", "ID");
-    const nameColumn = pickColumn("Name", "ItemName", "ProductName");
+    const itemSchema = await resolveItemsSchema();
 
     const result = await pool.request().query(`
-      SELECT * FROM dbo.Items
+      SELECT
+        ${buildIdCoalesceExpr(itemSchema.idColumns)} AS [id],
+        ${buildTextCoalesceExpr(itemSchema.nameColumns)} AS [name],
+        ${buildTextCoalesceExpr(itemSchema.categoryColumns)} AS [category],
+        ${buildTextCoalesceExpr(itemSchema.hsnColumns)} AS [hsn],
+        ${buildNumberCoalesceExpr(itemSchema.stockColumns)} AS [stock],
+        ${buildNumberCoalesceExpr(itemSchema.priceColumns)} AS [price],
+        ${buildTextCoalesceExpr(itemSchema.gstColumns)} AS [gst],
+        ${buildTextCoalesceExpr(itemSchema.descriptionColumns)} AS [description],
+        ${buildDateCoalesceExpr(itemSchema.createdAtColumns)} AS [createdAt],
+        ${buildDateCoalesceExpr(itemSchema.updatedAtColumns)} AS [updatedAt]
+      FROM dbo.Items
       ORDER BY ${
-        idColumn
-          ? `${toIdentifier(idColumn)} DESC`
-          : nameColumn
-          ? `${toIdentifier(nameColumn)} ASC`
+        itemSchema.sortColumn
+          ? `${toIdentifier(itemSchema.sortColumn)} ${
+              itemSchema.sortColumn === itemSchema.idColumn ? "DESC" : "ASC"
+            }`
           : "(SELECT NULL)"
       }
     `);
@@ -1484,7 +2124,8 @@ app.post("/api/items", async (req, res) => {
     const validPrice = Number.isFinite(cleanPrice) ? cleanPrice : 0;
 
     const pool = await getPool();
-    const result = await pool
+    const itemSchema = await resolveItemsSchema();
+    const request = pool
       .request()
       .input("Name", sql.NVarChar(255), String(name).trim())
       .input("Category", sql.NVarChar(100), String(category ?? "").trim())
@@ -1493,11 +2134,42 @@ app.post("/api/items", async (req, res) => {
       .input("Price", sql.Decimal(18, 2), validPrice)
       .input("GST", sql.NVarChar(100), String(gst ?? "").trim())
       .input("Description", sql.NVarChar(sql.MAX), String(description ?? "").trim())
-      .query(`
-        INSERT INTO dbo.Items (Name, Category, HSN, Stock, Price, GST, Description)
-        OUTPUT INSERTED.*
-        VALUES (@Name, @Category, @HSN, @Stock, @Price, @GST, @Description)
-      `);
+      .input("Now", sql.DateTime2, new Date());
+
+    const insertColumns = [];
+    const insertValues = [];
+    const usedColumns = new Set();
+    const addInsertFields = (columns, paramName) => {
+      for (const column of uniqueColumnNames(columns)) {
+        const normalized = column.toLowerCase();
+        if (usedColumns.has(normalized)) {
+          continue;
+        }
+        usedColumns.add(normalized);
+        insertColumns.push(toIdentifier(column));
+        insertValues.push(`@${paramName}`);
+      }
+    };
+
+    addInsertFields(itemSchema.nameColumns, "Name");
+    addInsertFields(itemSchema.categoryColumns, "Category");
+    addInsertFields(itemSchema.hsnColumns, "HSN");
+    addInsertFields(itemSchema.stockColumns, "Stock");
+    addInsertFields(itemSchema.priceColumns, "Price");
+    addInsertFields(itemSchema.gstColumns, "GST");
+    addInsertFields(itemSchema.descriptionColumns, "Description");
+    addInsertFields(itemSchema.createdAtColumns, "Now");
+    addInsertFields(itemSchema.updatedAtColumns, "Now");
+
+    if (!insertColumns.length) {
+      throw new Error("Items table has no writable columns");
+    }
+
+    const result = await request.query(`
+      INSERT INTO dbo.Items (${insertColumns.join(", ")})
+      OUTPUT INSERTED.*
+      VALUES (${insertValues.join(", ")})
+    `);
 
     return res.status(201).json({
       ok: true,
@@ -1525,15 +2197,31 @@ app.patch("/api/items/:id/quantity", async (req, res) => {
     }
 
     const pool = await getPool();
+    const itemSchema = await resolveItemsSchema();
+    if (!itemSchema.idColumn) {
+      throw new Error("Items table is missing a primary id column");
+    }
+    if (!itemSchema.stockColumns.length) {
+      throw new Error("Items table is missing a stock column");
+    }
+
+    const setClauses = uniqueColumnNames(itemSchema.stockColumns).map(
+      (column) => `${toIdentifier(column)} = @Stock`
+    );
+    for (const column of uniqueColumnNames(itemSchema.updatedAtColumns)) {
+      setClauses.push(`${toIdentifier(column)} = @Now`);
+    }
+
     const result = await pool
       .request()
-      .input("ItemId", sql.Int, id)
+      .input("ItemId", sql.BigInt, id)
       .input("Stock", sql.Int, stock)
+      .input("Now", sql.DateTime2, new Date())
       .query(`
         UPDATE dbo.Items
-        SET Stock = @Stock, UpdatedAt = SYSUTCDATETIME()
+        SET ${setClauses.join(", ")}
         OUTPUT INSERTED.*
-        WHERE ItemId = @ItemId
+        WHERE ${toIdentifier(itemSchema.idColumn)} = @ItemId
       `);
 
     const updated = result.recordset?.[0];
@@ -1559,13 +2247,18 @@ app.delete("/api/items/:id", async (req, res) => {
     }
 
     const pool = await getPool();
+    const itemSchema = await resolveItemsSchema();
+    if (!itemSchema.idColumn) {
+      throw new Error("Items table is missing a primary id column");
+    }
+
     const result = await pool
       .request()
-      .input("ItemId", sql.Int, id)
+      .input("ItemId", sql.BigInt, id)
       .query(`
         DELETE FROM dbo.Items
-        OUTPUT DELETED.ItemId
-        WHERE ItemId = @ItemId
+        OUTPUT DELETED.${toIdentifier(itemSchema.idColumn)} AS deletedItemId
+        WHERE ${toIdentifier(itemSchema.idColumn)} = @ItemId
       `);
 
     if (!result.recordset?.length) {
@@ -2054,6 +2747,24 @@ app.delete("/api/projects/:id", async (req, res) => {
     }
 
     const pool = await getPool();
+    const existing = await pool
+      .request()
+      .input("ProjectId", sql.Int, id)
+      .query(`SELECT ProjectId FROM dbo.Projects WHERE ProjectId = @ProjectId`);
+    if (!existing.recordset?.length) {
+      return res.status(404).json({ ok: false, error: "Project not found" });
+    }
+
+    const dependencyCounts = await loadProjectDependencyCounts(pool, id);
+    const dependencySummary = buildProjectDependencySummary(dependencyCounts);
+    if (dependencySummary) {
+      return res.status(409).json({
+        ok: false,
+        error: `Project cannot be deleted because it is used by ${dependencySummary}. Remove or reassign those records before deleting.`,
+        conflicts: dependencyCounts,
+      });
+    }
+
     const result = await pool
       .request()
       .input("ProjectId", sql.Int, id)
@@ -2069,6 +2780,13 @@ app.delete("/api/projects/:id", async (req, res) => {
 
     return res.json({ ok: true });
   } catch (error) {
+    if (isSqlForeignKeyViolation(error)) {
+      return res.status(409).json({
+        ok: false,
+        error:
+          "Project cannot be deleted because it is referenced by other records. Remove or reassign those records before deleting.",
+      });
+    }
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to delete project",
@@ -3248,12 +3966,13 @@ app.post("/api/boqs", async (req, res) => {
       insertItem.input("Unit", sql.NVarChar(50), String(item.unit ?? "").trim());
       insertItem.input("Quantity", sql.Decimal(18, 2), qty);
       insertItem.input("Rate", sql.Decimal(18, 2), rate);
+      insertItem.input("AvailableQty", sql.Decimal(18, 2), qty);
       insertItem.input("Notes", sql.NVarChar(sql.MAX), String(item.notes ?? "").trim());
       await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
-          (BOQId, ItemName, Description, Unit, Quantity, Rate, Notes)
+          (BOQId, ItemName, Description, Unit, Quantity, Rate, AvailableQty, Notes)
         VALUES
-          (@BOQId, @ItemName, @Description, @Unit, @Quantity, @Rate, @Notes)
+          (@BOQId, @ItemName, @Description, @Unit, @Quantity, @Rate, @AvailableQty, @Notes)
       `);
     }
 
@@ -3383,12 +4102,13 @@ app.put("/api/boqs/:id", async (req, res) => {
       insertItem.input("Unit", sql.NVarChar(50), String(item.unit ?? "").trim());
       insertItem.input("Quantity", sql.Decimal(18, 2), qty);
       insertItem.input("Rate", sql.Decimal(18, 2), rate);
+      insertItem.input("AvailableQty", sql.Decimal(18, 2), qty);
       insertItem.input("Notes", sql.NVarChar(sql.MAX), String(item.notes ?? "").trim());
       await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
-          (BOQId, ItemName, Description, Unit, Quantity, Rate, Notes)
+          (BOQId, ItemName, Description, Unit, Quantity, Rate, AvailableQty, Notes)
         VALUES
-          (@BOQId, @ItemName, @Description, @Unit, @Quantity, @Rate, @Notes)
+          (@BOQId, @ItemName, @Description, @Unit, @Quantity, @Rate, @AvailableQty, @Notes)
       `);
     }
 
@@ -3936,6 +4656,7 @@ app.get("/api/consumptions/:id", async (req, res) => {
 
   try {
     await ensureConsumptionTables();
+    await ensureBoqTables();
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
@@ -4015,7 +4736,11 @@ app.post("/api/consumptions", async (req, res) => {
       const name = String(item.name ?? item.Item ?? "").trim();
       const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
+      const boqItemId = toNullableInt(
+        item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId
+      );
       return {
+        boqItemId,
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
@@ -4036,6 +4761,7 @@ app.post("/api/consumptions", async (req, res) => {
   let tx;
   try {
     await ensureConsumptionTables();
+    await ensureBoqTables();
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
@@ -4069,6 +4795,7 @@ app.post("/api/consumptions", async (req, res) => {
     for (const item of normalizedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("ConsumptionId", sql.Int, consumptionId);
+      insertItemReq.input("BoqItemId", sql.Int, item.boqItemId);
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
@@ -4077,11 +4804,16 @@ app.post("/api/consumptions", async (req, res) => {
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.ConsumptionItems
-          (${fkCol}, Item, Description, Unit, Quantity, Rate, Notes)
+          (${fkCol}, BoqItemId, Item, Description, Unit, Quantity, Rate, Notes)
         VALUES
-          (@ConsumptionId, @Item, @Description, @Unit, @Quantity, @Rate, @Notes)
+          (@ConsumptionId, @BoqItemId, @Item, @Description, @Unit, @Quantity, @Rate, @Notes)
       `);
     }
+
+    await refreshBoqAvailability(
+      tx,
+      normalizedItems.map((item) => item.boqItemId)
+    );
 
     await tx.commit();
 
@@ -4154,7 +4886,11 @@ app.put("/api/consumptions/:id", async (req, res) => {
       const name = String(item.name ?? item.Item ?? "").trim();
       const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
+      const boqItemId = toNullableInt(
+        item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId
+      );
       return {
+        boqItemId,
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
@@ -4175,11 +4911,21 @@ app.put("/api/consumptions/:id", async (req, res) => {
   let tx;
   try {
     await ensureConsumptionTables();
+    await ensureBoqTables();
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
     tx = pool.transaction();
     await tx.begin();
+
+    const existingItemsResult = await new sql.Request(tx)
+      .input("ConsumptionId", sql.Int, id)
+      .query(`
+        SELECT BoqItemId FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
+      `);
+    const existingBoqItemIds = (existingItemsResult.recordset ?? []).map(
+      (row) => row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null
+    );
 
     const updateHeaderReq = new sql.Request(tx);
     updateHeaderReq.input("ConsumptionId", sql.Int, id);
@@ -4220,6 +4966,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
     for (const item of normalizedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("ConsumptionId", sql.Int, id);
+      insertItemReq.input("BoqItemId", sql.Int, item.boqItemId);
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
@@ -4228,11 +4975,16 @@ app.put("/api/consumptions/:id", async (req, res) => {
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.ConsumptionItems
-          (${fkCol}, Item, Description, Unit, Quantity, Rate, Notes)
+          (${fkCol}, BoqItemId, Item, Description, Unit, Quantity, Rate, Notes)
         VALUES
-          (@ConsumptionId, @Item, @Description, @Unit, @Quantity, @Rate, @Notes)
+          (@ConsumptionId, @BoqItemId, @Item, @Description, @Unit, @Quantity, @Rate, @Notes)
       `);
     }
+
+    await refreshBoqAvailability(tx, [
+      ...existingBoqItemIds,
+      ...normalizedItems.map((item) => item.boqItemId),
+    ]);
 
     await tx.commit();
 
@@ -4268,11 +5020,21 @@ app.delete("/api/consumptions/:id", async (req, res) => {
   let tx;
   try {
     await ensureConsumptionTables();
+    await ensureBoqTables();
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
     tx = pool.transaction();
     await tx.begin();
+
+    const existingItemsResult = await new sql.Request(tx)
+      .input("ConsumptionId", sql.Int, id)
+      .query(`
+        SELECT BoqItemId FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
+      `);
+    const existingBoqItemIds = (existingItemsResult.recordset ?? []).map(
+      (row) => row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null
+    );
 
     const deleteItemsReq = new sql.Request(tx);
     deleteItemsReq.input("ConsumptionId", sql.Int, id);
@@ -4286,6 +5048,8 @@ app.delete("/api/consumptions/:id", async (req, res) => {
       DELETE FROM dbo.Consumption WHERE ${pkCol} = @ConsumptionId
     `);
 
+    await refreshBoqAvailability(tx, existingBoqItemIds);
+
     await tx.commit();
 
     if ((deleteResult.rowsAffected?.[0] ?? 0) === 0) {
@@ -4298,6 +5062,502 @@ app.delete("/api/consumptions/:id", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to delete consumption",
+    });
+  }
+});
+
+app.get("/api/reallocate-inventory", async (_req, res) => {
+  try {
+    await ensureReallocateInventoryTables();
+    const pkCol = await refreshReallocateInventoryPk();
+    await refreshReallocateInventoryItemsFk();
+    const pool = await getPool();
+
+    const headersResult = await pool.request().query(`
+      SELECT * FROM dbo.ReallocateInventory ORDER BY ${toIdentifier(pkCol)} DESC
+    `);
+    const itemsResult = await pool.request().query(`
+      SELECT * FROM dbo.ReallocateInventoryItems
+    `);
+
+    const itemsByTransfer = (itemsResult.recordset ?? []).reduce((acc, row) => {
+      const item = normalizeReallocateInventoryItem(row);
+      const parentId = item.transferId;
+      if (parentId === null || parentId === undefined) {
+        return acc;
+      }
+      if (!acc[parentId]) {
+        acc[parentId] = [];
+      }
+      acc[parentId].push(item);
+      return acc;
+    }, {});
+
+    const reallocations = (headersResult.recordset ?? []).map((row) => {
+      const transfer = normalizeReallocateInventory(row);
+      return {
+        ...transfer,
+        items: itemsByTransfer[transfer.id] ?? [],
+      };
+    });
+
+    return res.json({ ok: true, reallocations });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch reallocate inventory records",
+    });
+  }
+});
+
+app.get("/api/reallocate-inventory/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid reallocate inventory id",
+    });
+  }
+
+  try {
+    await ensureReallocateInventoryTables();
+    const pkCol = await refreshReallocateInventoryPk();
+    const fkCol = await refreshReallocateInventoryItemsFk();
+    const pool = await getPool();
+
+    const headerResult = await pool
+      .request()
+      .input("TransferId", sql.Int, id)
+      .query(`
+        SELECT * FROM dbo.ReallocateInventory
+        WHERE ${toIdentifier(pkCol)} = @TransferId
+      `);
+
+    const transferRow = headerResult.recordset?.[0];
+    if (!transferRow) {
+      return res.status(404).json({
+        ok: false,
+        error: "Reallocate inventory record not found",
+      });
+    }
+
+    const itemsResult = await pool
+      .request()
+      .input("TransferId", sql.Int, id)
+      .query(`
+        SELECT * FROM dbo.ReallocateInventoryItems
+        WHERE ${toIdentifier(fkCol)} = @TransferId
+      `);
+
+    return res.json({
+      ok: true,
+      reallocation: {
+        ...normalizeReallocateInventory(transferRow),
+        items: (itemsResult.recordset ?? []).map(normalizeReallocateInventoryItem),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch reallocate inventory record",
+    });
+  }
+});
+
+app.post("/api/reallocate-inventory", async (req, res) => {
+  const {
+    referenceNumber = null,
+    type = "Reallocate",
+    consumptionId = null,
+    consumptionNumber = "",
+    projectId = null,
+    fromLocationId,
+    toLocationId = null,
+    returnVendorId = null,
+    requestDate = null,
+    requestedBy = null,
+    status = "Pending",
+    notes = null,
+    items = [],
+  } = req.body ?? {};
+
+  const safeType = String(type ?? "Reallocate").trim() === "Return"
+    ? "Return"
+    : "Reallocate";
+  const safeReferenceNumber = normalizeOptionalString(referenceNumber);
+  const safeConsumptionId = toNullableInt(consumptionId);
+  const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
+  const safeProjectId = toNullableInt(projectId);
+  const safeFromLocationId = toNullableInt(fromLocationId);
+  const safeToLocationId = toNullableInt(toLocationId);
+  const safeReturnVendorId = toNullableInt(returnVendorId);
+  const safeRequestedBy = normalizeOptionalString(requestedBy) ?? "";
+  const safeStatus = normalizeOptionalString(status) ?? "Pending";
+  const safeNotes = normalizeOptionalString(notes) ?? "";
+  const parsedRequestDate = parseDateInput(requestDate);
+
+  if (!safeFromLocationId) {
+    return res.status(400).json({
+      ok: false,
+      error: "fromLocationId is required",
+    });
+  }
+  if (safeType === "Reallocate" && !safeToLocationId) {
+    return res.status(400).json({
+      ok: false,
+      error: "toLocationId is required",
+    });
+  }
+  if (Number.isNaN(parsedRequestDate)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid requestDate",
+    });
+  }
+
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      name: String(item.name ?? item.item ?? item.Item ?? "").trim(),
+      description:
+        normalizeOptionalString(item.description ?? item.Description) ?? null,
+      unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+      quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+    }))
+    .filter((item) => item.name && item.quantity > 0);
+
+  if (!normalizedItems.length) {
+    return res.status(400).json({
+      ok: false,
+      error: "At least one reallocation item is required",
+    });
+  }
+
+  let tx;
+  try {
+    await ensureReallocateInventoryTables();
+    const pkCol = await refreshReallocateInventoryPk();
+    const fkCol = await refreshReallocateInventoryItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const now = new Date().toISOString();
+    const notesPayload = buildReallocateNotesPayload({
+      referenceNumber: safeReferenceNumber,
+      type: safeType,
+      consumptionId: safeConsumptionId,
+      consumptionNumber: safeConsumptionNumber,
+      projectId: safeProjectId,
+      returnVendorId: safeReturnVendorId,
+      requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
+      requestedBy: safeRequestedBy,
+      status: safeStatus,
+      notes: safeNotes,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const insertHeaderReq = new sql.Request(tx);
+    insertHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
+    insertHeaderReq.input("ToLocationId", sql.Int, safeToLocationId);
+    insertHeaderReq.input("TransferDate", sql.DateTime, parsedRequestDate ?? null);
+    insertHeaderReq.input("Notes", sql.NVarChar(1000), notesPayload);
+    const headerResult = await insertHeaderReq.query(`
+      INSERT INTO dbo.ReallocateInventory
+        (FromLocationId, ToLocationId, TransferDate, Notes)
+      OUTPUT INSERTED.*
+      VALUES
+        (@FromLocationId, @ToLocationId, @TransferDate, @Notes)
+    `);
+
+    const headerRow = headerResult.recordset?.[0];
+    const transferId =
+      headerRow?.[pkCol] ??
+      headerRow?.Id ??
+      headerRow?.TransferId ??
+      null;
+    if (!transferId) {
+      throw new Error("Failed to create reallocation");
+    }
+
+    for (const item of normalizedItems) {
+      const insertItemReq = new sql.Request(tx);
+      insertItemReq.input("TransferId", sql.Int, transferId);
+      insertItemReq.input("Item", sql.NVarChar(200), item.name);
+      insertItemReq.input("Description", sql.NVarChar(500), item.description);
+      insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
+      insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
+      await insertItemReq.query(`
+        INSERT INTO dbo.ReallocateInventoryItems
+          (${fkCol}, Item, Description, Unit, Quantity)
+        VALUES
+          (@TransferId, @Item, @Description, @Unit, @Quantity)
+      `);
+    }
+
+    await tx.commit();
+
+    const itemsResult = await pool
+      .request()
+      .input("TransferId", sql.Int, transferId)
+      .query(`
+        SELECT * FROM dbo.ReallocateInventoryItems
+        WHERE ${toIdentifier(fkCol)} = @TransferId
+      `);
+
+    return res.status(201).json({
+      ok: true,
+      reallocation: {
+        ...normalizeReallocateInventory(headerRow),
+        items: (itemsResult.recordset ?? []).map(normalizeReallocateInventoryItem),
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to create reallocation",
+    });
+  }
+});
+
+app.put("/api/reallocate-inventory/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid reallocate inventory id",
+    });
+  }
+
+  const {
+    referenceNumber = null,
+    type = "Reallocate",
+    consumptionId = null,
+    consumptionNumber = "",
+    projectId = null,
+    fromLocationId,
+    toLocationId = null,
+    returnVendorId = null,
+    requestDate = null,
+    requestedBy = null,
+    status = "Pending",
+    notes = null,
+    items = [],
+  } = req.body ?? {};
+
+  const safeType = String(type ?? "Reallocate").trim() === "Return"
+    ? "Return"
+    : "Reallocate";
+  const safeReferenceNumber = normalizeOptionalString(referenceNumber);
+  const safeConsumptionId = toNullableInt(consumptionId);
+  const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
+  const safeProjectId = toNullableInt(projectId);
+  const safeFromLocationId = toNullableInt(fromLocationId);
+  const safeToLocationId = toNullableInt(toLocationId);
+  const safeReturnVendorId = toNullableInt(returnVendorId);
+  const safeRequestedBy = normalizeOptionalString(requestedBy) ?? "";
+  const safeStatus = normalizeOptionalString(status) ?? "Pending";
+  const safeNotes = normalizeOptionalString(notes) ?? "";
+  const parsedRequestDate = parseDateInput(requestDate);
+
+  if (!safeFromLocationId) {
+    return res.status(400).json({
+      ok: false,
+      error: "fromLocationId is required",
+    });
+  }
+  if (safeType === "Reallocate" && !safeToLocationId) {
+    return res.status(400).json({
+      ok: false,
+      error: "toLocationId is required",
+    });
+  }
+  if (Number.isNaN(parsedRequestDate)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid requestDate",
+    });
+  }
+
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      name: String(item.name ?? item.item ?? item.Item ?? "").trim(),
+      description:
+        normalizeOptionalString(item.description ?? item.Description) ?? null,
+      unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+      quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+    }))
+    .filter((item) => item.name && item.quantity > 0);
+
+  if (!normalizedItems.length) {
+    return res.status(400).json({
+      ok: false,
+      error: "At least one reallocation item is required",
+    });
+  }
+
+  let tx;
+  try {
+    await ensureReallocateInventoryTables();
+    const pkCol = await refreshReallocateInventoryPk();
+    const fkCol = await refreshReallocateInventoryItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const currentResult = await new sql.Request(tx)
+      .input("TransferId", sql.Int, id)
+      .query(`
+        SELECT * FROM dbo.ReallocateInventory
+        WHERE ${toIdentifier(pkCol)} = @TransferId
+      `);
+
+    const currentRow = currentResult.recordset?.[0];
+    if (!currentRow) {
+      await tx.rollback();
+      return res.status(404).json({
+        ok: false,
+        error: "Reallocate inventory record not found",
+      });
+    }
+
+    const previousRecord = normalizeReallocateInventory(currentRow);
+    const notesPayload = buildReallocateNotesPayload({
+      referenceNumber: safeReferenceNumber,
+      type: safeType,
+      consumptionId: safeConsumptionId,
+      consumptionNumber: safeConsumptionNumber,
+      projectId: safeProjectId,
+      returnVendorId: safeReturnVendorId,
+      requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
+      requestedBy: safeRequestedBy,
+      status: safeStatus,
+      notes: safeNotes,
+      createdAt: previousRecord.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const updateHeaderReq = new sql.Request(tx);
+    updateHeaderReq.input("TransferId", sql.Int, id);
+    updateHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
+    updateHeaderReq.input("ToLocationId", sql.Int, safeToLocationId);
+    updateHeaderReq.input("TransferDate", sql.DateTime, parsedRequestDate ?? null);
+    updateHeaderReq.input("Notes", sql.NVarChar(1000), notesPayload);
+    const headerResult = await updateHeaderReq.query(`
+      UPDATE dbo.ReallocateInventory
+      SET FromLocationId = @FromLocationId,
+          ToLocationId = @ToLocationId,
+          TransferDate = @TransferDate,
+          Notes = @Notes
+      OUTPUT INSERTED.*
+      WHERE ${toIdentifier(pkCol)} = @TransferId
+    `);
+
+    const headerRow = headerResult.recordset?.[0];
+    if (!headerRow) {
+      await tx.rollback();
+      return res.status(404).json({
+        ok: false,
+        error: "Reallocate inventory record not found",
+      });
+    }
+
+    await new sql.Request(tx)
+      .input("TransferId", sql.Int, id)
+      .query(`
+        DELETE FROM dbo.ReallocateInventoryItems
+        WHERE ${toIdentifier(fkCol)} = @TransferId
+      `);
+
+    for (const item of normalizedItems) {
+      const insertItemReq = new sql.Request(tx);
+      insertItemReq.input("TransferId", sql.Int, id);
+      insertItemReq.input("Item", sql.NVarChar(200), item.name);
+      insertItemReq.input("Description", sql.NVarChar(500), item.description);
+      insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
+      insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
+      await insertItemReq.query(`
+        INSERT INTO dbo.ReallocateInventoryItems
+          (${fkCol}, Item, Description, Unit, Quantity)
+        VALUES
+          (@TransferId, @Item, @Description, @Unit, @Quantity)
+      `);
+    }
+
+    await tx.commit();
+
+    const itemsResult = await pool
+      .request()
+      .input("TransferId", sql.Int, id)
+      .query(`
+        SELECT * FROM dbo.ReallocateInventoryItems
+        WHERE ${toIdentifier(fkCol)} = @TransferId
+      `);
+
+    return res.json({
+      ok: true,
+      reallocation: {
+        ...normalizeReallocateInventory(headerRow),
+        items: (itemsResult.recordset ?? []).map(normalizeReallocateInventoryItem),
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to update reallocation",
+    });
+  }
+});
+
+app.delete("/api/reallocate-inventory/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid reallocate inventory id",
+    });
+  }
+
+  let tx;
+  try {
+    await ensureReallocateInventoryTables();
+    const pkCol = await refreshReallocateInventoryPk();
+    const fkCol = await refreshReallocateInventoryItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    await new sql.Request(tx)
+      .input("TransferId", sql.Int, id)
+      .query(`
+        DELETE FROM dbo.ReallocateInventoryItems
+        WHERE ${toIdentifier(fkCol)} = @TransferId
+      `);
+
+    const deleteResult = await new sql.Request(tx)
+      .input("TransferId", sql.Int, id)
+      .query(`
+        DELETE FROM dbo.ReallocateInventory
+        WHERE ${toIdentifier(pkCol)} = @TransferId
+      `);
+
+    await tx.commit();
+
+    if ((deleteResult.rowsAffected?.[0] ?? 0) === 0) {
+      return res.status(404).json({
+        ok: false,
+        error: "Reallocate inventory record not found",
+      });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to delete reallocation",
     });
   }
 });
@@ -4322,6 +5582,7 @@ const warmupSchema = async () => {
       ensureBoqTables(),
       ensureDeliveryChallanTables(),
       ensureConsumptionTables(),
+      ensureReallocateInventoryTables(),
     ]);
     console.log("Schema warmup complete");
   } catch (error) {

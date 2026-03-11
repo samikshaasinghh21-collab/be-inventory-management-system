@@ -1,3 +1,8 @@
+import {
+  normalizeProjectRecord,
+  normalizeProjectsList,
+} from "./projectNormalization";
+
 const STORAGE_KEY = "projects";
 
 const emitChange = () => {
@@ -8,23 +13,28 @@ const emitChange = () => {
 
 export const getProjects = () => {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    return normalizeProjectsList(
+      JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]")
+    );
   } catch {
     return [];
   }
 };
 
 export const setProjects = (projects = []) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(normalizeProjectsList(projects))
+  );
   emitChange();
 };
 
 export const saveProject = (project) => {
   const projects = getProjects();
-  const next = [...projects, project];
+  const next = [...projects, normalizeProjectRecord(project)];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   emitChange();
-  return project;
+  return next[next.length - 1];
 };
 
 export const deleteProject = (id) => {
@@ -37,7 +47,9 @@ export const deleteProject = (id) => {
 export const updateProject = (id, updates) => {
   const projects = getProjects();
   const next = projects.map((project) =>
-    project.id === id ? { ...project, ...updates } : project
+    project.id === id
+      ? normalizeProjectRecord({ ...project, ...updates })
+      : normalizeProjectRecord(project)
   );
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   emitChange();

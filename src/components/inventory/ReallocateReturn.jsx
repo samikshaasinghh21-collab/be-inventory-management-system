@@ -1,19 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { getProjects } from "../../services/projectsStore";
-import {
-  addWorkflowItem,
-  deleteWorkflowItem,
-  getWorkflowList,
-  updateWorkflowItem,
-} from "../../services/workflowStore";
 import { fetchLocations } from "../../services/locationsApi";
 import DateInput from "../common/DateInput";
 import { fetchVendors, syncVendorsCache } from "../../services/vendorsApi";
 import { fetchConsumptions } from "../../services/consumptionApi";
 import { fetchItems, updateQuantityApi } from "../../services/inventoryApi";
+import {
+  createReallocateInventory,
+  deleteReallocateInventory,
+  fetchReallocateInventory,
+  updateReallocateInventory,
+} from "../../services/reallocateInventoryApi";
 import { formatDate } from "../../utils/dateFormat";
-
-const STORAGE_KEY = "workflow_reallocate_return";
 
 const createFormState = () => ({
   referenceNumber: "",
@@ -30,7 +28,9 @@ const createFormState = () => ({
 });
 
 const toQuantity = (value) => {
-  const parsed = Number(value);
+  const normalized =
+    typeof value === "string" ? value.replace(/,/g, ".").trim() : value;
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
@@ -48,7 +48,19 @@ const ReallocateReturn = () => {
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
+  const loadRecords = async () => {
+    try {
+      const list = await fetchReallocateInventory();
+      setRecords(Array.isArray(list) ? list : []);
+    } catch (error) {
+      setRecords([]);
+      setSaveError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to load reallocation records."
+      );
+    }
+  };
 
   const loadLocations = async () => {
     try {
@@ -93,15 +105,17 @@ const ReallocateReturn = () => {
     void loadVendors();
     void loadConsumptions();
     void loadInventory();
-    loadRecords();
+    void loadRecords();
   }, []);
 
   useEffect(() => {
-    const handler = () => loadRecords();
-    window.addEventListener(`${STORAGE_KEY}:changed`, handler);
+    const handler = () => {
+      void loadRecords();
+    };
+    window.addEventListener("reallocate-inventory:changed", handler);
     window.addEventListener("consumptions:changed", handler);
     return () => {
-      window.removeEventListener(`${STORAGE_KEY}:changed`, handler);
+      window.removeEventListener("reallocate-inventory:changed", handler);
       window.removeEventListener("consumptions:changed", handler);
     };
   }, []);
@@ -293,13 +307,12 @@ const ReallocateReturn = () => {
 
     const source = consumptionMap[String(form.consumptionId)] || null;
     const payload = {
-      id: editingId ?? Date.now(),
       referenceNumber: form.referenceNumber.trim(),
       type: form.type,
-      consumptionId: Number(form.consumptionId),
+      consumptionId: form.consumptionId ? Number(form.consumptionId) : null,
       consumptionNumber: source?.consumptionNumber || "",
-      projectId: Number(form.projectId),
-      fromLocationId: Number(form.fromLocationId),
+      projectId: form.projectId ? Number(form.projectId) : null,
+      fromLocationId: form.fromLocationId ? Number(form.fromLocationId) : null,
       toLocationId: form.toLocationId ? Number(form.toLocationId) : null,
       returnVendorId: form.returnVendorId ? Number(form.returnVendorId) : null,
       requestDate: form.requestDate,
@@ -307,17 +320,17 @@ const ReallocateReturn = () => {
       status: form.status,
       notes: form.notes,
       items: cleanedItems,
-      updatedAt: new Date().toISOString(),
-      createdAt:
-        editingId &&
-        records.find((record) => record.id === editingId)?.createdAt
-          ? records.find((record) => record.id === editingId)?.createdAt
-          : new Date().toISOString(),
     };
 
     try {
       setSaving(true);
       setSaveError("");
+
+      if (editingId) {
+        await updateReallocateInventory(editingId, payload);
+      } else {
+        await createReallocateInventory(payload);
+      }
 
       if (form.type === "Return" && !editingId) {
         const missingMaterials = [];
@@ -339,12 +352,7 @@ const ReallocateReturn = () => {
         }
       }
 
-      if (editingId) {
-        updateWorkflowItem(STORAGE_KEY, editingId, payload);
-      } else {
-        addWorkflowItem(STORAGE_KEY, payload);
-      }
-
+      await loadRecords();
       resetForm();
     } catch (error) {
       setSaveError(
@@ -379,10 +387,20 @@ const ReallocateReturn = () => {
     setSaveError("");
   };
 
-  const handleDelete = (id) => {
-    deleteWorkflowItem(STORAGE_KEY, id);
-    if (editingId === id) {
-      resetForm();
+  const handleDelete = async (id) => {
+    try {
+      setSaveError("");
+      await deleteReallocateInventory(id);
+      await loadRecords();
+      if (editingId === id) {
+        resetForm();
+      }
+    } catch (error) {
+      setSaveError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to delete reallocate/return request."
+      );
     }
   };
 
@@ -664,6 +682,7 @@ const ReallocateReturn = () => {
                       <input
                         type="number"
                         min="0"
+                        step="0.01"
                         max={toQuantity(item.availableQty)}
                         value={item.quantity}
                         onChange={(event) =>

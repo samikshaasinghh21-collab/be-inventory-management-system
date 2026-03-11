@@ -1,0 +1,104 @@
+import api from "./api";
+
+const emitReallocateInventoryChange = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("reallocate-inventory:changed"));
+  }
+};
+
+const normalizeDateValue = (value) => {
+  if (!value) {
+    return null;
+  }
+  const normalized = String(value);
+  return normalized.length >= 10 ? normalized.slice(0, 10) : normalized;
+};
+
+const normalizeReallocateInventoryItem = (item = {}) => ({
+  id: item.id ?? item.Id ?? null,
+  transferId:
+    item.transferId ??
+    item.TransferId ??
+    item.reallocateInventoryId ??
+    item.ReallocateInventoryId ??
+    null,
+  item: item.item ?? item.Item ?? item.name ?? item.Name ?? "",
+  name: item.name ?? item.item ?? item.Item ?? item.Name ?? "",
+  description: item.description ?? item.Description ?? "",
+  unit: item.unit ?? item.Unit ?? "PCS",
+  quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+});
+
+const normalizeReallocateInventory = (record = {}) => {
+  const id =
+    record.id ??
+    record.transferId ??
+    record.Id ??
+    record.TransferId ??
+    null;
+
+  return {
+    id,
+    transferId: id,
+    referenceNumber: record.referenceNumber ?? record.ReferenceNumber ?? `REL-${id}`,
+    type: record.type ?? record.Type ?? "Reallocate",
+    consumptionId: record.consumptionId ?? record.ConsumptionId ?? null,
+    consumptionNumber:
+      record.consumptionNumber ?? record.ConsumptionNumber ?? "",
+    projectId: record.projectId ?? record.ProjectId ?? null,
+    fromLocationId: record.fromLocationId ?? record.FromLocationId ?? null,
+    toLocationId: record.toLocationId ?? record.ToLocationId ?? null,
+    returnVendorId: record.returnVendorId ?? record.ReturnVendorId ?? null,
+    requestDate: normalizeDateValue(
+      record.requestDate ?? record.RequestDate ?? record.transferDate ?? record.TransferDate
+    ),
+    transferDate: record.transferDate ?? record.TransferDate ?? null,
+    requestedBy: record.requestedBy ?? record.RequestedBy ?? "",
+    status: record.status ?? record.Status ?? "Pending",
+    notes: record.notes ?? record.Notes ?? "",
+    createdAt: record.createdAt ?? record.CreatedAt ?? null,
+    updatedAt: record.updatedAt ?? record.UpdatedAt ?? null,
+    items: Array.isArray(record.items)
+      ? record.items.map(normalizeReallocateInventoryItem)
+      : Array.isArray(record.ReallocateInventoryItems)
+      ? record.ReallocateInventoryItems.map(normalizeReallocateInventoryItem)
+      : [],
+  };
+};
+
+export const fetchReallocateInventory = async () => {
+  const response = await api.get("/reallocate-inventory");
+  const list = Array.isArray(response.data?.reallocations)
+    ? response.data.reallocations
+    : Array.isArray(response.data)
+    ? response.data
+    : [];
+  return list.map(normalizeReallocateInventory);
+};
+
+export const createReallocateInventory = async (payload) => {
+  const response = await api.post("/reallocate-inventory", payload, {
+    timeout: 60000,
+  });
+  const normalized = normalizeReallocateInventory(
+    response.data?.reallocation ?? response.data
+  );
+  emitReallocateInventoryChange();
+  return normalized;
+};
+
+export const updateReallocateInventory = async (id, payload) => {
+  const response = await api.put(`/reallocate-inventory/${id}`, payload, {
+    timeout: 60000,
+  });
+  const normalized = normalizeReallocateInventory(
+    response.data?.reallocation ?? response.data
+  );
+  emitReallocateInventoryChange();
+  return normalized;
+};
+
+export const deleteReallocateInventory = async (id) => {
+  await api.delete(`/reallocate-inventory/${id}`);
+  emitReallocateInventoryChange();
+};

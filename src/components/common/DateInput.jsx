@@ -2,9 +2,25 @@ import { useEffect, useMemo, useState } from "react";
 
 const pad = (value) => String(value).padStart(2, "0");
 
+const toIsoDateValue = (value) => {
+  if (!value) return "";
+  const trimmed = String(value).trim();
+  if (!trimmed) return "";
+  const directMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+  if (directMatch) {
+    return `${directMatch[1]}-${directMatch[2]}-${directMatch[3]}`;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+  return `${parsed.getUTCFullYear()}-${pad(parsed.getUTCMonth() + 1)}-${pad(parsed.getUTCDate())}`;
+};
+
 const isoToDisplay = (isoDate) => {
-  if (!isoDate) return "";
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate));
+  const normalized = toIsoDateValue(isoDate);
+  if (!normalized) return "";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
   if (!match) return "";
   const [, year, month, day] = match;
   return `${day}/${month}/${year}`;
@@ -42,7 +58,8 @@ const DateInput = ({
   showCalendarButton = true,
   ...rest
 }) => {
-  const externalDisplay = useMemo(() => isoToDisplay(value), [value]);
+  const nativeValue = useMemo(() => toIsoDateValue(value), [value]);
+  const externalDisplay = useMemo(() => isoToDisplay(nativeValue), [nativeValue]);
   const [inputValue, setInputValue] = useState(externalDisplay);
   const [hiddenId] = useState(() => `date-input-${Math.random().toString(36).slice(2, 8)}`);
 
@@ -109,7 +126,7 @@ const DateInput = ({
           <input
             id={hiddenId}
             type="date"
-            value={value || ""}
+            value={nativeValue}
             onChange={handleNativeChange}
             className="sr-only"
             tabIndex={-1}

@@ -10,6 +10,8 @@ const normalizeConsumptionItem = (item = {}) => ({
   id: item.id ?? item.Id ?? null,
   consumptionId:
     item.consumptionId ?? item.ConsumptionId ?? item.ConsumptionID ?? null,
+  boqItemId:
+    item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId ?? null,
   name: item.name ?? item.Item ?? item.item ?? item.Name ?? "",
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",
