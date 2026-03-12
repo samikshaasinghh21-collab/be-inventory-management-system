@@ -356,8 +356,8 @@ const normalizeItem = (row = {}) => ({
     row.Qty ??
     row.stock ??
     row.quantity ??
-      row.qty ??
-      0
+    row.qty ??
+    0
   ),
   price: Number(
     row.unit_price ??
@@ -455,6 +455,8 @@ const normalizePoItem = (row = {}) => {
     name: row.ItemName ?? row.Name ?? row.name ?? "",
     description: row.Description ?? row.description ?? "",
     unit: row.Unit ?? row.unit ?? "PCS",
+    hsn: row.HSN ?? row.hsn ?? row.Hsn ?? "",
+    gst: row.GST ?? row.gst ?? row.Gst ?? "",
     quantity,
     unitPrice,
     totalPrice:
@@ -481,9 +483,20 @@ const normalizeBoq = (row = {}) => ({
 const normalizeBoqItem = (row = {}) => {
   const quantity = Number(row.Quantity ?? row.quantity ?? 0) || 0;
   const rate = Number(row.Rate ?? row.rate ?? 0) || 0;
+  const rawConsumed =
+    row.ConsumedQty ??
+    row.consumedQty ??
+    row.TotalConsumed ??
+    row.totalConsumed ??
+    null;
+  const consumedQty = Number.isFinite(Number(rawConsumed)) ? Number(rawConsumed) : null;
   const rawAvailable =
     row.AvailableQty ?? row.availableQty ?? row.RemainingQty ?? row.remainingQty ?? null;
-  const availableQty = Number.isFinite(Number(rawAvailable)) ? Number(rawAvailable) : null;
+  const availableQty = Number.isFinite(Number(rawAvailable))
+    ? Number(rawAvailable)
+    : Number.isFinite(consumedQty)
+    ? Math.max(quantity - consumedQty, 0)
+    : null;
   return {
     id: row.LineItemId ?? row.lineItemId ?? null,
     boqId: row.BOQId ?? row.boqId ?? null,
@@ -491,6 +504,7 @@ const normalizeBoqItem = (row = {}) => {
     description: row.Description ?? row.description ?? "",
     unit: row.Unit ?? row.unit ?? "",
     quantity,
+    consumedQty,
     availableQty,
     rate,
     notes: row.Notes ?? row.notes ?? "",
@@ -539,6 +553,8 @@ const normalizeDeliveryChallanItem = (row = {}) => ({
   name: row.ItemName ?? row.itemName ?? row.Name ?? row.name ?? "",
   description: row.Description ?? row.description ?? "",
   unit: row.Unit ?? row.unit ?? "PCS",
+  hsn: row.HSN ?? row.hsn ?? row.Hsn ?? "",
+  gst: row.GST ?? row.gst ?? row.Gst ?? "",
   quantity: Number(row.Quantity ?? row.quantity ?? 0) || 0,
   rate: Number(row.Rate ?? row.rate ?? 0) || 0,
   notes: row.Notes ?? row.notes ?? "",
@@ -574,6 +590,8 @@ const normalizeConsumptionItem = (row = {}) => ({
   name: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
   description: row.Description ?? row.description ?? "",
   unit: row.Unit ?? row.unit ?? "PCS",
+  hsn: row.HSN ?? row.hsn ?? row.Hsn ?? "",
+  gst: row.GST ?? row.gst ?? row.Gst ?? "",
   quantity: Number(row.Quantity ?? row.quantity ?? 0) || 0,
   rate: Number(row.Rate ?? row.rate ?? 0) || 0,
   notes: row.Notes ?? row.notes ?? "",
@@ -1065,6 +1083,8 @@ const ensurePurchaseTables = async () => {
         Name NVARCHAR(255) NOT NULL DEFAULT '',
         Description NVARCHAR(MAX) NULL,
         Unit NVARCHAR(30) NULL,
+        HSN NVARCHAR(50) NULL,
+        GST NVARCHAR(100) NULL,
         Quantity INT NOT NULL DEFAULT 0,
         Rate DECIMAL(10, 2) NOT NULL DEFAULT 0,
         Notes NVARCHAR(MAX) NULL,
@@ -1078,6 +1098,14 @@ const ensurePurchaseTables = async () => {
     IF COL_LENGTH('dbo.PurchaseOrderItems', 'Rate') IS NULL
     BEGIN
       ALTER TABLE dbo.PurchaseOrderItems ADD Rate DECIMAL(10,2) NOT NULL CONSTRAINT DF_POItems_Rate DEFAULT 0;
+    END;
+    IF COL_LENGTH('dbo.PurchaseOrderItems', 'HSN') IS NULL
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrderItems ADD HSN NVARCHAR(50) NULL;
+    END;
+    IF COL_LENGTH('dbo.PurchaseOrderItems', 'GST') IS NULL
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrderItems ADD GST NVARCHAR(100) NULL;
     END;
   `);
   })();
@@ -1399,6 +1427,7 @@ const ensureBoqTables = async () => {
         Unit NVARCHAR(50) NULL,
         Quantity DECIMAL(18, 2) NOT NULL DEFAULT 0,
         Rate DECIMAL(18, 2) NOT NULL DEFAULT 0,
+        ConsumedQty DECIMAL(18, 2) NULL,
         AvailableQty DECIMAL(18, 2) NULL,
         Notes NVARCHAR(MAX) NULL,
         CONSTRAINT FK_BOQLineItems_BOQ FOREIGN KEY (BOQId)
@@ -1415,6 +1444,37 @@ const ensureBoqTables = async () => {
     IF COL_LENGTH('dbo.BOQLineItems', 'AvailableQty') IS NULL
     BEGIN
       ALTER TABLE dbo.BOQLineItems ADD AvailableQty DECIMAL(18, 2) NULL;
+    END;
+    IF COL_LENGTH('dbo.BOQLineItems', 'ConsumedQty') IS NULL
+    BEGIN
+      ALTER TABLE dbo.BOQLineItems ADD ConsumedQty DECIMAL(18, 2) NULL;
+
+      IF OBJECT_ID('dbo.ConsumptionItems', 'U') IS NOT NULL
+      BEGIN
+        EXEC('
+          WITH Consumed AS (
+            SELECT BoqItemId, SUM(Quantity) AS TotalConsumed
+            FROM dbo.ConsumptionItems
+            WHERE BoqItemId IS NOT NULL
+            GROUP BY BoqItemId
+          )
+          UPDATE bi
+          SET
+            ConsumedQty = ISNULL(c.TotalConsumed, 0),
+            AvailableQty = CASE
+              WHEN bi.Quantity - ISNULL(c.TotalConsumed, 0) < 0 THEN 0
+              ELSE bi.Quantity - ISNULL(c.TotalConsumed, 0)
+            END
+          FROM dbo.BOQLineItems bi
+          LEFT JOIN Consumed c ON c.BoqItemId = bi.LineItemId;
+        ');
+      END
+    END;
+    IF COL_LENGTH('dbo.BOQLineItems', 'ConsumedQty') IS NOT NULL
+    BEGIN
+      UPDATE dbo.BOQLineItems
+      SET ConsumedQty = 0
+      WHERE ConsumedQty IS NULL;
     END;
   `);
 
@@ -1458,10 +1518,11 @@ const refreshBoqAvailability = async (tx, boqItemIds = []) => {
     updateReq.input("ConsumedQty", sql.Decimal(18, 2), consumed);
     await updateReq.query(`
       UPDATE dbo.BOQLineItems
-      SET AvailableQty = CASE
-        WHEN Quantity - @ConsumedQty < 0 THEN 0
-        ELSE Quantity - @ConsumedQty
-      END
+      SET ConsumedQty = @ConsumedQty,
+          AvailableQty = CASE
+            WHEN Quantity - @ConsumedQty < 0 THEN 0
+            ELSE Quantity - @ConsumedQty
+          END
       WHERE LineItemId = @BoqItemId
     `);
   }
@@ -1614,6 +1675,8 @@ const ensureDeliveryChallanTables = async () => {
           ItemName NVARCHAR(200) NULL,
           Description NVARCHAR(500) NULL,
           Unit NVARCHAR(50) NULL,
+          HSN NVARCHAR(50) NULL,
+          GST NVARCHAR(100) NULL,
           Quantity DECIMAL(18,2) NOT NULL DEFAULT 0,
           Rate DECIMAL(18,2) NOT NULL DEFAULT 0,
           Notes NVARCHAR(500) NULL
@@ -1654,6 +1717,14 @@ const ensureDeliveryChallanTables = async () => {
       IF COL_LENGTH('dbo.DeliveryChallanItems', 'Unit') IS NULL
       BEGIN
         ALTER TABLE dbo.DeliveryChallanItems ADD Unit NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'HSN') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD HSN NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'GST') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD GST NVARCHAR(100) NULL;
       END;
       IF COL_LENGTH('dbo.DeliveryChallanItems', 'Quantity') IS NULL
       BEGIN
@@ -1821,8 +1892,10 @@ const ensureConsumptionTables = async () => {
           Item NVARCHAR(200) NULL,
           Description NVARCHAR(500) NULL,
           Unit NVARCHAR(100) NULL,
+          HSN NVARCHAR(50) NULL,
+          GST NVARCHAR(100) NULL,
           Quantity DECIMAL(18,2) NOT NULL DEFAULT 0,
-          Rate DECIMAL(18,2) NOT NULL DEFAULT 0,
+          Rate DECIMAL(18, 2) NOT NULL DEFAULT 0,
           Notes NVARCHAR(500) NULL
         )
       END
@@ -1872,6 +1945,14 @@ const ensureConsumptionTables = async () => {
       IF COL_LENGTH('dbo.ConsumptionItems', 'Unit') IS NULL
       BEGIN
         ALTER TABLE dbo.ConsumptionItems ADD Unit NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'HSN') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD HSN NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'GST') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD GST NVARCHAR(100) NULL;
       END;
       IF COL_LENGTH('dbo.ConsumptionItems', 'Quantity') IS NULL
       BEGIN
@@ -3185,6 +3266,8 @@ app.post("/api/purchase-orders", async (req, res) => {
       const notesCol = cols.has("Notes") ? "Notes" : null;
       const itemIdCol = cols.has("ItemId") ? "ItemId" : null;
       const descCol = cols.has("Description") ? "Description" : null;
+      const hsnCol = cols.has("HSN") ? "HSN" : cols.has("Hsn") ? "Hsn" : null;
+      const gstCol = cols.has("GST") ? "GST" : cols.has("Gst") ? "Gst" : null;
 
       const canInsert = hasPoId && nameCol && qtyCol && unitPriceCol;
 
@@ -3204,6 +3287,18 @@ app.post("/api/purchase-orders", async (req, res) => {
           req.input("UnitPrice", sql.Decimal(18, 2), unitPrice);
           req.input("Total", sql.Decimal(18, 2), lineTotal);
           req.input("Unit", sql.NVarChar(50), item.unit ?? "PCS");
+          req.input(
+            "HSN",
+            sql.NVarChar(50),
+            normalizeOptionalString(item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode) ??
+              null
+          );
+          req.input(
+            "GST",
+            sql.NVarChar(100),
+            normalizeOptionalString(item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate) ??
+              null
+          );
           const lineLocation = normalizeOptionalString(
             item.location ?? item.Location ?? item.notes ?? item.Notes
           );
@@ -3214,6 +3309,8 @@ app.post("/api/purchase-orders", async (req, res) => {
             itemIdCol ? "ItemId" : null,
             nameCol,
             descCol,
+            hsnCol,
+            gstCol,
             qtyCol,
             unitPriceCol,
             totalCol,
@@ -3226,6 +3323,8 @@ app.post("/api/purchase-orders", async (req, res) => {
             if (c === "ItemId") return "@ItemId";
             if (c === nameCol) return "@Name";
             if (c === descCol) return "@Desc";
+            if (c === hsnCol) return "@HSN";
+            if (c === gstCol) return "@GST";
             if (c === qtyCol) return "@Qty";
             if (c === unitPriceCol) return "@UnitPrice";
             if (c === totalCol) return "@Total";
@@ -3391,6 +3490,18 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
           req.input("UnitPrice", sql.Decimal(18, 2), unitPrice);
           req.input("Total", sql.Decimal(18, 2), lineTotal);
           req.input("Unit", sql.NVarChar(50), item.unit ?? "PCS");
+          req.input(
+            "HSN",
+            sql.NVarChar(50),
+            normalizeOptionalString(item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode) ??
+              null
+          );
+          req.input(
+            "GST",
+            sql.NVarChar(100),
+            normalizeOptionalString(item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate) ??
+              null
+          );
           const lineLocation = normalizeOptionalString(
             item.location ?? item.Location ?? item.notes ?? item.Notes
           );
@@ -3401,6 +3512,8 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
             itemIdCol ? "ItemId" : null,
             nameCol,
             descCol,
+            hsnCol,
+            gstCol,
             qtyCol,
             unitPriceCol,
             totalCol,
@@ -3413,6 +3526,8 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
             if (c === "ItemId") return "@ItemId";
             if (c === nameCol) return "@Name";
             if (c === descCol) return "@Desc";
+            if (c === hsnCol) return "@HSN";
+            if (c === gstCol) return "@GST";
             if (c === qtyCol) return "@Qty";
             if (c === unitPriceCol) return "@UnitPrice";
             if (c === totalCol) return "@Total";
@@ -3966,13 +4081,14 @@ app.post("/api/boqs", async (req, res) => {
       insertItem.input("Unit", sql.NVarChar(50), String(item.unit ?? "").trim());
       insertItem.input("Quantity", sql.Decimal(18, 2), qty);
       insertItem.input("Rate", sql.Decimal(18, 2), rate);
+      insertItem.input("ConsumedQty", sql.Decimal(18, 2), 0);
       insertItem.input("AvailableQty", sql.Decimal(18, 2), qty);
       insertItem.input("Notes", sql.NVarChar(sql.MAX), String(item.notes ?? "").trim());
       await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
-          (BOQId, ItemName, Description, Unit, Quantity, Rate, AvailableQty, Notes)
+          (BOQId, ItemName, Description, Unit, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
         VALUES
-          (@BOQId, @ItemName, @Description, @Unit, @Quantity, @Rate, @AvailableQty, @Notes)
+          (@BOQId, @ItemName, @Description, @Unit, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
       `);
     }
 
@@ -4097,18 +4213,19 @@ app.put("/api/boqs/:id", async (req, res) => {
 
       const insertItem = new sql.Request(tx);
       insertItem.input("BOQId", sql.Int, id);
-      insertItem.input("ItemName", sql.NVarChar(200), String(item.name ?? "").trim());
-      insertItem.input("Description", sql.NVarChar(sql.MAX), String(item.description ?? "").trim());
-      insertItem.input("Unit", sql.NVarChar(50), String(item.unit ?? "").trim());
+      insertItem.input("ItemName", sql.NVarChar(200), item.name);
+      insertItem.input("Description", sql.NVarChar(500), item.description);
+      insertItem.input("Unit", sql.NVarChar(100), item.unit);
+      insertItem.input("HSN", sql.NVarChar(50), item.hsn);
+      insertItem.input("GST", sql.NVarChar(100), item.gst);
       insertItem.input("Quantity", sql.Decimal(18, 2), qty);
       insertItem.input("Rate", sql.Decimal(18, 2), rate);
-      insertItem.input("AvailableQty", sql.Decimal(18, 2), qty);
-      insertItem.input("Notes", sql.NVarChar(sql.MAX), String(item.notes ?? "").trim());
+      insertItem.input("Notes", sql.NVarChar(500), item.notes);
       await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
-          (BOQId, ItemName, Description, Unit, Quantity, Rate, AvailableQty, Notes)
+          (BOQId, ItemName, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@BOQId, @ItemName, @Description, @Unit, @Quantity, @Rate, @AvailableQty, @Notes)
+          (@BOQId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
@@ -4155,7 +4272,9 @@ app.delete("/api/boqs/:id", async (req, res) => {
 
     const deleteBoq = new sql.Request(tx);
     deleteBoq.input("BOQId", sql.Int, id);
-    const result = await deleteBoq.query(`DELETE FROM dbo.BOQProjects WHERE BOQId = @BOQId`);
+    const result = await deleteBoq.query(`
+      DELETE FROM dbo.BOQProjects WHERE BOQId = @BOQId
+    `);
 
     await tx.commit();
 
@@ -4305,13 +4424,15 @@ app.post("/api/delivery-challans", async (req, res) => {
 
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
-      const name = String(item.name ?? item.ItemName ?? "").trim();
+      const name = String(item.name ?? item.Item ?? "").trim();
       const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
       return {
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        hsn: normalizeOptionalString(item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode) ?? null,
+        gst: normalizeOptionalString(item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate) ?? null,
         quantity,
         rate,
         notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
@@ -4366,14 +4487,16 @@ app.post("/api/delivery-challans", async (req, res) => {
       insertItemReq.input("ItemName", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(50), item.unit);
+      insertItemReq.input("HSN", sql.NVarChar(50), item.hsn);
+      insertItemReq.input("GST", sql.NVarChar(100), item.gst);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.DeliveryChallanItems
-          (${fkCol}, ItemName, Description, Unit, Quantity, Rate, Notes)
+          (${fkCol}, ItemName, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@DeliveryChallanId, @ItemName, @Description, @Unit, @Quantity, @Rate, @Notes)
+          (@DeliveryChallanId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
@@ -4449,13 +4572,15 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
 
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
-      const name = String(item.name ?? item.ItemName ?? "").trim();
+      const name = String(item.name ?? item.Item ?? "").trim();
       const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
       return {
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        hsn: normalizeOptionalString(item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode) ?? null,
+        gst: normalizeOptionalString(item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate) ?? null,
         quantity,
         rate,
         notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
@@ -4524,15 +4649,17 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       insertItemReq.input("DeliveryChallanId", sql.BigInt, id);
       insertItemReq.input("ItemName", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
-      insertItemReq.input("Unit", sql.NVarChar(50), item.unit);
+      insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
+      insertItemReq.input("HSN", sql.NVarChar(50), item.hsn);
+      insertItemReq.input("GST", sql.NVarChar(100), item.gst);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.DeliveryChallanItems
-          (${fkCol}, ItemName, Description, Unit, Quantity, Rate, Notes)
+          (${fkCol}, ItemName, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@DeliveryChallanId, @ItemName, @Description, @Unit, @Quantity, @Rate, @Notes)
+          (@DeliveryChallanId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
@@ -4744,6 +4871,8 @@ app.post("/api/consumptions", async (req, res) => {
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        hsn: normalizeOptionalString(item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode) ?? null,
+        gst: normalizeOptionalString(item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate) ?? null,
         quantity,
         rate,
         notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
@@ -4799,14 +4928,16 @@ app.post("/api/consumptions", async (req, res) => {
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
+      insertItemReq.input("HSN", sql.NVarChar(50), item.hsn);
+      insertItemReq.input("GST", sql.NVarChar(100), item.gst);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.ConsumptionItems
-          (${fkCol}, BoqItemId, Item, Description, Unit, Quantity, Rate, Notes)
+          (${fkCol}, BoqItemId, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@ConsumptionId, @BoqItemId, @Item, @Description, @Unit, @Quantity, @Rate, @Notes)
+          (@ConsumptionId, @BoqItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
@@ -4894,6 +5025,8 @@ app.put("/api/consumptions/:id", async (req, res) => {
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        hsn: normalizeOptionalString(item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode) ?? null,
+        gst: normalizeOptionalString(item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate) ?? null,
         quantity,
         rate,
         notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
@@ -4970,14 +5103,16 @@ app.put("/api/consumptions/:id", async (req, res) => {
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
+      insertItemReq.input("HSN", sql.NVarChar(50), item.hsn);
+      insertItemReq.input("GST", sql.NVarChar(100), item.gst);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.ConsumptionItems
-          (${fkCol}, BoqItemId, Item, Description, Unit, Quantity, Rate, Notes)
+          (${fkCol}, BoqItemId, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@ConsumptionId, @BoqItemId, @Item, @Description, @Unit, @Quantity, @Rate, @Notes)
+          (@ConsumptionId, @BoqItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
@@ -5604,4 +5739,3 @@ app.listen(port, () => {
 
   void warmupSchema();
 });
-

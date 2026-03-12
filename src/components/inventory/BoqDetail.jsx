@@ -49,7 +49,17 @@ const BoqDetail = () => {
         ["Date", boq.date ?? ""],
         ["Notes", (boq.notes ?? "").replace(/\r?\n/g, " ")],
         [],
-        ["Item", "Description", "Unit", "Quantity", "Rate", "Amount", "Notes"],
+        [
+          "Item",
+          "Description",
+          "Unit",
+          "Planned Qty",
+          "Consumed Qty",
+          "Available Qty",
+          "Rate",
+          "Amount",
+          "Notes",
+        ],
       ];
 
       const itemLines = (boq.items ?? []).map((item) => [
@@ -57,6 +67,8 @@ const BoqDetail = () => {
         (item.description ?? "").replace(/\r?\n/g, " "),
         item.unit ?? "",
         item.quantity ?? "",
+        item.consumedQty ?? "",
+        item.availableQty ?? "",
         item.rate ?? "",
         item.amount ?? "",
         (item.notes ?? "").replace(/\r?\n/g, " "),
@@ -219,7 +231,9 @@ const BoqDetail = () => {
               <th className="p-3 text-left min-w-[200px]">Item</th>
               <th className="p-3 text-left min-w-[200px]">Description</th>
               <th className="p-3 text-left min-w-[80px]">Unit</th>
-              <th className="p-3 text-left min-w-[90px]">Qty</th>
+              <th className="p-3 text-left min-w-[90px]">Planned Qty</th>
+              <th className="p-3 text-left min-w-[110px]">Consumed Qty</th>
+              <th className="p-3 text-left min-w-[110px]">Available Qty</th>
               <th className="p-3 text-left min-w-[100px]">Rate</th>
               <th className="p-3 text-left min-w-[110px]">Amount</th>
               <th className="p-3 text-left min-w-[160px]">Notes</th>
@@ -228,7 +242,7 @@ const BoqDetail = () => {
           <tbody>
             {boq.items?.length === 0 && (
               <tr>
-                <td colSpan="7" className="p-6 text-center text-slate-500">
+                <td colSpan="9" className="p-6 text-center text-slate-500">
                   No items.
                 </td>
               </tr>
@@ -239,6 +253,8 @@ const BoqDetail = () => {
                 <td className="p-3">{item.description || "-"}</td>
                 <td className="p-3">{item.unit || "-"}</td>
                 <td className="p-3">{item.quantity ?? "-"}</td>
+                <td className="p-3">{item.consumedQty ?? 0}</td>
+                <td className="p-3">{item.availableQty ?? "-"}</td>
                 <td className="p-3">{formatCurrency(item.rate)}</td>
                 <td className="p-3 font-semibold">{formatCurrency(item.amount)}</td>
                 <td className="p-3">{item.notes || "-"}</td>

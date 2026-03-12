@@ -3,9 +3,16 @@ import api from "./api";
 const normalizeBoqItem = (item = {}) => {
   const quantity = Number(item.quantity ?? item.Quantity ?? 0);
   const rate = Number(item.rate ?? item.Rate ?? 0);
+  const rawConsumed =
+    item.consumedQty ?? item.ConsumedQty ?? item.totalConsumed ?? item.TotalConsumed ?? null;
+  const consumedQty = Number.isFinite(Number(rawConsumed)) ? Number(rawConsumed) : null;
   const rawAvailable =
     item.availableQty ?? item.AvailableQty ?? item.remainingQty ?? item.RemainingQty ?? null;
-  const availableQty = Number.isFinite(Number(rawAvailable)) ? Number(rawAvailable) : null;
+  const availableQty = Number.isFinite(Number(rawAvailable))
+    ? Number(rawAvailable)
+    : Number.isFinite(consumedQty)
+    ? Math.max(quantity - consumedQty, 0)
+    : null;
   const amountFromValues = quantity * rate;
   const amount = Number(item.amount ?? item.Amount ?? amountFromValues) || amountFromValues;
   return {
@@ -15,6 +22,7 @@ const normalizeBoqItem = (item = {}) => {
     description: item.description ?? item.Description ?? "",
     unit: item.unit ?? item.Unit ?? "",
     quantity,
+    consumedQty,
     availableQty,
     rate,
     notes: item.notes ?? item.Notes ?? "",

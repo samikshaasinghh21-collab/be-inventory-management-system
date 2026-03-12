@@ -18,6 +18,8 @@ const createLineItem = () => ({
   name: "",
   description: "",
   unit: "PCS",
+  hsn: "",
+  gst: "",
   quantity: "",
   rate: "",
   notes: "",
@@ -73,6 +75,8 @@ const PurchaseOrder = () => {
         name: item.name ?? "",
         description: item.description ?? "",
         unit: item.unit ?? "PCS",
+        hsn: item.hsn ?? "",
+        gst: item.gst ?? "",
         quantity: item.quantity ?? "",
         rate: item.unitPrice ?? item.rate ?? "",
         location: item.location ?? item.notes ?? "",
@@ -168,6 +172,8 @@ const PurchaseOrder = () => {
           name: product.name || "",
           description: product.description || "",
           unit: product.unit || "PCS",
+          hsn: product.hsn || "",
+          gst: product.gst || "",
           quantity: product.quantity ?? product.qty ?? 1,
           rate: product.rate ?? product.salesPrice ?? 0,
           location: "",
@@ -267,6 +273,8 @@ const PurchaseOrder = () => {
           name: item.name?.trim() || "",
           description: item.description || "",
           unit: item.unit || "PCS",
+          hsn: String(item.hsn ?? "").trim(),
+          gst: String(item.gst ?? "").trim(),
           location: lineLocation,
           notes: lineLocation,
           quantity: qty,
@@ -316,6 +324,8 @@ const PurchaseOrder = () => {
         name: item.name || "",
         description: item.description || "",
         unit: item.unit || "PCS",
+        hsn: item.hsn || "",
+        gst: item.gst || "",
         quantity: qty,
         rate,
         location: item.location || item.notes || "",
@@ -642,6 +652,7 @@ const PurchaseOrder = () => {
           onChange={setItems}
           onPickFromProducts={goPickProducts}
           pickLabel="Pick from Products"
+          showHsnGst
           extraFieldKey="location"
           extraFieldLabel="Location"
           extraFieldPlaceholder="Site/store location"

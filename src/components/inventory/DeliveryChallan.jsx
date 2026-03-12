@@ -20,6 +20,8 @@ const createLineItem = () => ({
   name: "",
   description: "",
   unit: "PCS",
+  hsn: "",
+  gst: "",
   quantity: "",
   rate: "",
   notes: "",
@@ -162,6 +164,8 @@ const DeliveryChallan = () => {
       .map((item) => ({
         ...item,
         name: String(item.name ?? "").trim(),
+        hsn: String(item.hsn ?? "").trim(),
+        gst: String(item.gst ?? "").trim(),
       }))
       .filter((item) => item.name && Number(item.quantity) > 0);
 
@@ -234,6 +238,8 @@ const DeliveryChallan = () => {
       name: item.name || "",
       description: item.description || "",
       unit: item.unit || "PCS",
+      hsn: item.hsn || "",
+      gst: item.gst || "",
       quantity: item.quantity ?? "",
       rate: item.rate ?? 0,
       notes: item.notes || "",
@@ -532,6 +538,7 @@ const DeliveryChallan = () => {
           onChange={setItems}
           onPickFromProducts={handlePickFromBoq}
           pickLabel="Pick from BOQ"
+          showHsnGst
         />
         {boqError && <p className="text-xs text-red-600">{boqError}</p>}
         {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
@@ -737,6 +744,8 @@ const DeliveryChallan = () => {
                 <tr className="border-b border-slate-800">
                   <th className="p-2 text-left w-10">Sl No</th>
                   <th className="p-2 text-left">Description</th>
+                  <th className="p-2 text-left w-20">HSN</th>
+                  <th className="p-2 text-left w-20">GST</th>
                   <th className="p-2 text-right w-20">Qty</th>
                   <th className="p-2 text-left w-20">Unit</th>
                 </tr>
@@ -754,6 +763,8 @@ const DeliveryChallan = () => {
                         <p className="text-[10px] text-slate-500">{item.notes}</p>
                       )}
                     </td>
+                    <td className="p-2">{item.hsn || "-"}</td>
+                    <td className="p-2">{item.gst || "-"}</td>
                     <td className="p-2 text-right">{item.quantity || "-"}</td>
                     <td className="p-2">{item.unit || "-"}</td>
                   </tr>

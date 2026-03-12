@@ -48,6 +48,8 @@ const lineItem = (o = {}) => ({
   boqItemId: o.boqItemId ?? null,
   name: o.name ?? "",
   unit: o.unit ?? "PCS",
+  hsn: o.hsn ?? "",
+  gst: o.gst ?? "",
   receivedQty: qty(o.receivedQty ?? 0),
   quantity: o.quantity === "" ? "" : o.quantity ?? "",
   notes: o.notes ?? "",
@@ -91,6 +93,8 @@ const boqItems = (projectId, boqs = []) => {
       boqItemId: it.id ?? it.LineItemId ?? keyOf(it),
       name: it.name ?? "",
       unit: it.unit ?? "PCS",
+      hsn: it.hsn ?? "",
+      gst: it.gst ?? "",
       receivedQty: Number.isFinite(Number(it.availableQty))
         ? qty(it.availableQty)
         : qty(it.quantity),
@@ -110,6 +114,8 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
             boqItemId: it.boqItemId ?? it.id ?? null,
             name: it.name ?? "",
             unit: it.unit ?? "PCS",
+            hsn: it.hsn ?? "",
+            gst: it.gst ?? "",
             receivedQty: Math.max(qty(it.receivedQty), qty(it.quantity)),
             quantity: it.quantity ?? "",
             notes: it.notes ?? "",
@@ -136,6 +142,8 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
       boqItemId: bi.id ?? bi.LineItemId ?? k,
       name: bi.name ?? "",
       unit: bi.unit ?? "PCS",
+      hsn: found?.hsn ?? bi.hsn ?? "",
+      gst: found?.gst ?? bi.gst ?? "",
       receivedQty,
       quantity: found?.quantity ?? "",
       notes: found?.notes ?? bi.notes ?? "",
@@ -149,6 +157,8 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
         boqItemId: it.boqItemId ?? it.id ?? null,
         name: it.name ?? "",
         unit: it.unit ?? "PCS",
+        hsn: it.hsn ?? "",
+        gst: it.gst ?? "",
         receivedQty: Math.max(qty(it.receivedQty), qty(it.quantity)),
         quantity: it.quantity ?? "",
         notes: it.notes ?? "",
@@ -213,6 +223,18 @@ const Consumption = () => {
     () => [...records].sort((a, b) => sortValue(b) - sortValue(a)),
     [records]
   );
+  const boqItemMap = useMemo(() => {
+    const map = new Map();
+    (boqs || []).forEach((boq) => {
+      (boq.items || []).forEach((item) => {
+        const key = item.id ?? item.LineItemId ?? item.boqItemId ?? null;
+        if (key !== null && key !== undefined) {
+          map.set(String(key), item);
+        }
+      });
+    });
+    return map;
+  }, [boqs]);
   const projectMap = useMemo(
     () =>
       projects.reduce((acc, p) => {
@@ -357,6 +379,14 @@ const Consumption = () => {
     if (!ok) setForm((p) => ({ ...p, locationId: "" }));
   }, [filteredLocations, form.locationId]);
 
+  useEffect(() => {
+    if (!viewRecord?.id) return;
+    const updated = records.find((r) => String(r.id) === String(viewRecord.id));
+    if (updated && updated !== viewRecord) {
+      setViewRecord(updated);
+    }
+  }, [records, viewRecord?.id]);
+
   const onProjectChange = (projectId) => {
     setForm((p) => ({
       ...p,
@@ -423,6 +453,8 @@ const Consumption = () => {
           name: String(it.name || "").trim(),
           description: null,
           unit: String(it.unit || "PCS").trim() || "PCS",
+          hsn: String(it.hsn || "").trim(),
+          gst: String(it.gst || "").trim(),
           quantity: qty(it.quantity),
           rate: 0,
           notes: String(it.notes || "").trim() || null,
@@ -767,6 +799,8 @@ const Consumption = () => {
               <thead className="bg-[#eceff8] text-slate-700">
                 <tr>
                   <th className="px-3 py-3 text-left font-semibold min-w-[220px]">Material</th>
+                  <th className="px-3 py-3 text-left font-semibold min-w-[110px]">HSN</th>
+                  <th className="px-3 py-3 text-left font-semibold min-w-[110px]">GST</th>
                   <th className="px-3 py-3 text-left font-semibold min-w-[100px]">Unit</th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[130px]">Received Qty</th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[130px]">Consumed Qty</th>
@@ -781,6 +815,8 @@ const Consumption = () => {
                   return (
                     <tr key={it.id} className="border-b border-slate-200 bg-white">
                       <td className="px-3 py-2"><input value={it.name} onChange={(e) => onItemChange(it.id, "name", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
+                      <td className="px-3 py-2"><input value={it.hsn} onChange={(e) => onItemChange(it.id, "hsn", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
+                      <td className="px-3 py-2"><input value={it.gst} onChange={(e) => onItemChange(it.id, "gst", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
                       <td className="px-3 py-2"><input value={it.unit} onChange={(e) => onItemChange(it.id, "unit", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
                       <td className="px-3 py-2"><input readOnly value={fmtQty(it.receivedQty)} className="w-full rounded-md border border-slate-300 bg-slate-50 px-2.5 py-2 text-right text-sm font-medium text-slate-700" /></td>
                       <td className="px-3 py-2"><input type="number" min="0" step="0.01" value={it.quantity} onChange={(e) => onItemChange(it.id, "quantity", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-right text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
@@ -883,16 +919,42 @@ const Consumption = () => {
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Material" },
+            { key: "hsn", label: "HSN", widthClass: "w-20" },
+            { key: "gst", label: "GST", widthClass: "w-20" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
-            { key: "quantity", label: "Qty Consumed", align: "right", widthClass: "w-24" },
+            { key: "boqQty", label: "BOQ Qty", align: "right", widthClass: "w-24" },
+            { key: "boqConsumed", label: "Total Consumed", align: "right", widthClass: "w-28" },
+            { key: "boqAvailable", label: "Balance", align: "right", widthClass: "w-24" },
           ]}
-          tableRows={(viewRecord.items || []).map((it, idx) => ({
-            id: it.id || idx,
-            serial: idx + 1,
-            name: it.name || "-",
-            unit: it.unit || "PCS",
-            quantity: fmtQty(it.quantity),
-          }))}
+          tableRows={(viewRecord.items || []).map((it, idx) => {
+            const boqItemId = it.boqItemId ?? null;
+            const boqItem = boqItemId ? boqItemMap.get(String(boqItemId)) : null;
+            const rawBoqQty = Number(boqItem?.quantity);
+            const rawAvailable = Number(boqItem?.availableQty);
+            const rawConsumed = Number(boqItem?.consumedQty);
+            const resolvedAvailable = Number.isFinite(rawAvailable)
+              ? rawAvailable
+              : Number.isFinite(rawBoqQty) && Number.isFinite(rawConsumed)
+              ? Math.max(rawBoqQty - rawConsumed, 0)
+              : NaN;
+            const resolvedConsumed = Number.isFinite(rawConsumed)
+              ? rawConsumed
+              : Number.isFinite(rawBoqQty) && Number.isFinite(rawAvailable)
+              ? Math.max(rawBoqQty - rawAvailable, 0)
+              : NaN;
+
+            return {
+              id: it.id || idx,
+              serial: idx + 1,
+              name: it.name || "-",
+              hsn: it.hsn || "-",
+              gst: it.gst || "-",
+              unit: it.unit || "PCS",
+              boqQty: Number.isFinite(rawBoqQty) ? fmtQty(rawBoqQty) : "-",
+              boqConsumed: Number.isFinite(resolvedConsumed) ? fmtQty(resolvedConsumed) : "-",
+              boqAvailable: Number.isFinite(resolvedAvailable) ? fmtQty(resolvedAvailable) : "-",
+            };
+          })}
           bottomLeftTitle="Total Items"
           bottomLeftValue={(viewRecord.items || []).length}
           bottomRightTitle="Total Quantity"

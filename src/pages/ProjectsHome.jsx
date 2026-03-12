@@ -28,7 +28,7 @@ const normalizeDateValue = (value) => {
 
 const ProjectsHome = () => {
   const navigate = useNavigate();
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState(() => getProjects());
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
   const [apiError, setApiError] = useState("");
@@ -47,18 +47,42 @@ const ProjectsHome = () => {
   const loadProjects = async () => {
     try {
       const list = await fetchProjects();
-      setProjects(list);
       setLocalProjects(list);
-      setApiError("");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("projects:load-status", { detail: "" })
+        );
+      }
     } catch (error) {
       console.error("Failed to load projects from API", error);
-      setApiError("Unable to load latest projects. Showing cached list.");
-      setProjects(getProjects());
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("projects:load-status", {
+            detail: "Unable to load latest projects. Showing cached list.",
+          })
+        );
+      }
     }
   };
 
   useEffect(() => {
+    const handleProjectsChange = () => {
+      setProjects(getProjects());
+    };
+    const handleLoadStatus = (event) => {
+      setApiError(event?.detail || "");
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("projects:changed", handleProjectsChange);
+      window.addEventListener("projects:load-status", handleLoadStatus);
+    }
     void loadProjects();
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("projects:changed", handleProjectsChange);
+        window.removeEventListener("projects:load-status", handleLoadStatus);
+      }
+    };
   }, []);
 
   const filteredProjects = useMemo(() => {

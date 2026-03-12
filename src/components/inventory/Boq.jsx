@@ -683,19 +683,27 @@ const Boq = () => {
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
-            { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
+            { key: "quantity", label: "Planned", align: "right", widthClass: "w-20" },
+            { key: "consumedQty", label: "Consumed", align: "right", widthClass: "w-20" },
+            { key: "availableQty", label: "Available", align: "right", widthClass: "w-20" },
             { key: "rate", label: "Rate", align: "right", widthClass: "w-24" },
             { key: "amount", label: "Amount", align: "right", widthClass: "w-28" },
           ]}
           tableRows={(viewRecord.items || []).map((item, index) => {
             const qty = Number(item.quantity || 0);
             const rate = Number(item.rate || 0);
+            const consumed = Number(item.consumedQty ?? 0) || 0;
+            const available = Number.isFinite(Number(item.availableQty))
+              ? Number(item.availableQty)
+              : Math.max(qty - consumed, 0);
             return {
               id: item.id || index,
               serial: index + 1,
               name: item.name || "-",
               unit: item.unit || "-",
               quantity: qty,
+              consumedQty: consumed,
+              availableQty: available,
               rate: formatCurrency(rate),
               amount: formatCurrency(qty * rate),
             };

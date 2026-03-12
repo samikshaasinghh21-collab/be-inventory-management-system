@@ -424,6 +424,8 @@ const PurchaseOrderRegister = () => {
                                     <tr>
                                       <th className="p-2 text-left">Item</th>
                                       <th className="p-2 text-left">Description</th>
+                                      <th className="p-2 text-left">HSN</th>
+                                      <th className="p-2 text-left">GST</th>
                                       <th className="p-2 text-left">Unit</th>
                                       <th className="p-2 text-left">Qty</th>
                                       <th className="p-2 text-left">Rate</th>
@@ -434,7 +436,7 @@ const PurchaseOrderRegister = () => {
                                   <tbody>
                                     {(record.items || []).length === 0 && (
                                       <tr>
-                                        <td colSpan="7" className="p-3 text-slate-500 text-center">
+                                        <td colSpan="9" className="p-3 text-slate-500 text-center">
                                           No line items.
                                         </td>
                                       </tr>
@@ -453,6 +455,8 @@ const PurchaseOrderRegister = () => {
                                             {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
                                           </td>
                                           <td className="p-2">{item.description || "-"}</td>
+                                          <td className="p-2">{item.hsn || "-"}</td>
+                                          <td className="p-2">{item.gst || "-"}</td>
                                           <td className="p-2">{item.unit || "-"}</td>
                                           <td className="p-2">{qty}</td>
                                           <td className="p-2">{formatCurrency(rate)}</td>
@@ -514,6 +518,8 @@ const PurchaseOrderRegister = () => {
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
+            { key: "hsn", label: "HSN", widthClass: "w-20" },
+            { key: "gst", label: "GST", widthClass: "w-20" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
             { key: "rate", label: "Rate", align: "right", widthClass: "w-24" },
@@ -527,6 +533,8 @@ const PurchaseOrderRegister = () => {
               id: item.id || index,
               serial: index + 1,
               name: item.name,
+              hsn: item.hsn || "-",
+              gst: item.gst || "-",
               unit: item.unit,
               quantity: qty,
               rate: formatCurrency(rate),

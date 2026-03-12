@@ -7,6 +7,9 @@ import {
   updateWorkflowItem,
 } from "../../services/workflowStore";
 import useSettings from "../../hooks/useSettings";
+import { formatDate } from "../../utils/dateFormat";
+import { resolveBrandLogo } from "../../utils/branding";
+import DocumentViewPanel from "./DocumentViewPanel";
 
 const STORAGE_KEY = "workflow_purchase_orders";
 const LOCATION_KEY = "workflow_locations";
@@ -64,6 +67,10 @@ const computeReceiveStatus = (items, fallback = "Draft") => {
 const ReceiveGoods = () => {
   const navigate = useNavigate();
   const settings = useSettings();
+  const company = settings?.company || {};
+  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const brandName = company.name || "Bangalore Electronics";
+  const brandDescription = company.address || "Company address";
   const currency = settings?.preferences?.currency || "INR";
   const [records, setRecords] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -71,6 +78,7 @@ const ReceiveGoods = () => {
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [receiveForm, setReceiveForm] = useState(() => createReceiveForm());
+  const [viewRecord, setViewRecord] = useState(null);
 
   const loadRecords = () => setRecords(getWorkflowList(STORAGE_KEY));
   const loadLocations = () => setLocations(getWorkflowList(LOCATION_KEY));
@@ -114,6 +122,14 @@ const ReceiveGoods = () => {
       setSelectedId(null);
     }
   }, [records, selectedId]);
+
+  useEffect(() => {
+    if (!viewRecord?.id) return;
+    const updated = records.find((record) => record.id === viewRecord.id);
+    if (updated && updated !== viewRecord) {
+      setViewRecord(updated);
+    }
+  }, [records, viewRecord?.id]);
 
   const projectMap = useMemo(() => {
     return projects.reduce((acc, project) => {
@@ -319,6 +335,11 @@ const ReceiveGoods = () => {
     }
   };
 
+  const handleViewReceipt = () => {
+    if (!selectedRecord) return;
+    setViewRecord(selectedRecord);
+  };
+
   return (
     <div className="p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
@@ -379,7 +400,7 @@ const ReceiveGoods = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-6">
+      <div className="grid grid-cols-1 gap-6">
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
           <div className="px-4 py-3 border-b flex items-center justify-between">
             <h3 className="text-lg font-semibold text-slate-800">
@@ -466,13 +487,22 @@ const ReceiveGoods = () => {
                       Status: {selectedRecord.status || "-"}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(null)}
-                    className="text-xs text-slate-500 hover:text-slate-700"
-                  >
-                    Clear
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleViewReceipt}
+                      className="text-xs text-indigo-600 underline"
+                    >
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(null)}
+                      className="text-xs text-slate-500 hover:text-slate-700"
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div className="flex flex-col">
@@ -860,6 +890,69 @@ const ReceiveGoods = () => {
           )}
         </div>
       </div>
+      {viewRecord && (
+        <DocumentViewPanel
+          id="receive-goods-view-panel"
+          title="GOODS RECEIPT"
+          onClose={() => setViewRecord(null)}
+          companyName={brandName}
+          companyAddress={brandDescription}
+          companyGstin={company.gstin}
+          companyPhone={company.phone}
+          companyEmail={company.email}
+          logoUrl={logoUrl}
+          primaryPairs={[
+            {
+              label: "Receipt Ref",
+              value: viewRecord.poNumber || viewRecord.id,
+            },
+            { label: "Received Date", value: formatDate(viewRecord.receivedDate) },
+            {
+              label: "Status",
+              value:
+                viewRecord.status ||
+                computeReceiveStatus(buildReceiveItems(viewRecord), "Draft"),
+            },
+            { label: "Received By", value: viewRecord.receivedBy || "-" },
+          ]}
+          leftBlockTitle="Project"
+          leftBlockLines={[
+            projectMap[String(viewRecord.projectId)]?.name || "-",
+          ]}
+          rightBlockTitle="Vendor / Location"
+          rightBlockLines={[
+            vendorMap[String(viewRecord.vendorId)]?.name || "-",
+            locationMap[String(viewRecord.locationId)]?.name || "-",
+          ]}
+          tableColumns={[
+            { key: "serial", label: "Sl No", widthClass: "w-16" },
+            { key: "name", label: "Item" },
+            { key: "unit", label: "Unit", widthClass: "w-20" },
+            { key: "ordered", label: "Ordered", align: "right", widthClass: "w-24" },
+            { key: "received", label: "Received", align: "right", widthClass: "w-24" },
+            { key: "balance", label: "Balance", align: "right", widthClass: "w-24" },
+          ]}
+          tableRows={buildReceiveItems(viewRecord).map((item, index) => {
+            const ordered = Number(item.orderedQty) || 0;
+            const received = Number(item.receivedQty) || 0;
+            const balance = Math.max(ordered - received, 0);
+            return {
+              id: item.id ?? index,
+              serial: index + 1,
+              name: item.name || "-",
+              unit: item.unit || "-",
+              ordered,
+              received,
+              balance,
+            };
+          })}
+          bottomLeftTitle="Receiving Notes"
+          bottomLeftValue={viewRecord.receivedNotes || viewRecord.notes || "-"}
+          bottomRightTitle="Total Items"
+          bottomRightValue={(viewRecord.items || []).length}
+          footerCompanyName={brandName || "Company"}
+        />
+      )}
     </div>
   );
 };

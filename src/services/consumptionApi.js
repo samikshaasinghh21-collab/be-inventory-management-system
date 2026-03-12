@@ -15,6 +15,8 @@ const normalizeConsumptionItem = (item = {}) => ({
   name: item.name ?? item.Item ?? item.item ?? item.Name ?? "",
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",
+  hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
+  gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
   quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
   rate: Number(item.rate ?? item.Rate ?? 0) || 0,
   notes: item.notes ?? item.Notes ?? "",

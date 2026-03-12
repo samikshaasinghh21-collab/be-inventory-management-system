@@ -6,6 +6,8 @@ const createEmptyItem = (extraFieldKey = "notes") => {
     name: "",
     description: "",
     unit: "PCS",
+    hsn: "",
+    gst: "",
     quantity: "",
     rate: "",
     notes: "",
@@ -24,6 +26,11 @@ const LineItemsEditor = ({
   title = "Line Items",
   onPickFromProducts,
   pickLabel = "Add from Products",
+  showHsnGst = false,
+  hsnLabel = "HSN / SAC",
+  gstLabel = "GST",
+  hsnPlaceholder = "HSN",
+  gstPlaceholder = "GST",
   extraFieldKey = "notes",
   extraFieldLabel = "Notes",
   extraFieldPlaceholder = "Notes",
@@ -101,6 +108,12 @@ const LineItemsEditor = ({
             <tr>
               <th className="p-3 text-left min-w-[180px]">Item</th>
               <th className="p-3 text-left min-w-[160px]">Description</th>
+              {showHsnGst && (
+                <th className="p-3 text-left min-w-[110px]">{hsnLabel}</th>
+              )}
+              {showHsnGst && (
+                <th className="p-3 text-left min-w-[110px]">{gstLabel}</th>
+              )}
               <th className="p-3 text-left min-w-[90px]">Unit</th>
               <th className="p-3 text-left min-w-[90px]">Qty</th>
               <th className="p-3 text-left min-w-[110px]">Rate</th>
@@ -141,6 +154,32 @@ const LineItemsEditor = ({
                       className="w-full border border-slate-200 rounded-md px-3 py-2"
                     />
                   </td>
+                  {showHsnGst && (
+                    <td className="p-3">
+                      <input
+                        type="text"
+                        value={item.hsn ?? ""}
+                        onChange={(event) =>
+                          handleUpdate(item.id, "hsn", event.target.value)
+                        }
+                        placeholder={hsnPlaceholder}
+                        className="w-full border border-slate-200 rounded-md px-3 py-2"
+                      />
+                    </td>
+                  )}
+                  {showHsnGst && (
+                    <td className="p-3">
+                      <input
+                        type="text"
+                        value={item.gst ?? ""}
+                        onChange={(event) =>
+                          handleUpdate(item.id, "gst", event.target.value)
+                        }
+                        placeholder={gstPlaceholder}
+                        className="w-full border border-slate-200 rounded-md px-3 py-2"
+                      />
+                    </td>
+                  )}
                   <td className="p-3">
                     <input
                       type="text"
