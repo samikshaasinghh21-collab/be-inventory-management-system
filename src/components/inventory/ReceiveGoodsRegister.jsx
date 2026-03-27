@@ -9,11 +9,34 @@ import { formatDate } from "../../utils/dateFormat";
 import useSettings from "../../hooks/useSettings";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
+import { buildGstSummary } from "../../utils/taxUtils";
 import DocumentViewPanel from "./DocumentViewPanel";
 
 const toQuantity = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
+  const alignClass = align === "right" ? "text-right" : "text-left";
+  return (
+    <div className={`space-y-1 text-sm text-slate-700 ${alignClass}`}>
+      <div className="font-medium">Subtotal: {formatCurrency(summary.subtotal)}</div>
+      {summary.cgstGroups.map((group) => (
+        <div key={`cgst-${group.rate}`}>
+          CGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
+      {summary.sgstGroups.map((group) => (
+        <div key={`sgst-${group.rate}`}>
+          SGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
+      <div className="pt-1 font-semibold text-slate-900">
+        Total Value: {formatCurrency(summary.total)}
+      </div>
+    </div>
+  );
 };
 
 const getReceiptTotals = (receipt) => {
@@ -38,6 +61,34 @@ const getReceiptTotals = (receipt) => {
   );
 };
 
+const getReceiptItemKey = (item = {}, index = 0) =>
+  String(item.itemId ?? item.ItemId ?? item.id ?? item.Id ?? index);
+
+const findMatchingPoItem = (purchaseOrder, receiptItem, index) => {
+  const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
+  return (
+    poItems.find(
+      (poItem, poIndex) =>
+        getReceiptItemKey(poItem, poIndex) === getReceiptItemKey(receiptItem, index)
+    ) ??
+    poItems[index] ??
+    null
+  );
+};
+
+const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
+  (receipt?.items || [])
+    .map((item, index) => {
+      const poItem = findMatchingPoItem(purchaseOrder, item, index);
+      return {
+        quantity: toQuantity(item.receivedQty ?? item.ReceivedQty),
+        unitPrice: toQuantity(poItem?.unitPrice ?? poItem?.rate ?? 0),
+        taxPercentage: poItem?.taxPercentage ?? poItem?.gst ?? 0,
+        gst: poItem?.gst ?? poItem?.taxPercentage ?? 0,
+      };
+    })
+    .filter((item) => item.quantity > 0);
+
 const ReceiveGoodsRegister = () => {
   const navigate = useNavigate();
 
@@ -56,9 +107,23 @@ const ReceiveGoodsRegister = () => {
   const [filterStatus, setFilterStatus] = useState("");
   const settings = useSettings();
   const company = settings?.company || {};
+  const currency = settings?.preferences?.currency || "INR";
   const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
+
+  const formatCurrency = (value) => {
+    const amount = toQuantity(value);
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    } catch {
+      return `${currency} ${amount.toLocaleString()}`;
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -203,6 +268,12 @@ const ReceiveGoodsRegister = () => {
         brandDescription,
       });
     }, 80);
+  };
+
+  const handleOpenReceipt = (receipt) => {
+    navigate(`/inventory/receive-goods?purchaseOrderId=${receipt.purchaseOrderId}`, {
+      state: { purchaseOrderId: receipt.purchaseOrderId },
+    });
   };
 
   return (
@@ -378,6 +449,16 @@ const ReceiveGoodsRegister = () => {
                         {totals.balance}
                       </td>
                       <td className="p-3 flex gap-3">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleOpenReceipt(receipt);
+                          }}
+                          className="text-emerald-600 text-sm"
+                        >
+                          Open
+                        </button>
                         <button
                           type="button"
                           onClick={(event) => {
@@ -600,8 +681,18 @@ const ReceiveGoodsRegister = () => {
           })}
           bottomLeftTitle="Notes"
           bottomLeftValue={viewReceipt.notes || "-"}
-          bottomRightTitle="Total Items"
-          bottomRightValue={(viewReceipt.items || []).length}
+          bottomRightContent={
+            <GstSummaryBlock
+              summary={buildGstSummary(
+                buildReceiptSummaryItems(
+                  viewReceipt,
+                  poMap[String(viewReceipt.purchaseOrderId)]
+                )
+              )}
+              formatCurrency={formatCurrency}
+              align="right"
+            />
+          }
           footerCompanyName={brandName || "Company"}
         />
       )}

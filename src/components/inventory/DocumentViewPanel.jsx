@@ -30,12 +30,21 @@ const DocumentViewPanel = ({
   bottomLeftValue = "",
   bottomRightTitle = "",
   bottomRightValue = "",
+  bottomLeftContent = null,
+  bottomRightContent = null,
   footerNote = "Any changes in GST & taxes are acceptable to you.",
   footerCompanyName = "Bangalore Electronics",
+  hideFooterNote = false,
 }) => {
   const normalizedLogo = useMemo(() => resolveBrandLogo(logoUrl), [logoUrl]);
   const [resolvedLogo, setResolvedLogo] = useState(normalizedLogo);
   const canPrint = Boolean(id);
+  const hasBottomLeft = Boolean(
+    bottomLeftContent || bottomLeftTitle || bottomLeftValue
+  );
+  const hasBottomRight = Boolean(
+    bottomRightContent || bottomRightTitle || bottomRightValue
+  );
 
   useEffect(() => {
     setResolvedLogo(normalizedLogo);
@@ -176,21 +185,53 @@ const DocumentViewPanel = ({
         </tbody>
       </table>
 
-      {(bottomLeftTitle || bottomRightTitle) && (
-        <div className="grid grid-cols-2 border-b border-slate-800 text-[11px]">
-          <div className="p-3 border-r border-slate-800">
-            <p className="font-semibold">{toDisplay(bottomLeftTitle)}</p>
-            <p>{toDisplay(bottomLeftValue)}</p>
-          </div>
-          <div className="p-3 text-right">
-            <p className="font-semibold">{toDisplay(bottomRightTitle)}</p>
-            <p>{toDisplay(bottomRightValue)}</p>
-          </div>
+      {(hasBottomLeft || hasBottomRight) && (
+        <div className="border-b border-slate-800 text-[11px]">
+          {hasBottomLeft && hasBottomRight && (
+            <div className="grid grid-cols-2">
+              <div className="p-3 border-r border-slate-800">
+                {bottomLeftContent ?? (
+                  <>
+                    <p className="font-semibold">{toDisplay(bottomLeftTitle)}</p>
+                    <p>{toDisplay(bottomLeftValue)}</p>
+                  </>
+                )}
+              </div>
+              <div className="p-3 text-right">
+                {bottomRightContent ?? (
+                  <>
+                    <p className="font-semibold">{toDisplay(bottomRightTitle)}</p>
+                    <p>{toDisplay(bottomRightValue)}</p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          {hasBottomLeft && !hasBottomRight && (
+            <div className="p-3">
+              {bottomLeftContent ?? (
+                <>
+                  <p className="font-semibold">{toDisplay(bottomLeftTitle)}</p>
+                  <p>{toDisplay(bottomLeftValue)}</p>
+                </>
+              )}
+            </div>
+          )}
+          {!hasBottomLeft && hasBottomRight && (
+            <div className="p-3 text-right">
+              {bottomRightContent ?? (
+                <>
+                  <p className="font-semibold">{toDisplay(bottomRightTitle)}</p>
+                  <p>{toDisplay(bottomRightValue)}</p>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       <div className="flex items-center justify-between p-3 text-[11px]">
-        <p>{toDisplay(footerNote)}</p>
+        <p>{hideFooterNote ? "" : toDisplay(footerNote)}</p>
         <div className="text-right">
           <p className="font-semibold">For {toDisplay(footerCompanyName)}</p>
           <div className="mt-8 border-t border-slate-700 pt-2">

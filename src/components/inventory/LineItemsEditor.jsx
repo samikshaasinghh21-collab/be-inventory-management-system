@@ -34,6 +34,7 @@ const LineItemsEditor = ({
   extraFieldKey = "notes",
   extraFieldLabel = "Notes",
   extraFieldPlaceholder = "Notes",
+  priceLabel = "Rate",
 }) => {
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
@@ -116,8 +117,8 @@ const LineItemsEditor = ({
               )}
               <th className="p-3 text-left min-w-[90px]">Unit</th>
               <th className="p-3 text-left min-w-[90px]">Qty</th>
-              <th className="p-3 text-left min-w-[110px]">Rate</th>
-              <th className="p-3 text-left min-w-[120px]">Amount</th>
+              <th className="p-3 text-right min-w-[130px]">{priceLabel}</th>
+              <th className="p-3 text-right min-w-[140px]">Amount</th>
               <th className="p-3 text-left min-w-[160px]">{extraFieldLabel}</th>
               <th className="p-3 text-left min-w-[80px]">Action</th>
             </tr>
@@ -210,10 +211,10 @@ const LineItemsEditor = ({
                       onChange={(event) =>
                         handleUpdate(item.id, "rate", event.target.value)
                       }
-                      className="w-full border border-slate-200 rounded-md px-3 py-2"
+                      className="w-full rounded-md border border-slate-200 px-3 py-2 text-right"
                     />
                   </td>
-                  <td className="p-3 text-slate-700 font-medium">
+                  <td className="p-3 text-right font-medium text-slate-700">
                     {formatCurrency(amount)}
                   </td>
                   <td className="p-3">

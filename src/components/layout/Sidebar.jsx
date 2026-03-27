@@ -8,21 +8,84 @@ const Icon = ({ children }) => (
   </span>
 );
 
-const PROJECT_WORKFLOW = [
-  { id: "projects", label: "Projects", to: "/inventory/projects" },
-  { id: "create-project", label: "Create Project", to: "/inventory/create-project" },
-  { id: "boq", label: "Create Bill of Quantity (BOQ)", to: "/inventory/boq" },
-  { id: "locations", label: "Select / Manage Location", to: "/inventory/locations" },
-  { id: "purchase-order", label: "Purchase Order", to: "/inventory/purchase-order" },
-  { id: "receive-inventory", label: "Receive Inventory - Location based", to: "/inventory/receive-goods" },
-  { id: "delivery-challan", label: "Delivery Challan", to: "/inventory/delivery-challan" },
-  { id: "consumption", label: "Consumption (Material Used)", to: "/inventory/consumption" },
-  { id: "reallocate-return", label: "Reallocate / Return Inventory", to: "/inventory/reallocate-return" },
-];
-
-const VENDOR_WORKFLOW = [
-  { id: "vendors", label: "Vendors", to: "/inventory/vendors" },
-  { id: "create-vendor", label: "Create Vendor", to: "/inventory/create-vendors" },
+const INVENTORY_MANAGEMENT_WORKFLOW = [
+  {
+    id: "projects",
+    label: "Projects",
+    to: "/inventory/projects",
+    matchPrefixes: ["/inventory/projects", "/inventory/create-project"],
+  },
+  {
+    id: "boq",
+    label: "BOQ",
+    to: "/inventory/boq",
+    matchPrefixes: ["/inventory/boq"],
+  },
+  {
+    id: "purchase-order",
+    label: "Purchase Orders",
+    to: "/inventory/purchase-order",
+    matchPrefixes: ["/inventory/purchase-order", "/inventory/purchase-orders"],
+  },
+  {
+    id: "purchase-order-register",
+    label: "Purchase Register",
+    to: "/inventory/purchase-order-register",
+    matchPrefixes: ["/inventory/purchase-order-register"],
+  },
+  {
+    id: "products",
+    label: "Products",
+    to: "/inventory/products",
+    matchPrefixes: [
+      "/inventory/products",
+      "/inventory/create-product",
+      "/inventory/create-item",
+      "/inventory/edit/",
+    ],
+  },
+  {
+    id: "vendors",
+    label: "Vendors",
+    to: "/inventory/vendors",
+    matchPrefixes: ["/inventory/vendors", "/inventory/create-vendors"],
+  },
+  {
+    id: "customers",
+    label: "Customers",
+    to: "/inventory/customers",
+    matchPrefixes: ["/inventory/customers"],
+  },
+  {
+    id: "locations",
+    label: "Location Management",
+    to: "/inventory/locations",
+    matchPrefixes: ["/inventory/locations"],
+  },
+  {
+    id: "receive-inventory",
+    label: "Receive Inventory",
+    to: "/inventory/receive-goods",
+    matchPrefixes: ["/inventory/receive-goods"],
+  },
+  {
+    id: "receive-register",
+    label: "Receive Register",
+    to: "/inventory/receive-goods-register",
+    matchPrefixes: ["/inventory/receive-goods-register"],
+  },
+  {
+    id: "consumption",
+    label: "Consumption",
+    to: "/inventory/consumption",
+    matchPrefixes: ["/inventory/consumption"],
+  },
+  {
+    id: "return-reallocate",
+    label: "Relocation / Return",
+    to: "/inventory/return-reallocate",
+    matchPrefixes: ["/inventory/return-reallocate", "/inventory/reallocate-return"],
+  },
 ];
 
 const Sidebar = () => {
@@ -35,8 +98,7 @@ const Sidebar = () => {
       return false;
     }
   });
-  const [projectsOpen, setProjectsOpen] = useState(false);
-  const [vendorsOpen, setVendorsOpen] = useState(false);
+  const [inventoryManagementOpen, setInventoryManagementOpen] = useState(false);
   const [profile, setProfile] = useState(() => {
     try {
       return getSettings().profile || {};
@@ -45,11 +107,11 @@ const Sidebar = () => {
     }
   });
 
-  const isProjectRoute = PROJECT_WORKFLOW.some(
-    (step) => step.to && location.pathname.startsWith(step.to)
-  );
-  const isVendorRoute = VENDOR_WORKFLOW.some(
-    (step) => step.to && location.pathname.startsWith(step.to)
+  const isInventoryManagementRoute = INVENTORY_MANAGEMENT_WORKFLOW.some(
+    (step) =>
+      (step.matchPrefixes || [step.to]).some(
+        (prefix) => prefix && location.pathname.startsWith(prefix)
+      )
   );
 
   useEffect(() => {
@@ -63,16 +125,10 @@ const Sidebar = () => {
   }, [isCollapsed]);
 
   useEffect(() => {
-    if (isProjectRoute && !isCollapsed) {
-      setProjectsOpen(true);
+    if (isInventoryManagementRoute && !isCollapsed) {
+      setInventoryManagementOpen(true);
     }
-  }, [isProjectRoute, isCollapsed]);
-
-  useEffect(() => {
-    if (isVendorRoute && !isCollapsed) {
-      setVendorsOpen(true);
-    }
-  }, [isVendorRoute, isCollapsed]);
+  }, [isInventoryManagementRoute, isCollapsed]);
 
   useEffect(() => {
     const syncProfile = () => {
@@ -219,20 +275,18 @@ const Sidebar = () => {
           </NavLink>
 
           <NavLink
-            to="/inventory/products"
+            to="/inventory/tools"
             className={({ isActive }) =>
               `${linkClass} ${isActive ? activeClass : ""}`
             }
           >
             <Icon>
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <rect x="4" y="4" width="7" height="7" />
-                <rect x="13" y="4" width="7" height="7" />
-                <rect x="4" y="13" width="7" height="7" />
-                <rect x="13" y="13" width="7" height="7" />
+                <path d="M4 6h5l3 3h8v5h-4v4h-4l-2-2H6l-2-2z" />
+                <path d="M9 6V4h4v2" />
               </svg>
             </Icon>
-            <span className={labelClass}>Products</span>
+            <span className={labelClass}>Tools</span>
           </NavLink>
 
           <div className="px-0">
@@ -243,13 +297,13 @@ const Sidebar = () => {
                   navigate("/inventory/projects");
                   return;
                 }
-                setProjectsOpen((prev) => !prev);
+                setInventoryManagementOpen((prev) => !prev);
               }}
               className={`${linkClass} ${
-                isProjectRoute ? activeClass : ""
+                isInventoryManagementRoute ? activeClass : ""
               } w-full ${isCollapsed ? "" : "justify-between"}`}
-              aria-expanded={projectsOpen}
-              aria-controls="projects-workflow"
+              aria-expanded={inventoryManagementOpen}
+              aria-controls="inventory-management-workflow"
             >
               <span className={`flex items-center ${isCollapsed ? "justify-center" : "gap-4"}`}>
                 <Icon>
@@ -259,12 +313,12 @@ const Sidebar = () => {
                     <path d="M4 11h16" />
                   </svg>
                 </Icon>
-                <span className={labelClass}>Projects</span>
+                <span className={labelClass}>Inventory Management</span>
               </span>
               {!isCollapsed && (
                 <span
                   className={`ml-2 grid h-7 w-7 place-items-center rounded-md bg-slate-800/70 text-slate-300 transition ${
-                    projectsOpen ? "rotate-180" : ""
+                    inventoryManagementOpen ? "rotate-180" : ""
                   }`}
                 >
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -273,20 +327,26 @@ const Sidebar = () => {
                 </span>
               )}
             </button>
-            {!isCollapsed && projectsOpen && (
-              <div id="projects-workflow" className="mt-2 space-y-1 pl-16 pr-3">
-                {PROJECT_WORKFLOW.map((step) => (
+            {!isCollapsed && inventoryManagementOpen && (
+              <div
+                id="inventory-management-workflow"
+                className="mt-2 space-y-1 pl-16 pr-3"
+              >
+                {INVENTORY_MANAGEMENT_WORKFLOW.map((step) => (
                   <NavLink
                     key={step.id}
                     to={step.to}
-                    className={({ isActive }) =>
-                      [
+                    className={() => {
+                      const isStepActive = (step.matchPrefixes || [step.to]).some(
+                        (prefix) => prefix && location.pathname.startsWith(prefix)
+                      );
+                      return [
                         "block rounded-md px-3 py-2 text-sm transition",
-                        isActive
+                        isStepActive
                           ? "bg-slate-800/80 text-white"
                           : "text-slate-300 hover:bg-slate-800/60 hover:text-white",
-                      ].join(" ")
-                    }
+                      ].join(" ");
+                    }}
                   >
                     {step.label}
                   </NavLink>
@@ -294,82 +354,6 @@ const Sidebar = () => {
               </div>
             )}
           </div>
-
-          <div className="px-0">
-            <button
-              type="button"
-              onClick={() => {
-                if (isCollapsed) {
-                  navigate("/inventory/vendors");
-                  return;
-                }
-                setVendorsOpen((prev) => !prev);
-              }}
-              className={`${linkClass} ${
-                isVendorRoute ? activeClass : ""
-              } w-full ${isCollapsed ? "" : "justify-between"}`}
-              aria-expanded={vendorsOpen}
-              aria-controls="vendors-workflow"
-            >
-              <span className={`flex items-center ${isCollapsed ? "justify-center" : "gap-4"}`}>
-                <Icon>
-                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <path d="M7 8a3 3 0 1 0 6 0a3 3 0 0 0-6 0Z" />
-                    <path d="M3.5 18a5.5 5.5 0 0 1 11 0" />
-                    <path d="M14.5 8h6" />
-                  </svg>
-                </Icon>
-                <span className={labelClass}>Vendors</span>
-              </span>
-              {!isCollapsed && (
-                <span
-                  className={`ml-2 grid h-7 w-7 place-items-center rounded-md bg-slate-800/70 text-slate-300 transition ${
-                    vendorsOpen ? "rotate-180" : ""
-                  }`}
-                >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <path d="M6 9l6 6l6-6" />
-                  </svg>
-                </span>
-              )}
-            </button>
-            {!isCollapsed && vendorsOpen && (
-              <div id="vendors-workflow" className="mt-2 space-y-1 pl-16 pr-3">
-                {VENDOR_WORKFLOW.map((step) => (
-                  <NavLink
-                    key={step.id}
-                    to={step.to}
-                    className={({ isActive }) =>
-                      [
-                        "block rounded-md px-3 py-2 text-sm transition",
-                        isActive
-                          ? "bg-slate-800/80 text-white"
-                          : "text-slate-300 hover:bg-slate-800/60 hover:text-white",
-                      ].join(" ")
-                    }
-                  >
-                    {step.label}
-                  </NavLink>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <NavLink
-            to="/inventory/receive-goods"
-            className={({ isActive }) =>
-              `${linkClass} ${isActive ? activeClass : ""}`
-            }
-          >
-            <Icon>
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M4 6h13v12H4z" />
-                <path d="M17 9h3l1 3v6h-4" />
-                <path d="M9 12h4" />
-              </svg>
-            </Icon>
-            <span className={labelClass}>Receive Goods</span>
-          </NavLink>
 
         </div>
       </nav>

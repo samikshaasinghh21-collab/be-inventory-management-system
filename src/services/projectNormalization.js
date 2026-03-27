@@ -27,7 +27,44 @@ export const normalizeProjectRecord = (project = {}) => ({
   id: project.id ?? project.ProjectId ?? null,
   name: project.name ?? project.ProjectName ?? "",
   code: project.code ?? project.ProjectCode ?? "",
+  customerId: project.customerId ?? project.CustomerId ?? null,
   client: project.client ?? project.Client ?? "",
+  companyName:
+    project.companyName ??
+    project.ClientCompany ??
+    project.clientCompany ??
+    "",
+  address:
+    project.address ??
+    project.ClientAddress ??
+    project.clientAddress ??
+    "",
+  gstNumber:
+    project.gstNumber ??
+    project.ClientGSTNumber ??
+    project.ClientGstNumber ??
+    project.clientGstNumber ??
+    "",
+  phone:
+    project.phone ??
+    project.ClientPhone ??
+    project.clientPhone ??
+    "",
+  email:
+    project.email ??
+    project.ClientEmail ??
+    project.clientEmail ??
+    "",
+  contactPerson:
+    project.contactPerson ??
+    project.ClientContactPerson ??
+    project.clientContactPerson ??
+    "",
+  designation:
+    project.designation ??
+    project.ClientDesignation ??
+    project.clientDesignation ??
+    "",
   status: project.status ?? project.Status ?? "",
   startDate: normalizeProjectDate(project.startDate ?? project.StartDate),
   endDate: normalizeProjectDate(project.endDate ?? project.EndDate),

@@ -56,7 +56,7 @@ const BoqDetail = () => {
           "Planned Qty",
           "Consumed Qty",
           "Available Qty",
-          "Rate",
+          "Unit Price",
           "Amount",
           "Notes",
         ],
@@ -234,7 +234,7 @@ const BoqDetail = () => {
               <th className="p-3 text-left min-w-[90px]">Planned Qty</th>
               <th className="p-3 text-left min-w-[110px]">Consumed Qty</th>
               <th className="p-3 text-left min-w-[110px]">Available Qty</th>
-              <th className="p-3 text-left min-w-[100px]">Rate</th>
+              <th className="p-3 text-left min-w-[100px]">Unit Price</th>
               <th className="p-3 text-left min-w-[110px]">Amount</th>
               <th className="p-3 text-left min-w-[160px]">Notes</th>
             </tr>

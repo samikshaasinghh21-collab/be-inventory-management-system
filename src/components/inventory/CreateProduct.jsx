@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { saveProduct } from "../../services/productsStore";
-import { addCategory, getCategories } from "../../services/categoryStore";
+import { createItem } from "../../services/inventoryApi";
+import { TAX_OPTIONS, formatTaxPercentage } from "../../utils/taxUtils";
 
 const UNIT_OPTIONS = [
   "Nos",
@@ -15,165 +15,113 @@ const UNIT_OPTIONS = [
   "Litre",
 ];
 
-const GST_OPTIONS = [
-  "None",
-  "Exempted",
-  "GST @ 0%",
-  "GST @ 1.5%",
-  "GST @ 3%",
-  "GST @ 5%",
-  "GST @ 12%",
-  "GST @ 18%",
-  "GST @ 28%",
-];
-
 const CreateProduct = () => {
   const navigate = useNavigate();
-  const [productName, setProductName] = useState("");
-  const [sku, setSku] = useState("");
-  const [category, setCategory] = useState("");
-  const [categories, setCategories] = useState(() => getCategories());
-  const [newCategory, setNewCategory] = useState("");
-  const [brand, setBrand] = useState("");
-  const [hsn, setHsn] = useState("");
-  const [unit, setUnit] = useState("Nos");
-  const [salesPrice, setSalesPrice] = useState("");
-  const [costPrice, setCostPrice] = useState("");
-  const [gst, setGst] = useState("None");
-  const [openingStock, setOpeningStock] = useState("");
-  const [reorderLevel, setReorderLevel] = useState("");
-  const [description, setDescription] = useState("");
-  const [notes, setNotes] = useState("");
+  const [form, setForm] = useState({
+    name: "",
+    unit: "Nos",
+    price: "",
+    taxPercentage: "18",
+    hsn: "",
+    description: "",
+  });
   const [errors, setErrors] = useState({});
+  const [apiError, setApiError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    const handleCategoriesChanged = () => setCategories(getCategories());
-    setCategories(getCategories());
-    window.addEventListener("categories:changed", handleCategoriesChanged);
-    return () => {
-      window.removeEventListener("categories:changed", handleCategoriesChanged);
-    };
-  }, []);
-
-  const validate = () => {
-    const nextErrors = {};
-    if (!productName.trim()) {
-      nextErrors.productName = "Product name is required.";
-    }
-    const rate = Number(salesPrice);
-    if (!salesPrice || Number.isNaN(rate) || rate <= 0) {
-      nextErrors.salesPrice = "Enter a valid selling price.";
-    }
-    const cost = Number(costPrice);
-    if (costPrice && (Number.isNaN(cost) || cost < 0)) {
-      nextErrors.costPrice = "Enter a valid cost price.";
-    }
-    const stock = Number(openingStock);
-    if (openingStock && (Number.isNaN(stock) || stock < 0)) {
-      nextErrors.openingStock = "Enter a valid opening stock.";
-    }
-    const reorder = Number(reorderLevel);
-    if (reorderLevel && (Number.isNaN(reorder) || reorder < 0)) {
-      nextErrors.reorderLevel = "Enter a valid reorder level.";
-    }
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  };
-
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    if (!validate()) {
-      return;
-    }
-
-    const payload = {
-      id: Date.now(),
-      name: productName.trim(),
-      sku: sku.trim(),
-      category: category.trim(),
-      brand: brand.trim(),
-      hsn: hsn.trim(),
-      unit,
-      rate: Number(salesPrice),
-      costPrice: costPrice ? Number(costPrice) : 0,
-      gst,
-      qty: 0,
-      openingStock: openingStock ? Number(openingStock) : 0,
-      reorderLevel: reorderLevel ? Number(reorderLevel) : 0,
-      description: description.trim(),
-      notes: notes.trim(),
-      createdAt: new Date().toISOString(),
-    };
-
-    saveProduct(payload);
-    navigate("/inventory/products");
-  };
-
-  const handleAddCategory = () => {
-    const cleaned = newCategory.trim();
-    if (!cleaned) return;
-    const updated = addCategory(cleaned);
-    setCategories(updated);
-    setCategory(cleaned);
-    setNewCategory("");
-  };
-
-  const clearError = (key) => {
+  const updateField = (key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) {
       setErrors((prev) => ({ ...prev, [key]: undefined }));
     }
   };
 
+  const validate = () => {
+    const nextErrors = {};
+    if (!form.name.trim()) {
+      nextErrors.name = "Product name is required.";
+    }
+    const price = Number(form.price);
+    if (form.price === "" || Number.isNaN(price) || price <= 0) {
+      nextErrors.price = "Enter a valid price.";
+    }
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!validate() || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setApiError("");
+    try {
+      await createItem({
+        name: form.name.trim(),
+        unit: form.unit,
+        price: Number(form.price),
+        taxPercentage: Number(form.taxPercentage),
+        gst: formatTaxPercentage(form.taxPercentage),
+        hsn: form.hsn.trim() || undefined,
+        description: form.description.trim() || undefined,
+        stock: 0,
+      });
+      navigate("/inventory/products");
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error ??
+          error?.message ??
+          "Failed to save product."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center z-50">
-      <div className="bg-white w-[1100px] max-w-[96vw] rounded-2xl shadow-2xl overflow-hidden border border-slate-200 max-h-[92vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b bg-slate-50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+      <div className="flex max-h-[92vh] w-[980px] max-w-[96vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b bg-slate-50 px-6 py-4">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-              Product Catalog
+              Products
             </p>
             <h2 className="text-xl font-semibold text-slate-900">
               Create Product
             </h2>
           </div>
           <button
-            onClick={() => navigate(-1)}
-            className="h-9 w-9 grid place-items-center rounded-full border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 transition"
-            aria-label="Close"
             type="button"
+            onClick={() => navigate(-1)}
+            className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-900"
           >
             X
           </button>
         </div>
 
-        {/* Body */}
         <div className="flex flex-1 min-h-0">
-          {/* Left Sidebar */}
-          <aside className="w-64 border-r bg-slate-50 p-5 shrink-0">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400 mb-4">
+          <aside className="w-64 shrink-0 border-r bg-slate-50 p-5">
+            <p className="mb-4 text-xs uppercase tracking-[0.3em] text-slate-400">
               Sections
             </p>
             <div className="space-y-2 text-sm">
-              <div className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 shadow-sm">
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm">
                 Basic Details
               </div>
-              <div className="px-3 py-2 rounded-lg text-slate-600">
+              <div className="rounded-lg px-3 py-2 text-slate-600">
                 Pricing & Tax
               </div>
-              <div className="px-3 py-2 rounded-lg text-slate-600">
-                Inventory Rules
-              </div>
-              <div className="px-3 py-2 rounded-lg text-slate-600">
-                Notes
+              <div className="rounded-lg px-3 py-2 text-slate-600">
+                Optional Details
               </div>
             </div>
-            <p className="text-xs text-slate-500 mt-6">
-              Fields marked with * are required.
+            <p className="mt-6 text-xs text-slate-500">
+              Tax values are reused in purchase orders and billing.
             </p>
           </aside>
 
-          {/* Right Form */}
           <div className="flex-1 min-h-0 overflow-y-auto p-6">
             <form
               id="create-product-form"
@@ -181,120 +129,35 @@ const CreateProduct = () => {
               onSubmit={handleSubmit}
               noValidate
             >
-              {/* Basic Details */}
-              <section className="border border-slate-200 rounded-xl p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
+              {apiError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {apiError}
+                </div>
+              )}
+
+              <section className="rounded-xl border border-slate-200 p-5 shadow-sm">
+                <div className="mb-4 flex items-center justify-between">
                   <h3 className="text-base font-semibold text-slate-800">
                     Basic Details
                   </h3>
-                  <span className="text-xs text-slate-500">Required</span>
+                  <span className="text-xs text-slate-500">
+                    Required fields marked *
+                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                   <div className="lg:col-span-2">
                     <label className="text-sm font-medium text-slate-700">
                       Product Name *
                     </label>
                     <input
-                      value={productName}
-                      onChange={(event) => {
-                        setProductName(event.target.value);
-                        clearError("productName");
-                      }}
-                      type="text"
-                      placeholder="Ex: MX204-HWBASE-AC-FS"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                      aria-invalid={Boolean(errors.productName)}
+                      value={form.name}
+                      onChange={(event) => updateField("name", event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                     />
-                    {errors.productName && (
-                      <p className="mt-1 text-sm text-red-600">
-                        {errors.productName}
-                      </p>
+                    {errors.name && (
+                      <p className="mt-1 text-sm text-red-600">{errors.name}</p>
                     )}
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      SKU / Part No
-                    </label>
-                    <input
-                      value={sku}
-                      onChange={(event) => setSku(event.target.value)}
-                      type="text"
-                      placeholder="Ex: MX204-AC"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      Category
-                    </label>
-                    <div className="space-y-2 mt-1">
-                      <select
-                        value={category}
-                        onChange={(event) => setCategory(event.target.value)}
-                        className="w-full border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                      >
-                        <option value="">Select Category</option>
-                        {categories.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="flex gap-2">
-                        <input
-                          value={newCategory}
-                          onChange={(event) => setNewCategory(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              handleAddCategory();
-                            }
-                          }}
-                          type="text"
-                          placeholder="Add new category"
-                          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleAddCategory}
-                          className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white hover:border-indigo-500 hover:text-indigo-700"
-                        >
-                          Add
-                        </button>
-                      </div>
-                      <p className="text-xs text-slate-500">
-                        Add it once and it will stay in the dropdown.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      Brand
-                    </label>
-                    <input
-                      value={brand}
-                      onChange={(event) => setBrand(event.target.value)}
-                      type="text"
-                      placeholder="Ex: Juniper"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      HSN / SAC
-                    </label>
-                    <input
-                      value={hsn}
-                      onChange={(event) => setHsn(event.target.value)}
-                      type="text"
-                      placeholder="Ex: 85176290"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                    />
                   </div>
 
                   <div>
@@ -302,9 +165,9 @@ const CreateProduct = () => {
                       Unit
                     </label>
                     <select
-                      value={unit}
-                      onChange={(event) => setUnit(event.target.value)}
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                      value={form.unit}
+                      onChange={(event) => updateField("unit", event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                     >
                       {UNIT_OPTIONS.map((option) => (
                         <option key={option} value={option}>
@@ -313,71 +176,42 @@ const CreateProduct = () => {
                       ))}
                     </select>
                   </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-slate-700">
+                      Unit Price *
+                    </label>
+                    <input
+                      value={form.price}
+                      onChange={(event) => updateField("price", event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                    />
+                    {errors.price && (
+                      <p className="mt-1 text-sm text-red-600">{errors.price}</p>
+                    )}
+                  </div>
                 </div>
               </section>
 
-              {/* Pricing & Tax */}
-              <section className="border border-slate-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-base font-semibold text-slate-800 mb-4">
+              <section className="rounded-xl border border-slate-200 p-5 shadow-sm">
+                <h3 className="mb-4 text-base font-semibold text-slate-800">
                   Pricing & Tax
                 </h3>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                   <div>
                     <label className="text-sm font-medium text-slate-700">
-                      Selling Price *
-                    </label>
-                    <input
-                      value={salesPrice}
-                      onChange={(event) => {
-                        setSalesPrice(event.target.value);
-                        clearError("salesPrice");
-                      }}
-                      type="text"
-                      placeholder="Ex: 568924.43"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                      aria-invalid={Boolean(errors.salesPrice)}
-                    />
-                    {errors.salesPrice && (
-                      <p className="mt-1 text-sm text-red-600">
-                        {errors.salesPrice}
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      Cost Price
-                    </label>
-                    <input
-                      value={costPrice}
-                      onChange={(event) => {
-                        setCostPrice(event.target.value);
-                        clearError("costPrice");
-                      }}
-                      type="text"
-                      placeholder="Ex: 540000.00"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                      aria-invalid={Boolean(errors.costPrice)}
-                    />
-                    {errors.costPrice && (
-                      <p className="mt-1 text-sm text-red-600">
-                        {errors.costPrice}
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      GST Tax Rate
+                      Tax (%)
                     </label>
                     <select
-                      value={gst}
-                      onChange={(event) => setGst(event.target.value)}
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                      value={form.taxPercentage}
+                      onChange={(event) =>
+                        updateField("taxPercentage", event.target.value)
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                     >
-                      {GST_OPTIONS.map((option) => (
+                      {TAX_OPTIONS.map((option) => (
                         <option key={option} value={option}>
-                          {option}
+                          {option}%
                         </option>
                       ))}
                     </select>
@@ -385,105 +219,58 @@ const CreateProduct = () => {
                 </div>
               </section>
 
-              {/* Inventory Rules */}
-              <section className="border border-slate-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-base font-semibold text-slate-800 mb-4">
-                  Inventory Rules
+              <section className="rounded-xl border border-slate-200 p-5 shadow-sm">
+                <h3 className="mb-4 text-base font-semibold text-slate-800">
+                  Optional Details
                 </h3>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                   <div>
                     <label className="text-sm font-medium text-slate-700">
-                      Opening Stock
+                      HSN / SAC
                     </label>
                     <input
-                      value={openingStock}
-                      onChange={(event) => {
-                        setOpeningStock(event.target.value);
-                        clearError("openingStock");
-                      }}
-                      type="text"
-                      placeholder="Ex: 10"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                      aria-invalid={Boolean(errors.openingStock)}
+                      value={form.hsn}
+                      onChange={(event) => updateField("hsn", event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                     />
-                    {errors.openingStock && (
-                      <p className="mt-1 text-sm text-red-600">
-                        {errors.openingStock}
-                      </p>
-                    )}
                   </div>
-
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      Reorder Level
-                    </label>
-                    <input
-                      value={reorderLevel}
-                      onChange={(event) => {
-                        setReorderLevel(event.target.value);
-                        clearError("reorderLevel");
-                      }}
-                      type="text"
-                      placeholder="Ex: 5"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                      aria-invalid={Boolean(errors.reorderLevel)}
-                    />
-                    {errors.reorderLevel && (
-                      <p className="mt-1 text-sm text-red-600">
-                        {errors.reorderLevel}
-                      </p>
-                    )}
-                  </div>
-
                   <div className="lg:col-span-2">
                     <label className="text-sm font-medium text-slate-700">
                       Description
                     </label>
                     <textarea
-                      value={description}
-                      onChange={(event) => setDescription(event.target.value)}
-                      placeholder="Add a detailed description for internal use."
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                      value={form.description}
+                      onChange={(event) =>
+                        updateField("description", event.target.value)
+                      }
+                      className="mt-1 min-h-[120px] w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                     />
                   </div>
                 </div>
-              </section>
-
-              {/* Notes */}
-              <section className="border border-slate-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-base font-semibold text-slate-800 mb-4">
-                  Notes
-                </h3>
-                <textarea
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
-                  placeholder="Internal notes, procurement guidance, or warranty terms."
-                  className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                />
               </section>
             </form>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t bg-slate-50">
+        <div className="flex items-center justify-between border-t bg-slate-50 px-6 py-4">
           <p className="text-xs text-slate-500">
-            Products appear in the catalog for allocation and sales.
+            Products appear in BOQ and purchase-order pickers after save.
           </p>
           <div className="flex gap-3">
             <button
-              onClick={() => navigate(-1)}
-              className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 hover:border-slate-300 hover:text-slate-900"
               type="button"
+              onClick={() => navigate(-1)}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
             >
               Cancel
             </button>
             <button
               form="create-product-form"
               type="submit"
-              className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+              disabled={isSubmitting}
+              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
             >
-              Save Product
+              {isSubmitting ? "Saving..." : "Save Product"}
             </button>
           </div>
         </div>

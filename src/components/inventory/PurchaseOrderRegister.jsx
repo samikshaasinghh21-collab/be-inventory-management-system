@@ -12,6 +12,29 @@ import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import DocumentViewPanel from "./DocumentViewPanel";
+import { buildGstSummary } from "../../utils/taxUtils";
+
+const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
+  const alignClass = align === "right" ? "text-right" : "text-left";
+  return (
+    <div className={`space-y-1 text-sm text-slate-700 ${alignClass}`}>
+      <div className="font-medium">Subtotal: {formatCurrency(summary.subtotal)}</div>
+      {summary.cgstGroups.map((group) => (
+        <div key={`cgst-${group.rate}`}>
+          CGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
+      {summary.sgstGroups.map((group) => (
+        <div key={`sgst-${group.rate}`}>
+          SGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
+      <div className="pt-1 font-semibold text-slate-900">
+        Total Value: {formatCurrency(summary.total)}
+      </div>
+    </div>
+  );
+};
 
 const PurchaseOrderRegister = () => {
   const navigate = useNavigate();
@@ -107,7 +130,7 @@ const PurchaseOrderRegister = () => {
   }, [locations]);
 
   const totalValue = records.reduce(
-    (sum, record) => sum + (Number(record.total) || 0),
+    (sum, record) => sum + buildGstSummary(record.items || []).total,
     0
   );
 
@@ -132,7 +155,6 @@ const PurchaseOrderRegister = () => {
       poNumber,
       record.status,
       record.expectedDate,
-      record.gstRate,
       projectName,
       vendorName,
       locationName,
@@ -162,6 +184,12 @@ const PurchaseOrderRegister = () => {
 
   const handleEdit = (record) => {
     navigate("/inventory/purchase-order", { state: { purchaseOrder: record } });
+  };
+
+  const handleReceive = (record) => {
+    navigate(`/inventory/receive-goods?purchaseOrderId=${record.id}`, {
+      state: { purchaseOrderId: record.id },
+    });
   };
 
   const handleView = (record) => {
@@ -280,13 +308,11 @@ const PurchaseOrderRegister = () => {
               <th className="p-3 text-left min-w-[180px]">Project</th>
               <th className="p-3 text-left min-w-[160px]">Location</th>
               <th className="p-3 text-left min-w-[140px]">Status</th>
-              <th className="p-3 text-left min-w-[120px]">GST</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
-              <th className="p-3 text-left min-w-[140px]">Value</th>
+              <th className="p-3 text-left min-w-[140px]">Subtotal</th>
+              <th className="p-3 text-left min-w-[140px]">GST</th>
+              <th className="p-3 text-left min-w-[140px]">Total Value</th>
               <th className="p-3 text-left min-w-[140px]">Expected</th>
-              <th className="p-3 text-left min-w-[220px]">
-                Terms &amp; Conditions
-              </th>
               <th className="p-3 text-left min-w-[120px]">Actions</th>
             </tr>
           </thead>
@@ -314,6 +340,7 @@ const PurchaseOrderRegister = () => {
                 const project = projectMap[String(record.projectId)];
                 const vendor = vendorMap[String(record.vendorId)];
                 const location = locationMap[String(record.locationId)];
+                const summary = buildGstSummary(record.items || []);
                 return (
                   <Fragment key={key}>
                     <tr
@@ -327,16 +354,18 @@ const PurchaseOrderRegister = () => {
                       <td className="p-3">{project?.name || "-"}</td>
                       <td className="p-3">{location?.name || "-"}</td>
                       <td className="p-3">{statusBadge(record.status)}</td>
-                      <td className="p-3">{record.gstRate || record.gst || "None"}</td>
                       <td className="p-3">{record.items?.length || 0}</td>
                       <td className="p-3 font-medium">
-                        {formatCurrency(record.total || 0)}
+                        {formatCurrency(summary.subtotal)}
+                      </td>
+                      <td className="p-3 font-medium">
+                        {formatCurrency(summary.totalTax)}
+                      </td>
+                      <td className="p-3 font-medium">
+                        {formatCurrency(summary.total)}
                       </td>
                       <td className="p-3">
                         {formatDate(record.expectedDate || record.orderDate)}
-                      </td>
-                      <td className="p-3 text-slate-600">
-                        {record.termsConditions || record.notes || "-"}
                       </td>
                       <td className="p-3 flex gap-3">
                         <button
@@ -358,6 +387,16 @@ const PurchaseOrderRegister = () => {
                           className="text-slate-600 text-sm"
                         >
                           Print
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleReceive(record);
+                          }}
+                          className="text-emerald-600 text-sm"
+                        >
+                          Receive
                         </button>
                         <button
                           type="button"
@@ -410,8 +449,15 @@ const PurchaseOrderRegister = () => {
                                 {formatDate(record.expectedDate) || "-"}
                               </p>
                               <p>
-                                <strong>Total Value:</strong> {formatCurrency(record.total || 0)}
+                                <strong>Total Value:</strong> {formatCurrency(summary.total)}
                               </p>
+                            </div>
+
+                            <div className="rounded-lg border border-slate-200 bg-white p-4">
+                              <GstSummaryBlock
+                                summary={summary}
+                                formatCurrency={formatCurrency}
+                              />
                             </div>
 
                             <div>
@@ -424,19 +470,16 @@ const PurchaseOrderRegister = () => {
                                     <tr>
                                       <th className="p-2 text-left">Item</th>
                                       <th className="p-2 text-left">Description</th>
-                                      <th className="p-2 text-left">HSN</th>
-                                      <th className="p-2 text-left">GST</th>
                                       <th className="p-2 text-left">Unit</th>
                                       <th className="p-2 text-left">Qty</th>
-                                      <th className="p-2 text-left">Rate</th>
+                                      <th className="p-2 text-left">Unit Price</th>
                                       <th className="p-2 text-left">Amount</th>
-                                      <th className="p-2 text-left">Location</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {(record.items || []).length === 0 && (
                                       <tr>
-                                        <td colSpan="9" className="p-3 text-slate-500 text-center">
+                                        <td colSpan="6" className="p-3 text-slate-500 text-center">
                                           No line items.
                                         </td>
                                       </tr>
@@ -455,28 +498,16 @@ const PurchaseOrderRegister = () => {
                                             {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
                                           </td>
                                           <td className="p-2">{item.description || "-"}</td>
-                                          <td className="p-2">{item.hsn || "-"}</td>
-                                          <td className="p-2">{item.gst || "-"}</td>
                                           <td className="p-2">{item.unit || "-"}</td>
                                           <td className="p-2">{qty}</td>
                                           <td className="p-2">{formatCurrency(rate)}</td>
                                           <td className="p-2">{formatCurrency(amount)}</td>
-                                          <td className="p-2">
-                                            {item.location || item.notes || "-"}
-                                          </td>
                                         </tr>
                                       );
                                     })}
                                   </tbody>
                                 </table>
                               </div>
-                            </div>
-
-                            <div className="text-sm text-slate-600">
-                              <p>
-                                <strong>Terms &amp; Conditions:</strong>{" "}
-                                {record.termsConditions || record.notes || "-"}
-                              </p>
                             </div>
                           </div>
                         </td>
@@ -489,6 +520,11 @@ const PurchaseOrderRegister = () => {
         </table>
       </div>
       {viewRecord && (
+        (() => {
+          const summary = buildGstSummary(viewRecord.items || []);
+          const vendor = vendorMap[String(viewRecord.vendorId)];
+          const primaryContact = vendor?.contacts?.[0];
+          return (
         <DocumentViewPanel
           id="purchase-order-view-panel"
           title="PURCHASE ORDER"
@@ -507,22 +543,23 @@ const PurchaseOrderRegister = () => {
           ]}
           leftBlockTitle="Vendor"
           leftBlockLines={[
-            vendorMap[String(viewRecord.vendorId)]?.name || "-",
-            viewRecord.termsConditions || viewRecord.notes || "-",
+            vendor?.name || "-",
+            primaryContact?.contactName || vendor?.email || "-",
+            primaryContact?.phone || vendor?.phone || "-",
           ]}
           rightBlockTitle="Project"
           rightBlockLines={[
             projectMap[String(viewRecord.projectId)]?.name || "-",
             locationMap[String(viewRecord.locationId)]?.name || "-",
+            projectMap[String(viewRecord.projectId)]?.client || "-",
           ]}
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
-            { key: "hsn", label: "HSN", widthClass: "w-20" },
-            { key: "gst", label: "GST", widthClass: "w-20" },
+            { key: "description", label: "Description" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
-            { key: "rate", label: "Rate", align: "right", widthClass: "w-24" },
+            { key: "rate", label: "Unit Price", align: "right", widthClass: "w-24" },
             { key: "amount", label: "Amount", align: "right", widthClass: "w-28" },
           ]}
           tableRows={(viewRecord.items || []).map((item, index) => {
@@ -533,20 +570,25 @@ const PurchaseOrderRegister = () => {
               id: item.id || index,
               serial: index + 1,
               name: item.name,
-              hsn: item.hsn || "-",
-              gst: item.gst || "-",
+              description: item.description || "-",
               unit: item.unit,
               quantity: qty,
               rate: formatCurrency(rate),
               amount: formatCurrency(amount),
             };
           })}
-          bottomLeftTitle="GST"
-          bottomLeftValue={viewRecord.gstRate || viewRecord.gst || "None"}
-          bottomRightTitle="Total Value"
-          bottomRightValue={formatCurrency(viewRecord.total || 0)}
+          bottomRightContent={
+            <GstSummaryBlock
+              summary={summary}
+              formatCurrency={formatCurrency}
+              align="right"
+            />
+          }
           footerCompanyName={brandName || "Company"}
+          hideFooterNote
         />
+          );
+        })()
       )}
     </div>
   );

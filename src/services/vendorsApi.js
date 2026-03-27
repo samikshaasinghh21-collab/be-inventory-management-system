@@ -1,5 +1,15 @@
 import api from "./api";
 
+export const normalizeVendorContact = (contact = {}) => ({
+  id: contact.id ?? contact.VendorContactId ?? null,
+  vendorId: contact.vendorId ?? contact.VendorId ?? null,
+  contactName:
+    contact.contactName ?? contact.ContactName ?? contact.name ?? "",
+  email: contact.email ?? contact.Email ?? "",
+  designation: contact.designation ?? contact.Designation ?? "",
+  phone: contact.phone ?? contact.Phone ?? "",
+});
+
 export const normalizeVendor = (vendor = {}) => {
   const id = vendor.id ?? vendor.VendorId ?? vendor.vendorId ?? null;
   const name = vendor.name ?? vendor.VendorName ?? "";
@@ -7,6 +17,11 @@ export const normalizeVendor = (vendor = {}) => {
   const email = vendor.email ?? vendor.Email ?? "";
   const gstNumber = vendor.gstNumber ?? vendor.GSTNumber ?? "";
   const address = vendor.address ?? vendor.Address ?? "";
+  const contacts = Array.isArray(vendor.contacts)
+    ? vendor.contacts.map(normalizeVendorContact)
+    : Array.isArray(vendor.VendorContacts)
+    ? vendor.VendorContacts.map(normalizeVendorContact)
+    : [];
 
   return {
     ...vendor,
@@ -16,12 +31,14 @@ export const normalizeVendor = (vendor = {}) => {
     email,
     gstNumber,
     address,
+    contacts,
     VendorId: vendor.VendorId ?? id,
     VendorName: vendor.VendorName ?? name,
     Phone: vendor.Phone ?? phone,
     Email: vendor.Email ?? email,
     GSTNumber: vendor.GSTNumber ?? gstNumber,
     Address: vendor.Address ?? address,
+    VendorContacts: vendor.VendorContacts ?? contacts,
   };
 };
 

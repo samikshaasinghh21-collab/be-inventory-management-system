@@ -43,6 +43,15 @@ const normalizeConsumption = (consumption = {}) => ({
   issuedBy: consumption.issuedBy ?? consumption.IssuedBy ?? "",
   status: consumption.status ?? consumption.Status ?? "Logged",
   notes: consumption.notes ?? consumption.Notes ?? "",
+  companyAddress:
+    consumption.companyAddress ?? consumption.CompanyAddress ?? "",
+  companyGstin:
+    consumption.companyGstin ??
+    consumption.CompanyGstin ??
+    consumption.CompanyGSTIN ??
+    "",
+  companyPhone: consumption.companyPhone ?? consumption.CompanyPhone ?? "",
+  companyEmail: consumption.companyEmail ?? consumption.CompanyEmail ?? "",
   createdAt: consumption.createdAt ?? consumption.CreatedAt ?? null,
   updatedAt: consumption.updatedAt ?? consumption.UpdatedAt ?? null,
   items: Array.isArray(consumption.items)

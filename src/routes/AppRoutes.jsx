@@ -4,6 +4,14 @@ import MainLayout from "../layouts/MainLayout";
 import Dashboard from "../pages/Dashboard";
 import InventoryHome from "../pages/InventoryHome";
 import ProjectsHome from "../pages/ProjectsHome";
+import ToolsHome from "../pages/ToolsHome";
+import ToolsAnalytics from "../pages/ToolsAnalytics";
+import ToolsMaintenance from "../pages/ToolsMaintenance";
+import ToolsAssignments from "../pages/ToolsAssignments";
+import ToolsCategories from "../pages/ToolsCategories";
+import ToolsHistory from "../pages/ToolsHistory";
+import ToolsBulkImport from "../pages/ToolsBulkImport";
+import ToolsMap from "../pages/ToolsMap";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
 import Login from "../pages/Login";
@@ -22,6 +30,7 @@ import Product from "../components/inventory/Product";
 import Cart from "../components/inventory/Cart";
 import Boq from "../components/inventory/Boq";
 import Vendors from "../components/inventory/Vendors";
+import Customers from "../components/inventory/Customers";
 import Locations from "../components/inventory/Locations";
 import PurchaseOrder from "../components/inventory/PurchaseOrder";
 import PurchaseOrderRegister from "../components/inventory/PurchaseOrderRegister";
@@ -44,12 +53,33 @@ const AppRoutes = () => {
 
       <Route element={<MainLayout />}>
         <Route path="/inventory" element={<InventoryHome />} />
+        <Route path="/inventory/tools" element={<ToolsHome />} />
+        <Route path="/inventory/tools/analytics" element={<ToolsAnalytics />} />
+        <Route
+          path="/inventory/tools/maintenance"
+          element={<ToolsMaintenance />}
+        />
+        <Route
+          path="/inventory/tools/assignments"
+          element={<ToolsAssignments />}
+        />
+        <Route
+          path="/inventory/tools/categories"
+          element={<ToolsCategories />}
+        />
+        <Route path="/inventory/tools/history" element={<ToolsHistory />} />
+        <Route
+          path="/inventory/tools/bulk-import"
+          element={<ToolsBulkImport />}
+        />
+        <Route path="/inventory/tools/map" element={<ToolsMap />} />
         <Route path="/inventory/projects" element={<ProjectsHome />} />
         <Route path="/inventory/products" element={<Product />} />
 
         <Route path="/inventory/create-item" element={<CreateItems />} />
         <Route path="/inventory/edit/:id" element={<EditItems />} />
         <Route path="/inventory/vendors" element={<Vendors />} />
+        <Route path="/inventory/customers" element={<Customers />} />
         <Route path="/inventory/create-vendors" element={<CreateVendors />} />
         <Route path="/inventory/create-project" element={<CreateProjects />} />
         <Route path="/inventory/create-product" element={<CreateProduct />} />

@@ -54,7 +54,7 @@ const lineItem = (o = {}) => ({
   quantity: o.quantity === "" ? "" : o.quantity ?? "",
   notes: o.notes ?? "",
 });
-const formState = (consumptionNumber = "") => ({
+const formState = (consumptionNumber = "", companyDefaults = {}) => ({
   consumptionNumber,
   projectId: "",
   locationId: "",
@@ -62,6 +62,10 @@ const formState = (consumptionNumber = "") => ({
   issuedBy: "Store Keeper",
   status: "Logged",
   notes: "",
+  companyAddress: companyDefaults.address ?? "",
+  companyGstin: companyDefaults.gstin ?? "",
+  companyPhone: companyDefaults.phone ?? "",
+  companyEmail: companyDefaults.email ?? "",
 });
 const err = (e, fallback) => e?.response?.data?.error || e?.message || fallback;
 const sortValue = (r = {}) => {
@@ -202,12 +206,18 @@ const Consumption = () => {
   const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
+  const companyDefaults = {
+    address: company.address ?? "",
+    gstin: company.gstin ?? "",
+    phone: company.phone ?? "",
+    email: company.email ?? "",
+  };
 
   const [projects, setProjects] = useState([]);
   const [locations, setLocations] = useState([]);
   const [boqs, setBoqs] = useState([]);
   const [records, setRecords] = useState([]);
-  const [form, setForm] = useState(() => formState());
+  const [form, setForm] = useState(() => formState("", companyDefaults));
   const [items, setItems] = useState([lineItem()]);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -302,7 +312,7 @@ const Consumption = () => {
   };
 
   const reset = (latest = sortedRecords) => {
-    setForm(formState(nextConNo(latest)));
+    setForm(formState(nextConNo(latest), companyDefaults));
     setItems([lineItem()]);
     setErrors({});
     setEditingId(null);
@@ -343,7 +353,9 @@ const Consumption = () => {
       setLocations(l);
       setBoqs(b);
       setRecords(rs);
-      setForm((prev) => (prev.consumptionNumber ? prev : formState(nextConNo(rs))));
+      setForm((prev) =>
+        prev.consumptionNumber ? prev : formState(nextConNo(rs), companyDefaults)
+      );
       const e =
         (pr.status === "rejected" && !p.length ? err(pr.reason, "Failed to load projects.") : "") ||
         (lr.status === "rejected" ? err(lr.reason, "Failed to load locations.") : "") ||
@@ -447,6 +459,10 @@ const Consumption = () => {
       issuedBy: form.issuedBy,
       status: form.status,
       notes: form.notes,
+      companyAddress: form.companyAddress,
+      companyGstin: form.companyGstin,
+      companyPhone: form.companyPhone,
+      companyEmail: form.companyEmail,
       items: items
         .map((it) => ({
           boqItemId: it.boqItemId ?? null,
@@ -492,6 +508,10 @@ const Consumption = () => {
       issuedBy: r.issuedBy || "Store Keeper",
       status: statusOptions.includes(r.status) ? r.status : "Logged",
       notes: r.notes || "",
+      companyAddress: r.companyAddress || companyDefaults.address || "",
+      companyGstin: r.companyGstin || companyDefaults.gstin || "",
+      companyPhone: r.companyPhone || companyDefaults.phone || "",
+      companyEmail: r.companyEmail || companyDefaults.email || "",
     });
     setItems(mergeEdit(r.projectId, boqs, r.items || []));
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -762,6 +782,58 @@ const Consumption = () => {
               />
             </label>
 
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="md:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">
+                  Company Address
+                </span>
+                <textarea
+                  value={form.companyAddress}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, companyAddress: e.target.value }))
+                  }
+                  placeholder="Company address"
+                  className="mt-1 min-h-[70px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+
+              <label>
+                <span className="text-sm font-semibold text-slate-700">GST No</span>
+                <input
+                  className={field}
+                  value={form.companyGstin}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, companyGstin: e.target.value }))
+                  }
+                  placeholder="GST No"
+                />
+              </label>
+
+              <label>
+                <span className="text-sm font-semibold text-slate-700">Phone</span>
+                <input
+                  className={field}
+                  value={form.companyPhone}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, companyPhone: e.target.value }))
+                  }
+                  placeholder="Phone"
+                />
+              </label>
+
+              <label className="md:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">Email</span>
+                <input
+                  className={field}
+                  value={form.companyEmail}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, companyEmail: e.target.value }))
+                  }
+                  placeholder="Email"
+                />
+              </label>
+            </div>
+
             {form.projectId && selectedBoq && (
               <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
                 BOQ Auto-fill:{" "}
@@ -901,10 +973,10 @@ const Consumption = () => {
           title="CONSUMPTION DETAILS"
           onClose={() => setViewRecord(null)}
           companyName={brandName}
-          companyAddress={brandDescription}
-          companyGstin={company.gstin}
-          companyPhone={company.phone}
-          companyEmail={company.email}
+          companyAddress={viewRecord.companyAddress || brandDescription}
+          companyGstin={viewRecord.companyGstin || company.gstin}
+          companyPhone={viewRecord.companyPhone || company.phone}
+          companyEmail={viewRecord.companyEmail || company.email}
           logoUrl={logoUrl}
           primaryPairs={[
             { label: "Reference", value: viewRecord.consumptionNumber },
@@ -957,8 +1029,6 @@ const Consumption = () => {
           })}
           bottomLeftTitle="Total Items"
           bottomLeftValue={(viewRecord.items || []).length}
-          bottomRightTitle="Total Quantity"
-          bottomRightValue={fmtQty((viewRecord.items || []).reduce((s, it) => s + qty(it.quantity), 0))}
           footerCompanyName={brandName || "Company"}
         />
       )}

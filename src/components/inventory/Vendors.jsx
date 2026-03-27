@@ -15,6 +15,14 @@ const emptyForm = {
   Address: "",
 };
 
+const createEmptyContact = () => ({
+  id: Date.now() + Math.random(),
+  contactName: "",
+  email: "",
+  designation: "",
+  phone: "",
+});
+
 const Vendors = () => {
   const navigate = useNavigate();
   const [vendors, setVendors] = useState([]);
@@ -23,53 +31,36 @@ const Vendors = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [editingVendor, setEditingVendor] = useState(null);
   const [editForm, setEditForm] = useState(emptyForm);
+  const [contacts, setContacts] = useState([createEmptyContact()]);
   const [editErrors, setEditErrors] = useState({});
   const [editError, setEditError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeletingId, setIsDeletingId] = useState(null);
-  const [actionError, setActionError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
 
-  const loadVendorsFromCache = () => {
+  const loadVendors = async () => {
+    setIsLoading(true);
+    setLoadError("");
     try {
-      const stored = JSON.parse(localStorage.getItem("vendors") || "[]");
-      setVendors(Array.isArray(stored) ? stored : []);
-    } catch {
+      const list = await fetchVendors();
+      setVendors(list);
+      syncVendorsCache(list);
+    } catch (error) {
+      setLoadError(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.message ||
+          "Failed to load vendors."
+      );
       setVendors([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    const loadVendors = async () => {
-      setIsLoading(true);
-      setLoadError("");
-      try {
-        const list = await fetchVendors();
-        setVendors(list);
-        syncVendorsCache(list);
-      } catch (error) {
-        setLoadError(
-          error?.response?.data?.message || error?.message || "Failed to load vendors."
-        );
-        loadVendorsFromCache();
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     void loadVendors();
-  }, []);
-
-  useEffect(() => {
-    const handleStorage = (event) => {
-      if (event.key === "vendors") {
-        loadVendorsFromCache();
-      }
-    };
-
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
   const filteredVendors = useMemo(() => {
@@ -84,6 +75,12 @@ const Vendors = () => {
         vendor.email,
         vendor.gstNumber,
         vendor.address,
+        ...(vendor.contacts || []).flatMap((contact) => [
+          contact.contactName,
+          contact.email,
+          contact.designation,
+          contact.phone,
+        ]),
       ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query))
@@ -93,12 +90,23 @@ const Vendors = () => {
   const openEdit = (vendor) => {
     setEditingVendor(vendor);
     setEditForm({
-      VendorName: vendor.name ?? vendor.VendorName ?? "",
-      Phone: vendor.phone ?? vendor.Phone ?? "",
-      Email: vendor.email ?? vendor.Email ?? "",
-      GSTNumber: vendor.gstNumber ?? vendor.GSTNumber ?? "",
-      Address: vendor.address ?? vendor.Address ?? "",
+      VendorName: vendor.name ?? "",
+      Phone: vendor.phone ?? "",
+      Email: vendor.email ?? "",
+      GSTNumber: vendor.gstNumber ?? "",
+      Address: vendor.address ?? "",
     });
+    setContacts(
+      vendor.contacts?.length
+        ? vendor.contacts.map((contact) => ({
+            id: contact.id ?? Date.now() + Math.random(),
+            contactName: contact.contactName ?? "",
+            email: contact.email ?? "",
+            designation: contact.designation ?? "",
+            phone: contact.phone ?? "",
+          }))
+        : [createEmptyContact()]
+    );
     setEditErrors({});
     setEditError("");
   };
@@ -106,6 +114,7 @@ const Vendors = () => {
   const closeEdit = () => {
     setEditingVendor(null);
     setEditForm(emptyForm);
+    setContacts([createEmptyContact()]);
     setEditErrors({});
     setEditError("");
   };
@@ -117,6 +126,25 @@ const Vendors = () => {
     }
   };
 
+  const updateContact = (id, key, value) => {
+    setContacts((prev) =>
+      prev.map((contact) =>
+        contact.id === id ? { ...contact, [key]: value } : contact
+      )
+    );
+  };
+
+  const addContact = () => {
+    setContacts((prev) => [...prev, createEmptyContact()]);
+  };
+
+  const removeContact = (id) => {
+    setContacts((prev) => {
+      const next = prev.filter((contact) => contact.id !== id);
+      return next.length ? next : [createEmptyContact()];
+    });
+  };
+
   const validateEdit = () => {
     const nextErrors = {};
     if (!editForm.VendorName.trim()) {
@@ -125,19 +153,35 @@ const Vendors = () => {
     if (!editForm.Phone.trim()) {
       nextErrors.Phone = "Phone number is required.";
     }
+
+    const normalizedContacts = contacts.filter((contact) =>
+      [
+        contact.contactName,
+        contact.email,
+        contact.designation,
+        contact.phone,
+      ].some((value) => String(value || "").trim())
+    );
+
+    normalizedContacts.forEach((contact, index) => {
+      if (!contact.contactName.trim()) {
+        nextErrors[`contactName-${index}`] = "Contact name is required.";
+      }
+      if (!contact.email.trim()) {
+        nextErrors[`contactEmail-${index}`] = "Email is required.";
+      }
+      if (!contact.designation.trim()) {
+        nextErrors[`contactDesignation-${index}`] = "Designation is required.";
+      }
+    });
+
     setEditErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
 
   const handleEditSubmit = async (event) => {
     event.preventDefault();
-    setEditError("");
-    setActionError("");
-
-    if (!editingVendor) {
-      return;
-    }
-    if (!validateEdit()) {
+    if (!editingVendor || !validateEdit() || isSaving) {
       return;
     }
 
@@ -146,84 +190,101 @@ const Vendors = () => {
       const updated = await updateVendor(editingVendor.id, {
         name: editForm.VendorName.trim(),
         phone: editForm.Phone.trim(),
-        email: editForm.Email.trim(),
-        gstNumber: editForm.GSTNumber.trim(),
-        address: editForm.Address.trim(),
+        email: editForm.Email.trim() || undefined,
+        gstNumber: editForm.GSTNumber.trim() || undefined,
+        address: editForm.Address.trim() || undefined,
+        contacts: contacts
+          .filter((contact) =>
+            [
+              contact.contactName,
+              contact.email,
+              contact.designation,
+              contact.phone,
+            ].some((value) => String(value || "").trim())
+          )
+          .map((contact) => ({
+            contactName: contact.contactName.trim(),
+            email: contact.email.trim(),
+            designation: contact.designation.trim(),
+            phone: contact.phone.trim() || undefined,
+          })),
       });
 
       const nextVendors = vendors.map((vendor) =>
-        vendor.id === updated.id ? { ...vendor, ...updated } : vendor
+        vendor.id === updated.id ? updated : vendor
       );
       setVendors(nextVendors);
       syncVendorsCache(nextVendors);
       closeEdit();
     } catch (error) {
       setEditError(
-        error?.response?.data?.message || error?.message || "Failed to update vendor."
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.message ||
+          "Failed to update vendor."
       );
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleDeleteRequest = (vendor) => {
-    setDeleteTarget(vendor);
-    setDeleteError("");
-  };
-
-  const handleDeleteConfirm = async () => {
+  const handleDelete = async () => {
     if (!deleteTarget) {
       return;
     }
 
-    setActionError("");
     setDeleteError("");
     setIsDeletingId(deleteTarget.id);
     try {
       await deleteVendor(deleteTarget.id);
-      const nextVendors = vendors.filter((item) => item.id !== deleteTarget.id);
+      const nextVendors = vendors.filter((vendor) => vendor.id !== deleteTarget.id);
       setVendors(nextVendors);
       syncVendorsCache(nextVendors);
       setDeleteTarget(null);
     } catch (error) {
-      if (error?.response?.status === 404) {
-        const nextVendors = vendors.filter((item) => item.id !== deleteTarget.id);
-        setVendors(nextVendors);
-        syncVendorsCache(nextVendors);
-        setDeleteTarget(null);
-        return;
-      }
       setDeleteError(
-        error?.response?.data?.message || error?.message || "Failed to delete vendor."
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.message ||
+          "Failed to delete vendor."
       );
     } finally {
       setIsDeletingId(null);
     }
   };
 
-  const handleDeleteCancel = () => {
-    setDeleteTarget(null);
-    setDeleteError("");
-  };
-
   return (
     <div className="p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center mb-6">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Inventory
+            Inventory Management
           </p>
-          <h1 className="text-3xl font-semibold text-slate-800">
-            Vendors
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Manage all registered vendors and contact details.
+          <h1 className="text-3xl font-semibold text-slate-800">Vendors</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Manage vendors and multiple contact persons in one register.
           </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={loadVendors}
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700"
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("/inventory/create-vendors")}
+            className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            + Add Vendor
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-sm text-slate-500">Total Vendors</p>
           <p className="text-2xl font-semibold text-slate-800">
             {isLoading ? "..." : vendors.length}
@@ -231,193 +292,357 @@ const Vendors = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
-        <div className="px-4 py-3 border-b flex items-center justify-between gap-4">
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
           <div>
             <h3 className="text-lg font-semibold text-slate-800">
               Vendor Register
             </h3>
             {loadError && (
-              <p className="text-xs text-amber-700 mt-1">{loadError}</p>
-            )}
-            {actionError && (
-              <p className="text-xs text-red-600 mt-1">{actionError}</p>
+              <p className="mt-1 text-xs text-amber-700">{loadError}</p>
             )}
           </div>
           <input
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search vendor name, phone, GST, email..."
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 max-w-full"
+            placeholder="Search vendor, GST, contact person, email..."
+            className="w-80 max-w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
           />
         </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
-              <th className="p-3 text-left min-w-[200px]">Vendor Name</th>
-              <th className="p-3 text-left min-w-[160px]">Phone</th>
-              <th className="p-3 text-left min-w-[220px]">Email</th>
-              <th className="p-3 text-left min-w-[180px]">GST</th>
-              <th className="p-3 text-left min-w-[260px]">Address</th>
-              <th className="p-3 text-left min-w-[160px]">Actions</th>
+              <th className="p-3 text-left min-w-[180px]">Vendor Name</th>
+              <th className="p-3 text-left min-w-[150px]">Phone</th>
+              <th className="p-3 text-left min-w-[180px]">Email</th>
+              <th className="p-3 text-left min-w-[150px]">GST</th>
+              <th className="p-3 text-left min-w-[220px]">Primary Contact</th>
+              <th className="p-3 text-left min-w-[120px]">Contacts</th>
+              <th className="p-3 text-left min-w-[180px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredVendors.length === 0 && (
               <tr>
-                <td colSpan="6" className="p-6 text-center text-slate-500">
+                <td colSpan="7" className="p-6 text-center text-slate-500">
                   {vendors.length === 0
                     ? "No vendors added yet."
                     : "No vendors match your search."}
                 </td>
               </tr>
             )}
-            {filteredVendors.map((vendor) => (
-              <tr key={vendor.id} className="border-t hover:bg-slate-50">
-                <td className="p-3 font-medium text-slate-800">
-                  {vendor.name || "-"}
-                </td>
-                <td className="p-3">{vendor.phone || "-"}</td>
-                <td className="p-3">{vendor.email || "-"}</td>
-                <td className="p-3">{vendor.gstNumber || "-"}</td>
-                <td className="p-3 text-slate-600">
-                  {vendor.address || "-"}
-                </td>
-                <td className="p-3">
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(vendor)}
-                      className="px-3 py-1 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRequest(vendor)}
-                      className="px-3 py-1 rounded-md text-xs font-medium bg-red-600 text-white hover:bg-red-700 transition"
-                      disabled={isDeletingId === vendor.id}
-                    >
-                      {isDeletingId === vendor.id ? "Deleting..." : "Delete"}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {filteredVendors.map((vendor) => {
+              const primaryContact = vendor.contacts?.[0];
+              return (
+                <tr key={vendor.id} className="border-t hover:bg-slate-50">
+                  <td className="p-3 font-medium text-slate-800">
+                    <div>{vendor.name || "-"}</div>
+                    <div className="text-xs text-slate-500">
+                      {vendor.address || "No address"}
+                    </div>
+                  </td>
+                  <td className="p-3">{vendor.phone || "-"}</td>
+                  <td className="p-3">{vendor.email || "-"}</td>
+                  <td className="p-3">{vendor.gstNumber || "-"}</td>
+                  <td className="p-3">
+                    {primaryContact ? (
+                      <>
+                        <div className="font-medium text-slate-700">
+                          {primaryContact.contactName}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {primaryContact.designation}
+                        </div>
+                      </>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
+                  <td className="p-3">{vendor.contacts?.length || 0}</td>
+                  <td className="p-3">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(vendor)}
+                        className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteTarget(vendor);
+                          setDeleteError("");
+                        }}
+                        className="rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+                        disabled={isDeletingId === vendor.id}
+                      >
+                        {isDeletingId === vendor.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       {editingVendor && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center z-50">
-          <div className="bg-white w-[900px] max-w-[96vw] rounded-2xl shadow-2xl overflow-hidden border border-slate-200 max-h-[92vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b bg-slate-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+          <div className="flex max-h-[92vh] w-[980px] max-w-[96vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b bg-slate-50 px-6 py-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
                   Vendors
                 </p>
-                <h2 className="text-xl font-semibold text-slate-900">Edit Vendor</h2>
+                <h2 className="text-xl font-semibold text-slate-900">
+                  Edit Vendor
+                </h2>
               </div>
               <button
-                onClick={closeEdit}
-                className="h-9 w-9 grid place-items-center rounded-full border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 transition"
-                aria-label="Close"
                 type="button"
+                onClick={closeEdit}
+                className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-900"
               >
                 X
               </button>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto p-6">
-              <form id="edit-vendor-form" className="space-y-6" onSubmit={handleEditSubmit} noValidate>
-                <section className="border border-slate-200 rounded-xl p-5 shadow-sm">
-                  <div className="flex items-center justify-between mb-4">
+            <div className="flex-1 overflow-y-auto p-6">
+              <form
+                id="edit-vendor-form"
+                className="space-y-6"
+                onSubmit={handleEditSubmit}
+                noValidate
+              >
+                <section className="rounded-xl border border-slate-200 p-5 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-base font-semibold text-slate-800">
                       Vendor Details
                     </h3>
-                    <span className="text-xs text-slate-500">Required fields marked *</span>
+                    <span className="text-xs text-slate-500">
+                      Required fields marked *
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                     <div>
-                      <label className="text-sm font-medium text-slate-700">Vendor Name *</label>
+                      <label className="text-sm font-medium text-slate-700">
+                        Vendor Name *
+                      </label>
                       <input
                         value={editForm.VendorName}
-                        onChange={(event) => updateEditField("VendorName", event.target.value)}
-                        type="text"
-                        placeholder="Ex: ABC Traders"
-                        className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                        aria-invalid={Boolean(editErrors.VendorName)}
+                        onChange={(event) =>
+                          updateEditField("VendorName", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
                       {editErrors.VendorName && (
-                        <p className="mt-1 text-sm text-red-600">{editErrors.VendorName}</p>
+                        <p className="mt-1 text-sm text-red-600">
+                          {editErrors.VendorName}
+                        </p>
                       )}
                     </div>
 
                     <div>
-                      <label className="text-sm font-medium text-slate-700">Phone *</label>
+                      <label className="text-sm font-medium text-slate-700">
+                        Phone *
+                      </label>
                       <input
                         value={editForm.Phone}
-                        onChange={(event) => updateEditField("Phone", event.target.value)}
-                        type="text"
-                        placeholder="Ex: 9876543210"
-                        className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                        aria-invalid={Boolean(editErrors.Phone)}
+                        onChange={(event) =>
+                          updateEditField("Phone", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
                       {editErrors.Phone && (
-                        <p className="mt-1 text-sm text-red-600">{editErrors.Phone}</p>
+                        <p className="mt-1 text-sm text-red-600">
+                          {editErrors.Phone}
+                        </p>
                       )}
                     </div>
 
                     <div>
-                      <label className="text-sm font-medium text-slate-700">Email</label>
+                      <label className="text-sm font-medium text-slate-700">
+                        Email
+                      </label>
                       <input
                         value={editForm.Email}
-                        onChange={(event) => updateEditField("Email", event.target.value)}
-                        type="email"
-                        placeholder="Ex: abc@traders.com"
-                        className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                        onChange={(event) =>
+                          updateEditField("Email", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
                     </div>
 
                     <div>
-                      <label className="text-sm font-medium text-slate-700">GST Number</label>
+                      <label className="text-sm font-medium text-slate-700">
+                        GST Number
+                      </label>
                       <input
                         value={editForm.GSTNumber}
-                        onChange={(event) => updateEditField("GSTNumber", event.target.value)}
-                        type="text"
-                        placeholder="Ex: 27ABCDE1234F1Z5"
-                        className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                        onChange={(event) =>
+                          updateEditField("GSTNumber", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
                     </div>
 
                     <div className="lg:col-span-2">
-                      <label className="text-sm font-medium text-slate-700">Address</label>
+                      <label className="text-sm font-medium text-slate-700">
+                        Address
+                      </label>
                       <textarea
                         value={editForm.Address}
-                        onChange={(event) => updateEditField("Address", event.target.value)}
-                        placeholder="Ex: Mumbai, Maharashtra"
-                        className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                        onChange={(event) =>
+                          updateEditField("Address", event.target.value)
+                        }
+                        className="mt-1 min-h-[120px] w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
                     </div>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-slate-200 p-5 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-800">
+                        Contact Persons
+                      </h3>
+                      <p className="text-sm text-slate-500">
+                        Add, update, or remove contacts under the same vendor.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addContact}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
+                    >
+                      + Add Contact
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {contacts.map((contact, index) => (
+                      <div
+                        key={contact.id}
+                        className="rounded-xl border border-slate-200 p-4"
+                      >
+                        <div className="mb-4 flex items-center justify-between">
+                          <h4 className="text-sm font-semibold text-slate-800">
+                            Contact {index + 1}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => removeContact(contact.id)}
+                            className="text-xs font-medium text-red-600"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Contact Name
+                            </label>
+                            <input
+                              value={contact.contactName}
+                              onChange={(event) =>
+                                updateContact(
+                                  contact.id,
+                                  "contactName",
+                                  event.target.value
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                            />
+                            {editErrors[`contactName-${index}`] && (
+                              <p className="mt-1 text-sm text-red-600">
+                                {editErrors[`contactName-${index}`]}
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Email ID
+                            </label>
+                            <input
+                              value={contact.email}
+                              onChange={(event) =>
+                                updateContact(
+                                  contact.id,
+                                  "email",
+                                  event.target.value
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                            />
+                            {editErrors[`contactEmail-${index}`] && (
+                              <p className="mt-1 text-sm text-red-600">
+                                {editErrors[`contactEmail-${index}`]}
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Designation
+                            </label>
+                            <input
+                              value={contact.designation}
+                              onChange={(event) =>
+                                updateContact(
+                                  contact.id,
+                                  "designation",
+                                  event.target.value
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                            />
+                            {editErrors[`contactDesignation-${index}`] && (
+                              <p className="mt-1 text-sm text-red-600">
+                                {editErrors[`contactDesignation-${index}`]}
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Phone Number
+                            </label>
+                            <input
+                              value={contact.phone}
+                              onChange={(event) =>
+                                updateContact(
+                                  contact.id,
+                                  "phone",
+                                  event.target.value
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </section>
               </form>
             </div>
 
-            <div className="flex items-center justify-between px-6 py-4 border-t bg-slate-50">
+            <div className="flex items-center justify-between border-t bg-slate-50 px-6 py-4">
               {editError ? (
                 <p className="text-xs text-red-600">{editError}</p>
               ) : (
                 <p className="text-xs text-slate-500">
-                  Update vendor details and save changes.
+                  Save vendor changes to update purchase-order contact details.
                 </p>
               )}
               <div className="flex gap-3">
                 <button
-                  onClick={closeEdit}
-                  className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 hover:border-slate-300 hover:text-slate-900"
                   type="button"
+                  onClick={closeEdit}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
                   disabled={isSaving}
                 >
                   Cancel
@@ -425,7 +650,7 @@ const Vendors = () => {
                 <button
                   form="edit-vendor-form"
                   type="submit"
-                  className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-60"
+                  className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
                   disabled={isSaving}
                 >
                   {isSaving ? "Saving..." : "Save Changes"}
@@ -437,39 +662,41 @@ const Vendors = () => {
       )}
 
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center z-50">
-          <div className="bg-white w-[520px] max-w-[92vw] rounded-2xl shadow-[0_25px_60px_-12px_rgba(15,23,42,0.45)] border border-slate-200 overflow-hidden">
-            <div className="px-6 py-5 border-b bg-slate-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+          <div className="w-[520px] max-w-[92vw] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="border-b bg-slate-900 px-6 py-5">
               <p className="text-xs uppercase tracking-[0.3em] text-slate-300">
                 Vendors
               </p>
-              <h2 className="text-lg font-semibold text-white">Delete Vendor</h2>
+              <h2 className="text-lg font-semibold text-white">
+                Delete Vendor
+              </h2>
             </div>
             <div className="px-6 py-5 text-sm text-slate-600">
               <p>
                 Are you sure you want to delete{" "}
                 <span className="font-semibold text-slate-900">
-                  {deleteTarget.name || deleteTarget.VendorName || "this vendor"}
+                  {deleteTarget.name || "this vendor"}
                 </span>
-                ? This action cannot be undone.
+                ?
               </p>
               {deleteError && (
                 <p className="mt-3 text-xs text-red-600">{deleteError}</p>
               )}
             </div>
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t bg-slate-50">
+            <div className="flex items-center justify-end gap-3 border-t bg-slate-50 px-6 py-4">
               <button
                 type="button"
-                onClick={handleDeleteCancel}
-                className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 hover:border-slate-300 hover:text-slate-900 bg-white transition"
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700"
                 disabled={isDeletingId === deleteTarget.id}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleDeleteConfirm}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition disabled:opacity-60"
+                onClick={handleDelete}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
                 disabled={isDeletingId === deleteTarget.id}
               >
                 {isDeletingId === deleteTarget.id ? "Deleting..." : "Delete Vendor"}

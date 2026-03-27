@@ -9,6 +9,7 @@ const normalizePoItem = (item = {}) => ({
   unit: item.unit ?? item.Unit ?? "PCS",
   hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
   gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
+  taxPercentage: Number(item.taxPercentage ?? item.TaxPercentage ?? 0),
   location: item.location ?? item.Location ?? item.notes ?? item.Notes ?? "",
   notes: item.notes ?? item.Notes ?? item.location ?? item.Location ?? "",
   quantity: Number(item.quantity ?? item.Quantity ?? item.Qty ?? 0),

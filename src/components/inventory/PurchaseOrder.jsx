@@ -12,6 +12,12 @@ import { fetchLocations } from "../../services/locationsApi";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
 import DateInput from "../common/DateInput";
+import {
+  buildGstSummary,
+  formatTaxPercentage,
+  parseTaxPercentage,
+} from "../../utils/taxUtils";
+import { generateNextPurchaseOrderNumber } from "../../utils/purchaseOrderNumber";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -20,6 +26,7 @@ const createLineItem = () => ({
   unit: "PCS",
   hsn: "",
   gst: "",
+  taxPercentage: 0,
   quantity: "",
   rate: "",
   notes: "",
@@ -77,6 +84,7 @@ const PurchaseOrder = () => {
         unit: item.unit ?? "PCS",
         hsn: item.hsn ?? "",
         gst: item.gst ?? "",
+        taxPercentage: item.taxPercentage ?? 0,
         quantity: item.quantity ?? "",
         rate: item.unitPrice ?? item.rate ?? "",
         location: item.location ?? item.notes ?? "",
@@ -152,6 +160,25 @@ const PurchaseOrder = () => {
     void loadBoqs();
   }, []);
 
+  useEffect(() => {
+    if (editingId) {
+      return;
+    }
+    setForm((prev) => {
+      const nextPoNumber = generateNextPurchaseOrderNumber(
+        records,
+        prev.orderDate
+      );
+      if (prev.poNumber === nextPoNumber) {
+        return prev;
+      }
+      return {
+        ...prev,
+        poNumber: nextPoNumber,
+      };
+    });
+  }, [records, editingId, form.orderDate]);
+
   // When returning from Products (pick=po flow), pull selected items into the PO
   useEffect(() => {
     try {
@@ -174,8 +201,9 @@ const PurchaseOrder = () => {
           unit: product.unit || "PCS",
           hsn: product.hsn || "",
           gst: product.gst || "",
+          taxPercentage: product.taxPercentage ?? parseTaxPercentage(product.gst),
           quantity: product.quantity ?? product.qty ?? 1,
-          rate: product.rate ?? product.salesPrice ?? 0,
+          rate: product.rate ?? product.salesPrice ?? product.price ?? 0,
           location: "",
         }));
       if (mapped.length > 0) {
@@ -207,7 +235,7 @@ const PurchaseOrder = () => {
   }, [form.projectId, selectedBoqId, boqs]);
 
   const totalValue = records.reduce(
-    (sum, record) => sum + (Number(record.total) || 0),
+    (sum, record) => sum + buildGstSummary(record.items || []).total,
     0
   );
 
@@ -227,9 +255,6 @@ const PurchaseOrder = () => {
 
   const validate = () => {
     const nextErrors = {};
-    if (!form.poNumber.trim()) {
-      nextErrors.poNumber = "PO number is required.";
-    }
     if (!form.projectId) {
       nextErrors.projectId = "Select a project.";
     }
@@ -274,7 +299,12 @@ const PurchaseOrder = () => {
           description: item.description || "",
           unit: item.unit || "PCS",
           hsn: String(item.hsn ?? "").trim(),
-          gst: String(item.gst ?? "").trim(),
+          gst:
+            String(item.gst ?? "").trim() ||
+            formatTaxPercentage(item.taxPercentage ?? 0),
+          taxPercentage: parseTaxPercentage(
+            item.taxPercentage ?? item.gst ?? 0
+          ),
           location: lineLocation,
           notes: lineLocation,
           quantity: qty,
@@ -326,6 +356,8 @@ const PurchaseOrder = () => {
         unit: item.unit || "PCS",
         hsn: item.hsn || "",
         gst: item.gst || "",
+        taxPercentage:
+          item.taxPercentage ?? parseTaxPercentage(item.gst ?? item.GST ?? 0),
         quantity: qty,
         rate,
         location: item.location || item.notes || "",
@@ -351,7 +383,7 @@ const PurchaseOrder = () => {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Projects
+            Inventory Management
           </p>
           <h1 className="text-3xl font-semibold text-slate-800">
             Purchase Orders
@@ -367,6 +399,13 @@ const PurchaseOrder = () => {
             className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
           >
             Refresh Vendors
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("/inventory/purchase-order-register")}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-slate-900 hover:bg-slate-800"
+          >
+            Open Register
           </button>
           <button
             type="button"
@@ -413,20 +452,17 @@ const PurchaseOrder = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="text-sm font-medium text-slate-700">
-                PO Number *
+                PO Number
               </label>
               <input
                 type="text"
                 value={form.poNumber}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, poNumber: event.target.value }))
-                }
-                placeholder="PO-2026-002"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                readOnly
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 bg-slate-100 text-slate-600 cursor-not-allowed"
               />
-              {errors.poNumber && (
-                <p className="text-xs text-red-600 mt-1">{errors.poNumber}</p>
-              )}
+              <p className="mt-1 text-xs text-slate-500">
+                Automatically generated by the system.
+              </p>
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
@@ -653,6 +689,7 @@ const PurchaseOrder = () => {
           onPickFromProducts={goPickProducts}
           pickLabel="Pick from Products"
           showHsnGst
+          priceLabel="Unit Price"
           extraFieldKey="location"
           extraFieldLabel="Location"
           extraFieldPlaceholder="Site/store location"
@@ -678,21 +715,6 @@ const PurchaseOrder = () => {
         </div>
       </form>
 
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4 flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-slate-800">View Purchase Orders</h3>
-          <p className="text-sm text-slate-600">
-            Saved POs are listed on the Register page.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => navigate("/inventory/purchase-order-register")}
-          className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
-        >
-          Open Register
-        </button>
-      </div>
     </div>
   );
 };

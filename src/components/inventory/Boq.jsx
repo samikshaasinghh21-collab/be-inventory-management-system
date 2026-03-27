@@ -20,6 +20,8 @@ const createLineItem = () => ({
   name: "",
   description: "",
   unit: "PCS",
+  hsn: "",
+  gst: "",
   quantity: "",
   rate: "",
   notes: "",
@@ -157,6 +159,8 @@ const Boq = () => {
             name: item.name ?? "",
             description: item.description ?? "",
             unit: item.unit ?? "PCS",
+            hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
+            gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
             quantity: item.quantity ?? item.qty ?? 1,
             rate: item.rate ?? 0,
             notes: item.notes ?? "",
@@ -246,6 +250,8 @@ const Boq = () => {
         name: item.name,
         description: item.description,
         unit: item.unit,
+        hsn: item.hsn,
+        gst: item.gst,
         quantity: Number(item.quantity) || 0,
         rate: Number(item.rate) || 0,
         notes: item.notes,
@@ -290,6 +296,8 @@ const Boq = () => {
             name: item.name ?? "",
             description: item.description ?? "",
             unit: item.unit ?? "PCS",
+            hsn: item.hsn ?? item.HSN ?? "",
+            gst: item.gst ?? item.GST ?? "",
             quantity: item.quantity ?? "",
             rate: item.rate ?? "",
             notes: item.notes ?? "",
@@ -341,7 +349,7 @@ const Boq = () => {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Projects
+            Inventory Management
           </p>
           <h1 className="text-3xl font-semibold text-slate-800">
             Bill of Quantity (BOQ)
@@ -528,6 +536,8 @@ const Boq = () => {
           onChange={setItems}
           onPickFromProducts={handlePickFromProducts}
           pickLabel="Pick from Products"
+          showHsnGst
+          priceLabel="Unit Price"
         />
         {errors.items && (
           <p className="text-xs text-red-600">{errors.items}</p>
@@ -682,11 +692,18 @@ const Boq = () => {
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
+            { key: "hsn", label: "HSN", widthClass: "w-20" },
+            { key: "gst", label: "GST", widthClass: "w-20" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "quantity", label: "Planned", align: "right", widthClass: "w-20" },
             { key: "consumedQty", label: "Consumed", align: "right", widthClass: "w-20" },
             { key: "availableQty", label: "Available", align: "right", widthClass: "w-20" },
-            { key: "rate", label: "Rate", align: "right", widthClass: "w-24" },
+            {
+              key: "rate",
+              label: "Unit Price",
+              align: "right",
+              widthClass: "w-24",
+            },
             { key: "amount", label: "Amount", align: "right", widthClass: "w-28" },
           ]}
           tableRows={(viewRecord.items || []).map((item, index) => {
@@ -700,6 +717,8 @@ const Boq = () => {
               id: item.id || index,
               serial: index + 1,
               name: item.name || "-",
+              hsn: item.hsn || "-",
+              gst: item.gst || "-",
               unit: item.unit || "-",
               quantity: qty,
               consumedQty: consumed,
