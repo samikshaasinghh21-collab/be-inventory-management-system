@@ -41,7 +41,11 @@ const getToolImage = (imageUrl) => {
   if (basename && TOOL_IMAGE_MAP[basename]) return TOOL_IMAGE_MAP[basename];
 
   // If it's a URL or absolute path, use it directly
-  if (normalized.startsWith("http") || normalized.startsWith("/")) {
+  if (
+    normalized.startsWith("http") ||
+    normalized.startsWith("/") ||
+    normalized.startsWith("data:")
+  ) {
     return normalized;
   }
 
@@ -82,6 +86,8 @@ const ACTION_BUTTONS = {
     `${ACTION_BUTTON_BASE} border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100`,
   warning:
     `${ACTION_BUTTON_BASE} border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100`,
+  danger:
+    `${ACTION_BUTTON_BASE} border-red-200 bg-red-50 text-red-600 hover:bg-red-100`,
 };
 
 const formatNumber = (value) => new Intl.NumberFormat("en-US").format(value);
@@ -687,6 +693,29 @@ const ToolsHome = () => {
     );
     setMaintenanceState(updated);
     setToolMaintenance(updated);
+  };
+
+  const handleDeleteTool = (tool = selectedTool) => {
+    if (!tool) return;
+    const confirmed = window.confirm(`Delete tool ${tool.name || tool.id}?`);
+    if (!confirmed) return;
+
+    const updatedTools = tools.filter((record) => record.id !== tool.id);
+    const updatedAssignments = assignments.filter(
+      (record) => record.toolId !== tool.id
+    );
+    const updatedMaintenance = maintenance.filter(
+      (record) => record.toolId !== tool.id
+    );
+
+    setToolsState(updatedTools);
+    setTools(updatedTools);
+    setAssignmentsState(updatedAssignments);
+    setToolAssignments(updatedAssignments);
+    setMaintenanceState(updatedMaintenance);
+    setToolMaintenance(updatedMaintenance);
+    setShowAssignModal(false);
+    setShowMaintenanceModal(false);
   };
 
   const checkoutHistory = useMemo(() => {
@@ -1336,6 +1365,28 @@ const ToolsHome = () => {
                                     : "Send to maintenance"
                                 }
                                 aria-label="Send to maintenance"
+                                >
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    className="h-4 w-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.6"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M14.7 6.3a1 1 0 010 1.4l-1.1 1.1a4 4 0 01-5.7 5.7l-3.3 3.3a1 1 0 01-1.4-1.4l3.3-3.3a4 4 0 015.7-5.7l1.1-1.1a1 1 0 011.4 0z" />
+                                  </svg>
+                                </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleDeleteTool(tool);
+                                }}
+                                className={ACTION_BUTTONS.danger}
+                                title="Delete tool"
+                                aria-label="Delete tool"
                               >
                                 <svg
                                   viewBox="0 0 24 24"
@@ -1346,7 +1397,10 @@ const ToolsHome = () => {
                                   strokeLinecap="round"
                                   strokeLinejoin="round"
                                 >
-                                  <path d="M14.7 6.3a1 1 0 010 1.4l-1.1 1.1a4 4 0 01-5.7 5.7l-3.3 3.3a1 1 0 01-1.4-1.4l3.3-3.3a4 4 0 015.7-5.7l1.1-1.1a1 1 0 011.4 0z" />
+                                  <path d="M4 7h16" />
+                                  <path d="M9 7V4h6v3" />
+                                  <path d="M7 7l1 13h8l1-13" />
+                                  <path d="M10 11v5M14 11v5" />
                                 </svg>
                               </button>
                             </div>
@@ -1704,6 +1758,16 @@ const ToolsHome = () => {
                       className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
                     >
                       Resolve Maintenance
+                    </button>
+                  )}
+
+                  {selectedTool && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTool(selectedTool)}
+                      className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100"
+                    >
+                      Delete Tool
                     </button>
                   )}
                 </div>

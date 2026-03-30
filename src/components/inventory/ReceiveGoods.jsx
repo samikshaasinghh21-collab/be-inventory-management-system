@@ -136,6 +136,7 @@ const ReceiveGoods = () => {
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [receiveForm, setReceiveForm] = useState(() => createReceiveForm());
   const [hasStatusOverride, setHasStatusOverride] = useState(false);
+  const [purchaseOrderPreview, setPurchaseOrderPreview] = useState(null);
   const [viewReceipt, setViewReceipt] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -443,6 +444,19 @@ const ReceiveGoods = () => {
   const viewReceiptSummary = buildGstSummary(
     buildReceiptSummaryItems(viewReceipt, viewPurchaseOrder)
   );
+  const purchaseOrderPreviewProject = purchaseOrderPreview
+    ? projectMap[String(purchaseOrderPreview.projectId)]
+    : null;
+  const purchaseOrderPreviewVendor = purchaseOrderPreview
+    ? vendorMap[String(purchaseOrderPreview.vendorId)]
+    : null;
+  const purchaseOrderPreviewLocation = purchaseOrderPreview
+    ? locationMap[String(purchaseOrderPreview.locationId)]
+    : null;
+  const purchaseOrderPreviewSummary = buildGstSummary(
+    purchaseOrderPreview?.items || []
+  );
+  const purchaseOrderPreviewContact = purchaseOrderPreviewVendor?.contacts?.[0];
 
   return (
     <div className="p-6">
@@ -535,19 +549,20 @@ const ReceiveGoods = () => {
                 <th className="p-3 text-left min-w-[130px]">Status</th>
                 <th className="p-3 text-left min-w-[120px]">Items</th>
                 <th className="p-3 text-left min-w-[140px]">Expected</th>
+                <th className="p-3 text-left min-w-[120px]">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan="6" className="p-6 text-center text-slate-500">
+                  <td colSpan="7" className="p-6 text-center text-slate-500">
                     Loading purchase orders...
                   </td>
                 </tr>
               )}
               {!loading && filteredPurchaseOrders.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="p-6 text-center text-slate-500">
+                  <td colSpan="7" className="p-6 text-center text-slate-500">
                     {purchaseOrders.length === 0
                       ? "No purchase orders found."
                       : "No purchase orders match your search."}
@@ -576,6 +591,19 @@ const ReceiveGoods = () => {
                     <td className="p-3">{record.items?.length || 0}</td>
                     <td className="p-3">
                       {formatDate(record.expectedDate || record.orderDate) || "-"}
+                    </td>
+                    <td className="p-3">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setViewReceipt(null);
+                          setPurchaseOrderPreview(record);
+                        }}
+                        className="text-sm text-slate-700 underline"
+                      >
+                        View
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -610,7 +638,21 @@ const ReceiveGoods = () => {
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => selectedReceipt && setViewReceipt(selectedReceipt)}
+                      onClick={() => {
+                        setViewReceipt(null);
+                        setPurchaseOrderPreview(selectedPurchaseOrder);
+                      }}
+                      className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-700"
+                    >
+                      View Purchase Order
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedReceipt) return;
+                        setPurchaseOrderPreview(null);
+                        setViewReceipt(selectedReceipt);
+                      }}
                       disabled={!selectedReceipt}
                       className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
@@ -813,6 +855,75 @@ const ReceiveGoods = () => {
           )}
         </div>
       </div>
+
+      {purchaseOrderPreview && (
+        <DocumentViewPanel
+          id="receive-goods-purchase-order-view-panel"
+          title="PURCHASE ORDER"
+          onClose={() => setPurchaseOrderPreview(null)}
+          companyName={brandName}
+          companyAddress={brandDescription}
+          companyGstin={company.gstin}
+          companyPhone={company.phone}
+          companyEmail={company.email}
+          logoUrl={logoUrl}
+          primaryPairs={[
+            { label: "PO No", value: purchaseOrderPreview.poNumber || purchaseOrderPreview.id },
+            { label: "Date", value: formatDate(purchaseOrderPreview.orderDate) },
+            { label: "Expected", value: formatDate(purchaseOrderPreview.expectedDate) },
+            { label: "Status", value: purchaseOrderPreview.status },
+          ]}
+          leftBlockTitle="Vendor"
+          leftBlockLines={[
+            purchaseOrderPreviewVendor?.name || "-",
+            purchaseOrderPreviewContact?.contactName ||
+              purchaseOrderPreviewVendor?.email ||
+              "-",
+            purchaseOrderPreviewContact?.phone ||
+              purchaseOrderPreviewVendor?.phone ||
+              "-",
+          ]}
+          rightBlockTitle="Project"
+          rightBlockLines={[
+            purchaseOrderPreviewProject?.name || "-",
+            purchaseOrderPreviewLocation?.name || "-",
+            purchaseOrderPreviewProject?.client || "-",
+          ]}
+          tableColumns={[
+            { key: "serial", label: "Sl No", widthClass: "w-16" },
+            { key: "name", label: "Item" },
+            { key: "description", label: "Description" },
+            { key: "unit", label: "Unit", widthClass: "w-20" },
+            { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
+            { key: "rate", label: "Unit Price", align: "right", widthClass: "w-24" },
+            { key: "amount", label: "Amount", align: "right", widthClass: "w-28" },
+          ]}
+          tableRows={(purchaseOrderPreview.items || []).map((item, index) => {
+            const qty = Number(item.quantity || 0);
+            const rate = Number(item.rate ?? item.unitPrice ?? 0);
+            const amount = Number(item.totalPrice ?? qty * rate);
+            return {
+              id: item.id || index,
+              serial: index + 1,
+              name: item.name,
+              description: item.description || "-",
+              unit: item.unit,
+              quantity: qty,
+              rate: formatCurrency(rate),
+              amount: formatCurrency(amount),
+            };
+          })}
+          bottomRightContent={
+            <GstSummaryBlock
+              summary={purchaseOrderPreviewSummary}
+              formatCurrency={formatCurrency}
+              align="right"
+            />
+          }
+          footerCompanyName={brandName || "Company"}
+          hideFooterNote
+        />
+      )}
 
       {viewReceipt && (
         <DocumentViewPanel

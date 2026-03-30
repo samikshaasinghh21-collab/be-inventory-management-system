@@ -5,12 +5,17 @@ import Dashboard from "../pages/Dashboard";
 import InventoryHome from "../pages/InventoryHome";
 import ProjectsHome from "../pages/ProjectsHome";
 import ToolsHome from "../pages/ToolsHome";
+import ToolsAddTool from "../pages/ToolsAddTool";
+import ToolsAssignTool from "../pages/ToolsAssignTool";
+import ToolsEmployees from "../pages/ToolsEmployees";
+import ToolsAddEmployee from "../pages/ToolsAddEmployee";
 import ToolsAnalytics from "../pages/ToolsAnalytics";
 import ToolsMaintenance from "../pages/ToolsMaintenance";
 import ToolsAssignments from "../pages/ToolsAssignments";
 import ToolsCategories from "../pages/ToolsCategories";
 import ToolsHistory from "../pages/ToolsHistory";
 import ToolsBulkImport from "../pages/ToolsBulkImport";
+import ToolsHandoverTool from "../pages/ToolsHandoverTool";
 import ToolsMap from "../pages/ToolsMap";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
@@ -54,6 +59,18 @@ const AppRoutes = () => {
       <Route element={<MainLayout />}>
         <Route path="/inventory" element={<InventoryHome />} />
         <Route path="/inventory/tools" element={<ToolsHome />} />
+        <Route path="/inventory/tools/list" element={<ToolsHome />} />
+        <Route path="/inventory/tools/new" element={<ToolsAddTool />} />
+        <Route path="/inventory/tools/assign" element={<ToolsAssignTool />} />
+        <Route
+          path="/inventory/tools/handover"
+          element={<ToolsHandoverTool />}
+        />
+        <Route path="/inventory/tools/employees" element={<ToolsEmployees />} />
+        <Route
+          path="/inventory/tools/employees/new"
+          element={<ToolsAddEmployee />}
+        />
         <Route path="/inventory/tools/analytics" element={<ToolsAnalytics />} />
         <Route
           path="/inventory/tools/maintenance"

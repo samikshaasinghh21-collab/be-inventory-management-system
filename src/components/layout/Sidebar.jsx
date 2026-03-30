@@ -88,6 +88,48 @@ const INVENTORY_MANAGEMENT_WORKFLOW = [
   },
 ];
 
+const TOOL_EMPLOYEE_WORKFLOW = [
+  {
+    id: "tools-employees-list",
+    label: "List of Employees",
+    to: "/inventory/tools/employees",
+    matchPrefixes: ["/inventory/tools/employees"],
+  },
+  {
+    id: "tools-employees-add",
+    label: "Add New Employee",
+    to: "/inventory/tools/employees/new",
+    matchPrefixes: ["/inventory/tools/employees/new"],
+  },
+];
+
+const TOOL_WORKFLOW = [
+  {
+    id: "tools-list",
+    label: "List of Tools",
+    to: "/inventory/tools/list",
+    matchPrefixes: ["/inventory/tools/list"],
+  },
+  {
+    id: "tools-add",
+    label: "Add New Tool",
+    to: "/inventory/tools/new",
+    matchPrefixes: ["/inventory/tools/new"],
+  },
+  {
+    id: "tools-assign",
+    label: "Assign Tool to Employee",
+    to: "/inventory/tools/assign",
+    matchPrefixes: ["/inventory/tools/assign"],
+  },
+  {
+    id: "tools-handover",
+    label: "Switch / Handover Tool",
+    to: "/inventory/tools/handover",
+    matchPrefixes: ["/inventory/tools/handover"],
+  },
+];
+
 const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -99,6 +141,8 @@ const Sidebar = () => {
     }
   });
   const [inventoryManagementOpen, setInventoryManagementOpen] = useState(false);
+  const [toolEmployeesOpen, setToolEmployeesOpen] = useState(false);
+  const [toolWorkflowOpen, setToolWorkflowOpen] = useState(false);
   const [profile, setProfile] = useState(() => {
     try {
       return getSettings().profile || {};
@@ -113,6 +157,18 @@ const Sidebar = () => {
         (prefix) => prefix && location.pathname.startsWith(prefix)
       )
   );
+  const isToolEmployeesRoute = TOOL_EMPLOYEE_WORKFLOW.some((step) =>
+    (step.matchPrefixes || [step.to]).some(
+      (prefix) => prefix && location.pathname.startsWith(prefix)
+    )
+  );
+  const isToolWorkflowRoute =
+    location.pathname === "/inventory/tools" ||
+    TOOL_WORKFLOW.some((step) =>
+      (step.matchPrefixes || [step.to]).some(
+        (prefix) => prefix && location.pathname.startsWith(prefix)
+      )
+    );
 
   useEffect(() => {
     const width = isCollapsed ? "5rem" : "18rem";
@@ -129,6 +185,18 @@ const Sidebar = () => {
       setInventoryManagementOpen(true);
     }
   }, [isInventoryManagementRoute, isCollapsed]);
+
+  useEffect(() => {
+    if (isToolEmployeesRoute && !isCollapsed) {
+      setToolEmployeesOpen(true);
+    }
+  }, [isToolEmployeesRoute, isCollapsed]);
+
+  useEffect(() => {
+    if (isToolWorkflowRoute && !isCollapsed) {
+      setToolWorkflowOpen(true);
+    }
+  }, [isToolWorkflowRoute, isCollapsed]);
 
   useEffect(() => {
     const syncProfile = () => {
@@ -288,6 +356,102 @@ const Sidebar = () => {
             </Icon>
             <span className={labelClass}>Tools</span>
           </NavLink>
+
+          {!isCollapsed && (
+            <div className="mt-1 pl-16 pr-3">
+              <button
+                type="button"
+                onClick={() => setToolWorkflowOpen((prev) => !prev)}
+                className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
+                  isToolWorkflowRoute
+                    ? "bg-slate-800/70 text-white"
+                    : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
+                }`}
+                aria-expanded={toolWorkflowOpen}
+                aria-controls="tool-workflow"
+              >
+                <span>Tools</span>
+                <span
+                  className={`grid h-6 w-6 place-items-center rounded-md bg-slate-800/70 transition ${
+                    toolWorkflowOpen ? "rotate-180" : ""
+                  }`}
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M6 9l6 6l6-6" />
+                  </svg>
+                </span>
+              </button>
+              {toolWorkflowOpen && (
+                <div id="tool-workflow" className="mt-1 space-y-1 pl-3">
+                  {TOOL_WORKFLOW.map((step) => (
+                    <NavLink
+                      key={step.id}
+                      to={step.to}
+                      className={() => {
+                        const isStepActive = (step.matchPrefixes || [step.to]).some(
+                          (prefix) => prefix && location.pathname.startsWith(prefix)
+                        );
+                        return [
+                          "block rounded-md px-3 py-2 text-sm transition",
+                          isStepActive
+                            ? "bg-slate-800/80 text-white"
+                            : "text-slate-300 hover:bg-slate-800/60 hover:text-white",
+                        ].join(" ");
+                      }}
+                    >
+                      {step.label}
+                    </NavLink>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setToolEmployeesOpen((prev) => !prev)}
+                className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition ${
+                  isToolEmployeesRoute
+                    ? "bg-slate-800/70 text-white"
+                    : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
+                }`}
+                aria-expanded={toolEmployeesOpen}
+                aria-controls="tool-employee-workflow"
+              >
+                <span>Employee Details</span>
+                <span
+                  className={`grid h-6 w-6 place-items-center rounded-md bg-slate-800/70 transition ${
+                    toolEmployeesOpen ? "rotate-180" : ""
+                  }`}
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M6 9l6 6l6-6" />
+                  </svg>
+                </span>
+              </button>
+              {toolEmployeesOpen && (
+                <div id="tool-employee-workflow" className="mt-1 space-y-1 pl-3">
+                  {TOOL_EMPLOYEE_WORKFLOW.map((step) => (
+                    <NavLink
+                      key={step.id}
+                      to={step.to}
+                      className={() => {
+                        const isStepActive = (step.matchPrefixes || [step.to]).some(
+                          (prefix) => prefix && location.pathname.startsWith(prefix)
+                        );
+                        return [
+                          "block rounded-md px-3 py-2 text-sm transition",
+                          isStepActive
+                            ? "bg-slate-800/80 text-white"
+                            : "text-slate-300 hover:bg-slate-800/60 hover:text-white",
+                        ].join(" ");
+                      }}
+                    >
+                      {step.label}
+                    </NavLink>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="px-0">
             <button
