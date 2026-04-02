@@ -37,6 +37,9 @@ const sortValue = (record = {}) => {
 const err = (error, fallback) =>
   error?.response?.data?.error || error?.message || fallback;
 
+const getMovementTypeLabel = (type) =>
+  type === "Reallocate" ? "DC (Delivery Challan)" : type || "-";
+
 const ReallocationRegister = () => {
   const navigate = useNavigate();
   const settings = useSettings();
@@ -180,7 +183,7 @@ const ReallocationRegister = () => {
         (lr.status === "rejected" ? err(lr.reason, "Failed to load locations.") : "") ||
         (vr.status === "rejected" ? err(vr.reason, "Failed to load vendors.") : "") ||
         (rr.status === "rejected"
-          ? err(rr.reason, "Failed to load reallocation records.")
+          ? err(rr.reason, "Failed to load delivery challans.")
           : "");
       if (loadError) setErrorMessage(loadError);
       setLoading(false);
@@ -226,7 +229,7 @@ const ReallocationRegister = () => {
   const printRegister = () => {
     printSection({
       selector: "#reallocation-register",
-      title: "Reallocation Register",
+      title: "DC Register",
       subtitle: "Inventory movement ledger",
       metaRows: [
         { label: "Total Entries", value: sortedRecords.length },
@@ -243,7 +246,7 @@ const ReallocationRegister = () => {
     setTimeout(() => {
       printSection({
         selector: "#reallocation-view-panel",
-        title: "Reallocation Details",
+        title: "Delivery Challan Details",
         logoUrl,
         brandName,
         brandDescription,
@@ -256,14 +259,14 @@ const ReallocationRegister = () => {
       <section className="space-y-3">
         <div className="flex items-center gap-3">
           <span className="grid h-9 w-9 place-items-center rounded-md bg-blue-600 text-sm font-semibold text-white">
-            R
+            D
           </span>
           <h1 className="text-4xl font-semibold tracking-tight text-slate-800">
-            Reallocation Register
+            DC Register
           </h1>
         </div>
         <p className="text-sm uppercase tracking-[0.2em] text-slate-500">
-          PROJECTS / Reallocation
+          PROJECTS / Delivery Challan
         </p>
       </section>
 
@@ -290,7 +293,7 @@ const ReallocationRegister = () => {
             onClick={() => navigate("/inventory/reallocate-return")}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
           >
-            + New Reallocation
+            + New Delivery Challan
           </button>
         </div>
       </section>
@@ -304,7 +307,7 @@ const ReallocationRegister = () => {
       <section id="reallocation-register" className={panel}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <h2 className="text-3xl font-semibold text-slate-800">
-            Reallocation Register
+            DC Register
           </h2>
           <button
             type="button"
@@ -353,7 +356,9 @@ const ReallocationRegister = () => {
               {visibleRecords.length === 0 && (
                 <tr>
                   <td colSpan="10" className="px-4 py-10 text-center text-slate-500">
-                    {loading ? "Loading reallocation records..." : "No reallocation records found."}
+                    {loading
+                      ? "Loading delivery challans..."
+                      : "No delivery challans found."}
                   </td>
                 </tr>
               )}
@@ -371,7 +376,9 @@ const ReallocationRegister = () => {
                     <td className="px-4 py-3 text-slate-800">
                       {record.referenceNumber || `REL-${record.id}`}
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{record.type || "-"}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {getMovementTypeLabel(record.type)}
+                    </td>
                     <td className="px-4 py-3 text-slate-700">
                       {record.consumptionNumber || "-"}
                     </td>
@@ -426,7 +433,7 @@ const ReallocationRegister = () => {
       {viewRecord && (
         <DocumentViewPanel
           id="reallocation-view-panel"
-          title="REALLOCATION DETAILS"
+          title="DELIVERY CHALLAN DETAILS"
           onClose={() => setViewRecord(null)}
           companyName={brandName}
           companyAddress={brandDescription}
@@ -436,7 +443,7 @@ const ReallocationRegister = () => {
           logoUrl={logoUrl}
           primaryPairs={[
             { label: "Reference", value: viewRecord.referenceNumber || `REL-${viewRecord.id}` },
-            { label: "Type", value: viewRecord.type || "Reallocate" },
+            { label: "Type", value: getMovementTypeLabel(viewRecord.type) },
             {
               label: "Request Date",
               value: formatDate(viewRecord.requestDate || viewRecord.transferDate),

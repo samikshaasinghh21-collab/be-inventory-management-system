@@ -64,6 +64,9 @@ const statusClass = (status) => {
   return "border-slate-200 bg-slate-100 text-slate-700";
 };
 
+const getMovementTypeLabel = (type) =>
+  type === "Reallocate" ? "DC (Delivery Challan)" : type || "-";
+
 const ReallocateReturn = () => {
   const settings = useSettings();
   const company = settings?.company || {};
@@ -97,7 +100,7 @@ const ReallocateReturn = () => {
       setSaveError(
         error?.response?.data?.error ||
           error?.message ||
-          "Failed to load reallocation records."
+          "Failed to load delivery challans."
       );
     }
   };
@@ -485,7 +488,7 @@ const ReallocateReturn = () => {
       setSaveError(
         error?.response?.data?.error ||
           error?.message ||
-          "Failed to save reallocate/return request."
+          "Failed to save delivery challan."
       );
     } finally {
       setSaving(false);
@@ -526,7 +529,7 @@ const ReallocateReturn = () => {
       setSaveError(
         error?.response?.data?.error ||
           error?.message ||
-          "Failed to delete reallocate/return request."
+          "Failed to delete delivery challan."
       );
     }
   };
@@ -549,7 +552,7 @@ const ReallocateReturn = () => {
   const printRegister = () => {
     printSection({
       selector: "#reallocation-register",
-      title: "Reallocation Register",
+      title: "DC Register",
       subtitle: "Inventory movement ledger",
       metaRows: [
         { label: "Total Entries", value: sortedRecords.length },
@@ -566,7 +569,7 @@ const ReallocateReturn = () => {
     setTimeout(() => {
       printSection({
         selector: "#reallocation-view-panel",
-        title: "Reallocation Details",
+        title: "Delivery Challan Details",
         logoUrl,
         brandName,
         brandDescription,
@@ -580,10 +583,10 @@ const ReallocateReturn = () => {
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Projects</p>
           <h1 className="text-3xl font-semibold text-slate-800">
-            Reallocate / Return Inventory
+            Delivery Challan
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Create requests using consumed materials and update stock on returns.
+            Create delivery challans using consumed materials and track stock movement.
           </p>
         </div>
         <button
@@ -607,7 +610,7 @@ const ReallocateReturn = () => {
           </p>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-500">Returns</p>
+          <p className="text-sm text-slate-500">Vendor Returns</p>
           <p className="text-2xl font-semibold text-slate-800">
             {records.filter((record) => record.type === "Return").length}
           </p>
@@ -622,7 +625,9 @@ const ReallocateReturn = () => {
 
       <form onSubmit={handleSubmit} className="mb-6 space-y-4">
         <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-slate-800">Request Details</h2>
+          <h2 className="mb-4 text-lg font-semibold text-slate-800">
+            Delivery Challan Details
+          </h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
               <label className="text-sm font-medium text-slate-700">Reference *</label>
@@ -632,7 +637,7 @@ const ReallocateReturn = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, referenceNumber: event.target.value }))
                 }
-                placeholder="RR-2026-002"
+                placeholder="DC-2026-002"
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               />
               {errors.referenceNumber && (
@@ -649,7 +654,7 @@ const ReallocateReturn = () => {
                 }
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
-                <option value="Reallocate">Reallocate</option>
+                <option value="Reallocate">DC (Delivery Challan)</option>
                 <option value="Return">Return</option>
               </select>
             </div>
@@ -875,7 +880,11 @@ const ReallocateReturn = () => {
             disabled={saving}
             className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {saving ? "Saving..." : editingId ? "Update Request" : "Save Request"}
+            {saving
+              ? "Saving..."
+              : editingId
+              ? "Update Delivery Challan"
+              : "Save Delivery Challan"}
           </button>
         </div>
       </form>
@@ -883,7 +892,7 @@ const ReallocateReturn = () => {
       <section id="reallocation-register" className={panel}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <h2 className="text-3xl font-semibold text-slate-800">
-            Reallocation / Return Register
+            DC Register
           </h2>
           <button
             type="button"
@@ -933,8 +942,8 @@ const ReallocateReturn = () => {
                 <tr>
                   <td colSpan="10" className="px-4 py-10 text-center text-slate-500">
                     {records.length
-                      ? "No matching reallocation records found."
-                      : "No reallocation or return requests yet."}
+                      ? "No matching delivery challans found."
+                      : "No delivery challans created yet."}
                   </td>
                 </tr>
               )}
@@ -952,7 +961,9 @@ const ReallocateReturn = () => {
                     <td className="px-4 py-3 text-slate-800">
                       {record.referenceNumber || `REL-${record.id}`}
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{record.type || "-"}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {getMovementTypeLabel(record.type)}
+                    </td>
                     <td className="px-4 py-3 text-slate-700">
                       {record.consumptionNumber || "-"}
                     </td>
@@ -1021,7 +1032,7 @@ const ReallocateReturn = () => {
       {viewRecord && (
         <DocumentViewPanel
           id="reallocation-view-panel"
-          title="REALLOCATION DETAILS"
+          title="DELIVERY CHALLAN DETAILS"
           onClose={() => setViewRecord(null)}
           companyName={brandName}
           companyAddress={brandDescription}
@@ -1031,7 +1042,7 @@ const ReallocateReturn = () => {
           logoUrl={logoUrl}
           primaryPairs={[
             { label: "Reference", value: viewRecord.referenceNumber || `REL-${viewRecord.id}` },
-            { label: "Type", value: viewRecord.type || "Reallocate" },
+            { label: "Type", value: getMovementTypeLabel(viewRecord.type) },
             {
               label: "Request Date",
               value: formatDate(viewRecord.requestDate || viewRecord.transferDate),

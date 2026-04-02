@@ -10,7 +10,7 @@ const emptyForm = {
   location: "",
   email: "",
   phone: "",
-  status: "Active",
+  status: "RTO (Return to Office)",
   notes: "",
 };
 
@@ -188,6 +188,7 @@ const ToolsAddEmployee = () => {
               className={inputClass}
             >
               <option value="Active">Active</option>
+              <option value="RTO (Return to Office)">RTO (Return to Office)</option>
               <option value="Inactive">Inactive</option>
             </select>
           </div>

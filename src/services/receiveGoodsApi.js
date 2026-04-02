@@ -10,6 +10,31 @@ const toQuantity = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const toChronologyTime = (...values) => {
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+    const time = new Date(value).getTime();
+    if (Number.isFinite(time)) {
+      return time;
+    }
+  }
+  return 0;
+};
+
+const compareReceiveChronology = (left = {}, right = {}) => {
+  const rightTime = toChronologyTime(right.receivedDate, right.createdAt);
+  const leftTime = toChronologyTime(left.receivedDate, left.createdAt);
+  if (rightTime !== leftTime) {
+    return rightTime - leftTime;
+  }
+  return (
+    toQuantity(right.receiveGoodsId ?? right.id) -
+    toQuantity(left.receiveGoodsId ?? left.id)
+  );
+};
+
 export const normalizeReceiveGoodsItem = (item = {}) => {
   const orderedQty = toQuantity(item.orderedQty ?? item.OrderedQty ?? 0);
   const receivedQty = toQuantity(item.receivedQty ?? item.ReceivedQty ?? 0);
@@ -47,6 +72,8 @@ export const normalizeReceiveGoods = (receipt = {}) => {
     receipt.id ??
     receipt.Id ??
     null;
+  const rawShowProjectDetails =
+    receipt.showProjectDetails ?? receipt.ShowProjectDetails ?? null;
   return {
     id,
     receiveGoodsId: id,
@@ -60,6 +87,12 @@ export const normalizeReceiveGoods = (receipt = {}) => {
     locationId: receipt.locationId ?? receipt.LocationId ?? null,
     receivedDate: receipt.receivedDate ?? receipt.ReceivedDate ?? null,
     receivedBy: receipt.receivedBy ?? receipt.ReceivedBy ?? "",
+    billTo: receipt.billTo ?? receipt.BillTo ?? "",
+    shipTo: receipt.shipTo ?? receipt.ShipTo ?? "",
+    showProjectDetails:
+      rawShowProjectDetails === null || rawShowProjectDetails === undefined
+        ? true
+        : !["0", "false", "no"].includes(String(rawShowProjectDetails).toLowerCase()),
     notes: receipt.notes ?? receipt.Notes ?? "",
     status: receipt.status ?? receipt.Status ?? "",
     createdAt: receipt.createdAt ?? receipt.CreatedAt ?? null,
@@ -79,7 +112,7 @@ export const fetchReceiveGoods = async (purchaseOrderId) => {
     : Array.isArray(response.data)
     ? response.data
     : [];
-  return list.map(normalizeReceiveGoods);
+  return list.map(normalizeReceiveGoods).sort(compareReceiveChronology);
 };
 
 export const saveReceiveGoods = async (payload) => {

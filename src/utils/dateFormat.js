@@ -1,13 +1,43 @@
-const isValidDate = (value) => {
-  if (!value) return false;
-  const date = new Date(value);
-  return !Number.isNaN(date.getTime());
+const parseDateValue = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+  if (isoMatch) {
+    return {
+      year: Number(isoMatch[1]),
+      month: Number(isoMatch[2]),
+      day: Number(isoMatch[3]),
+    };
+  }
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const getDateParts = (value) => {
+  const parsed = parseDateValue(value);
+  if (!parsed) return null;
+  if (parsed instanceof Date) {
+    return {
+      day: parsed.getDate(),
+      month: parsed.getMonth() + 1,
+      year: parsed.getFullYear(),
+    };
+  }
+  return parsed;
+};
+
+const isValidDate = (value) => Boolean(getDateParts(value));
+
+const pad = (value) => String(value).padStart(2, "0");
+
 export const formatDate = (value) => {
-  if (!isValidDate(value)) return "-";
-  const date = new Date(value);
-  return date.toLocaleDateString("en-GB");
+  const parts = getDateParts(value);
+  if (!parts) return "-";
+  return `${pad(parts.day)}/${pad(parts.month)}/${parts.year}`;
 };
 
 export const formatDateDDMMYYYY = formatDate;
@@ -15,13 +45,11 @@ export const formatDateDDMMYYYY = formatDate;
 export const formatDateTimeDDMMYYYY = (value) => {
   if (!isValidDate(value)) return "-";
   const date = new Date(value);
-  return `${date.toLocaleDateString("en-GB")} ${date.toLocaleTimeString("en-GB", {
+  return `${formatDate(value)} ${date.toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
   })}`;
 };
-
-const pad = (value) => String(value).padStart(2, "0");
 
 const ISO_DATETIME_RE =
   /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?:Z|([+-]\d{2}(?::?\d{2})?))?)?$/;

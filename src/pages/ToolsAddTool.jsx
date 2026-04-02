@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DateInput from "../components/common/DateInput";
-import { getTools, setTools } from "../services/toolsStore";
+import { generateNextToolId, getTools, setTools } from "../services/toolsStore";
 
 const emptyForm = {
   id: "",
@@ -21,7 +21,10 @@ const inputClass =
 
 const ToolsAddTool = () => {
   const navigate = useNavigate();
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(() => ({
+    ...emptyForm,
+    id: generateNextToolId(getTools()),
+  }));
   const [errors, setErrors] = useState({});
 
   const updateField = (field, value) =>
@@ -52,32 +55,28 @@ const ToolsAddTool = () => {
 
     const nextErrors = {};
     if (!form.name.trim()) nextErrors.name = "Tool name is required.";
-    if (!form.id.trim()) nextErrors.id = "Tool ID is required.";
     if (!form.type.trim()) nextErrors.type = "Tool type is required.";
     if (!form.serialNumber.trim()) {
       nextErrors.serialNumber = "Serial number is required.";
     }
 
     const existingTools = getTools();
-    const duplicateId = existingTools.some(
-      (tool) =>
-        String(tool.id).toLowerCase() === String(form.id).trim().toLowerCase()
-    );
     const duplicateSerial = existingTools.some(
       (tool) =>
         String(tool.serialNumber).toLowerCase() ===
         String(form.serialNumber).trim().toLowerCase()
     );
 
-    if (duplicateId) nextErrors.id = "Tool ID must be unique.";
     if (duplicateSerial) nextErrors.serialNumber = "Serial number must be unique.";
 
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
 
+    const nextToolId = generateNextToolId(existingTools);
+
     setTools([
       {
-        id: form.id.trim(),
+        id: nextToolId,
         name: form.name.trim(),
         type: form.type.trim(),
         serialNumber: form.serialNumber.trim(),
@@ -126,10 +125,12 @@ const ToolsAddTool = () => {
             <label className="text-sm font-medium text-slate-700">Tool ID</label>
             <input
               value={form.id}
-              onChange={(event) => updateField("id", event.target.value)}
-              className={inputClass}
+              readOnly
+              className={`${inputClass} bg-slate-50`}
             />
-            {errors.id && <p className="mt-1 text-xs text-red-600">{errors.id}</p>}
+            <p className="mt-1 text-xs text-slate-500">
+              Tool ID is auto-generated when the tool is created.
+            </p>
           </div>
           <div>
             <label className="text-sm font-medium text-slate-700">Tool Type</label>

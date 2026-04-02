@@ -6,10 +6,19 @@ import { fetchLocations } from "../../services/locationsApi";
 import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import { fetchReceiveGoods, saveReceiveGoods } from "../../services/receiveGoodsApi";
 import useSettings from "../../hooks/useSettings";
+import DateInput from "../common/DateInput";
 import { formatDate } from "../../utils/dateFormat";
 import { resolveBrandLogo } from "../../utils/branding";
 import { buildGstSummary } from "../../utils/taxUtils";
+import {
+  buildReceiveBillToText,
+  buildReceiveProjectDetailLines,
+  buildReceiveShipToText,
+  isReceiveProjectDetailsVisible,
+  splitDocumentText,
+} from "../../utils/receiveGoodsDocument";
 import DocumentViewPanel from "./DocumentViewPanel";
+import { isClosedPurchaseOrder } from "../../utils/purchaseOrderStatus";
 
 const RECEIVE_STATUS_OPTIONS = ["Draft", "Partially Received", "Closed"];
 
@@ -80,11 +89,15 @@ const buildReceiveItems = (purchaseOrder, receipt) => {
     };
   });
 };
-const createReceiveForm = (purchaseOrder, receipt) => {
+const createReceiveForm = (purchaseOrder, receipt, defaults = {}) => {
   const items = buildReceiveItems(purchaseOrder, receipt);
   return {
     receivedDate: receipt?.receivedDate || getTodayDate(),
     receivedBy: receipt?.receivedBy || "",
+    billTo: receipt?.billTo ?? defaults.billTo ?? "",
+    shipTo: receipt?.shipTo ?? defaults.shipTo ?? "",
+    showProjectDetails:
+      receipt?.showProjectDetails ?? defaults.showProjectDetails ?? true,
     status:
       receipt?.status ||
       computeReceiveStatus(items, purchaseOrder?.status || "Draft"),
@@ -227,9 +240,12 @@ const ReceiveGoods = () => {
   );
 
   const filteredPurchaseOrders = useMemo(() => {
+    const visiblePurchaseOrders = purchaseOrders.filter(
+      (record) => !isClosedPurchaseOrder(record.status)
+    );
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return purchaseOrders;
-    return purchaseOrders.filter((record) =>
+    if (!query) return visiblePurchaseOrders;
+    return visiblePurchaseOrders.filter((record) =>
       [
         record.poNumber,
         record.status,
@@ -253,6 +269,9 @@ const ReceiveGoods = () => {
   const selectedLocation = selectedPurchaseOrder
     ? locationMap[String(selectedPurchaseOrder.locationId)]
     : null;
+  const isSelectedPurchaseOrderClosed = isClosedPurchaseOrder(
+    selectedPurchaseOrder?.status
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -269,7 +288,13 @@ const ReceiveGoods = () => {
         if (!isActive) return;
         const nextReceipt = Array.isArray(receiptList) ? receiptList[0] ?? null : null;
         setSelectedReceipt(nextReceipt);
-        setReceiveForm(createReceiveForm(selectedPurchaseOrder, nextReceipt));
+        setReceiveForm(
+          createReceiveForm(selectedPurchaseOrder, nextReceipt, {
+            billTo: buildReceiveBillToText(selectedProject),
+            shipTo: buildReceiveShipToText(selectedLocation),
+            showProjectDetails: true,
+          })
+        );
         setHasStatusOverride(false);
       } catch (error) {
         if (!isActive) return;
@@ -279,7 +304,13 @@ const ReceiveGoods = () => {
             "Failed to load saved receipt details."
         );
         setSelectedReceipt(null);
-        setReceiveForm(createReceiveForm(selectedPurchaseOrder));
+        setReceiveForm(
+          createReceiveForm(selectedPurchaseOrder, null, {
+            billTo: buildReceiveBillToText(selectedProject),
+            shipTo: buildReceiveShipToText(selectedLocation),
+            showProjectDetails: true,
+          })
+        );
         setHasStatusOverride(false);
       } finally {
         if (isActive) setReceiptLoading(false);
@@ -289,7 +320,7 @@ const ReceiveGoods = () => {
     return () => {
       isActive = false;
     };
-  }, [selectedPurchaseOrder]);
+  }, [selectedLocation, selectedProject, selectedPurchaseOrder]);
 
   const receiveItems = useMemo(
     () =>
@@ -321,7 +352,7 @@ const ReceiveGoods = () => {
   );
 
   const openOrdersCount = useMemo(
-    () => purchaseOrders.filter((record) => String(record.status || "").toLowerCase() !== "closed").length,
+    () => purchaseOrders.filter((record) => !isClosedPurchaseOrder(record.status)).length,
     [purchaseOrders]
   );
 
@@ -351,6 +382,9 @@ const ReceiveGoods = () => {
   };
 
   const handleReceiveFieldChange = (field, value) => {
+    if (isSelectedPurchaseOrderClosed) {
+      return;
+    }
     if (field === "status") {
       setHasStatusOverride(true);
     }
@@ -358,6 +392,9 @@ const ReceiveGoods = () => {
   };
   const handleReceiveQtyChange = (id, value) =>
     setReceiveForm((prev) => {
+      if (isSelectedPurchaseOrderClosed) {
+        return prev;
+      }
       const nextItems = prev.items.map((item) =>
         item.id === id
           ? {
@@ -391,6 +428,10 @@ const ReceiveGoods = () => {
       setApiError("Select a purchase order before saving a receipt.");
       return;
     }
+    if (isSelectedPurchaseOrderClosed) {
+      setApiError("This Purchase Order is Closed.");
+      return;
+    }
     try {
       setIsSaving(true);
       setApiError("");
@@ -402,6 +443,9 @@ const ReceiveGoods = () => {
         locationId: selectedPurchaseOrder.locationId || null,
         receivedDate: receiveForm.receivedDate || null,
         receivedBy: receiveForm.receivedBy.trim() || null,
+        billTo: receiveForm.billTo.trim() || null,
+        shipTo: receiveForm.shipTo.trim() || null,
+        showProjectDetails: receiveForm.showProjectDetails !== false,
         notes: receiveForm.notes.trim() || null,
         status: receiveForm.status || nextStatusPreview,
         items: receiveItems.map((item) => ({
@@ -415,7 +459,13 @@ const ReceiveGoods = () => {
       };
       const savedReceipt = await saveReceiveGoods(payload);
       setSelectedReceipt(savedReceipt);
-      setReceiveForm(createReceiveForm(selectedPurchaseOrder, savedReceipt));
+      setReceiveForm(
+        createReceiveForm(selectedPurchaseOrder, savedReceipt, {
+          billTo: buildReceiveBillToText(selectedProject),
+          shipTo: buildReceiveShipToText(selectedLocation),
+          showProjectDetails: true,
+        })
+      );
       setHasStatusOverride(false);
       setSaveMessage(`Receipt saved for ${selectedPurchaseOrder.poNumber || "selected PO"}.`);
       const refreshedPurchaseOrders = await fetchPurchaseOrders();
@@ -444,6 +494,13 @@ const ReceiveGoods = () => {
   const viewReceiptSummary = buildGstSummary(
     buildReceiptSummaryItems(viewReceipt, viewPurchaseOrder)
   );
+  const viewBillTo = splitDocumentText(
+    viewReceipt?.billTo || buildReceiveBillToText(viewProject)
+  );
+  const viewShipTo = splitDocumentText(
+    viewReceipt?.shipTo || buildReceiveShipToText(viewLocation)
+  );
+  const viewProjectDetailLines = buildReceiveProjectDetailLines(viewProject);
   const purchaseOrderPreviewProject = purchaseOrderPreview
     ? projectMap[String(purchaseOrderPreview.projectId)]
     : null;
@@ -528,9 +585,9 @@ const ReceiveGoods = () => {
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-col gap-3 border-b px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h3 className="text-lg font-semibold text-slate-800">Purchase Orders</h3>
+              <h3 className="text-lg font-semibold text-slate-800">Active Purchase Orders</h3>
               <p className="text-sm text-slate-500">
-                Select a PO to fetch it into the receive form.
+                Closed purchase orders stay in the register, but are hidden from this active list.
               </p>
             </div>
             <input
@@ -628,7 +685,9 @@ const ReceiveGoods = () => {
                       {selectedPurchaseOrder.poNumber || "Purchase Order"}
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      {receiptLoading
+                      {isSelectedPurchaseOrderClosed
+                        ? "This Purchase Order is Closed."
+                        : receiptLoading
                         ? "Fetching saved receipt..."
                         : selectedReceipt
                         ? "Existing receipt loaded."
@@ -713,144 +772,197 @@ const ReceiveGoods = () => {
                 </div>
               </div>
 
-              <form
-                onSubmit={handleReceiveSubmit}
-                className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-              >
-                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h3 className="text-base font-semibold text-slate-800">Receive Goods</h3>
-                    <p className="text-xs text-slate-500">
-                      Saving updates the latest receipt for this PO.
-                    </p>
-                  </div>
+              {isSelectedPurchaseOrderClosed ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 shadow-sm">
+                  <p className="font-medium">This Purchase Order is Closed.</p>
+                  <p className="mt-1">
+                    Closed purchase orders are read-only and stay in the Purchase Order Register.
+                  </p>
                   <button
                     type="button"
-                    onClick={() => {
-                      setReceiveForm(
-                        createReceiveForm(selectedPurchaseOrder, selectedReceipt)
-                      );
-                      setHasStatusOverride(false);
-                    }}
-                    className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-600"
+                    onClick={() => navigate("/inventory/purchase-order-register")}
+                    className="mt-4 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900"
                   >
-                    Reset
+                    Open PO Register
                   </button>
                 </div>
+              ) : (
+                <form
+                  onSubmit={handleReceiveSubmit}
+                  className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+                >
+                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-800">Receive Goods</h3>
+                      <p className="text-xs text-slate-500">
+                        Saving updates the latest receipt for this PO.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReceiveForm(
+                          createReceiveForm(selectedPurchaseOrder, selectedReceipt, {
+                            billTo: buildReceiveBillToText(selectedProject),
+                            shipTo: buildReceiveShipToText(selectedLocation),
+                            showProjectDetails: true,
+                          })
+                        );
+                        setHasStatusOverride(false);
+                      }}
+                      className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-600"
+                    >
+                      Reset
+                    </button>
+                  </div>
 
-                <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">Received Date</label>
-                    <input
-                      type="date"
-                      value={receiveForm.receivedDate}
-                      onChange={(event) =>
-                        handleReceiveFieldChange("receivedDate", event.target.value)
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">Received By</label>
-                    <input
-                      type="text"
-                      value={receiveForm.receivedBy}
-                      onChange={(event) =>
-                        handleReceiveFieldChange("receivedBy", event.target.value)
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-sm font-medium text-slate-700">Receipt Status</label>
-                    <div className="mt-1 grid grid-cols-1 gap-3 lg:grid-cols-[260px,1fr]">
-                      <select
-                        value={receiveForm.status || nextStatusPreview}
+                  <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">Received Date</label>
+                      <DateInput
+                        value={receiveForm.receivedDate}
+                        onChange={(value) => handleReceiveFieldChange("receivedDate", value || "")}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">Received By</label>
+                      <input
+                        type="text"
+                        value={receiveForm.receivedBy}
                         onChange={(event) =>
-                          handleReceiveFieldChange("status", event.target.value)
+                          handleReceiveFieldChange("receivedBy", event.target.value)
                         }
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      >
-                        {RECEIVE_STATUS_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                        Suggested from received quantities: {nextStatusPreview}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">Bill To</label>
+                      <textarea
+                        value={receiveForm.billTo}
+                        onChange={(event) =>
+                          handleReceiveFieldChange("billTo", event.target.value)
+                        }
+                        className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">Ship To</label>
+                      <textarea
+                        value={receiveForm.shipTo}
+                        onChange={(event) =>
+                          handleReceiveFieldChange("shipTo", event.target.value)
+                        }
+                        className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={receiveForm.showProjectDetails !== false}
+                          onChange={(event) =>
+                            handleReceiveFieldChange(
+                              "showProjectDetails",
+                              event.target.checked
+                            )
+                          }
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        Show project details on the receipt
+                      </label>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-sm font-medium text-slate-700">Receipt Status</label>
+                      <div className="mt-1 grid grid-cols-1 gap-3 lg:grid-cols-[260px,1fr]">
+                        <select
+                          value={receiveForm.status || nextStatusPreview}
+                          onChange={(event) =>
+                            handleReceiveFieldChange("status", event.target.value)
+                          }
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        >
+                          {RECEIVE_STATUS_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                          Suggested from received quantities: {nextStatusPreview}
+                        </div>
                       </div>
                     </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-sm font-medium text-slate-700">Receiving Notes</label>
+                      <textarea
+                        value={receiveForm.notes}
+                        onChange={(event) =>
+                          handleReceiveFieldChange("notes", event.target.value)
+                        }
+                        className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
                   </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-sm font-medium text-slate-700">Receiving Notes</label>
-                    <textarea
-                      value={receiveForm.notes}
-                      onChange={(event) =>
-                        handleReceiveFieldChange("notes", event.target.value)
-                      }
-                      className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    />
-                  </div>
-                </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-100 text-slate-600">
-                      <tr>
-                        <th className="p-3 text-left min-w-[160px]">Item</th>
-                        <th className="p-3 text-left min-w-[90px]">Unit</th>
-                        <th className="p-3 text-left min-w-[100px]">Ordered</th>
-                        <th className="p-3 text-left min-w-[110px]">Received</th>
-                        <th className="p-3 text-left min-w-[100px]">Balance</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {receiveItems.map((item, index) => (
-                        <tr key={item.id ?? item.itemId ?? index} className="border-t">
-                          <td className="p-3">
-                            <div className="font-medium text-slate-800">{item.name || "-"}</div>
-                            <div className="text-xs text-slate-500">
-                              {item.description || "-"}
-                            </div>
-                          </td>
-                          <td className="p-3">{item.unit || "-"}</td>
-                          <td className="p-3">{item.orderedQty}</td>
-                          <td className="p-3">
-                            <input
-                              type="number"
-                              min="0"
-                              max={item.orderedQty}
-                              step="1"
-                              value={item.receivedQty}
-                              onChange={(event) =>
-                                handleReceiveQtyChange(item.id, event.target.value)
-                              }
-                              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                            />
-                          </td>
-                          <td className="p-3">{item.balanceQty}</td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-100 text-slate-600">
+                        <tr>
+                          <th className="p-3 text-left min-w-[160px]">Item</th>
+                          <th className="p-3 text-left min-w-[90px]">Unit</th>
+                          <th className="p-3 text-left min-w-[100px]">Ordered</th>
+                          <th className="p-3 text-left min-w-[110px]">Received</th>
+                          <th className="p-3 text-left min-w-[100px]">Balance</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="mt-4 flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex flex-wrap gap-4">
-                    <span>Ordered: {totals.ordered}</span>
-                    <span>Received: {totals.received}</span>
-                    <span>Balance: {totals.balance}</span>
+                      </thead>
+                      <tbody>
+                        {receiveItems.map((item, index) => (
+                          <tr key={item.id ?? item.itemId ?? index} className="border-t">
+                            <td className="p-3">
+                              <div className="font-medium text-slate-800">{item.name || "-"}</div>
+                              <div className="text-xs text-slate-500">
+                                {item.description || "-"}
+                              </div>
+                            </td>
+                            <td className="p-3">{item.unit || "-"}</td>
+                            <td className="p-3">{item.orderedQty}</td>
+                            <td className="p-3">
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.orderedQty}
+                                step="1"
+                                value={item.receivedQty}
+                                onChange={(event) =>
+                                  handleReceiveQtyChange(item.id, event.target.value)
+                                }
+                                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                              />
+                            </td>
+                            <td className="p-3">{item.balanceQty}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <button
-                    type="submit"
-                    disabled={isSaving || receiptLoading}
-                    className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isSaving ? "Saving..." : selectedReceipt ? "Update Receipt" : "Save Receipt"}
-                  </button>
-                </div>
-              </form>
+
+                  <div className="mt-4 flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap gap-4">
+                      <span>Ordered: {totals.ordered}</span>
+                      <span>Received: {totals.received}</span>
+                      <span>Balance: {totals.balance}</span>
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={isSaving || receiptLoading}
+                      className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSaving ? "Saving..." : selectedReceipt ? "Update Receipt" : "Save Receipt"}
+                    </button>
+                  </div>
+                </form>
+              )}
             </>
           )}
         </div>
@@ -942,10 +1054,10 @@ const ReceiveGoods = () => {
             { label: "Status", value: viewReceipt.status || viewPurchaseOrder?.status || "Draft" },
             { label: "Received By", value: viewReceipt.receivedBy || "-" },
           ]}
-          leftBlockTitle="Project"
-          leftBlockLines={[viewProject?.name || "-"]}
-          rightBlockTitle="Vendor / Location"
-          rightBlockLines={[viewVendor?.name || "-", viewLocation?.name || "-"]}
+          leftBlockTitle="Bill To"
+          leftBlockLines={viewBillTo}
+          rightBlockTitle="Ship To"
+          rightBlockLines={viewShipTo}
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
@@ -967,8 +1079,28 @@ const ReceiveGoods = () => {
               balance: Math.max(ordered - received, 0),
             };
           })}
-          bottomLeftTitle="Notes"
-          bottomLeftValue={viewReceipt.notes || "-"}
+          bottomLeftContent={
+            <div className="space-y-3 text-left">
+              {isReceiveProjectDetailsVisible(viewReceipt) && (
+                <div>
+                  <p className="font-semibold">Project Details</p>
+                  {viewProjectDetailLines.length ? (
+                    viewProjectDetailLines.map((line) => <p key={line}>{line}</p>)
+                  ) : (
+                    <p>-</p>
+                  )}
+                </div>
+              )}
+              <div>
+                <p className="font-semibold">Notes</p>
+                <p>{viewReceipt.notes || "-"}</p>
+              </div>
+              <div>
+                <p className="font-semibold">Vendor</p>
+                <p>{viewVendor?.name || "-"}</p>
+              </div>
+            </div>
+          }
           bottomRightContent={
             <GstSummaryBlock
               summary={viewReceiptSummary}

@@ -75,16 +75,16 @@ const INVENTORY_MANAGEMENT_WORKFLOW = [
     matchPrefixes: ["/inventory/receive-goods-register"],
   },
   {
+    id: "return-reallocate",
+    label: "Delivery Challan",
+    to: "/inventory/return-reallocate",
+    matchPrefixes: ["/inventory/return-reallocate", "/inventory/reallocate-return"],
+  },
+  {
     id: "consumption",
     label: "Consumption",
     to: "/inventory/consumption",
     matchPrefixes: ["/inventory/consumption"],
-  },
-  {
-    id: "return-reallocate",
-    label: "Relocation / Return",
-    to: "/inventory/return-reallocate",
-    matchPrefixes: ["/inventory/return-reallocate", "/inventory/reallocate-return"],
   },
 ];
 

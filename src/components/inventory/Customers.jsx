@@ -7,18 +7,22 @@ import {
 } from "../../services/customersApi";
 
 const emptyForm = {
-  name: "",
   companyName: "",
   address: "",
   gstNumber: "",
   phone: "",
   email: "",
-  contactPerson: "",
-  designation: "",
 };
 
-const resolveCustomerName = ({ companyName = "", name = "" } = {}) =>
-  companyName.trim() || name.trim();
+const createEmptyContact = () => ({
+  id: Date.now() + Math.random(),
+  contactName: "",
+  email: "",
+  designation: "",
+  phone: "",
+});
+
+const resolveCustomerName = ({ companyName = "" } = {}) => companyName.trim();
 
 const getCustomerPrimaryName = (customer = {}) =>
   customer.name || customer.companyName || "-";
@@ -30,6 +34,36 @@ const getCustomerCompanyName = (customer = {}) => {
     : "-";
 };
 
+const mapContactForForm = (contact = {}) => ({
+  id: contact.id ?? Date.now() + Math.random(),
+  contactName: contact.contactName ?? "",
+  email: contact.email ?? "",
+  designation: contact.designation ?? "",
+  phone: contact.phone ?? "",
+});
+
+const deriveCustomerContacts = (customer = {}) => {
+  if (Array.isArray(customer.contacts) && customer.contacts.length) {
+    return customer.contacts.map(mapContactForForm);
+  }
+
+  const hasLegacyContact = [
+    customer.contactPerson,
+    customer.designation,
+  ].some((value) => String(value || "").trim());
+
+  return hasLegacyContact
+    ? [
+        mapContactForForm({
+          contactName: customer.contactPerson ?? "",
+          email: customer.email ?? "",
+          designation: customer.designation ?? "",
+          phone: customer.phone ?? "",
+        }),
+      ]
+    : [createEmptyContact()];
+};
+
 const Customers = () => {
   const [customers, setCustomers] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -39,6 +73,7 @@ const Customers = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [contacts, setContacts] = useState([createEmptyContact()]);
   const [errors, setErrors] = useState({});
   const [isSaving, setIsSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -50,7 +85,7 @@ const Customers = () => {
       setLoading(true);
       setApiError("");
       const list = await fetchCustomers();
-      setCustomers(list);
+      setCustomers(Array.isArray(list) ? list : []);
     } catch (error) {
       setApiError(
         error?.response?.data?.error ??
@@ -72,6 +107,7 @@ const Customers = () => {
     if (!query) {
       return customers;
     }
+
     return customers.filter((customer) =>
       [
         customer.name,
@@ -82,6 +118,12 @@ const Customers = () => {
         customer.email,
         customer.contactPerson,
         customer.designation,
+        ...(customer.contacts || []).flatMap((contact) => [
+          contact.contactName,
+          contact.email,
+          contact.designation,
+          contact.phone,
+        ]),
       ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query))
@@ -93,6 +135,7 @@ const Customers = () => {
     setIsModalOpen(true);
     setEditingCustomer(null);
     setForm(emptyForm);
+    setContacts([createEmptyContact()]);
     setErrors({});
     setApiError("");
   };
@@ -102,15 +145,13 @@ const Customers = () => {
     setIsModalOpen(true);
     setEditingCustomer(customer);
     setForm({
-      name: customer.name ?? "",
-      companyName: customer.companyName ?? "",
+      companyName: customer.companyName ?? customer.name ?? "",
       address: customer.address ?? "",
       gstNumber: customer.gstNumber ?? "",
       phone: customer.phone ?? "",
       email: customer.email ?? "",
-      contactPerson: customer.contactPerson ?? "",
-      designation: customer.designation ?? "",
     });
+    setContacts(deriveCustomerContacts(customer));
     setErrors({});
     setApiError("");
   };
@@ -119,6 +160,7 @@ const Customers = () => {
     setIsModalOpen(false);
     setEditingCustomer(null);
     setForm(emptyForm);
+    setContacts([createEmptyContact()]);
     setErrors({});
   };
 
@@ -129,24 +171,82 @@ const Customers = () => {
     }
   };
 
+  const updateContact = (id, key, value) => {
+    setContacts((prev) =>
+      prev.map((contact) =>
+        contact.id === id ? { ...contact, [key]: value } : contact
+      )
+    );
+  };
+
+  const addContact = () => {
+    setContacts((prev) => [...prev, createEmptyContact()]);
+  };
+
+  const removeContact = (id) => {
+    setContacts((prev) => {
+      const next = prev.filter((contact) => contact.id !== id);
+      return next.length ? next : [createEmptyContact()];
+    });
+  };
+
   const validate = () => {
     const nextErrors = {};
     if (!resolveCustomerName(form)) {
       nextErrors.companyName = "Company name is required.";
     }
+
+    const normalizedContacts = contacts.filter((contact) =>
+      [
+        contact.contactName,
+        contact.email,
+        contact.designation,
+        contact.phone,
+      ].some((value) => String(value || "").trim())
+    );
+
+    normalizedContacts.forEach((contact, index) => {
+      if (!contact.contactName.trim()) {
+        nextErrors[`contactName-${index}`] = "Contact name is required.";
+      }
+      if (!contact.email.trim()) {
+        nextErrors[`contactEmail-${index}`] = "Email is required.";
+      }
+      if (!contact.designation.trim()) {
+        nextErrors[`contactDesignation-${index}`] = "Designation is required.";
+      }
+    });
+
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!validate()) {
+    if (!validate() || isSaving) {
       return;
     }
 
     setIsSaving(true);
     setApiError("");
     const nextName = resolveCustomerName(form);
+    const normalizedContacts = contacts
+      .filter((contact) =>
+        [
+          contact.contactName,
+          contact.email,
+          contact.designation,
+          contact.phone,
+        ].some((value) => String(value || "").trim())
+      )
+      .map((contact) => ({
+        contactName: contact.contactName.trim(),
+        email: contact.email.trim(),
+        designation: contact.designation.trim(),
+        phone: contact.phone.trim() || undefined,
+      }));
+
+    const primaryContact = normalizedContacts[0] ?? null;
     const payload = {
       name: nextName,
       companyName: form.companyName.trim() || undefined,
@@ -154,8 +254,9 @@ const Customers = () => {
       gstNumber: form.gstNumber.trim() || undefined,
       phone: form.phone.trim() || undefined,
       email: form.email.trim() || undefined,
-      contactPerson: form.contactPerson.trim() || undefined,
-      designation: form.designation.trim() || undefined,
+      contactPerson: primaryContact?.contactName || undefined,
+      designation: primaryContact?.designation || undefined,
+      contacts: normalizedContacts,
     };
 
     try {
@@ -215,7 +316,7 @@ const Customers = () => {
           </p>
           <h1 className="text-3xl font-semibold text-slate-800">Customers</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Manage customer records and client contacts for project creation.
+            Manage customer records and multiple client contacts for projects.
           </p>
         </div>
         <div className="flex gap-2">
@@ -236,7 +337,7 @@ const Customers = () => {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-sm text-slate-500">Total Customers</p>
           <p className="text-2xl font-semibold text-slate-800">
@@ -274,71 +375,82 @@ const Customers = () => {
             <tr>
               <th className="p-3 text-left min-w-[180px]">Customer</th>
               <th className="p-3 text-left min-w-[180px]">Company</th>
-              <th className="p-3 text-left min-w-[180px]">Contact Person</th>
+              <th className="p-3 text-left min-w-[220px]">Primary Contact</th>
               <th className="p-3 text-left min-w-[180px]">Email</th>
               <th className="p-3 text-left min-w-[140px]">Phone</th>
               <th className="p-3 text-left min-w-[160px]">GST Number</th>
+              <th className="p-3 text-left min-w-[120px]">Contacts</th>
               <th className="p-3 text-left min-w-[200px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {!loading && filteredCustomers.length === 0 && (
               <tr>
-                <td colSpan="7" className="p-6 text-center text-slate-500">
+                <td colSpan="8" className="p-6 text-center text-slate-500">
                   {customers.length === 0
                     ? "No customers added yet."
                     : "No customers match your search."}
                 </td>
               </tr>
             )}
-            {filteredCustomers.map((customer) => (
-              <tr key={customer.id} className="border-t hover:bg-slate-50">
-                <td className="p-3 font-medium text-slate-800">
-                  {getCustomerPrimaryName(customer)}
-                </td>
-                <td className="p-3">{getCustomerCompanyName(customer)}</td>
-                <td className="p-3">
-                  <div className="font-medium text-slate-700">
-                    {customer.contactPerson || "-"}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {customer.designation || "No designation"}
-                  </div>
-                </td>
-                <td className="p-3">{customer.email || "-"}</td>
-                <td className="p-3">{customer.phone || "-"}</td>
-                <td className="p-3">{customer.gstNumber || "-"}</td>
-                <td className="p-3">
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(customer)}
-                      className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDeleteTarget(customer);
-                        setDeleteError("");
-                      }}
-                      className="rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
-                      disabled={isDeletingId === customer.id}
-                    >
-                      {isDeletingId === customer.id ? "Deleting..." : "Delete"}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {filteredCustomers.map((customer) => {
+              const primaryContact = customer.contacts?.[0] ?? null;
+              return (
+                <tr key={customer.id} className="border-t hover:bg-slate-50">
+                  <td className="p-3 font-medium text-slate-800">
+                    {getCustomerPrimaryName(customer)}
+                  </td>
+                  <td className="p-3">{getCustomerCompanyName(customer)}</td>
+                  <td className="p-3">
+                    {primaryContact ? (
+                      <>
+                        <div className="font-medium text-slate-700">
+                          {primaryContact.contactName}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {primaryContact.designation || "No designation"}
+                        </div>
+                      </>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
+                  <td className="p-3">{customer.email || "-"}</td>
+                  <td className="p-3">{customer.phone || "-"}</td>
+                  <td className="p-3">{customer.gstNumber || "-"}</td>
+                  <td className="p-3">{customer.contacts?.length || 0}</td>
+                  <td className="p-3">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(customer)}
+                        className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteTarget(customer);
+                          setDeleteError("");
+                        }}
+                        className="rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+                        disabled={isDeletingId === customer.id}
+                      >
+                        {isDeletingId === customer.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
-          <div className="max-h-[92vh] w-[900px] max-w-[96vw] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+          <div className="flex max-h-[92vh] w-[980px] max-w-[96vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b bg-slate-50 px-6 py-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
@@ -357,132 +469,237 @@ const Customers = () => {
               </button>
             </div>
 
-            <form
-              id="customer-form"
-              onSubmit={handleSubmit}
-              className="max-h-[calc(92vh-80px)] overflow-y-auto p-6 space-y-6"
-            >
-              <section className="rounded-xl border border-slate-200 p-5 shadow-sm">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-slate-800">
-                    Customer Details
-                  </h3>
-                  <span className="text-xs text-slate-500">
-                    Required fields marked *
-                  </span>
-                </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <form
+                id="customer-form"
+                onSubmit={handleSubmit}
+                className="space-y-6"
+                noValidate
+              >
+                <section className="rounded-xl border border-slate-200 p-5 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-base font-semibold text-slate-800">
+                      Customer Details
+                    </h3>
+                    <span className="text-xs text-slate-500">
+                      Required fields marked *
+                    </span>
+                  </div>
 
-                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      Company Name *
-                    </label>
-                    <input
-                      value={form.companyName}
-                      onChange={(event) =>
-                        updateField("companyName", event.target.value)
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
-                    />
-                    {errors.companyName && (
-                      <p className="mt-1 text-sm text-red-600">
-                        {errors.companyName}
+                  <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Company Name *
+                      </label>
+                      <input
+                        value={form.companyName}
+                        onChange={(event) =>
+                          updateField("companyName", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                      {errors.companyName && (
+                        <p className="mt-1 text-sm text-red-600">
+                          {errors.companyName}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Contact Number
+                      </label>
+                      <input
+                        value={form.phone}
+                        onChange={(event) => updateField("phone", event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Email
+                      </label>
+                      <input
+                        value={form.email}
+                        onChange={(event) => updateField("email", event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        GST Number
+                      </label>
+                      <input
+                        value={form.gstNumber}
+                        onChange={(event) =>
+                          updateField("gstNumber", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+                    <div className="lg:col-span-2">
+                      <label className="text-sm font-medium text-slate-700">
+                        Address
+                      </label>
+                      <textarea
+                        value={form.address}
+                        onChange={(event) =>
+                          updateField("address", event.target.value)
+                        }
+                        className="mt-1 min-h-[120px] w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-slate-200 p-5 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-800">
+                        Contact Persons
+                      </h3>
+                      <p className="text-sm text-slate-500">
+                        Add multiple contacts for the same customer.
                       </p>
-                    )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addContact}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:border-slate-300"
+                    >
+                      + Add Contact
+                    </button>
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      Contact Number
-                    </label>
-                    <input
-                      value={form.phone}
-                      onChange={(event) => updateField("phone", event.target.value)}
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      Email
-                    </label>
-                    <input
-                      value={form.email}
-                      onChange={(event) => updateField("email", event.target.value)}
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      Contact Person
-                    </label>
-                    <input
-                      value={form.contactPerson}
-                      onChange={(event) =>
-                        updateField("contactPerson", event.target.value)
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      Designation
-                    </label>
-                    <input
-                      value={form.designation}
-                      onChange={(event) =>
-                        updateField("designation", event.target.value)
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-slate-700">
-                      GST Number
-                    </label>
-                    <input
-                      value={form.gstNumber}
-                      onChange={(event) =>
-                        updateField("gstNumber", event.target.value)
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
-                    />
-                  </div>
-                  <div className="lg:col-span-2">
-                    <label className="text-sm font-medium text-slate-700">
-                      Address
-                    </label>
-                    <textarea
-                      value={form.address}
-                      onChange={(event) =>
-                        updateField("address", event.target.value)
-                      }
-                      className="mt-1 min-h-[120px] w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
-                    />
-                  </div>
-                </div>
-              </section>
 
-              <div className="flex items-center justify-between border-t bg-slate-50 px-1 pt-4">
-                <p className="text-xs text-slate-500">
-                  Customer records are used to auto-fill project client details.
-                </p>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSaving}
-                    className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
-                  >
-                    {isSaving ? "Saving..." : "Save Customer"}
-                  </button>
-                </div>
+                  <div className="space-y-4">
+                    {contacts.map((contact, index) => (
+                      <div
+                        key={contact.id}
+                        className="rounded-xl border border-slate-200 p-4"
+                      >
+                        <div className="mb-4 flex items-center justify-between">
+                          <h4 className="text-sm font-semibold text-slate-800">
+                            Contact {index + 1}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => removeContact(contact.id)}
+                            className="text-xs font-medium text-red-600 hover:text-red-700"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Contact Name
+                            </label>
+                            <input
+                              value={contact.contactName}
+                              onChange={(event) =>
+                                updateContact(
+                                  contact.id,
+                                  "contactName",
+                                  event.target.value
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                            />
+                            {errors[`contactName-${index}`] && (
+                              <p className="mt-1 text-sm text-red-600">
+                                {errors[`contactName-${index}`]}
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Email ID
+                            </label>
+                            <input
+                              value={contact.email}
+                              onChange={(event) =>
+                                updateContact(
+                                  contact.id,
+                                  "email",
+                                  event.target.value
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                            />
+                            {errors[`contactEmail-${index}`] && (
+                              <p className="mt-1 text-sm text-red-600">
+                                {errors[`contactEmail-${index}`]}
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Designation
+                            </label>
+                            <input
+                              value={contact.designation}
+                              onChange={(event) =>
+                                updateContact(
+                                  contact.id,
+                                  "designation",
+                                  event.target.value
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                            />
+                            {errors[`contactDesignation-${index}`] && (
+                              <p className="mt-1 text-sm text-red-600">
+                                {errors[`contactDesignation-${index}`]}
+                              </p>
+                            )}
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Phone Number
+                            </label>
+                            <input
+                              value={contact.phone}
+                              onChange={(event) =>
+                                updateContact(
+                                  contact.id,
+                                  "phone",
+                                  event.target.value
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </form>
+            </div>
+
+            <div className="flex items-center justify-between border-t bg-slate-50 px-6 py-4">
+              <p className="text-xs text-slate-500">
+                Customer records and contact persons are used to auto-fill project
+                client details.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  form="customer-form"
+                  type="submit"
+                  disabled={isSaving}
+                  className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {isSaving ? "Saving..." : "Save Customer"}
+                </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -502,7 +719,7 @@ const Customers = () => {
               <p>
                 Are you sure you want to delete{" "}
                 <span className="font-semibold text-slate-900">
-                  {deleteTarget.name || "this customer"}
+                  {deleteTarget.name || deleteTarget.companyName || "this customer"}
                 </span>
                 ?
               </p>

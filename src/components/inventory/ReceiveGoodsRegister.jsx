@@ -10,11 +10,43 @@ import useSettings from "../../hooks/useSettings";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import { buildGstSummary } from "../../utils/taxUtils";
+import {
+  buildReceiveBillToText,
+  buildReceiveProjectDetailLines,
+  buildReceiveShipToText,
+  isReceiveProjectDetailsVisible,
+  splitDocumentText,
+} from "../../utils/receiveGoodsDocument";
 import DocumentViewPanel from "./DocumentViewPanel";
 
 const toQuantity = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const toChronologyTime = (...values) => {
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+    const time = new Date(value).getTime();
+    if (Number.isFinite(time)) {
+      return time;
+    }
+  }
+  return 0;
+};
+
+const compareReceiptChronology = (left = {}, right = {}) => {
+  const leftTime = toChronologyTime(left.receivedDate, left.createdAt);
+  const rightTime = toChronologyTime(right.receivedDate, right.createdAt);
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  return (
+    toQuantity(left.receiveGoodsId ?? left.id) -
+    toQuantity(right.receiveGoodsId ?? right.id)
+  );
 };
 
 const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
@@ -163,6 +195,20 @@ const ReceiveGoodsRegister = () => {
     }, {});
   }, [purchaseOrders]);
 
+  const orderedReceipts = useMemo(
+    () => [...receipts].sort(compareReceiptChronology),
+    [receipts]
+  );
+
+  const receiptSequenceMap = useMemo(
+    () =>
+      orderedReceipts.reduce((acc, receipt, index) => {
+        acc[String(receipt.id)] = index + 1;
+        return acc;
+      }, {}),
+    [orderedReceipts]
+  );
+
   const projectMap = useMemo(() => {
     return projects.reduce((acc, project) => {
       acc[String(project.id)] = project;
@@ -184,7 +230,7 @@ const ReceiveGoodsRegister = () => {
     }, {});
   }, [locations]);
 
-  const filteredReceipts = receipts.filter((receipt) => {
+  const filteredReceipts = orderedReceipts.filter((receipt) => {
     const query = search.trim().toLowerCase();
     if (!query) return true;
     const po = poMap[String(receipt.purchaseOrderId)];
@@ -391,6 +437,7 @@ const ReceiveGoodsRegister = () => {
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
+              <th className="p-3 text-left min-w-[90px]">Seq No</th>
               <th className="p-3 text-left min-w-[140px]">PO No</th>
               <th className="p-3 text-left min-w-[160px]">Project</th>
               <th className="p-3 text-left min-w-[160px]">Vendor</th>
@@ -406,14 +453,14 @@ const ReceiveGoodsRegister = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="10" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   Loading receipts...
                 </td>
               </tr>
             )}
             {!loading && filteredReceipts.length === 0 && (
               <tr>
-                <td colSpan="10" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   No receipts found.
                 </td>
               </tr>
@@ -431,6 +478,9 @@ const ReceiveGoodsRegister = () => {
                       className="border-t hover:bg-slate-50 cursor-pointer"
                       onClick={() => toggleRow(receipt.id)}
                     >
+                      <td className="p-3 font-medium text-slate-700">
+                        {receiptSequenceMap[String(receipt.id)] || "-"}
+                      </td>
                       <td className="p-3 font-medium text-slate-800">
                         {po?.poNumber || receipt.purchaseOrderId || "-"}
                       </td>
@@ -483,9 +533,13 @@ const ReceiveGoodsRegister = () => {
                     </tr>
                     {expandedId === receipt.id && (
                       <tr className="bg-slate-50">
-                        <td colSpan="10" className="p-4">
+                        <td colSpan="11" className="p-4">
                           <div className="space-y-4">
                             <div className="flex flex-wrap gap-4 text-sm text-slate-700">
+                              <span>
+                                <strong>Seq No:</strong>{" "}
+                                {receiptSequenceMap[String(receipt.id)] || "-"}
+                              </span>
                               <span>
                                 <strong>PO:</strong>{" "}
                                 {po?.poNumber || receipt.purchaseOrderId || "-"}
@@ -617,30 +671,30 @@ const ReceiveGoodsRegister = () => {
             },
             { label: "Received By", value: viewReceipt.receivedBy },
           ]}
-          leftBlockTitle="Project"
-          leftBlockLines={[
-            projectMap[
-              String(
-                viewReceipt.projectId ||
-                  poMap[String(viewReceipt.purchaseOrderId)]?.projectId
+          leftBlockTitle="Bill To"
+          leftBlockLines={splitDocumentText(
+            viewReceipt.billTo ||
+              buildReceiveBillToText(
+                projectMap[
+                  String(
+                    viewReceipt.projectId ||
+                      poMap[String(viewReceipt.purchaseOrderId)]?.projectId
+                  )
+                ]
               )
-            ]?.name || "-",
-          ]}
-          rightBlockTitle="Vendor / Location"
-          rightBlockLines={[
-            vendorMap[
-              String(
-                viewReceipt.vendorId ||
-                  poMap[String(viewReceipt.purchaseOrderId)]?.vendorId
+          )}
+          rightBlockTitle="Ship To"
+          rightBlockLines={splitDocumentText(
+            viewReceipt.shipTo ||
+              buildReceiveShipToText(
+                locationMap[
+                  String(
+                    viewReceipt.locationId ||
+                      poMap[String(viewReceipt.purchaseOrderId)]?.locationId
+                  )
+                ]
               )
-            ]?.name || "-",
-            locationMap[
-              String(
-                viewReceipt.locationId ||
-                  poMap[String(viewReceipt.purchaseOrderId)]?.locationId
-              )
-            ]?.name || "-",
-          ]}
+          )}
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
@@ -679,8 +733,38 @@ const ReceiveGoodsRegister = () => {
               balance,
             };
           })}
-          bottomLeftTitle="Notes"
-          bottomLeftValue={viewReceipt.notes || "-"}
+          bottomLeftContent={
+            <div className="space-y-3 text-left">
+              {isReceiveProjectDetailsVisible(viewReceipt) && (
+                <div>
+                  <p className="font-semibold">Project Details</p>
+                  {buildReceiveProjectDetailLines(
+                    projectMap[
+                      String(
+                        viewReceipt.projectId ||
+                          poMap[String(viewReceipt.purchaseOrderId)]?.projectId
+                      )
+                    ]
+                  ).length ? (
+                    buildReceiveProjectDetailLines(
+                      projectMap[
+                        String(
+                          viewReceipt.projectId ||
+                            poMap[String(viewReceipt.purchaseOrderId)]?.projectId
+                        )
+                      ]
+                    ).map((line) => <p key={line}>{line}</p>)
+                  ) : (
+                    <p>-</p>
+                  )}
+                </div>
+              )}
+              <div>
+                <p className="font-semibold">Notes</p>
+                <p>{viewReceipt.notes || "-"}</p>
+              </div>
+            </div>
+          }
           bottomRightContent={
             <GstSummaryBlock
               summary={buildGstSummary(

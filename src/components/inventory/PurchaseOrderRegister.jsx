@@ -13,6 +13,7 @@ import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import DocumentViewPanel from "./DocumentViewPanel";
 import { buildGstSummary } from "../../utils/taxUtils";
+import { isClosedPurchaseOrder } from "../../utils/purchaseOrderStatus";
 
 const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   const alignClass = align === "right" ? "text-right" : "text-left";
@@ -135,7 +136,7 @@ const PurchaseOrderRegister = () => {
   );
 
   const openOrdersCount = useMemo(
-    () => records.filter((record) => record.status !== "Closed").length,
+    () => records.filter((record) => !isClosedPurchaseOrder(record.status)).length,
     [records]
   );
 
@@ -183,10 +184,18 @@ const PurchaseOrderRegister = () => {
   };
 
   const handleEdit = (record) => {
+    if (isClosedPurchaseOrder(record?.status)) {
+      setApiError("This Purchase Order is Closed.");
+      return;
+    }
     navigate("/inventory/purchase-order", { state: { purchaseOrder: record } });
   };
 
   const handleReceive = (record) => {
+    if (isClosedPurchaseOrder(record?.status)) {
+      setApiError("This Purchase Order is Closed.");
+      return;
+    }
     navigate(`/inventory/receive-goods?purchaseOrderId=${record.id}`, {
       state: { purchaseOrderId: record.id },
     });
@@ -212,6 +221,11 @@ const PurchaseOrderRegister = () => {
   const handleDelete = async (id) => {
     try {
       setApiError("");
+      const record = records.find((entry) => String(entry.id) === String(id));
+      if (isClosedPurchaseOrder(record?.status)) {
+        setApiError("This Purchase Order is Closed.");
+        return;
+      }
       await deletePurchaseOrder(id);
       await loadRecords();
       if (viewRecord?.id === id) {
@@ -341,6 +355,7 @@ const PurchaseOrderRegister = () => {
                 const vendor = vendorMap[String(record.vendorId)];
                 const location = locationMap[String(record.locationId)];
                 const summary = buildGstSummary(record.items || []);
+                const isClosed = isClosedPurchaseOrder(record.status);
                 return (
                   <Fragment key={key}>
                     <tr
@@ -394,7 +409,8 @@ const PurchaseOrderRegister = () => {
                             event.stopPropagation();
                             handleReceive(record);
                           }}
-                          className="text-emerald-600 text-sm"
+                          disabled={isClosed}
+                          className="text-emerald-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Receive
                         </button>
@@ -404,7 +420,8 @@ const PurchaseOrderRegister = () => {
                             event.stopPropagation();
                             handleEdit(record);
                           }}
-                          className="text-indigo-600 text-sm"
+                          disabled={isClosed}
+                          className="text-indigo-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Edit
                         </button>
@@ -414,7 +431,8 @@ const PurchaseOrderRegister = () => {
                             event.stopPropagation();
                             handleDelete(record.id);
                           }}
-                          className="text-red-600 text-sm"
+                          disabled={isClosed}
+                          className="text-red-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Delete
                         </button>
@@ -425,6 +443,11 @@ const PurchaseOrderRegister = () => {
                       <tr className="bg-slate-50">
                         <td colSpan="11" className="p-4">
                           <div className="space-y-4">
+                            {isClosed && (
+                              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                This Purchase Order is Closed.
+                              </div>
+                            )}
                             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm text-slate-700">
                               <p>
                                 <strong>PO No:</strong> {record.poNumber || record.id}
@@ -577,6 +600,13 @@ const PurchaseOrderRegister = () => {
               amount: formatCurrency(amount),
             };
           })}
+          bottomLeftContent={
+            isClosedPurchaseOrder(viewRecord.status) ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">
+                This Purchase Order is Closed.
+              </div>
+            ) : null
+          }
           bottomRightContent={
             <GstSummaryBlock
               summary={summary}

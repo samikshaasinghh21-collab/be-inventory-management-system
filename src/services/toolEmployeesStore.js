@@ -55,18 +55,39 @@ const writeList = (list) => {
   );
 };
 
+const normalizeEmployee = (employee = {}) => {
+  const status =
+    String(employee.status ?? "").trim() === "New Employee"
+      ? "RTO (Return to Office)"
+      : employee.status;
+  return {
+    ...employee,
+    status,
+  };
+};
+
 const ensureSeeded = () => {
   if (typeof window === "undefined") return;
-  if (!readList().length) {
+  const existingEmployees = readList();
+  if (!existingEmployees.length) {
     writeList(seedEmployees);
+    return;
+  }
+  const normalizedEmployees = existingEmployees.map(normalizeEmployee);
+  const hasChanges = normalizedEmployees.some(
+    (employee, index) =>
+      employee.status !== existingEmployees[index]?.status
+  );
+  if (hasChanges) {
+    writeList(normalizedEmployees);
   }
 };
 
 export const getToolEmployees = () => {
   ensureSeeded();
-  return readList();
+  return readList().map(normalizeEmployee);
 };
 
 export const setToolEmployees = (employees) => {
-  writeList(employees);
+  writeList((Array.isArray(employees) ? employees : []).map(normalizeEmployee));
 };

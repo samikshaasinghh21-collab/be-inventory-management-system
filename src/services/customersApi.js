@@ -1,18 +1,53 @@
 import api from "./api";
 
-export const normalizeCustomer = (customer = {}) => ({
-  id: customer.id ?? customer.CustomerId ?? customer.customerId ?? null,
-  name: customer.name ?? customer.CustomerName ?? "",
-  companyName: customer.companyName ?? customer.CompanyName ?? "",
-  address: customer.address ?? customer.Address ?? "",
-  gstNumber: customer.gstNumber ?? customer.GSTNumber ?? "",
-  phone:
-    customer.phone ?? customer.ContactNumber ?? customer.Phone ?? "",
-  email: customer.email ?? customer.Email ?? "",
-  contactPerson:
-    customer.contactPerson ?? customer.ContactPerson ?? "",
-  designation: customer.designation ?? customer.Designation ?? "",
+export const normalizeCustomerContact = (contact = {}) => ({
+  id: contact.id ?? contact.CustomerContactId ?? contact.customerContactId ?? null,
+  customerId: contact.customerId ?? contact.CustomerId ?? null,
+  contactName:
+    contact.contactName ?? contact.ContactName ?? contact.name ?? "",
+  email: contact.email ?? contact.Email ?? "",
+  designation: contact.designation ?? contact.Designation ?? "",
+  phone: contact.phone ?? contact.Phone ?? "",
 });
+
+export const normalizeCustomer = (customer = {}) => {
+  const contacts = Array.isArray(customer.contacts)
+    ? customer.contacts.map(normalizeCustomerContact)
+    : Array.isArray(customer.CustomerContacts)
+    ? customer.CustomerContacts.map(normalizeCustomerContact)
+    : [];
+  const primaryContact = contacts[0] ?? null;
+
+  return {
+    id: customer.id ?? customer.CustomerId ?? customer.customerId ?? null,
+    name: customer.name ?? customer.CustomerName ?? "",
+    companyName: customer.companyName ?? customer.CompanyName ?? "",
+    address: customer.address ?? customer.Address ?? "",
+    gstNumber: customer.gstNumber ?? customer.GSTNumber ?? "",
+    phone:
+      customer.phone ??
+      customer.ContactNumber ??
+      customer.Phone ??
+      primaryContact?.phone ??
+      "",
+    email:
+      customer.email ??
+      customer.Email ??
+      primaryContact?.email ??
+      "",
+    contactPerson:
+      customer.contactPerson ??
+      customer.ContactPerson ??
+      primaryContact?.contactName ??
+      "",
+    designation:
+      customer.designation ??
+      customer.Designation ??
+      primaryContact?.designation ??
+      "",
+    contacts,
+  };
+};
 
 export const fetchCustomers = async () => {
   const response = await api.get("/customers");

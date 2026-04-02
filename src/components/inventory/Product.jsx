@@ -294,15 +294,20 @@ const formatCompactNumber = (value) =>
 const normalizeProduct = (product) => {
   const rate = Number(product?.rate ?? product?.salesPrice ?? 0);
   const qty = Number(product?.qty ?? 0);
+  const taxPercentage = Number(
+    product?.taxPercentage ?? product?.TaxPercentage ?? 0
+  );
   return {
     ...product,
     name: product?.name || "",
     description: product?.description || "",
     hsn: product?.hsn ? String(product.hsn) : "",
+    gst: product?.gst ?? product?.GST ?? "",
     sku: product?.sku || "",
     category: product?.category || "",
     brand: product?.brand || "",
     unit: product?.unit || "Nos",
+    taxPercentage: Number.isFinite(taxPercentage) ? taxPercentage : 0,
     qty: Number.isFinite(qty) ? qty : 0,
     rate: Number.isFinite(rate) ? rate : 0,
   };
@@ -594,6 +599,9 @@ export default function Product() {
       name: item.name || "",
       description: item.description || "",
       unit: item.unit || "PCS",
+      hsn: item.hsn || "",
+      gst: item.gst || "",
+      taxPercentage: item.taxPercentage ?? 0,
       rate: item.rate || 0,
       quantity: item.qty || 0,
     }));
@@ -612,6 +620,9 @@ export default function Product() {
       name: item.name || "",
       description: item.description || "",
       unit: item.unit || "PCS",
+      hsn: item.hsn || "",
+      gst: item.gst || "",
+      taxPercentage: item.taxPercentage ?? 0,
       rate: item.rate || 0,
       quantity: item.qty || 0,
       notes: "",

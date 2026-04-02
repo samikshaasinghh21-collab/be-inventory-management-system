@@ -35,6 +35,7 @@ const LineItemsEditor = ({
   extraFieldLabel = "Notes",
   extraFieldPlaceholder = "Notes",
   priceLabel = "Rate",
+  readOnly = false,
 }) => {
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
@@ -89,18 +90,21 @@ const LineItemsEditor = ({
             <button
               type="button"
               onClick={onPickFromProducts}
-              className="px-3 py-1.5 rounded-md border border-slate-200 text-slate-700 text-xs font-medium hover:border-slate-300"
+              disabled={readOnly}
+              className="px-3 py-1.5 rounded-md border border-slate-200 text-slate-700 text-xs font-medium hover:border-slate-300 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
             >
               {pickLabel}
             </button>
           )}
-          <button
-            type="button"
-            onClick={handleAdd}
-            className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
-          >
-            + Add Item
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={handleAdd}
+              className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
+            >
+              + Add Item
+            </button>
+          )}
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -120,7 +124,9 @@ const LineItemsEditor = ({
               <th className="p-3 text-right min-w-[130px]">{priceLabel}</th>
               <th className="p-3 text-right min-w-[140px]">Amount</th>
               <th className="p-3 text-left min-w-[160px]">{extraFieldLabel}</th>
-              <th className="p-3 text-left min-w-[80px]">Action</th>
+              {!readOnly && (
+                <th className="p-3 text-left min-w-[80px]">Action</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -137,22 +143,24 @@ const LineItemsEditor = ({
                     <input
                       type="text"
                       value={item.name}
+                      disabled={readOnly}
                       onChange={(event) =>
                         handleUpdate(item.id, "name", event.target.value)
                       }
                       placeholder="Item name"
-                      className="w-full border border-slate-200 rounded-md px-3 py-2"
+                      className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </td>
                   <td className="p-3">
                     <input
                       type="text"
                       value={item.description}
+                      disabled={readOnly}
                       onChange={(event) =>
                         handleUpdate(item.id, "description", event.target.value)
                       }
                       placeholder="Specs or details"
-                      className="w-full border border-slate-200 rounded-md px-3 py-2"
+                      className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </td>
                   {showHsnGst && (
@@ -160,11 +168,12 @@ const LineItemsEditor = ({
                       <input
                         type="text"
                         value={item.hsn ?? ""}
+                        disabled={readOnly}
                         onChange={(event) =>
                           handleUpdate(item.id, "hsn", event.target.value)
                         }
                         placeholder={hsnPlaceholder}
-                        className="w-full border border-slate-200 rounded-md px-3 py-2"
+                        className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                       />
                     </td>
                   )}
@@ -173,11 +182,12 @@ const LineItemsEditor = ({
                       <input
                         type="text"
                         value={item.gst ?? ""}
+                        disabled={readOnly}
                         onChange={(event) =>
                           handleUpdate(item.id, "gst", event.target.value)
                         }
                         placeholder={gstPlaceholder}
-                        className="w-full border border-slate-200 rounded-md px-3 py-2"
+                        className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                       />
                     </td>
                   )}
@@ -185,11 +195,12 @@ const LineItemsEditor = ({
                     <input
                       type="text"
                       value={item.unit}
+                      disabled={readOnly}
                       onChange={(event) =>
                         handleUpdate(item.id, "unit", event.target.value)
                       }
                       placeholder="PCS"
-                      className="w-full border border-slate-200 rounded-md px-3 py-2"
+                      className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </td>
                   <td className="p-3">
@@ -197,10 +208,11 @@ const LineItemsEditor = ({
                       type="number"
                       min="0"
                       value={item.quantity}
+                      disabled={readOnly}
                       onChange={(event) =>
                         handleUpdate(item.id, "quantity", event.target.value)
                       }
-                      className="w-full border border-slate-200 rounded-md px-3 py-2"
+                      className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </td>
                   <td className="p-3">
@@ -208,10 +220,11 @@ const LineItemsEditor = ({
                       type="number"
                       min="0"
                       value={item.rate}
+                      disabled={readOnly}
                       onChange={(event) =>
                         handleUpdate(item.id, "rate", event.target.value)
                       }
-                      className="w-full rounded-md border border-slate-200 px-3 py-2 text-right"
+                      className="w-full rounded-md border border-slate-200 px-3 py-2 text-right disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </td>
                   <td className="p-3 text-right font-medium text-slate-700">
@@ -221,22 +234,25 @@ const LineItemsEditor = ({
                     <input
                       type="text"
                       value={resolvedExtraFieldValue}
+                      disabled={readOnly}
                       onChange={(event) =>
                         handleUpdate(item.id, extraFieldKey, event.target.value)
                       }
                       placeholder={extraFieldPlaceholder}
-                      className="w-full border border-slate-200 rounded-md px-3 py-2"
+                      className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </td>
-                  <td className="p-3">
-                    <button
-                      type="button"
-                      onClick={() => handleRemove(item.id)}
-                      className="text-red-600 text-xs font-semibold"
-                    >
-                      Remove
-                    </button>
-                  </td>
+                  {!readOnly && (
+                    <td className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => handleRemove(item.id)}
+                        className="text-red-600 text-xs font-semibold"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}

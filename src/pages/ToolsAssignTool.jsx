@@ -56,8 +56,11 @@ const ToolsAssignTool = () => {
     [availableToolIds, tools]
   );
 
-  const activeEmployees = useMemo(
-    () => employees.filter((employee) => employee.status === "Active"),
+  const assignableEmployees = useMemo(
+    () =>
+      employees.filter(
+        (employee) => String(employee.status || "").toLowerCase() !== "inactive"
+      ),
     [employees]
   );
 
@@ -75,11 +78,11 @@ const ToolsAssignTool = () => {
           : availableTools[0]?.id || "",
       employeeId:
         current.employeeId &&
-        activeEmployees.some((employee) => employee.id === current.employeeId)
+        assignableEmployees.some((employee) => employee.id === current.employeeId)
           ? current.employeeId
-          : activeEmployees[0]?.id || "",
+          : assignableEmployees[0]?.id || "",
     }));
-  }, [availableToolIds, availableTools, activeEmployees]);
+  }, [assignableEmployees, availableToolIds, availableTools]);
 
   const updateField = (field, value) =>
     setForm((current) => ({
@@ -102,12 +105,12 @@ const ToolsAssignTool = () => {
       setError("Assignment date is required.");
       return;
     }
-    if (!form.expectedReturnDate) {
-      setError("Expected return date is required.");
+    if (!String(selectedTool?.serialNumber || "").trim()) {
+      setError("Serial number is required before issuing this tool.");
       return;
     }
 
-    const employee = activeEmployees.find(
+    const employee = assignableEmployees.find(
       (record) => record.id === form.employeeId
     );
     if (!employee) {
@@ -121,8 +124,9 @@ const ToolsAssignTool = () => {
         toolId: form.toolId,
         employeeId: employee.id,
         assignedTo: employee.name,
+        toolSerialNumber: selectedTool.serialNumber,
         checkoutDate: form.assignmentDate,
-        expectedReturnDate: form.expectedReturnDate,
+        expectedReturnDate: form.expectedReturnDate || null,
         actualReturnDate: null,
         conditionCheck: form.conditionCheck,
         notes: form.notes.trim(),
@@ -145,7 +149,7 @@ const ToolsAssignTool = () => {
           Assign Tool to Employee
         </h1>
         <p className="mt-1 text-sm text-slate-600">
-          Assign an available tool to an active employee and set the return plan.
+          Assign an available tool to an eligible employee and set the return plan.
         </p>
       </section>
 
@@ -178,12 +182,12 @@ const ToolsAssignTool = () => {
               value={form.employeeId}
               onChange={(event) => updateField("employeeId", event.target.value)}
               className={inputClass}
-              disabled={!activeEmployees.length}
+              disabled={!assignableEmployees.length}
             >
-              {activeEmployees.length === 0 && (
-                <option value="">No active employees available</option>
+              {assignableEmployees.length === 0 && (
+                <option value="">No eligible employees available</option>
               )}
-              {activeEmployees.map((employee) => (
+              {assignableEmployees.map((employee) => (
                 <option key={employee.id} value={employee.id}>
                   {employee.name} ({employee.id})
                 </option>
@@ -209,6 +213,9 @@ const ToolsAssignTool = () => {
               onChange={(value) => updateField("expectedReturnDate", value || "")}
               className={inputClass}
             />
+            <p className="mt-1 text-xs text-slate-500">
+              Optional for open-ended laptop or tool issue records.
+            </p>
           </div>
           <div>
             <label className="text-sm font-medium text-slate-700">
@@ -229,6 +236,14 @@ const ToolsAssignTool = () => {
             <label className="text-sm font-medium text-slate-700">Tool Location</label>
             <input
               value={selectedTool?.baseLocation || ""}
+              readOnly
+              className={`${inputClass} bg-slate-50`}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Serial Number</label>
+            <input
+              value={selectedTool?.serialNumber || ""}
               readOnly
               className={`${inputClass} bg-slate-50`}
             />

@@ -180,6 +180,17 @@ export const setTools = (tools) => {
   writeList(TOOL_STORAGE_KEY, tools);
 };
 
+export const generateNextToolId = (tools = []) => {
+  const maxNumber = (Array.isArray(tools) ? tools : []).reduce((max, tool) => {
+    const match = /^TL-(\d+)$/i.exec(String(tool?.id ?? "").trim());
+    if (!match) {
+      return max;
+    }
+    return Math.max(max, Number(match[1]));
+  }, 200);
+  return `TL-${String(maxNumber + 1).padStart(3, "0")}`;
+};
+
 export const getToolAssignments = () => {
   ensureSeeded();
   return readList(ASSIGNMENT_STORAGE_KEY);

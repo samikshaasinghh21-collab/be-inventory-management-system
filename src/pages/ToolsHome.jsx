@@ -7,6 +7,7 @@ import toolLaserImage from "../assets/images/Laser-Level.png";
 import toolCaliperImage from "../assets/images/Digital-Caliper.png";
 import toolMeterImage from "../assets/images/Multi-Meter.png";
 import {
+  generateNextToolId,
   getToolAssignments,
   getToolMaintenance,
   getTools,
@@ -592,7 +593,7 @@ const ToolsHome = () => {
     if (Object.keys(nextErrors).length) return;
 
     const created = {
-      id: createId("TL"),
+      id: generateNextToolId(tools),
       name: newTool.name.trim(),
       type: newTool.type.trim(),
       serialNumber: newTool.serialNumber.trim(),
@@ -624,8 +625,8 @@ const ToolsHome = () => {
       setAssignError("Please select a borrower.");
       return;
     }
-    if (!assignForm.expectedReturnDate) {
-      setAssignError("Expected return date is required.");
+    if (!String(selectedTool?.serialNumber || "").trim()) {
+      setAssignError("Serial number is required before issuing this tool.");
       return;
     }
 
@@ -633,8 +634,9 @@ const ToolsHome = () => {
       id: createId("TA"),
       toolId: selectedTool.id,
       assignedTo: assignForm.assignedTo.trim(),
+      toolSerialNumber: selectedTool.serialNumber,
       checkoutDate: todayIso(),
-      expectedReturnDate: assignForm.expectedReturnDate,
+      expectedReturnDate: assignForm.expectedReturnDate || null,
       actualReturnDate: null,
     };
     const updated = [created, ...assignments];
@@ -2118,6 +2120,16 @@ const ToolsHome = () => {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-700">
+                    Serial Number
+                  </label>
+                  <input
+                    value={selectedTool?.serialNumber || ""}
+                    readOnly
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
                     Expected Return Date
                   </label>
                   <DateInput
@@ -2130,6 +2142,9 @@ const ToolsHome = () => {
                     }
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Optional for open-ended laptop or tool issue records.
+                  </p>
                 </div>
                 {assignError && (
                   <p className="text-sm text-red-600">{assignError}</p>

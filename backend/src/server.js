@@ -539,6 +539,15 @@ const normalizeVendorContact = (row = {}) => ({
   phone: row.Phone ?? row.phone ?? "",
 });
 
+const normalizeCustomerContact = (row = {}) => ({
+  id: row.CustomerContactId ?? row.Id ?? row.id ?? null,
+  customerId: row.CustomerId ?? row.customerId ?? null,
+  contactName: row.ContactName ?? row.contactName ?? "",
+  email: row.Email ?? row.email ?? "",
+  designation: row.Designation ?? row.designation ?? "",
+  phone: row.Phone ?? row.phone ?? "",
+});
+
 const normalizeVendor = (row = {}) => ({
   id: row.VendorId ?? row.Id ?? row.id ?? null,
   name: row.VendorName ?? row.Name ?? row.name ?? "",
@@ -563,6 +572,41 @@ const normalizeCustomer = (row = {}) => ({
   createdAt: row.CreatedAt ?? row.createdAt ?? null,
   updatedAt: row.UpdatedAt ?? row.updatedAt ?? null,
 });
+
+const attachCustomerContacts = (customer = {}, contacts = []) => {
+  const normalizedContacts = Array.isArray(contacts)
+    ? contacts.map(normalizeCustomerContact)
+    : [];
+  const hasLegacyContact = [
+    customer.contactPerson,
+    customer.designation,
+  ].some((value) => String(value || "").trim());
+  const legacyContact = hasLegacyContact
+    ? {
+        id: null,
+        customerId: customer.id ?? null,
+        contactName: customer.contactPerson ?? "",
+        email: customer.email ?? "",
+        designation: customer.designation ?? "",
+        phone: customer.phone ?? "",
+      }
+    : null;
+  const resolvedContacts = normalizedContacts.length
+    ? normalizedContacts
+    : legacyContact
+    ? [legacyContact]
+    : [];
+  const primaryContact = resolvedContacts[0] ?? null;
+
+  return {
+    ...customer,
+    phone: customer.phone || primaryContact?.phone || "",
+    email: customer.email || primaryContact?.email || "",
+    contactPerson: customer.contactPerson || primaryContact?.contactName || "",
+    designation: customer.designation || primaryContact?.designation || "",
+    contacts: resolvedContacts,
+  };
+};
 
 const normalizeLocation = (row = {}) => ({
   id: row.LocationId ?? row.Id ?? row.id ?? null,
@@ -890,6 +934,20 @@ const parseDateInput = (value) => {
   if (!trimmed) {
     return null;
   }
+  const ddmmyyyyMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
+  if (ddmmyyyyMatch) {
+    const [, dayText, monthText, yearText] = ddmmyyyyMatch;
+    const day = Number(dayText);
+    const month = Number(monthText);
+    const year = Number(yearText);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    const isValid =
+      !Number.isNaN(date.getTime()) &&
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day;
+    return isValid ? date : NaN;
+  }
   const date = new Date(trimmed);
   return Number.isNaN(date.getTime()) ? NaN : date;
 };
@@ -924,10 +982,35 @@ const normalizeVendorContactsInput = (contacts = []) =>
       [contact.contactName, contact.email, contact.designation, contact.phone].some(Boolean)
     );
 
+const normalizeCustomerContactsInput = (contacts = []) =>
+  (Array.isArray(contacts) ? contacts : [])
+    .map((contact) => ({
+      contactName: String(
+        contact?.contactName ?? contact?.ContactName ?? contact?.name ?? ""
+      ).trim(),
+      email: String(contact?.email ?? contact?.Email ?? "").trim(),
+      designation: String(
+        contact?.designation ?? contact?.Designation ?? ""
+      ).trim(),
+      phone: String(contact?.phone ?? contact?.Phone ?? "").trim(),
+    }))
+    .filter((contact) =>
+      [contact.contactName, contact.email, contact.designation, contact.phone].some(Boolean)
+    );
+
 const getVendorContactsValidationError = (contacts = []) => {
   for (const [index, contact] of contacts.entries()) {
     if (!contact.contactName || !contact.email || !contact.designation) {
       return `Vendor contact ${index + 1} must include contact name, email, and designation.`;
+    }
+  }
+  return "";
+};
+
+const getCustomerContactsValidationError = (contacts = []) => {
+  for (const [index, contact] of contacts.entries()) {
+    if (!contact.contactName || !contact.email || !contact.designation) {
+      return `Customer contact ${index + 1} must include contact name, email, and designation.`;
     }
   }
   return "";
@@ -1006,7 +1089,24 @@ const getCustomerById = async (pool, customerId) => {
     `);
 
   const customerRow = result.recordset?.[0];
-  return customerRow ? normalizeCustomer(customerRow) : null;
+  if (!customerRow) {
+    return null;
+  }
+
+  const contactsResult = await pool
+    .request()
+    .input("CustomerId", sql.Int, safeCustomerId)
+    .query(`
+      SELECT *
+      FROM dbo.CustomerContacts
+      WHERE CustomerId = @CustomerId
+      ORDER BY CustomerContactId ASC
+    `);
+
+  return attachCustomerContacts(
+    normalizeCustomer(customerRow),
+    contactsResult.recordset ?? []
+  );
 };
 
 const buildNextPurchaseOrderNumber = (poNumbers = [], year = new Date().getFullYear()) => {
@@ -1087,9 +1187,14 @@ const computeReceiveStatus = (items = [], fallback = "Draft") => {
   return fallback;
 };
 
+const isClosedPurchaseOrderStatus = (status) =>
+  String(status ?? "").trim().toLowerCase() === "closed";
+
 const normalizeReceiveGoods = (row = {}) => {
   const id =
     row.ReceiveGoodsId ?? row.receiveGoodsId ?? row.Id ?? row.id ?? null;
+  const rawShowProjectDetails =
+    row.ShowProjectDetails ?? row.showProjectDetails ?? null;
   return {
     id,
     receiveGoodsId: id,
@@ -1100,6 +1205,12 @@ const normalizeReceiveGoods = (row = {}) => {
     locationId: row.LocationId ?? row.locationId ?? null,
     receivedDate: row.ReceivedDate ?? row.receivedDate ?? null,
     receivedBy: row.ReceivedBy ?? row.receivedBy ?? "",
+    billTo: row.BillTo ?? row.billTo ?? "",
+    shipTo: row.ShipTo ?? row.shipTo ?? "",
+    showProjectDetails:
+      rawShowProjectDetails === null || rawShowProjectDetails === undefined
+        ? true
+        : !["0", "false", "no"].includes(String(rawShowProjectDetails).toLowerCase()),
     notes: row.Notes ?? row.notes ?? "",
     status: row.Status ?? row.status ?? "",
     createdAt: row.CreatedAt ?? row.createdAt ?? null,
@@ -1382,6 +1493,57 @@ const ensureCustomersTable = async () => {
     BEGIN
       ALTER TABLE dbo.Customers ADD UpdatedAt DATETIME2 NOT NULL
         CONSTRAINT DF_Customers_UpdatedAt DEFAULT SYSUTCDATETIME();
+    END;
+  `);
+
+  await pool.request().query(`
+    IF OBJECT_ID('dbo.CustomerContacts', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.CustomerContacts (
+        CustomerContactId INT IDENTITY(1,1) PRIMARY KEY,
+        CustomerId INT NOT NULL,
+        ContactName NVARCHAR(255) NOT NULL,
+        Email NVARCHAR(255) NOT NULL,
+        Designation NVARCHAR(255) NOT NULL,
+        Phone NVARCHAR(30) NULL,
+        CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_CustomerContacts_Customer FOREIGN KEY (CustomerId)
+          REFERENCES dbo.Customers(CustomerId) ON DELETE CASCADE
+      )
+    END
+  `);
+
+  await pool.request().query(`
+    IF COL_LENGTH('dbo.CustomerContacts', 'CustomerId') IS NULL
+    BEGIN
+      ALTER TABLE dbo.CustomerContacts ADD CustomerId INT NULL;
+    END;
+    IF COL_LENGTH('dbo.CustomerContacts', 'ContactName') IS NULL
+    BEGIN
+      ALTER TABLE dbo.CustomerContacts ADD ContactName NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.CustomerContacts', 'Email') IS NULL
+    BEGIN
+      ALTER TABLE dbo.CustomerContacts ADD Email NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.CustomerContacts', 'Designation') IS NULL
+    BEGIN
+      ALTER TABLE dbo.CustomerContacts ADD Designation NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.CustomerContacts', 'Phone') IS NULL
+    BEGIN
+      ALTER TABLE dbo.CustomerContacts ADD Phone NVARCHAR(30) NULL;
+    END;
+    IF COL_LENGTH('dbo.CustomerContacts', 'CreatedAt') IS NULL
+    BEGIN
+      ALTER TABLE dbo.CustomerContacts ADD CreatedAt DATETIME2 NOT NULL
+        CONSTRAINT DF_CustomerContacts_CreatedAt DEFAULT SYSUTCDATETIME();
+    END;
+    IF COL_LENGTH('dbo.CustomerContacts', 'UpdatedAt') IS NULL
+    BEGIN
+      ALTER TABLE dbo.CustomerContacts ADD UpdatedAt DATETIME2 NOT NULL
+        CONSTRAINT DF_CustomerContacts_UpdatedAt DEFAULT SYSUTCDATETIME();
     END;
   `);
 };
@@ -1903,6 +2065,9 @@ const ensureReceiveTables = async () => {
         LocationId INT NULL,
         ReceivedDate DATE NULL,
         ReceivedBy NVARCHAR(100) NULL,
+        BillTo NVARCHAR(MAX) NULL,
+        ShipTo NVARCHAR(MAX) NULL,
+        ShowProjectDetails BIT NOT NULL DEFAULT 1,
         Notes NVARCHAR(MAX) NULL,
         Status NVARCHAR(50) NULL,
         CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
@@ -1955,6 +2120,18 @@ const ensureReceiveTables = async () => {
     IF COL_LENGTH('dbo.ReceiveGoods', 'ReceivedBy') IS NULL
     BEGIN
       ALTER TABLE dbo.ReceiveGoods ADD ReceivedBy NVARCHAR(100) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'BillTo') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD BillTo NVARCHAR(MAX) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'ShipTo') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD ShipTo NVARCHAR(MAX) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'ShowProjectDetails') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD ShowProjectDetails BIT NOT NULL CONSTRAINT DF_ReceiveGoods_ShowProjectDetails DEFAULT 1;
     END;
     IF COL_LENGTH('dbo.ReceiveGoods', 'Notes') IS NULL
     BEGIN
@@ -3583,24 +3760,55 @@ app.get("/api/customers", async (_req, res) => {
   try {
     await ensureCustomersTable();
     const pool = await getPool();
-    const result = await pool.request().query(`
-      SELECT
-        CustomerId,
-        CustomerName,
-        CompanyName,
-        Address,
-        GSTNumber,
-        ContactNumber,
-        Email,
-        ContactPerson,
-        Designation,
-        CreatedAt,
-        UpdatedAt
-      FROM dbo.Customers
-      ORDER BY CustomerId DESC
-    `);
+    const [customersResult, contactsResult] = await Promise.all([
+      pool.request().query(`
+        SELECT
+          CustomerId,
+          CustomerName,
+          CompanyName,
+          Address,
+          GSTNumber,
+          ContactNumber,
+          Email,
+          ContactPerson,
+          Designation,
+          CreatedAt,
+          UpdatedAt
+        FROM dbo.Customers
+        ORDER BY CustomerId DESC
+      `),
+      pool.request().query(`
+        SELECT *
+        FROM dbo.CustomerContacts
+        ORDER BY CustomerContactId ASC
+      `),
+    ]);
 
-    return res.json((result.recordset ?? []).map(normalizeCustomer));
+    const contactsByCustomer = (contactsResult.recordset ?? []).reduce(
+      (acc, row) => {
+        const contact = normalizeCustomerContact(row);
+        const key = String(contact.customerId ?? "");
+        if (!key) {
+          return acc;
+        }
+        if (!acc[key]) {
+          acc[key] = [];
+        }
+        acc[key].push(contact);
+        return acc;
+      },
+      {}
+    );
+
+    return res.json(
+      (customersResult.recordset ?? []).map((row) => {
+        const customer = normalizeCustomer(row);
+        return attachCustomerContacts(
+          customer,
+          contactsByCustomer[String(customer.id)] ?? []
+        );
+      })
+    );
   } catch (error) {
     return res.status(500).json({
       ok: false,
@@ -3621,6 +3829,7 @@ app.post("/api/customers", async (req, res) => {
       email,
       contactPerson,
       designation,
+      contacts,
       CustomerName,
       CompanyName,
       Address,
@@ -3635,50 +3844,85 @@ app.post("/api/customers", async (req, res) => {
     if (!nextName) {
       return res.status(400).json({ ok: false, error: "Customer name is required" });
     }
+    const normalizedContacts = normalizeCustomerContactsInput(contacts);
+    const contactsError = getCustomerContactsValidationError(normalizedContacts);
+    if (contactsError) {
+      return res.status(400).json({ ok: false, error: contactsError });
+    }
 
     const pool = await getPool();
-    const result = await pool
-      .request()
-      .input("CustomerName", sql.NVarChar(255), nextName)
-      .input(
-        "CompanyName",
-        sql.NVarChar(255),
-        normalizeOptionalString(companyName ?? CompanyName)
-      )
-      .input("Address", sql.NVarChar(sql.MAX), normalizeOptionalString(address ?? Address))
-      .input(
-        "GSTNumber",
-        sql.NVarChar(30),
-        normalizeOptionalString(gstNumber ?? GSTNumber)
-      )
-      .input(
-        "ContactNumber",
-        sql.NVarChar(30),
-        normalizeOptionalString(phone ?? ContactNumber)
-      )
-      .input("Email", sql.NVarChar(255), normalizeOptionalString(email ?? Email))
-      .input(
-        "ContactPerson",
-        sql.NVarChar(255),
-        normalizeOptionalString(contactPerson ?? ContactPerson)
-      )
-      .input(
-        "Designation",
-        sql.NVarChar(255),
-        normalizeOptionalString(designation ?? Designation)
-      )
-      .query(`
-        INSERT INTO dbo.Customers
-          (CustomerName, CompanyName, Address, GSTNumber, ContactNumber, Email, ContactPerson, Designation)
-        OUTPUT INSERTED.*
-        VALUES
-          (@CustomerName, @CompanyName, @Address, @GSTNumber, @ContactNumber, @Email, @ContactPerson, @Designation)
-      `);
+    const tx = pool.transaction();
+    await tx.begin();
 
-    return res.status(201).json({
-      ok: true,
-      customer: normalizeCustomer(result.recordset?.[0] ?? {}),
-    });
+    try {
+      const primaryContact = normalizedContacts[0] ?? null;
+      const result = await new sql.Request(tx)
+        .input("CustomerName", sql.NVarChar(255), nextName)
+        .input(
+          "CompanyName",
+          sql.NVarChar(255),
+          normalizeOptionalString(companyName ?? CompanyName)
+        )
+        .input("Address", sql.NVarChar(sql.MAX), normalizeOptionalString(address ?? Address))
+        .input(
+          "GSTNumber",
+          sql.NVarChar(30),
+          normalizeOptionalString(gstNumber ?? GSTNumber)
+        )
+        .input(
+          "ContactNumber",
+          sql.NVarChar(30),
+          normalizeOptionalString(phone ?? ContactNumber)
+        )
+        .input("Email", sql.NVarChar(255), normalizeOptionalString(email ?? Email))
+        .input(
+          "ContactPerson",
+          sql.NVarChar(255),
+          normalizeOptionalString(
+            contactPerson ?? ContactPerson ?? primaryContact?.contactName
+          )
+        )
+        .input(
+          "Designation",
+          sql.NVarChar(255),
+          normalizeOptionalString(
+            designation ?? Designation ?? primaryContact?.designation
+          )
+        )
+        .query(`
+          INSERT INTO dbo.Customers
+            (CustomerName, CompanyName, Address, GSTNumber, ContactNumber, Email, ContactPerson, Designation)
+          OUTPUT INSERTED.*
+          VALUES
+            (@CustomerName, @CompanyName, @Address, @GSTNumber, @ContactNumber, @Email, @ContactPerson, @Designation)
+        `);
+
+      const customer = normalizeCustomer(result.recordset?.[0] ?? {});
+      for (const contact of normalizedContacts) {
+        await new sql.Request(tx)
+          .input("CustomerId", sql.Int, customer.id)
+          .input("ContactName", sql.NVarChar(255), contact.contactName)
+          .input("Email", sql.NVarChar(255), contact.email)
+          .input("Designation", sql.NVarChar(255), contact.designation)
+          .input("Phone", sql.NVarChar(30), contact.phone || null)
+          .query(`
+            INSERT INTO dbo.CustomerContacts
+              (CustomerId, ContactName, Email, Designation, Phone)
+            VALUES
+              (@CustomerId, @ContactName, @Email, @Designation, @Phone)
+          `);
+      }
+
+      await tx.commit();
+
+      return res.status(201).json({
+        ok: true,
+        customer: attachCustomerContacts(customer, normalizedContacts),
+      });
+    } catch (error) {
+      await rollbackTx(tx);
+      throw error;
+    }
   } catch (error) {
     return res.status(500).json({
       ok: false,
@@ -3704,6 +3948,7 @@ app.put("/api/customers/:id", async (req, res) => {
       email,
       contactPerson,
       designation,
+      contacts,
       CustomerName,
       CompanyName,
       Address,
@@ -3718,63 +3963,125 @@ app.put("/api/customers/:id", async (req, res) => {
     if (!nextName) {
       return res.status(400).json({ ok: false, error: "Customer name is required" });
     }
-
-    const pool = await getPool();
-    const result = await pool
-      .request()
-      .input("CustomerId", sql.Int, id)
-      .input("CustomerName", sql.NVarChar(255), nextName)
-      .input(
-        "CompanyName",
-        sql.NVarChar(255),
-        normalizeOptionalString(companyName ?? CompanyName)
-      )
-      .input("Address", sql.NVarChar(sql.MAX), normalizeOptionalString(address ?? Address))
-      .input(
-        "GSTNumber",
-        sql.NVarChar(30),
-        normalizeOptionalString(gstNumber ?? GSTNumber)
-      )
-      .input(
-        "ContactNumber",
-        sql.NVarChar(30),
-        normalizeOptionalString(phone ?? ContactNumber)
-      )
-      .input("Email", sql.NVarChar(255), normalizeOptionalString(email ?? Email))
-      .input(
-        "ContactPerson",
-        sql.NVarChar(255),
-        normalizeOptionalString(contactPerson ?? ContactPerson)
-      )
-      .input(
-        "Designation",
-        sql.NVarChar(255),
-        normalizeOptionalString(designation ?? Designation)
-      )
-      .query(`
-        UPDATE dbo.Customers
-        SET CustomerName = @CustomerName,
-            CompanyName = @CompanyName,
-            Address = @Address,
-            GSTNumber = @GSTNumber,
-            ContactNumber = @ContactNumber,
-            Email = @Email,
-            ContactPerson = @ContactPerson,
-            Designation = @Designation,
-            UpdatedAt = SYSUTCDATETIME()
-        OUTPUT INSERTED.*
-        WHERE CustomerId = @CustomerId
-      `);
-
-    const updated = result.recordset?.[0];
-    if (!updated) {
-      return res.status(404).json({ ok: false, error: "Customer not found" });
+    const hasContactsPayload = Array.isArray(contacts);
+    const normalizedContacts = hasContactsPayload
+      ? normalizeCustomerContactsInput(contacts)
+      : [];
+    const contactsError = hasContactsPayload
+      ? getCustomerContactsValidationError(normalizedContacts)
+      : "";
+    if (contactsError) {
+      return res.status(400).json({ ok: false, error: contactsError });
     }
 
-    return res.json({
-      ok: true,
-      customer: normalizeCustomer(updated),
-    });
+    const pool = await getPool();
+    const tx = pool.transaction();
+    await tx.begin();
+
+    try {
+      const primaryContact = normalizedContacts[0] ?? null;
+      const result = await new sql.Request(tx)
+        .input("CustomerId", sql.Int, id)
+        .input("CustomerName", sql.NVarChar(255), nextName)
+        .input(
+          "CompanyName",
+          sql.NVarChar(255),
+          normalizeOptionalString(companyName ?? CompanyName)
+        )
+        .input("Address", sql.NVarChar(sql.MAX), normalizeOptionalString(address ?? Address))
+        .input(
+          "GSTNumber",
+          sql.NVarChar(30),
+          normalizeOptionalString(gstNumber ?? GSTNumber)
+        )
+        .input(
+          "ContactNumber",
+          sql.NVarChar(30),
+          normalizeOptionalString(phone ?? ContactNumber)
+        )
+        .input("Email", sql.NVarChar(255), normalizeOptionalString(email ?? Email))
+        .input(
+          "ContactPerson",
+          sql.NVarChar(255),
+          normalizeOptionalString(
+            contactPerson ?? ContactPerson ?? primaryContact?.contactName
+          )
+        )
+        .input(
+          "Designation",
+          sql.NVarChar(255),
+          normalizeOptionalString(
+            designation ?? Designation ?? primaryContact?.designation
+          )
+        )
+        .query(`
+          UPDATE dbo.Customers
+          SET CustomerName = @CustomerName,
+              CompanyName = @CompanyName,
+              Address = @Address,
+              GSTNumber = @GSTNumber,
+              ContactNumber = @ContactNumber,
+              Email = @Email,
+              ContactPerson = @ContactPerson,
+              Designation = @Designation,
+              UpdatedAt = SYSUTCDATETIME()
+          OUTPUT INSERTED.*
+          WHERE CustomerId = @CustomerId
+        `);
+
+      const updated = result.recordset?.[0];
+      if (!updated) {
+        await tx.rollback();
+        return res.status(404).json({ ok: false, error: "Customer not found" });
+      }
+
+      if (hasContactsPayload) {
+        await new sql.Request(tx)
+          .input("CustomerId", sql.Int, id)
+          .query(`DELETE FROM dbo.CustomerContacts WHERE CustomerId = @CustomerId`);
+
+        for (const contact of normalizedContacts) {
+          await new sql.Request(tx)
+            .input("CustomerId", sql.Int, id)
+            .input("ContactName", sql.NVarChar(255), contact.contactName)
+            .input("Email", sql.NVarChar(255), contact.email)
+            .input("Designation", sql.NVarChar(255), contact.designation)
+            .input("Phone", sql.NVarChar(30), contact.phone || null)
+            .query(`
+              INSERT INTO dbo.CustomerContacts
+                (CustomerId, ContactName, Email, Designation, Phone)
+              VALUES
+                (@CustomerId, @ContactName, @Email, @Designation, @Phone)
+            `);
+        }
+      }
+
+      await tx.commit();
+
+      let savedContacts = normalizedContacts;
+      if (!hasContactsPayload) {
+        const contactsResult = await pool
+          .request()
+          .input("CustomerId", sql.Int, id)
+          .query(`
+            SELECT *
+            FROM dbo.CustomerContacts
+            WHERE CustomerId = @CustomerId
+            ORDER BY CustomerContactId ASC
+          `);
+        savedContacts = (contactsResult.recordset ?? []).map(
+          normalizeCustomerContact
+        );
+      }
+
+      return res.json({
+        ok: true,
+        customer: attachCustomerContacts(normalizeCustomer(updated), savedContacts),
+      });
+    } catch (error) {
+      await rollbackTx(tx);
+      throw error;
+    }
   } catch (error) {
     return res.status(500).json({
       ok: false,
@@ -4748,6 +5055,13 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
       await tx.rollback();
       return res.status(404).json({ ok: false, error: "Purchase order not found" });
     }
+    if (isClosedPurchaseOrderStatus(existingOrder.Status)) {
+      await tx.rollback();
+      return res.status(409).json({
+        ok: false,
+        error: "This Purchase Order is Closed.",
+      });
+    }
 
     const finalPONumber =
       normalizeOptionalString(existingOrder.PONumber) ??
@@ -4846,6 +5160,28 @@ app.delete("/api/purchase-orders/:id", async (req, res) => {
     const pool = await getPool();
     tx = pool.transaction();
     await tx.begin();
+
+    const existingOrderResult = await new sql.Request(tx)
+      .input("Id", sql.Int, id)
+      .query(`
+        SELECT TOP 1 Status
+        FROM dbo.PurchaseOrders
+        WHERE Id = @Id
+      `);
+    const existingOrder = existingOrderResult.recordset?.[0] ?? null;
+
+    if (!existingOrder) {
+      await tx.rollback();
+      return res.status(404).json({ ok: false, error: "Purchase order not found" });
+    }
+
+    if (isClosedPurchaseOrderStatus(existingOrder.Status)) {
+      await tx.rollback();
+      return res.status(409).json({
+        ok: false,
+        error: "This Purchase Order is Closed.",
+      });
+    }
 
     const deleteItems = new sql.Request(tx);
     deleteItems.input("PurchaseOrderId", sql.Int, id);
@@ -4992,6 +5328,9 @@ app.post("/api/receive-goods", async (req, res) => {
     locationId = null,
     receivedDate = null,
     receivedBy = null,
+    billTo = null,
+    shipTo = null,
+    showProjectDetails = true,
     notes = null,
     items = [],
     status = null,
@@ -5073,8 +5412,15 @@ app.post("/api/receive-goods", async (req, res) => {
         error: "Purchase order not found",
       });
     }
+    if (isClosedPurchaseOrderStatus(poRow.Status)) {
+      await tx.rollback();
+      return res.status(409).json({
+        ok: false,
+        error: "This Purchase Order is Closed.",
+      });
+    }
 
-    const receiptStatus = status || computeReceiveStatus(normalizedItems, poRow?.Status ?? "Draft");
+    const receiptStatus = computeReceiveStatus(normalizedItems, "Draft");
 
     const existingResult = await new sql.Request(tx)
       .input("PurchaseOrderId", sql.Int, poId)
@@ -5091,6 +5437,15 @@ app.post("/api/receive-goods", async (req, res) => {
     upsertReq.input("LocationId", sql.Int, safeLocationId ?? toNullableInt(poRow?.LocationId));
     upsertReq.input("ReceivedDate", sql.Date, parsedDate ?? null);
     upsertReq.input("ReceivedBy", sql.NVarChar(100), normalizeOptionalString(receivedBy) ?? null);
+    upsertReq.input("BillTo", sql.NVarChar(sql.MAX), normalizeOptionalString(billTo) ?? null);
+    upsertReq.input("ShipTo", sql.NVarChar(sql.MAX), normalizeOptionalString(shipTo) ?? null);
+    upsertReq.input(
+      "ShowProjectDetails",
+      sql.Bit,
+      showProjectDetails === undefined || showProjectDetails === null
+        ? true
+        : !["0", "false", "no"].includes(String(showProjectDetails).toLowerCase())
+    );
     upsertReq.input("Notes", sql.NVarChar(sql.MAX), normalizeOptionalString(notes) ?? null);
     upsertReq.input("Status", sql.NVarChar(50), receiptStatus);
 
@@ -5105,6 +5460,9 @@ app.post("/api/receive-goods", async (req, res) => {
             LocationId = @LocationId,
             ReceivedDate = @ReceivedDate,
             ReceivedBy = @ReceivedBy,
+            BillTo = @BillTo,
+            ShipTo = @ShipTo,
+            ShowProjectDetails = @ShowProjectDetails,
             Notes = @Notes,
             Status = @Status,
             UpdatedAt = SYSUTCDATETIME()
@@ -5115,10 +5473,10 @@ app.post("/api/receive-goods", async (req, res) => {
     } else {
       const insertResult = await upsertReq.query(`
         INSERT INTO dbo.ReceiveGoods
-          (PurchaseOrderId, ProjectId, VendorId, LocationId, ReceivedDate, ReceivedBy, Notes, Status)
+          (PurchaseOrderId, ProjectId, VendorId, LocationId, ReceivedDate, ReceivedBy, BillTo, ShipTo, ShowProjectDetails, Notes, Status)
         OUTPUT INSERTED.*
         VALUES
-          (@PurchaseOrderId, @ProjectId, @VendorId, @LocationId, @ReceivedDate, @ReceivedBy, @Notes, @Status)
+          (@PurchaseOrderId, @ProjectId, @VendorId, @LocationId, @ReceivedDate, @ReceivedBy, @BillTo, @ShipTo, @ShowProjectDetails, @Notes, @Status)
       `);
       receiptRow = insertResult.recordset?.[0] ?? null;
     }

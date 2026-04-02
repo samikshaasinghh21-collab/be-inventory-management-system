@@ -25,6 +25,7 @@ const ToolsHandoverTool = () => {
     toolId: "",
     newEmployeeId: "",
     handoverDate: todayIso(),
+    switchHandover: true,
     conditionCheck: "Good",
     notes: "",
   });
@@ -57,7 +58,8 @@ const ToolsHandoverTool = () => {
     const currentEmployeeName = selectedRecord?.assignment.assignedTo || "";
     return employees.filter(
       (employee) =>
-        employee.status === "Active" && employee.name !== currentEmployeeName
+        String(employee.status || "").toLowerCase() !== "inactive" &&
+        employee.name !== currentEmployeeName
     );
   }, [employees, selectedRecord]);
 
@@ -106,6 +108,10 @@ const ToolsHandoverTool = () => {
       setError("Handover date is required.");
       return;
     }
+    if (!String(selectedRecord?.tool?.serialNumber || "").trim()) {
+      setError("Serial number is required before handing over this laptop or tool.");
+      return;
+    }
 
     const newEmployee = employees.find(
       (employee) => employee.id === form.newEmployeeId
@@ -120,6 +126,7 @@ const ToolsHandoverTool = () => {
         ? {
             ...assignment,
             actualReturnDate: form.handoverDate,
+            switchHandover: form.switchHandover,
             handoverCondition: form.conditionCheck,
             handoverNotes: form.notes.trim(),
           }
@@ -132,10 +139,11 @@ const ToolsHandoverTool = () => {
         toolId: selectedRecord.assignment.toolId,
         employeeId: newEmployee.id,
         assignedTo: newEmployee.name,
+        toolSerialNumber: selectedRecord.tool.serialNumber,
         checkoutDate: form.handoverDate,
-        expectedReturnDate:
-          selectedRecord.assignment.expectedReturnDate || form.handoverDate,
+        expectedReturnDate: selectedRecord.assignment.expectedReturnDate || null,
         actualReturnDate: null,
+        switchHandover: form.switchHandover,
         conditionCheck: form.conditionCheck,
         notes: form.notes.trim(),
         previousAssignee: selectedRecord.assignment.assignedTo,
@@ -196,7 +204,7 @@ const ToolsHandoverTool = () => {
             />
           </div>
           <div>
-            <label className="text-sm font-medium text-slate-700">New Employee</label>
+            <label className="text-sm font-medium text-slate-700">Select Employee</label>
             <select
               value={form.newEmployeeId}
               onChange={(event) =>
@@ -206,7 +214,7 @@ const ToolsHandoverTool = () => {
               disabled={!selectableEmployees.length}
             >
               {selectableEmployees.length === 0 && (
-                <option value="">No alternate active employee available</option>
+                <option value="">No alternate eligible employee available</option>
               )}
               {selectableEmployees.map((employee) => (
                 <option key={employee.id} value={employee.id}>
@@ -223,6 +231,27 @@ const ToolsHandoverTool = () => {
               value={form.handoverDate}
               onChange={(value) => updateField("handoverDate", value || "")}
               className={inputClass}
+            />
+          </div>
+          <div className="flex items-end">
+            <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.switchHandover}
+                onChange={(event) =>
+                  updateField("switchHandover", event.target.checked)
+                }
+                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              Switch Handover
+            </label>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">Serial Number</label>
+            <input
+              value={selectedRecord?.tool.serialNumber || ""}
+              readOnly
+              className={`${inputClass} bg-slate-50`}
             />
           </div>
           <div>

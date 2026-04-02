@@ -18,6 +18,7 @@ import {
   parseTaxPercentage,
 } from "../../utils/taxUtils";
 import { generateNextPurchaseOrderNumber } from "../../utils/purchaseOrderNumber";
+import { isClosedPurchaseOrder } from "../../utils/purchaseOrderStatus";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -57,6 +58,7 @@ const PurchaseOrder = () => {
   const [items, setItems] = useState([createLineItem()]);
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
+  const [editingStatus, setEditingStatus] = useState("");
   const [apiError, setApiError] = useState("");
   const [boqs, setBoqs] = useState([]);
   const [boqsLoading, setBoqsLoading] = useState(false);
@@ -66,6 +68,7 @@ const PurchaseOrder = () => {
     const record = location.state?.purchaseOrder;
     if (record && record.id !== editingId) {
       setEditingId(record.id);
+      setEditingStatus(record.status || "Draft");
       setForm({
         poNumber: record.poNumber || "",
         projectId: record.projectId || "",
@@ -246,11 +249,14 @@ const PurchaseOrder = () => {
     );
   }, [boqs, form.projectId]);
 
+  const isEditingClosed = Boolean(editingId) && isClosedPurchaseOrder(editingStatus);
+
   const resetForm = () => {
     setForm(createFormState());
     setItems([createLineItem()]);
     setErrors({});
     setEditingId(null);
+    setEditingStatus("");
   };
 
   const validate = () => {
@@ -273,6 +279,10 @@ const PurchaseOrder = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (isEditingClosed) {
+      setApiError("This Purchase Order is Closed.");
+      return;
+    }
     if (!validate()) {
       return;
     }
@@ -433,7 +443,7 @@ const PurchaseOrder = () => {
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
           <p className="text-sm text-slate-500">Open Orders</p>
           <p className="text-2xl font-semibold text-slate-800">
-            {records.filter((record) => record.status !== "Closed").length}
+            {records.filter((record) => !isClosedPurchaseOrder(record.status)).length}
           </p>
         </div>
       </div>
@@ -441,6 +451,11 @@ const PurchaseOrder = () => {
       {apiError && (
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {apiError}
+        </div>
+      )}
+      {isEditingClosed && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This Purchase Order is Closed.
         </div>
       )}
 
@@ -473,7 +488,8 @@ const PurchaseOrder = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, projectId: event.target.value }))
                 }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                disabled={isEditingClosed}
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="">Select project</option>
                 {projects.map((project) => (
@@ -495,7 +511,8 @@ const PurchaseOrder = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, vendorId: event.target.value }))
                 }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                disabled={isEditingClosed}
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="">Select vendor</option>
                 {vendors.map((vendor) => (
@@ -520,7 +537,8 @@ const PurchaseOrder = () => {
                     locationId: event.target.value,
                   }))
                 }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                disabled={isEditingClosed}
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="">Select location</option>
                 {locations.map((location) => (
@@ -539,7 +557,8 @@ const PurchaseOrder = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, status: event.target.value }))
                 }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                disabled={isEditingClosed}
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="Draft">Draft</option>
                 <option value="Sent">Sent</option>
@@ -556,6 +575,8 @@ const PurchaseOrder = () => {
                 onChange={(value) =>
                   setForm((prev) => ({ ...prev, orderDate: value }))
                 }
+                disabled={isEditingClosed}
+                showCalendarButton={!isEditingClosed}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
             </div>
@@ -571,6 +592,8 @@ const PurchaseOrder = () => {
                     expectedDate: value,
                   }))
                 }
+                disabled={isEditingClosed}
+                showCalendarButton={!isEditingClosed}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
             </div>
@@ -588,8 +611,8 @@ const PurchaseOrder = () => {
                   <select
                     value={selectedBoqId}
                     onChange={(event) => setSelectedBoqId(event.target.value)}
-                    disabled={!form.projectId || boqsLoading}
-                    className="w-full md:w-64 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                    disabled={!form.projectId || boqsLoading || isEditingClosed}
+                    className="w-full md:w-64 border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                   >
                     <option value="">
                       {boqsLoading
@@ -609,7 +632,7 @@ const PurchaseOrder = () => {
                   <button
                     type="button"
                     onClick={applyBoqToItems}
-                    disabled={!selectedBoqId || boqsLoading}
+                    disabled={!selectedBoqId || boqsLoading || isEditingClosed}
                     className="md:ml-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
                   >
                     Use BOQ Items
@@ -677,7 +700,8 @@ const PurchaseOrder = () => {
                   setForm((prev) => ({ ...prev, notes: event.target.value }))
                 }
                 placeholder="Delivery terms, remarks, or approvals."
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px]"
+                disabled={isEditingClosed}
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               />
             </div>
           </div>
@@ -693,6 +717,7 @@ const PurchaseOrder = () => {
           extraFieldKey="location"
           extraFieldLabel="Location"
           extraFieldPlaceholder="Site/store location"
+          readOnly={isEditingClosed}
         />
         {errors.items && (
           <p className="text-xs text-red-600">{errors.items}</p>
@@ -708,9 +733,14 @@ const PurchaseOrder = () => {
           </button>
           <button
             type="submit"
+            disabled={isEditingClosed}
             className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
           >
-            {editingId ? "Update PO" : "Save PO"}
+            {isEditingClosed
+              ? "Closed PO"
+              : editingId
+              ? "Update PO"
+              : "Save PO"}
           </button>
         </div>
       </form>
