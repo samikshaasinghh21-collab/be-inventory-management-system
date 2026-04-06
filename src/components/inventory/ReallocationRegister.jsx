@@ -150,6 +150,15 @@ const ReallocationRegister = () => {
     vendorMap,
   ]);
 
+  const activeViewRecord = useMemo(() => {
+    if (!viewRecord?.id) {
+      return viewRecord;
+    }
+    return (
+      records.find((record) => String(record.id) === String(viewRecord.id)) ?? viewRecord
+    );
+  }, [records, viewRecord]);
+
   const loadRecords = async () => {
     const list = await fetchReallocateInventory();
     const safe = Array.isArray(list) ? list : [];
@@ -210,14 +219,6 @@ const ReallocationRegister = () => {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!viewRecord?.id) return;
-    const updated = records.find((record) => String(record.id) === String(viewRecord.id));
-    if (updated && updated !== viewRecord) {
-      setViewRecord(updated);
-    }
-  }, [records, viewRecord?.id]);
 
   const statusClass = (status) => {
     const normalized = String(status || "").toLowerCase();
@@ -342,7 +343,7 @@ const ReallocationRegister = () => {
               <tr>
                 <th className="px-4 py-3 text-left font-semibold min-w-[140px]">Reference</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Type</th>
-                <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Consumption Ref</th>
+                <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Receive Ref</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[180px]">Project</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">From</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">To / Vendor</th>
@@ -430,7 +431,7 @@ const ReallocationRegister = () => {
         </div>
       </section>
 
-      {viewRecord && (
+      {activeViewRecord && (
         <DocumentViewPanel
           id="reallocation-view-panel"
           title="DELIVERY CHALLAN DETAILS"
@@ -442,26 +443,34 @@ const ReallocationRegister = () => {
           companyEmail={company.email}
           logoUrl={logoUrl}
           primaryPairs={[
-            { label: "Reference", value: viewRecord.referenceNumber || `REL-${viewRecord.id}` },
-            { label: "Type", value: getMovementTypeLabel(viewRecord.type) },
+            {
+              label: "Reference",
+              value:
+                activeViewRecord.referenceNumber || `REL-${activeViewRecord.id}`,
+            },
+            { label: "Type", value: getMovementTypeLabel(activeViewRecord.type) },
             {
               label: "Request Date",
-              value: formatDate(viewRecord.requestDate || viewRecord.transferDate),
+              value: formatDate(
+                activeViewRecord.requestDate || activeViewRecord.transferDate
+              ),
             },
-            { label: "Status", value: viewRecord.status || "Pending" },
-            { label: "Consumption Ref", value: viewRecord.consumptionNumber || "-" },
-            { label: "Requested By", value: viewRecord.requestedBy || "-" },
+            { label: "Status", value: activeViewRecord.status || "Pending" },
+            { label: "Receive Ref", value: activeViewRecord.consumptionNumber || "-" },
+            { label: "Requested By", value: activeViewRecord.requestedBy || "-" },
           ]}
           leftBlockTitle="Project / From"
           leftBlockLines={[
-            projectMap[String(viewRecord.projectId)]?.name || "-",
-            locationMap[String(viewRecord.fromLocationId)]?.name || "-",
+            projectMap[String(activeViewRecord.projectId)]?.name || "-",
+            locationMap[String(activeViewRecord.fromLocationId)]?.name || "-",
           ]}
-          rightBlockTitle={viewRecord.type === "Return" ? "Return Vendor" : "To Location"}
+          rightBlockTitle={
+            activeViewRecord.type === "Return" ? "Return Vendor" : "To Location"
+          }
           rightBlockLines={[
-            viewRecord.type === "Return"
-              ? vendorMap[String(viewRecord.returnVendorId)]?.name || "-"
-              : locationMap[String(viewRecord.toLocationId)]?.name || "-",
+            activeViewRecord.type === "Return"
+              ? vendorMap[String(activeViewRecord.returnVendorId)]?.name || "-"
+              : locationMap[String(activeViewRecord.toLocationId)]?.name || "-",
           ]}
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
@@ -469,7 +478,7 @@ const ReallocationRegister = () => {
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "quantity", label: "Qty", align: "right", widthClass: "w-24" },
           ]}
-          tableRows={(viewRecord.items || []).map((item, index) => ({
+          tableRows={(activeViewRecord.items || []).map((item, index) => ({
             id: item.id ?? index,
             serial: index + 1,
             name: item.name || item.item || "-",
@@ -477,10 +486,13 @@ const ReallocationRegister = () => {
             quantity: fmtQty(item.quantity),
           }))}
           bottomLeftTitle="Notes"
-          bottomLeftValue={viewRecord.notes || "-"}
+          bottomLeftValue={activeViewRecord.notes || "-"}
           bottomRightTitle="Total Quantity"
           bottomRightValue={fmtQty(
-            (viewRecord.items || []).reduce((sum, item) => sum + qty(item.quantity), 0)
+            (activeViewRecord.items || []).reduce(
+              (sum, item) => sum + qty(item.quantity),
+              0
+            )
           )}
           footerCompanyName={brandName || "Company"}
         />

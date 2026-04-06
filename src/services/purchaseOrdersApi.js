@@ -2,6 +2,7 @@ import api from "./api";
 
 const normalizePoItem = (item = {}) => ({
   id: item.id ?? item.Id ?? null,
+  poItemId: item.poItemId ?? item.purchaseOrderItemId ?? item.PurchaseOrderItemId ?? item.id ?? item.Id ?? null,
   purchaseOrderId: item.purchaseOrderId ?? item.PurchaseOrderId ?? null,
   itemId: item.itemId ?? item.ItemId ?? null,
   name: item.name ?? item.Name ?? item.ItemName ?? "",

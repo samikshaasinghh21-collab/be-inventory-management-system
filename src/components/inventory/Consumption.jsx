@@ -16,6 +16,10 @@ import DocumentViewPanel from "./DocumentViewPanel";
 import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
+import {
+  getActiveProjectId,
+  setActiveProjectId,
+} from "../../services/projectSelectionStore";
 
 const panel =
   "rounded-xl border border-slate-200 bg-[#f8f9ff] shadow-[0_8px_24px_-18px_rgba(15,23,42,0.35)]";
@@ -399,6 +403,23 @@ const Consumption = () => {
     }
   }, [records, viewRecord?.id]);
 
+  useEffect(() => {
+    if (editingId || form.projectId || !projects.length || !boqs.length) {
+      return;
+    }
+    const activeProjectId = getActiveProjectId();
+    if (!activeProjectId) {
+      return;
+    }
+    const exists = projects.some(
+      (project) => String(project.id) === String(activeProjectId)
+    );
+    if (!exists) {
+      return;
+    }
+    onProjectChange(String(activeProjectId));
+  }, [boqs.length, editingId, form.projectId, projects]);
+
   const onProjectChange = (projectId) => {
     setForm((p) => ({
       ...p,
@@ -411,6 +432,9 @@ const Consumption = () => {
     clearErr("projectId");
     clearErr("locationId");
     clearErr("items");
+    if (projectId) {
+      setActiveProjectId(projectId);
+    }
   };
 
   const onItemChange = (id, fieldName, value) => {

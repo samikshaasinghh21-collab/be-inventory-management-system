@@ -96,6 +96,9 @@ const SettingsPage = () => {
   };
 
   const handleSave = () => {
+    if (!isDirty) {
+      return;
+    }
     saveSettings(form);
     setBaseline(JSON.stringify(form));
     showStatus("success", "Settings saved.");
@@ -113,8 +116,13 @@ const SettingsPage = () => {
     updateSection(section, field, Number.isNaN(next) ? "" : next);
   };
 
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    handleSave();
+  };
+
   return (
-    <div className="p-6">
+    <form className="p-6" onSubmit={handleSubmit}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
         <div>
           <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
@@ -134,8 +142,7 @@ const SettingsPage = () => {
             Reset to Defaults
           </button>
           <button
-            type="button"
-            onClick={handleSave}
+            type="submit"
             disabled={!isDirty}
             className={`px-5 py-2 rounded-lg text-sm font-medium text-white transition ${
               isDirty
@@ -329,6 +336,20 @@ const SettingsPage = () => {
                     updateSection("company", "phone", event.target.value)
                   }
                   placeholder="Ex: +1 555 987 6543"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Business State
+                </label>
+                <input
+                  type="text"
+                  value={form.company.state}
+                  onChange={(event) =>
+                    updateSection("company", "state", event.target.value)
+                  }
+                  placeholder="Ex: Karnataka"
                   className={inputClass}
                 />
               </div>
@@ -698,6 +719,28 @@ const SettingsPage = () => {
                   className={inputClass}
                 />
               </div>
+              <div className="md:col-span-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Closed PO Admin Password
+                </label>
+                <input
+                  type="password"
+                  value={form.security.closedPoAdminPassword}
+                  onChange={(event) =>
+                    updateSection(
+                      "security",
+                      "closedPoAdminPassword",
+                      event.target.value
+                    )
+                  }
+                  placeholder="Required to unlock closed PO edits"
+                  className={inputClass}
+                  autoComplete="new-password"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Admin users must enter this password before editing a closed purchase order.
+                </p>
+              </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
               <ToggleItem
@@ -724,7 +767,7 @@ const SettingsPage = () => {
           </section>
         </div>
       </div>
-    </div>
+    </form>
   );
 };
 

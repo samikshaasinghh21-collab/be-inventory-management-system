@@ -19,6 +19,12 @@ import {
 } from "../../utils/taxUtils";
 import { generateNextPurchaseOrderNumber } from "../../utils/purchaseOrderNumber";
 import { isClosedPurchaseOrder } from "../../utils/purchaseOrderStatus";
+import PasswordPromptModal from "../common/PasswordPromptModal";
+import { getClosedPoAuthError } from "../../utils/closedPoAuth";
+import {
+  getActiveProjectId,
+  setActiveProjectId,
+} from "../../services/projectSelectionStore";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -64,11 +70,16 @@ const PurchaseOrder = () => {
   const [boqsLoading, setBoqsLoading] = useState(false);
   const [boqError, setBoqError] = useState("");
   const [selectedBoqId, setSelectedBoqId] = useState("");
+  const [closedPoOverrideApproved, setClosedPoOverrideApproved] = useState(false);
+  const [passwordPromptOpen, setPasswordPromptOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState("");
   useEffect(() => {
     const record = location.state?.purchaseOrder;
     if (record && record.id !== editingId) {
       setEditingId(record.id);
       setEditingStatus(record.status || "Draft");
+      setClosedPoOverrideApproved(Boolean(location.state?.closedPoAuthorized));
       setForm({
         poNumber: record.poNumber || "",
         projectId: record.projectId || "",
@@ -95,6 +106,8 @@ const PurchaseOrder = () => {
       }));
       setItems(mappedItems.length ? mappedItems : [createLineItem()]);
       setErrors({});
+      setAdminPassword("");
+      setAdminPasswordError("");
       // Clear navigation state so we don't re-apply on re-render
       window.history.replaceState({}, document.title);
     }
@@ -162,6 +175,29 @@ const PurchaseOrder = () => {
     void loadVendors();
     void loadBoqs();
   }, []);
+
+  useEffect(() => {
+    if (editingId || form.projectId || !projects.length) {
+      return;
+    }
+    const activeProjectId = getActiveProjectId();
+    if (!activeProjectId) {
+      return;
+    }
+    const exists = projects.some(
+      (project) => String(project.id) === String(activeProjectId)
+    );
+    if (!exists) {
+      return;
+    }
+    setForm((prev) => ({ ...prev, projectId: String(activeProjectId) }));
+  }, [editingId, form.projectId, projects]);
+
+  useEffect(() => {
+    if (form.projectId) {
+      setActiveProjectId(form.projectId);
+    }
+  }, [form.projectId]);
 
   useEffect(() => {
     if (editingId) {
@@ -250,6 +286,7 @@ const PurchaseOrder = () => {
   }, [boqs, form.projectId]);
 
   const isEditingClosed = Boolean(editingId) && isClosedPurchaseOrder(editingStatus);
+  const isEditingClosedLocked = isEditingClosed && !closedPoOverrideApproved;
 
   const resetForm = () => {
     setForm(createFormState());
@@ -257,6 +294,10 @@ const PurchaseOrder = () => {
     setErrors({});
     setEditingId(null);
     setEditingStatus("");
+    setClosedPoOverrideApproved(false);
+    setPasswordPromptOpen(false);
+    setAdminPassword("");
+    setAdminPasswordError("");
   };
 
   const validate = () => {
@@ -279,7 +320,7 @@ const PurchaseOrder = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (isEditingClosed) {
+    if (isEditingClosedLocked) {
       setApiError("This Purchase Order is Closed.");
       return;
     }
@@ -299,6 +340,7 @@ const PurchaseOrder = () => {
       orderDate: form.orderDate || null,
       expectedDate: form.expectedDate || null,
       notes: form.notes || "",
+      allowClosedEdit: isEditingClosed && closedPoOverrideApproved,
       items: cleanedItems.map((item) => {
         const qty = Number(item.quantity) || 0;
         const unitPrice = Number(item.rate) || 0;
@@ -388,6 +430,19 @@ const PurchaseOrder = () => {
     navigate("/inventory/products?pick=po");
   };
 
+  const handleClosedPoUnlock = () => {
+    const nextError = getClosedPoAuthError(settings, adminPassword);
+    if (nextError) {
+      setAdminPasswordError(nextError);
+      return;
+    }
+    setClosedPoOverrideApproved(true);
+    setPasswordPromptOpen(false);
+    setAdminPassword("");
+    setAdminPasswordError("");
+    setApiError("");
+  };
+
   return (
     <div className="p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
@@ -455,7 +510,29 @@ const PurchaseOrder = () => {
       )}
       {isEditingClosed && (
         <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          This Purchase Order is Closed.
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium">This Purchase Order is Closed.</p>
+              <p className="mt-1">
+                {isEditingClosedLocked
+                  ? "Only Admin users can unlock and edit this PO."
+                  : "Admin override is active for this closed PO."}
+              </p>
+            </div>
+            {isEditingClosedLocked ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPasswordPromptOpen(true);
+                  setAdminPassword("");
+                  setAdminPasswordError("");
+                }}
+                className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900"
+              >
+                Unlock as Admin
+              </button>
+            ) : null}
+          </div>
         </div>
       )}
 
@@ -488,7 +565,7 @@ const PurchaseOrder = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, projectId: event.target.value }))
                 }
-                disabled={isEditingClosed}
+                disabled={isEditingClosedLocked}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="">Select project</option>
@@ -511,7 +588,7 @@ const PurchaseOrder = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, vendorId: event.target.value }))
                 }
-                disabled={isEditingClosed}
+                disabled={isEditingClosedLocked}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="">Select vendor</option>
@@ -537,7 +614,7 @@ const PurchaseOrder = () => {
                     locationId: event.target.value,
                   }))
                 }
-                disabled={isEditingClosed}
+                disabled={isEditingClosedLocked}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="">Select location</option>
@@ -557,7 +634,7 @@ const PurchaseOrder = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, status: event.target.value }))
                 }
-                disabled={isEditingClosed}
+                disabled={isEditingClosedLocked}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="Draft">Draft</option>
@@ -575,8 +652,8 @@ const PurchaseOrder = () => {
                 onChange={(value) =>
                   setForm((prev) => ({ ...prev, orderDate: value }))
                 }
-                disabled={isEditingClosed}
-                showCalendarButton={!isEditingClosed}
+                disabled={isEditingClosedLocked}
+                showCalendarButton={!isEditingClosedLocked}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
             </div>
@@ -592,8 +669,8 @@ const PurchaseOrder = () => {
                     expectedDate: value,
                   }))
                 }
-                disabled={isEditingClosed}
-                showCalendarButton={!isEditingClosed}
+                disabled={isEditingClosedLocked}
+                showCalendarButton={!isEditingClosedLocked}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
             </div>
@@ -611,7 +688,7 @@ const PurchaseOrder = () => {
                   <select
                     value={selectedBoqId}
                     onChange={(event) => setSelectedBoqId(event.target.value)}
-                    disabled={!form.projectId || boqsLoading || isEditingClosed}
+                    disabled={!form.projectId || boqsLoading || isEditingClosedLocked}
                     className="w-full md:w-64 border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                   >
                     <option value="">
@@ -632,7 +709,7 @@ const PurchaseOrder = () => {
                   <button
                     type="button"
                     onClick={applyBoqToItems}
-                    disabled={!selectedBoqId || boqsLoading || isEditingClosed}
+                    disabled={!selectedBoqId || boqsLoading || isEditingClosedLocked}
                     className="md:ml-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
                   >
                     Use BOQ Items
@@ -700,7 +777,7 @@ const PurchaseOrder = () => {
                   setForm((prev) => ({ ...prev, notes: event.target.value }))
                 }
                 placeholder="Delivery terms, remarks, or approvals."
-                disabled={isEditingClosed}
+                disabled={isEditingClosedLocked}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               />
             </div>
@@ -717,7 +794,7 @@ const PurchaseOrder = () => {
           extraFieldKey="location"
           extraFieldLabel="Location"
           extraFieldPlaceholder="Site/store location"
-          readOnly={isEditingClosed}
+          readOnly={isEditingClosedLocked}
         />
         {errors.items && (
           <p className="text-xs text-red-600">{errors.items}</p>
@@ -733,10 +810,10 @@ const PurchaseOrder = () => {
           </button>
           <button
             type="submit"
-            disabled={isEditingClosed}
+            disabled={isEditingClosedLocked}
             className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
           >
-            {isEditingClosed
+            {isEditingClosedLocked
               ? "Closed PO"
               : editingId
               ? "Update PO"
@@ -744,6 +821,27 @@ const PurchaseOrder = () => {
           </button>
         </div>
       </form>
+
+      <PasswordPromptModal
+        isOpen={passwordPromptOpen}
+        title="Unlock Closed PO"
+        description="Enter the admin password to edit this closed purchase order."
+        password={adminPassword}
+        error={adminPasswordError}
+        confirmLabel="Unlock"
+        onPasswordChange={(value) => {
+          setAdminPassword(value);
+          if (adminPasswordError) {
+            setAdminPasswordError("");
+          }
+        }}
+        onCancel={() => {
+          setPasswordPromptOpen(false);
+          setAdminPassword("");
+          setAdminPasswordError("");
+        }}
+        onConfirm={handleClosedPoUnlock}
+      />
 
     </div>
   );

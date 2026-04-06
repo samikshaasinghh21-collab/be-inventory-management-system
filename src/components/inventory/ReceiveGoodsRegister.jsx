@@ -18,6 +18,9 @@ import {
   splitDocumentText,
 } from "../../utils/receiveGoodsDocument";
 import DocumentViewPanel from "./DocumentViewPanel";
+import PasswordPromptModal from "../common/PasswordPromptModal";
+import { getClosedPoAuthError } from "../../utils/closedPoAuth";
+import { getGstTaxMode } from "../../utils/gstUtils";
 
 const toQuantity = (value) => {
   const parsed = Number(value);
@@ -54,6 +57,11 @@ const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   return (
     <div className={`space-y-1 text-sm text-slate-700 ${alignClass}`}>
       <div className="font-medium">Subtotal: {formatCurrency(summary.subtotal)}</div>
+      {summary.igstGroups?.map((group) => (
+        <div key={`igst-${group.rate}`}>
+          IGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
       {summary.cgstGroups.map((group) => (
         <div key={`cgst-${group.rate}`}>
           CGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
@@ -79,10 +87,11 @@ const getReceiptTotals = (receipt) => {
         item.orderedQty ?? item.quantity ?? item.OrderedQty
       );
       const received = toQuantity(item.receivedQty ?? item.ReceivedQty);
-      const balance = Math.max(
-        toQuantity(item.balanceQty ?? item.BalanceQty),
-        Math.max(ordered - received, 0)
-      );
+      const rawBalance = item.balanceQty ?? item.BalanceQty;
+      const balance =
+        rawBalance === undefined || rawBalance === null || rawBalance === ""
+          ? Math.max(ordered - received, 0)
+          : toQuantity(rawBalance);
       return {
         ordered: acc.ordered + ordered,
         received: acc.received + received,
@@ -137,6 +146,9 @@ const ReceiveGoodsRegister = () => {
   const [filterProject, setFilterProject] = useState("");
   const [filterVendor, setFilterVendor] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [closedPoPromptReceipt, setClosedPoPromptReceipt] = useState(null);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState("");
   const settings = useSettings();
   const company = settings?.company || {};
   const currency = settings?.preferences?.currency || "INR";
@@ -316,9 +328,58 @@ const ReceiveGoodsRegister = () => {
     }, 80);
   };
 
-  const handleOpenReceipt = (receipt) => {
-    navigate(`/inventory/receive-goods?purchaseOrderId=${receipt.purchaseOrderId}`, {
-      state: { purchaseOrderId: receipt.purchaseOrderId },
+  const handleEditReceipt = (receipt) => {
+    const po = poMap[String(receipt.purchaseOrderId)];
+    if (String(po?.status || "").toLowerCase() === "closed") {
+      setClosedPoPromptReceipt(receipt);
+      setAdminPassword("");
+      setAdminPasswordError("");
+      return;
+    }
+
+    navigate(
+      `/inventory/receive-goods?purchaseOrderId=${receipt.purchaseOrderId}&receiptId=${receipt.id}`,
+      {
+        state: {
+          purchaseOrderId: receipt.purchaseOrderId,
+          receiptId: receipt.id,
+        },
+      }
+    );
+  };
+
+  const confirmClosedPoReceiptEdit = () => {
+    const nextError = getClosedPoAuthError(settings, adminPassword);
+    if (nextError) {
+      setAdminPasswordError(nextError);
+      return;
+    }
+    if (!closedPoPromptReceipt) {
+      return;
+    }
+    navigate(
+      `/inventory/receive-goods?purchaseOrderId=${closedPoPromptReceipt.purchaseOrderId}&receiptId=${closedPoPromptReceipt.id}`,
+      {
+        state: {
+          purchaseOrderId: closedPoPromptReceipt.purchaseOrderId,
+          receiptId: closedPoPromptReceipt.id,
+          closedPoAuthorized: true,
+        },
+      }
+    );
+    setClosedPoPromptReceipt(null);
+    setAdminPassword("");
+    setAdminPasswordError("");
+  };
+
+  const getReceiptTaxMode = (receipt) => {
+    const po = poMap[String(receipt?.purchaseOrderId)];
+    const vendor = vendorMap[String(receipt?.vendorId || po?.vendorId)];
+    return getGstTaxMode({
+      vendorState: vendor?.state,
+      vendorGstin: vendor?.gstNumber,
+      companyState: company.state,
+      companyGstin: company.gstin,
     });
   };
 
@@ -473,7 +534,7 @@ const ReceiveGoodsRegister = () => {
                 const location = locationMap[String(receipt.locationId || po?.locationId)];
                 const totals = getReceiptTotals(receipt);
                 return (
-                  <Fragment key={receipt.id}>
+                  <Fragment key={`${receipt.id}-${po?.poNumber || receipt.purchaseOrderId || receipt.receivedDate || ""}`}>
                     <tr
                       className="border-t hover:bg-slate-50 cursor-pointer"
                       onClick={() => toggleRow(receipt.id)}
@@ -503,11 +564,11 @@ const ReceiveGoodsRegister = () => {
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            handleOpenReceipt(receipt);
+                            handleEditReceipt(receipt);
                           }}
                           className="text-emerald-600 text-sm"
                         >
-                          Open
+                          Edit
                         </button>
                         <button
                           type="button"
@@ -606,7 +667,7 @@ const ReceiveGoodsRegister = () => {
                                       const displayUnit = item.unit || poItem.unit || "-";
                                       return (
                                         <tr
-                                          key={item.id ?? item.itemId ?? idx}
+                                          key={`${receipt.id}-${item.id ?? item.itemId ?? "item"}-${idx}`}
                                           className="border-t"
                                         >
                                           <td className="p-2">{displayItemName}</td>
@@ -771,7 +832,8 @@ const ReceiveGoodsRegister = () => {
                 buildReceiptSummaryItems(
                   viewReceipt,
                   poMap[String(viewReceipt.purchaseOrderId)]
-                )
+                ),
+                { taxMode: getReceiptTaxMode(viewReceipt) }
               )}
               formatCurrency={formatCurrency}
               align="right"
@@ -780,6 +842,27 @@ const ReceiveGoodsRegister = () => {
           footerCompanyName={brandName || "Company"}
         />
       )}
+
+      <PasswordPromptModal
+        isOpen={Boolean(closedPoPromptReceipt)}
+        title="Unlock Closed PO Receipt"
+        description="Enter the admin password to edit a receipt linked to a closed purchase order."
+        password={adminPassword}
+        error={adminPasswordError}
+        confirmLabel="Unlock"
+        onPasswordChange={(value) => {
+          setAdminPassword(value);
+          if (adminPasswordError) {
+            setAdminPasswordError("");
+          }
+        }}
+        onCancel={() => {
+          setClosedPoPromptReceipt(null);
+          setAdminPassword("");
+          setAdminPasswordError("");
+        }}
+        onConfirm={confirmClosedPoReceiptEdit}
+      />
     </div>
   );
 };

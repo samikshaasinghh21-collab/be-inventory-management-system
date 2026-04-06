@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = {
     email: "",
     phone: "",
     address: "",
+    state: "",
     gstin: "",
   },
   preferences: {
@@ -47,6 +48,7 @@ export const DEFAULT_SETTINGS = {
     sessionTimeout: 30,
     passwordExpiryDays: 90,
     requireStrongPassword: true,
+    closedPoAdminPassword: "",
   },
 };
 

@@ -35,10 +35,20 @@ const compareReceiveChronology = (left = {}, right = {}) => {
   );
 };
 
+const emitReceiveGoodsChange = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("receive-goods:changed"));
+  }
+};
+
 export const normalizeReceiveGoodsItem = (item = {}) => {
   const orderedQty = toQuantity(item.orderedQty ?? item.OrderedQty ?? 0);
   const receivedQty = toQuantity(item.receivedQty ?? item.ReceivedQty ?? 0);
-  const explicitBalance = toQuantity(item.balanceQty ?? item.BalanceQty);
+  const rawExplicitBalance = item.balanceQty ?? item.BalanceQty;
+  const explicitBalance =
+    rawExplicitBalance === undefined || rawExplicitBalance === null || rawExplicitBalance === ""
+      ? null
+      : toQuantity(rawExplicitBalance);
   const computedBalance = Math.max(orderedQty - receivedQty, 0);
   return {
     id: item.id ?? item.Id ?? null,
@@ -48,6 +58,11 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
       item.ReceivegoodsId ??
       null,
     purchaseOrderId: item.purchaseOrderId ?? item.PurchaseOrderId ?? null,
+    poItemId:
+      item.poItemId ??
+      item.purchaseOrderItemId ??
+      item.PurchaseOrderItemId ??
+      null,
     itemId: item.itemId ?? item.ItemId ?? null,
     name: item.name ?? item.Name ?? item.ItemName ?? "",
     description: item.description ?? item.Description ?? "",
@@ -55,12 +70,7 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
     notes: item.notes ?? item.Notes ?? "",
     orderedQty,
     receivedQty,
-    balanceQty: Math.max(
-      explicitBalance > 0 || computedBalance === 0
-        ? explicitBalance
-        : computedBalance,
-      0
-    ),
+    balanceQty: Math.max(explicitBalance ?? computedBalance, 0),
     createdAt: item.createdAt ?? item.CreatedAt ?? null,
   };
 };
@@ -119,5 +129,16 @@ export const saveReceiveGoods = async (payload) => {
   const response = await api.post("/receive-goods", payload, {
     timeout: 60000,
   });
-  return normalizeReceiveGoods(response.data?.receipt ?? response.data);
+  const normalized = normalizeReceiveGoods(response.data?.receipt ?? response.data);
+  emitReceiveGoodsChange();
+  return normalized;
+};
+
+export const updateReceiveGoods = async (id, payload) => {
+  const response = await api.put(`/receive-goods/${id}`, payload, {
+    timeout: 60000,
+  });
+  const normalized = normalizeReceiveGoods(response.data?.receipt ?? response.data);
+  emitReceiveGoodsChange();
+  return normalized;
 };

@@ -3,8 +3,8 @@ import { getProjects } from "../../services/projectsStore";
 import { fetchLocations } from "../../services/locationsApi";
 import DateInput from "../common/DateInput";
 import { fetchVendors, syncVendorsCache } from "../../services/vendorsApi";
-import { fetchConsumptions } from "../../services/consumptionApi";
 import { fetchItems, updateQuantityApi } from "../../services/inventoryApi";
+import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
 import {
   createReallocateInventory,
   deleteReallocateInventory,
@@ -67,6 +67,11 @@ const statusClass = (status) => {
 const getMovementTypeLabel = (type) =>
   type === "Reallocate" ? "DC (Delivery Challan)" : type || "-";
 
+const getReceiveReference = (record = {}) =>
+  record.consumptionNumber ??
+  record.referenceNumber ??
+  `RG-${record.receiveGoodsId ?? record.id ?? ""}`;
+
 const ReallocateReturn = () => {
   const settings = useSettings();
   const company = settings?.company || {};
@@ -126,7 +131,7 @@ const ReallocateReturn = () => {
 
   const loadConsumptions = async () => {
     try {
-      const list = await fetchConsumptions();
+      const list = await fetchReceiveGoods();
       setConsumptions(Array.isArray(list) ? list : []);
     } catch {
       setConsumptions([]);
@@ -156,20 +161,12 @@ const ReallocateReturn = () => {
       void loadRecords();
     };
     window.addEventListener("reallocate-inventory:changed", handler);
-    window.addEventListener("consumptions:changed", handler);
+    window.addEventListener("receive-goods:changed", handler);
     return () => {
       window.removeEventListener("reallocate-inventory:changed", handler);
-      window.removeEventListener("consumptions:changed", handler);
+      window.removeEventListener("receive-goods:changed", handler);
     };
   }, []);
-
-  useEffect(() => {
-    if (!viewRecord?.id) return;
-    const updated = records.find((record) => String(record.id) === String(viewRecord.id));
-    if (updated && updated !== viewRecord) {
-      setViewRecord(updated);
-    }
-  }, [records, viewRecord?.id]);
 
   const projectMap = useMemo(() => {
     return projects.reduce((acc, project) => {
@@ -203,9 +200,9 @@ const ReallocateReturn = () => {
     const query = consumptionQuery.trim().toLowerCase();
     if (!query) return consumptions;
     return consumptions.filter((entry) => {
-      const ref = entry.consumptionNumber || `CON-${entry.id}`;
+      const ref = getReceiveReference(entry);
       const dateText = formatDate(
-        entry.consumptionDate || entry.date || entry.createdAt || entry.updatedAt
+        entry.receivedDate || entry.date || entry.createdAt || entry.updatedAt
       );
       const safeDate = dateText === "-" ? "" : dateText;
       const itemsText = (entry.items || [])
@@ -219,6 +216,15 @@ const ReallocateReturn = () => {
       return haystack.includes(query);
     });
   }, [consumptions, consumptionQuery]);
+
+  const activeViewRecord = useMemo(() => {
+    if (!viewRecord?.id) {
+      return viewRecord;
+    }
+    return (
+      records.find((record) => String(record.id) === String(viewRecord.id)) ?? viewRecord
+    );
+  }, [records, viewRecord]);
 
   const inventoryByName = useMemo(() => {
     return inventoryItems.reduce((acc, item) => {
@@ -291,9 +297,6 @@ const ReallocateReturn = () => {
 
   const returnedQtyByConsumptionMaterial = useMemo(() => {
     return records.reduce((acc, record) => {
-      if (record.type !== "Return") {
-        return acc;
-      }
       if (editingId && record.id === editingId) {
         return acc;
       }
@@ -330,7 +333,7 @@ const ReallocateReturn = () => {
     return (source.items || []).map((item, index) => {
       const name = String(item.name || "").trim();
       const key = name.toLowerCase();
-      const consumedQty = toQuantity(item.quantity);
+      const consumedQty = toQuantity(item.receivedQty ?? item.quantity);
       const alreadyReturned =
         returnedQtyByConsumptionMaterial[`${String(consumptionId)}::${key}`] || 0;
       const availableQty = Math.max(consumedQty - alreadyReturned, 0);
@@ -385,7 +388,7 @@ const ReallocateReturn = () => {
       nextErrors.referenceNumber = "Reference number is required.";
     }
     if (!form.consumptionId) {
-      nextErrors.consumptionId = "Select a consumption record.";
+      nextErrors.consumptionId = "Select a receive inventory record.";
     }
     if (!form.projectId) {
       nextErrors.projectId = "Select a project.";
@@ -404,14 +407,14 @@ const ReallocateReturn = () => {
       (item) => String(item.name || "").trim() && toQuantity(item.quantity) > 0
     );
     if (!hasValidItem) {
-      nextErrors.items = "Select at least one consumed material quantity.";
+      nextErrors.items = "Select at least one received material quantity.";
     }
 
     const hasOverQty = items.some(
       (item) => toQuantity(item.quantity) > toQuantity(item.availableQty)
     );
     if (hasOverQty) {
-      nextErrors.items = "Request quantity cannot exceed available consumed quantity.";
+      nextErrors.items = "Request quantity cannot exceed available received quantity.";
     }
 
     setErrors(nextErrors);
@@ -440,7 +443,7 @@ const ReallocateReturn = () => {
       referenceNumber: form.referenceNumber.trim(),
       type: form.type,
       consumptionId: form.consumptionId ? Number(form.consumptionId) : null,
-      consumptionNumber: source?.consumptionNumber || "",
+      consumptionNumber: getReceiveReference(source),
       projectId: form.projectId ? Number(form.projectId) : null,
       fromLocationId: form.fromLocationId ? Number(form.fromLocationId) : null,
       toLocationId: form.toLocationId ? Number(form.toLocationId) : null,
@@ -586,7 +589,7 @@ const ReallocateReturn = () => {
             Delivery Challan
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Create delivery challans using consumed materials and track stock movement.
+            Create delivery challans using receive-inventory records and track stock movement.
           </p>
         </div>
         <button
@@ -660,7 +663,9 @@ const ReallocateReturn = () => {
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-700">Consumption Ref *</label>
+              <label className="text-sm font-medium text-slate-700">
+                Receive Inventory Ref *
+              </label>
               <input
                 type="search"
                 value={consumptionQuery}
@@ -673,10 +678,10 @@ const ReallocateReturn = () => {
                 onChange={(event) => applyConsumptionSelection(event.target.value)}
                 className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
-                <option value="">Select consumption</option>
+                <option value="">Select receive inventory</option>
                 {filteredConsumptions.map((entry) => (
                   <option key={entry.id} value={entry.id}>
-                    {entry.consumptionNumber || `CON-${entry.id}`} | {formatDate(entry.consumptionDate)}
+                    {getReceiveReference(entry)} | {formatDate(entry.receivedDate)}
                   </option>
                 ))}
               </select>
@@ -820,14 +825,14 @@ const ReallocateReturn = () => {
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="mb-4 text-base font-semibold text-slate-800">
-            Materials From Consumption
+            Materials From Receive Inventory
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-100 text-slate-600">
                 <tr>
                   <th className="min-w-[200px] p-3 text-left">Material</th>
-                  <th className="min-w-[120px] p-3 text-left">Consumed Qty</th>
+                  <th className="min-w-[120px] p-3 text-left">Received Qty</th>
                   <th className="min-w-[120px] p-3 text-left">Available Qty</th>
                   <th className="min-w-[160px] p-3 text-left">Request Qty</th>
                 </tr>
@@ -836,7 +841,7 @@ const ReallocateReturn = () => {
                 {items.length === 0 && (
                   <tr>
                     <td colSpan="4" className="p-4 text-center text-slate-500">
-                      Select a consumption record to load materials.
+                      Select a receive inventory record to load materials.
                     </td>
                   </tr>
                 )}
@@ -927,7 +932,7 @@ const ReallocateReturn = () => {
               <tr>
                 <th className="px-4 py-3 text-left font-semibold min-w-[140px]">Reference</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Type</th>
-                <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Consumption Ref</th>
+                <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Receive Ref</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[180px]">Project</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">From</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">To / Vendor</th>
@@ -1029,7 +1034,7 @@ const ReallocateReturn = () => {
         </div>
       </section>
 
-      {viewRecord && (
+      {activeViewRecord && (
         <DocumentViewPanel
           id="reallocation-view-panel"
           title="DELIVERY CHALLAN DETAILS"
@@ -1041,26 +1046,34 @@ const ReallocateReturn = () => {
           companyEmail={company.email}
           logoUrl={logoUrl}
           primaryPairs={[
-            { label: "Reference", value: viewRecord.referenceNumber || `REL-${viewRecord.id}` },
-            { label: "Type", value: getMovementTypeLabel(viewRecord.type) },
+            {
+              label: "Reference",
+              value:
+                activeViewRecord.referenceNumber || `REL-${activeViewRecord.id}`,
+            },
+            { label: "Type", value: getMovementTypeLabel(activeViewRecord.type) },
             {
               label: "Request Date",
-              value: formatDate(viewRecord.requestDate || viewRecord.transferDate),
+              value: formatDate(
+                activeViewRecord.requestDate || activeViewRecord.transferDate
+              ),
             },
-            { label: "Status", value: viewRecord.status || "Pending" },
-            { label: "Consumption Ref", value: viewRecord.consumptionNumber || "-" },
-            { label: "Requested By", value: viewRecord.requestedBy || "-" },
+            { label: "Status", value: activeViewRecord.status || "Pending" },
+            { label: "Receive Ref", value: activeViewRecord.consumptionNumber || "-" },
+            { label: "Requested By", value: activeViewRecord.requestedBy || "-" },
           ]}
           leftBlockTitle="Project / From"
           leftBlockLines={[
-            projectMap[String(viewRecord.projectId)]?.name || "-",
-            locationMap[String(viewRecord.fromLocationId)]?.name || "-",
+            projectMap[String(activeViewRecord.projectId)]?.name || "-",
+            locationMap[String(activeViewRecord.fromLocationId)]?.name || "-",
           ]}
-          rightBlockTitle={viewRecord.type === "Return" ? "Return Vendor" : "To Location"}
+          rightBlockTitle={
+            activeViewRecord.type === "Return" ? "Return Vendor" : "To Location"
+          }
           rightBlockLines={[
-            viewRecord.type === "Return"
-              ? vendorMap[String(viewRecord.returnVendorId)]?.name || "-"
-              : locationMap[String(viewRecord.toLocationId)]?.name || "-",
+            activeViewRecord.type === "Return"
+              ? vendorMap[String(activeViewRecord.returnVendorId)]?.name || "-"
+              : locationMap[String(activeViewRecord.toLocationId)]?.name || "-",
           ]}
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
@@ -1068,7 +1081,7 @@ const ReallocateReturn = () => {
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "quantity", label: "Qty", align: "right", widthClass: "w-24" },
           ]}
-          tableRows={(viewRecord.items || []).map((item, index) => ({
+          tableRows={(activeViewRecord.items || []).map((item, index) => ({
             id: item.id ?? index,
             serial: index + 1,
             name: item.name || item.item || "-",
@@ -1076,10 +1089,13 @@ const ReallocateReturn = () => {
             quantity: fmtQty(item.quantity),
           }))}
           bottomLeftTitle="Notes"
-          bottomLeftValue={viewRecord.notes || "-"}
+          bottomLeftValue={activeViewRecord.notes || "-"}
           bottomRightTitle="Total Quantity"
           bottomRightValue={fmtQty(
-            (viewRecord.items || []).reduce((sum, item) => sum + toQuantity(item.quantity), 0)
+            (activeViewRecord.items || []).reduce(
+              (sum, item) => sum + toQuantity(item.quantity),
+              0
+            )
           )}
           footerCompanyName={brandName || "Company"}
         />

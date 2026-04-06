@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useSettings from "../hooks/useSettings";
 import { formatDate } from "../utils/dateFormat";
+import { ensureApiAvailable, isApiUnavailableError } from "../services/api";
 import { fetchProjects } from "../services/projectsApi";
 import {
   getProjects as getLocalProjects,
@@ -122,6 +123,19 @@ const SummaryCard = ({
   </div>
 );
 
+const getFallbackDashboardData = () => ({
+  projects: getLocalProjects(),
+  boqs: [],
+  purchaseOrders: [],
+  receiveGoods: [],
+  deliveryChallans: [],
+  locations: [],
+  vendors: [],
+  items: [],
+  consumption: getWorkflowList(WORKFLOW_CONSUMPTION_KEY),
+  goodsDelivered: getWorkflowList(WORKFLOW_GOODS_DELIVERED_KEY),
+});
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const settings = useSettings();
@@ -166,6 +180,23 @@ const Dashboard = () => {
     if (silent) setRefreshing(true);
     else setLoading(true);
 
+    try {
+      await ensureApiAvailable();
+    } catch (error) {
+      if (isApiUnavailableError(error)) {
+        setData(getFallbackDashboardData());
+        setErrors([
+          error?.response?.data?.error ||
+            error?.message ||
+            "Inventory API is unavailable.",
+        ]);
+
+        if (silent) setRefreshing(false);
+        else setLoading(false);
+        return;
+      }
+    }
+
     const results = await Promise.allSettled([
       fetchProjects(),
       fetchBoqs(),
@@ -177,6 +208,25 @@ const Dashboard = () => {
       fetchItems(),
       fetchConsumptions(),
     ]);
+
+    const unavailableResults = results.filter(
+      (result) =>
+        result.status === "rejected" && isApiUnavailableError(result.reason)
+    );
+
+    if (unavailableResults.length === results.length) {
+      const firstUnavailableError = unavailableResults[0]?.reason;
+      setData(getFallbackDashboardData());
+      setErrors([
+        firstUnavailableError?.response?.data?.error ||
+          firstUnavailableError?.message ||
+          "Inventory API is unavailable.",
+      ]);
+
+      if (silent) setRefreshing(false);
+      else setLoading(false);
+      return;
+    }
 
     const nextErrors = [];
     const readList = (result, label, fallback = []) => {

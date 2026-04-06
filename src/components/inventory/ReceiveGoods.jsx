@@ -4,7 +4,11 @@ import { getProjects } from "../../services/projectsStore";
 import { fetchVendors } from "../../services/vendorsApi";
 import { fetchLocations } from "../../services/locationsApi";
 import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
-import { fetchReceiveGoods, saveReceiveGoods } from "../../services/receiveGoodsApi";
+import {
+  fetchReceiveGoods,
+  saveReceiveGoods,
+  updateReceiveGoods,
+} from "../../services/receiveGoodsApi";
 import useSettings from "../../hooks/useSettings";
 import DateInput from "../common/DateInput";
 import { formatDate } from "../../utils/dateFormat";
@@ -19,6 +23,9 @@ import {
 } from "../../utils/receiveGoodsDocument";
 import DocumentViewPanel from "./DocumentViewPanel";
 import { isClosedPurchaseOrder } from "../../utils/purchaseOrderStatus";
+import PasswordPromptModal from "../common/PasswordPromptModal";
+import { getClosedPoAuthError } from "../../utils/closedPoAuth";
+import { getGstTaxMode } from "../../utils/gstUtils";
 
 const RECEIVE_STATUS_OPTIONS = ["Draft", "Partially Received", "Closed"];
 
@@ -27,6 +34,11 @@ const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   return (
     <div className={`space-y-1 text-sm text-slate-700 ${alignClass}`}>
       <div className="font-medium">Subtotal: {formatCurrency(summary.subtotal)}</div>
+      {summary.igstGroups?.map((group) => (
+        <div key={`igst-${group.rate}`}>
+          IGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
       {summary.cgstGroups.map((group) => (
         <div key={`cgst-${group.rate}`}>
           CGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
@@ -50,47 +62,140 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 const getItemKey = (item = {}, index = 0) =>
-  String(item.itemId ?? item.ItemId ?? item.id ?? item.Id ?? index);
-const computeReceiveStatus = (items, fallback = "Draft") => {
-  const normalized = Array.isArray(items) ? items : [];
-  if (!normalized.length) return fallback;
-  const anyReceived = normalized.some((item) => toNumber(item.receivedQty) > 0);
-  const allReceived = normalized.every((item) => {
-    const ordered = toNumber(item.orderedQty);
-    return ordered === 0 || toNumber(item.receivedQty) >= ordered;
+  String(
+    item.poItemId ??
+      item.PurchaseOrderItemId ??
+      item.itemId ??
+      item.ItemId ??
+      item.id ??
+      item.Id ??
+      index
+  );
+
+const compareReceiptChronologyAsc = (left = {}, right = {}) => {
+  const leftTime = new Date(left.receivedDate ?? left.createdAt ?? 0).getTime() || 0;
+  const rightTime = new Date(right.receivedDate ?? right.createdAt ?? 0).getTime() || 0;
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  return toNumber(left.receiveGoodsId ?? left.id) - toNumber(right.receiveGoodsId ?? right.id);
+};
+
+const buildReceivedTotalsBeforeReceipt = (receiptHistory = [], targetReceiptId = "") => {
+  const totals = {};
+  const targetId = String(targetReceiptId || "");
+
+  [...(Array.isArray(receiptHistory) ? receiptHistory : [])]
+    .sort(compareReceiptChronologyAsc)
+    .some((receipt) => {
+      if (targetId && String(receipt.id) === targetId) {
+        return true;
+      }
+      (receipt.items || []).forEach((item, index) => {
+        const key = getItemKey(item, index);
+        totals[key] = (totals[key] || 0) + toNumber(item.receivedQty);
+      });
+      return false;
+    });
+
+  return totals;
+};
+
+const buildReceivedTotalsExcludingReceipt = (receiptHistory = [], excludeReceiptId = "") => {
+  const totals = {};
+  const excludeId = String(excludeReceiptId || "");
+
+  (Array.isArray(receiptHistory) ? receiptHistory : []).forEach((receipt) => {
+    if (excludeId && String(receipt.id) === excludeId) {
+      return;
+    }
+    (receipt.items || []).forEach((item, index) => {
+      const key = getItemKey(item, index);
+      totals[key] = (totals[key] || 0) + toNumber(item.receivedQty);
+    });
   });
-  if (allReceived) return "Closed";
-  if (anyReceived) return "Partially Received";
+
+  return totals;
+};
+
+const computeReceiveStatus = (
+  purchaseOrder,
+  receiptHistory = [],
+  items = [],
+  editingReceiptId = null,
+  fallback = "Draft"
+) => {
+  const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
+  if (!poItems.length) {
+    return fallback;
+  }
+
+  const receivedTotals = buildReceivedTotalsExcludingReceipt(
+    receiptHistory,
+    editingReceiptId
+  );
+
+  (items || []).forEach((item, index) => {
+    const key = getItemKey(item, index);
+    receivedTotals[key] = (receivedTotals[key] || 0) + toNumber(item.receivedQty);
+  });
+
+  let anyReceived = false;
+  const allReceived = poItems.every((item, index) => {
+    const orderedQty = toNumber(item.quantity ?? item.orderedQty);
+    const receivedQty = toNumber(receivedTotals[getItemKey(item, index)]);
+    if (receivedQty > 0) {
+      anyReceived = true;
+    }
+    return orderedQty === 0 || receivedQty >= orderedQty;
+  });
+
+  if (allReceived) {
+    return "Closed";
+  }
+  if (anyReceived) {
+    return "Partially Received";
+  }
   return fallback;
 };
-const buildReceiveItems = (purchaseOrder, receipt) => {
+
+const buildReceiveItems = (purchaseOrder, receiptHistory = [], receipt = null) => {
   const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
   const receiptItems = Array.isArray(receipt?.items) ? receipt.items : [];
+  const priorTotals = receipt
+    ? buildReceivedTotalsBeforeReceipt(receiptHistory, receipt.id)
+    : buildReceivedTotalsExcludingReceipt(receiptHistory);
   const receiptMap = receiptItems.reduce((acc, item, index) => {
     acc[getItemKey(item, index)] = item;
     return acc;
   }, {});
+
   return poItems.map((item, index) => {
     const matched = receiptMap[getItemKey(item, index)] ?? receiptItems[index] ?? null;
     const orderedQty = toNumber(item.quantity ?? item.orderedQty);
-    const receivedQty =
-      orderedQty > 0
-        ? Math.min(toNumber(matched?.receivedQty), orderedQty)
-        : toNumber(matched?.receivedQty);
+    const pendingQty = Math.max(orderedQty - toNumber(priorTotals[getItemKey(item, index)]), 0);
+    const receivedQty = Math.min(toNumber(matched?.receivedQty), pendingQty);
     return {
       id: item.id ?? item.itemId ?? index,
+      poItemId: item.poItemId ?? item.id ?? null,
       itemId: item.itemId ?? item.id ?? null,
       name: item.name ?? matched?.name ?? "",
       description: item.description ?? matched?.description ?? "",
       unit: item.unit ?? matched?.unit ?? "PCS",
       orderedQty,
+      pendingQty,
       receivedQty,
-      balanceQty: Math.max(orderedQty - receivedQty, 0),
+      balanceQty: Math.max(pendingQty - receivedQty, 0),
     };
   });
 };
-const createReceiveForm = (purchaseOrder, receipt, defaults = {}) => {
-  const items = buildReceiveItems(purchaseOrder, receipt);
+const createReceiveForm = (
+  purchaseOrder,
+  receiptHistory = [],
+  receipt = null,
+  defaults = {}
+) => {
+  const items = buildReceiveItems(purchaseOrder, receiptHistory, receipt);
   return {
     receivedDate: receipt?.receivedDate || getTodayDate(),
     receivedBy: receipt?.receivedBy || "",
@@ -100,7 +205,13 @@ const createReceiveForm = (purchaseOrder, receipt, defaults = {}) => {
       receipt?.showProjectDetails ?? defaults.showProjectDetails ?? true,
     status:
       receipt?.status ||
-      computeReceiveStatus(items, purchaseOrder?.status || "Draft"),
+      computeReceiveStatus(
+        purchaseOrder,
+        receiptHistory,
+        items,
+        receipt?.id,
+        purchaseOrder?.status || "Draft"
+      ),
     notes: receipt?.notes || "",
     items,
   };
@@ -146,7 +257,9 @@ const ReceiveGoods = () => {
   const [vendors, setVendors] = useState([]);
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState("");
+  const [receiptHistory, setReceiptHistory] = useState([]);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
+  const [editingReceipt, setEditingReceipt] = useState(null);
   const [receiveForm, setReceiveForm] = useState(() => createReceiveForm());
   const [hasStatusOverride, setHasStatusOverride] = useState(false);
   const [purchaseOrderPreview, setPurchaseOrderPreview] = useState(null);
@@ -157,8 +270,15 @@ const ReceiveGoods = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [apiError, setApiError] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
+  const [closedPoOverrideApproved, setClosedPoOverrideApproved] = useState(
+    Boolean(location.state?.closedPoAuthorized)
+  );
+  const [passwordPromptOpen, setPasswordPromptOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState("");
 
   const purchaseOrderIdFromSearch = searchParams.get("purchaseOrderId") || "";
+  const receiptIdFromSearch = searchParams.get("receiptId") || "";
   const formatCurrency = (value) => {
     const amount = toNumber(value);
     try {
@@ -206,8 +326,17 @@ const ReceiveGoods = () => {
     if (!statePurchaseOrderId || purchaseOrderIdFromSearch) return;
     const nextSearchParams = new URLSearchParams(searchParams);
     nextSearchParams.set("purchaseOrderId", String(statePurchaseOrderId));
+    if (location.state?.receiptId) {
+      nextSearchParams.set("receiptId", String(location.state.receiptId));
+    }
     setSearchParams(nextSearchParams, { replace: true });
   }, [location.state, purchaseOrderIdFromSearch, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (location.state?.closedPoAuthorized) {
+      setClosedPoOverrideApproved(true);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     if (!purchaseOrders.length) {
@@ -277,23 +406,42 @@ const ReceiveGoods = () => {
     let isActive = true;
     const loadSelectedReceipt = async () => {
       if (!selectedPurchaseOrder?.id) {
+        setReceiptHistory([]);
         setSelectedReceipt(null);
+        setEditingReceipt(null);
         setReceiveForm(createReceiveForm());
         setHasStatusOverride(false);
+        setClosedPoOverrideApproved(false);
         return;
       }
       try {
         setReceiptLoading(true);
         const receiptList = await fetchReceiveGoods(selectedPurchaseOrder.id);
         if (!isActive) return;
-        const nextReceipt = Array.isArray(receiptList) ? receiptList[0] ?? null : null;
+        const safeReceiptList = Array.isArray(receiptList) ? receiptList : [];
+        const nextReceipt = safeReceiptList[0] ?? null;
+        const nextEditingReceipt = receiptIdFromSearch
+          ? safeReceiptList.find(
+              (receipt) => String(receipt.id) === String(receiptIdFromSearch)
+            ) ?? null
+          : null;
+        setReceiptHistory(safeReceiptList);
         setSelectedReceipt(nextReceipt);
+        setEditingReceipt(nextEditingReceipt);
+        if (!isClosedPurchaseOrder(selectedPurchaseOrder.status) || !nextEditingReceipt) {
+          setClosedPoOverrideApproved(false);
+        }
         setReceiveForm(
-          createReceiveForm(selectedPurchaseOrder, nextReceipt, {
+          createReceiveForm(
+            selectedPurchaseOrder,
+            safeReceiptList,
+            nextEditingReceipt,
+            {
             billTo: buildReceiveBillToText(selectedProject),
             shipTo: buildReceiveShipToText(selectedLocation),
             showProjectDetails: true,
-          })
+            }
+          )
         );
         setHasStatusOverride(false);
       } catch (error) {
@@ -303,9 +451,12 @@ const ReceiveGoods = () => {
             error?.message ??
             "Failed to load saved receipt details."
         );
+        setReceiptHistory([]);
         setSelectedReceipt(null);
+        setEditingReceipt(null);
+        setClosedPoOverrideApproved(false);
         setReceiveForm(
-          createReceiveForm(selectedPurchaseOrder, null, {
+          createReceiveForm(selectedPurchaseOrder, [], null, {
             billTo: buildReceiveBillToText(selectedProject),
             shipTo: buildReceiveShipToText(selectedLocation),
             showProjectDetails: true,
@@ -320,15 +471,19 @@ const ReceiveGoods = () => {
     return () => {
       isActive = false;
     };
-  }, [selectedLocation, selectedProject, selectedPurchaseOrder]);
+  }, [receiptIdFromSearch, selectedLocation, selectedProject, selectedPurchaseOrder]);
 
   const receiveItems = useMemo(
     () =>
       (receiveForm.items || []).map((item) => ({
         ...item,
         orderedQty: toNumber(item.orderedQty),
+        pendingQty: toNumber(item.pendingQty ?? item.orderedQty),
         receivedQty: toNumber(item.receivedQty),
-        balanceQty: Math.max(toNumber(item.orderedQty) - toNumber(item.receivedQty), 0),
+        balanceQty: Math.max(
+          toNumber(item.pendingQty ?? item.orderedQty) - toNumber(item.receivedQty),
+          0
+        ),
       })),
     [receiveForm.items]
   );
@@ -337,11 +492,11 @@ const ReceiveGoods = () => {
     () =>
       receiveItems.reduce(
         (acc, item) => ({
-          ordered: acc.ordered + item.orderedQty,
+          pending: acc.pending + item.pendingQty,
           received: acc.received + item.receivedQty,
           balance: acc.balance + item.balanceQty,
         }),
-        { ordered: 0, received: 0, balance: 0 }
+        { pending: 0, received: 0, balance: 0 }
       ),
     [receiveItems]
   );
@@ -357,8 +512,18 @@ const ReceiveGoods = () => {
   );
 
   const nextStatusPreview = selectedPurchaseOrder
-    ? computeReceiveStatus(receiveItems, selectedPurchaseOrder.status || "Draft")
+    ? computeReceiveStatus(
+        selectedPurchaseOrder,
+        receiptHistory,
+        receiveItems,
+        editingReceipt?.id,
+        selectedPurchaseOrder.status || "Draft"
+      )
     : "Draft";
+
+  const canEditClosedReceipt = Boolean(editingReceipt) && closedPoOverrideApproved;
+  const isReceiveReadOnly =
+    isSelectedPurchaseOrderClosed ? !canEditClosedReceipt : false;
 
   const statusBadge = (status) => {
     const label = status || "Draft";
@@ -371,18 +536,20 @@ const ReceiveGoods = () => {
     return <span className={`rounded-full px-2 py-1 text-xs font-medium ${className}`}>{label}</span>;
   };
 
-  const syncSelectedPurchaseOrder = (purchaseOrderId) => {
+  const syncSelectedPurchaseOrder = (purchaseOrderId, receiptId = "") => {
     const nextId = purchaseOrderId ? String(purchaseOrderId) : "";
     setSelectedId(nextId);
     setSaveMessage("");
     const nextSearchParams = new URLSearchParams(searchParams);
     if (nextId) nextSearchParams.set("purchaseOrderId", nextId);
     else nextSearchParams.delete("purchaseOrderId");
+    if (receiptId) nextSearchParams.set("receiptId", String(receiptId));
+    else nextSearchParams.delete("receiptId");
     setSearchParams(nextSearchParams, { replace: true });
   };
 
   const handleReceiveFieldChange = (field, value) => {
-    if (isSelectedPurchaseOrderClosed) {
+    if (isReceiveReadOnly) {
       return;
     }
     if (field === "status") {
@@ -392,7 +559,7 @@ const ReceiveGoods = () => {
   };
   const handleReceiveQtyChange = (id, value) =>
     setReceiveForm((prev) => {
-      if (isSelectedPurchaseOrderClosed) {
+      if (isReceiveReadOnly) {
         return prev;
       }
       const nextItems = prev.items.map((item) =>
@@ -403,7 +570,7 @@ const ReceiveGoods = () => {
                 0,
                 Math.min(
                   Number.parseInt(value, 10) || 0,
-                  toNumber(item.orderedQty)
+                  toNumber(item.pendingQty ?? item.orderedQty)
                 )
               ),
             }
@@ -415,7 +582,10 @@ const ReceiveGoods = () => {
         status: hasStatusOverride
           ? prev.status
           : computeReceiveStatus(
+              selectedPurchaseOrder,
+              receiptHistory,
               nextItems,
+              editingReceipt?.id,
               selectedPurchaseOrder?.status || "Draft"
             ),
         items: nextItems,
@@ -428,7 +598,7 @@ const ReceiveGoods = () => {
       setApiError("Select a purchase order before saving a receipt.");
       return;
     }
-    if (isSelectedPurchaseOrderClosed) {
+    if (isReceiveReadOnly) {
       setApiError("This Purchase Order is Closed.");
       return;
     }
@@ -449,25 +619,28 @@ const ReceiveGoods = () => {
         notes: receiveForm.notes.trim() || null,
         status: receiveForm.status || nextStatusPreview,
         items: receiveItems.map((item) => ({
+          poItemId: item.poItemId ?? item.id ?? null,
           itemId: item.itemId ?? item.id ?? null,
           name: item.name || "",
           description: item.description || "",
           unit: item.unit || "PCS",
-          orderedQty: item.orderedQty,
           receivedQty: item.receivedQty,
         })),
+        allowClosedEdit: isSelectedPurchaseOrderClosed && canEditClosedReceipt,
       };
-      const savedReceipt = await saveReceiveGoods(payload);
-      setSelectedReceipt(savedReceipt);
-      setReceiveForm(
-        createReceiveForm(selectedPurchaseOrder, savedReceipt, {
-          billTo: buildReceiveBillToText(selectedProject),
-          shipTo: buildReceiveShipToText(selectedLocation),
-          showProjectDetails: true,
-        })
-      );
+      const savedReceipt = editingReceipt
+        ? await updateReceiveGoods(editingReceipt.id, payload)
+        : await saveReceiveGoods(payload);
       setHasStatusOverride(false);
-      setSaveMessage(`Receipt saved for ${selectedPurchaseOrder.poNumber || "selected PO"}.`);
+      setSaveMessage(
+        `${editingReceipt ? "Receipt updated" : "Receipt saved"} for ${
+          selectedPurchaseOrder.poNumber || "selected PO"
+        }.`
+      );
+      syncSelectedPurchaseOrder(
+        selectedPurchaseOrder.id,
+        editingReceipt ? savedReceipt.id : ""
+      );
       const refreshedPurchaseOrders = await fetchPurchaseOrders();
       setPurchaseOrders(Array.isArray(refreshedPurchaseOrders) ? refreshedPurchaseOrders : []);
     } catch (error) {
@@ -477,6 +650,29 @@ const ReceiveGoods = () => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleClosedPoUnlock = () => {
+    const nextError = getClosedPoAuthError(settings, adminPassword);
+    if (nextError) {
+      setAdminPasswordError(nextError);
+      return;
+    }
+    setClosedPoOverrideApproved(true);
+    setPasswordPromptOpen(false);
+    setAdminPassword("");
+    setAdminPasswordError("");
+    setApiError("");
+  };
+
+  const getPurchaseOrderTaxMode = (purchaseOrder) => {
+    const vendor = vendorMap[String(purchaseOrder?.vendorId)];
+    return getGstTaxMode({
+      vendorState: vendor?.state,
+      vendorGstin: vendor?.gstNumber,
+      companyState: company.state,
+      companyGstin: company.gstin,
+    });
   };
 
   const viewPurchaseOrder = viewReceipt
@@ -492,7 +688,8 @@ const ReceiveGoods = () => {
     ? locationMap[String(viewPurchaseOrder.locationId)]
     : null;
   const viewReceiptSummary = buildGstSummary(
-    buildReceiptSummaryItems(viewReceipt, viewPurchaseOrder)
+    buildReceiptSummaryItems(viewReceipt, viewPurchaseOrder),
+    { taxMode: getPurchaseOrderTaxMode(viewPurchaseOrder) }
   );
   const viewBillTo = splitDocumentText(
     viewReceipt?.billTo || buildReceiveBillToText(viewProject)
@@ -511,7 +708,8 @@ const ReceiveGoods = () => {
     ? locationMap[String(purchaseOrderPreview.locationId)]
     : null;
   const purchaseOrderPreviewSummary = buildGstSummary(
-    purchaseOrderPreview?.items || []
+    purchaseOrderPreview?.items || [],
+    { taxMode: getPurchaseOrderTaxMode(purchaseOrderPreview) }
   );
   const purchaseOrderPreviewContact = purchaseOrderPreviewVendor?.contacts?.[0];
 
@@ -629,7 +827,7 @@ const ReceiveGoods = () => {
               {!loading &&
                 filteredPurchaseOrders.map((record) => (
                   <tr
-                    key={record.id}
+                    key={`${record.id}-${record.poNumber}`}
                     onClick={() => syncSelectedPurchaseOrder(record.id)}
                     className={`cursor-pointer border-t hover:bg-slate-50 ${
                       String(selectedId) === String(record.id) ? "bg-indigo-50/70" : ""
@@ -686,11 +884,17 @@ const ReceiveGoods = () => {
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">
                       {isSelectedPurchaseOrderClosed
-                        ? "This Purchase Order is Closed."
+                        ? editingReceipt
+                          ? isReceiveReadOnly
+                            ? "This closed PO receipt is locked until an Admin unlocks it."
+                            : "Editing a saved receipt under admin override."
+                          : "This Purchase Order is Closed."
                         : receiptLoading
-                        ? "Fetching saved receipt..."
+                        ? "Fetching receipt history..."
+                        : editingReceipt
+                        ? "Editing the selected receive entry."
                         : selectedReceipt
-                        ? "Existing receipt loaded."
+                        ? "Create a new receive entry from the latest balance."
                         : "No saved receipt found yet."}
                     </p>
                   </div>
@@ -715,8 +919,17 @@ const ReceiveGoods = () => {
                       disabled={!selectedReceipt}
                       className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      View Saved Receipt
-                    </button>
+                        View Saved Receipt
+                      </button>
+                    {!isSelectedPurchaseOrderClosed ? (
+                      <button
+                        type="button"
+                        onClick={() => syncSelectedPurchaseOrder(selectedPurchaseOrder.id)}
+                        className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-700"
+                      >
+                        New Entry
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => syncSelectedPurchaseOrder("")}
@@ -772,11 +985,12 @@ const ReceiveGoods = () => {
                 </div>
               </div>
 
-              {isSelectedPurchaseOrderClosed ? (
+              {isSelectedPurchaseOrderClosed && !editingReceipt ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 shadow-sm">
                   <p className="font-medium">This Purchase Order is Closed.</p>
                   <p className="mt-1">
-                    Closed purchase orders are read-only and stay in the Purchase Order Register.
+                    Closed purchase orders are read-only. Use the Receipts Register to open a
+                    specific saved receipt if an Admin needs to correct it.
                   </p>
                   <button
                     type="button"
@@ -795,18 +1009,25 @@ const ReceiveGoods = () => {
                     <div>
                       <h3 className="text-base font-semibold text-slate-800">Receive Goods</h3>
                       <p className="text-xs text-slate-500">
-                        Saving updates the latest receipt for this PO.
+                        {editingReceipt
+                          ? "Update the selected receive entry."
+                          : "Each save creates a new receive entry for this PO."}
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => {
                         setReceiveForm(
-                          createReceiveForm(selectedPurchaseOrder, selectedReceipt, {
+                          createReceiveForm(
+                            selectedPurchaseOrder,
+                            receiptHistory,
+                            editingReceipt,
+                            {
                             billTo: buildReceiveBillToText(selectedProject),
                             shipTo: buildReceiveShipToText(selectedLocation),
                             showProjectDetails: true,
-                          })
+                            }
+                          )
                         );
                         setHasStatusOverride(false);
                       }}
@@ -816,12 +1037,41 @@ const ReceiveGoods = () => {
                     </button>
                   </div>
 
+                  {isSelectedPurchaseOrderClosed && editingReceipt ? (
+                    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="font-medium">Closed PO receipt</p>
+                          <p className="mt-1">
+                            {isReceiveReadOnly
+                              ? "Only Admin users can unlock this saved receipt for editing."
+                              : "Admin override is active for this closed PO receipt."}
+                          </p>
+                        </div>
+                        {isReceiveReadOnly ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPasswordPromptOpen(true);
+                              setAdminPassword("");
+                              setAdminPasswordError("");
+                            }}
+                            className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900"
+                          >
+                            Unlock as Admin
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className="text-sm font-medium text-slate-700">Received Date</label>
                       <DateInput
                         value={receiveForm.receivedDate}
                         onChange={(value) => handleReceiveFieldChange("receivedDate", value || "")}
+                        disabled={isReceiveReadOnly}
                         className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                       />
                     </div>
@@ -833,6 +1083,7 @@ const ReceiveGoods = () => {
                         onChange={(event) =>
                           handleReceiveFieldChange("receivedBy", event.target.value)
                         }
+                        disabled={isReceiveReadOnly}
                         className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                       />
                     </div>
@@ -843,6 +1094,7 @@ const ReceiveGoods = () => {
                         onChange={(event) =>
                           handleReceiveFieldChange("billTo", event.target.value)
                         }
+                        disabled={isReceiveReadOnly}
                         className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                       />
                     </div>
@@ -853,6 +1105,7 @@ const ReceiveGoods = () => {
                         onChange={(event) =>
                           handleReceiveFieldChange("shipTo", event.target.value)
                         }
+                        disabled={isReceiveReadOnly}
                         className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                       />
                     </div>
@@ -867,6 +1120,7 @@ const ReceiveGoods = () => {
                               event.target.checked
                             )
                           }
+                          disabled={isReceiveReadOnly}
                           className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                         />
                         Show project details on the receipt
@@ -880,6 +1134,7 @@ const ReceiveGoods = () => {
                           onChange={(event) =>
                             handleReceiveFieldChange("status", event.target.value)
                           }
+                          disabled={isReceiveReadOnly}
                           className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                         >
                           {RECEIVE_STATUS_OPTIONS.map((option) => (
@@ -900,6 +1155,7 @@ const ReceiveGoods = () => {
                         onChange={(event) =>
                           handleReceiveFieldChange("notes", event.target.value)
                         }
+                        disabled={isReceiveReadOnly}
                         className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                       />
                     </div>
@@ -911,14 +1167,17 @@ const ReceiveGoods = () => {
                         <tr>
                           <th className="p-3 text-left min-w-[160px]">Item</th>
                           <th className="p-3 text-left min-w-[90px]">Unit</th>
-                          <th className="p-3 text-left min-w-[100px]">Ordered</th>
-                          <th className="p-3 text-left min-w-[110px]">Received</th>
+                          <th className="p-3 text-left min-w-[100px]">Pending</th>
+                          <th className="p-3 text-left min-w-[110px]">Receive Now</th>
                           <th className="p-3 text-left min-w-[100px]">Balance</th>
                         </tr>
                       </thead>
                       <tbody>
                         {receiveItems.map((item, index) => (
-                          <tr key={item.id ?? item.itemId ?? index} className="border-t">
+                          <tr
+                            key={`${item.id ?? item.itemId ?? "item"}-${item.name ?? ""}-${index}`}
+                            className="border-t"
+                          >
                             <td className="p-3">
                               <div className="font-medium text-slate-800">{item.name || "-"}</div>
                               <div className="text-xs text-slate-500">
@@ -926,17 +1185,18 @@ const ReceiveGoods = () => {
                               </div>
                             </td>
                             <td className="p-3">{item.unit || "-"}</td>
-                            <td className="p-3">{item.orderedQty}</td>
+                            <td className="p-3">{item.pendingQty}</td>
                             <td className="p-3">
                               <input
                                 type="number"
                                 min="0"
-                                max={item.orderedQty}
+                                max={item.pendingQty}
                                 step="1"
                                 value={item.receivedQty}
                                 onChange={(event) =>
                                   handleReceiveQtyChange(item.id, event.target.value)
                                 }
+                                disabled={isReceiveReadOnly}
                                 className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
                               />
                             </td>
@@ -949,16 +1209,20 @@ const ReceiveGoods = () => {
 
                   <div className="mt-4 flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex flex-wrap gap-4">
-                      <span>Ordered: {totals.ordered}</span>
+                      <span>Pending: {totals.pending}</span>
                       <span>Received: {totals.received}</span>
                       <span>Balance: {totals.balance}</span>
                     </div>
                     <button
                       type="submit"
-                      disabled={isSaving || receiptLoading}
+                      disabled={isSaving || receiptLoading || isReceiveReadOnly}
                       className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {isSaving ? "Saving..." : selectedReceipt ? "Update Receipt" : "Save Receipt"}
+                      {isSaving
+                        ? "Saving..."
+                        : editingReceipt
+                        ? "Update Receipt"
+                        : "Save Receipt"}
                     </button>
                   </div>
                 </form>
@@ -1069,6 +1333,7 @@ const ReceiveGoods = () => {
           tableRows={(viewReceipt.items || []).map((item, index) => {
             const ordered = toNumber(item.orderedQty);
             const received = toNumber(item.receivedQty);
+            const rawBalance = item.balanceQty ?? item.BalanceQty;
             return {
               id: item.id ?? item.itemId ?? index,
               serial: index + 1,
@@ -1076,7 +1341,10 @@ const ReceiveGoods = () => {
               unit: item.unit || "-",
               ordered,
               received,
-              balance: Math.max(ordered - received, 0),
+              balance:
+                rawBalance === undefined || rawBalance === null || rawBalance === ""
+                  ? Math.max(ordered - received, 0)
+                  : toNumber(rawBalance),
             };
           })}
           bottomLeftContent={
@@ -1111,6 +1379,27 @@ const ReceiveGoods = () => {
           footerCompanyName={brandName || "Company"}
         />
       )}
+
+      <PasswordPromptModal
+        isOpen={passwordPromptOpen}
+        title="Unlock Closed PO Receipt"
+        description="Enter the admin password to edit this saved receipt."
+        password={adminPassword}
+        error={adminPasswordError}
+        confirmLabel="Unlock"
+        onPasswordChange={(value) => {
+          setAdminPassword(value);
+          if (adminPasswordError) {
+            setAdminPasswordError("");
+          }
+        }}
+        onCancel={() => {
+          setPasswordPromptOpen(false);
+          setAdminPassword("");
+          setAdminPasswordError("");
+        }}
+        onConfirm={handleClosedPoUnlock}
+      />
     </div>
   );
 };

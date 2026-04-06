@@ -20,6 +20,9 @@ const initialForm = {
   Email: "",
   GSTNumber: "",
   Address: "",
+  City: "",
+  State: "",
+  Pincode: "",
 };
 
 const CreateVendors = () => {
@@ -106,6 +109,9 @@ const CreateVendors = () => {
         email: form.Email.trim() || undefined,
         gstNumber: form.GSTNumber.trim() || undefined,
         address: form.Address.trim() || undefined,
+        city: form.City.trim() || undefined,
+        state: form.State.trim() || undefined,
+        pincode: form.Pincode.trim() || undefined,
         contacts: contacts
           .filter((contact) =>
             [
@@ -241,6 +247,38 @@ const CreateVendors = () => {
                     value={form.Address}
                     onChange={(event) => updateField("Address", event.target.value)}
                     className="mt-1 min-h-[120px] w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    City
+                  </label>
+                  <input
+                    value={form.City}
+                    onChange={(event) => updateField("City", event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    State
+                  </label>
+                  <input
+                    value={form.State}
+                    onChange={(event) => updateField("State", event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Pincode
+                  </label>
+                  <input
+                    value={form.Pincode}
+                    onChange={(event) =>
+                      updateField("Pincode", event.target.value)
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                   />
                 </div>
               </div>

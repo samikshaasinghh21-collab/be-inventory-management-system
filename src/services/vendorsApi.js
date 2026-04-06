@@ -17,6 +17,9 @@ export const normalizeVendor = (vendor = {}) => {
   const email = vendor.email ?? vendor.Email ?? "";
   const gstNumber = vendor.gstNumber ?? vendor.GSTNumber ?? "";
   const address = vendor.address ?? vendor.Address ?? "";
+  const city = vendor.city ?? vendor.City ?? "";
+  const state = vendor.state ?? vendor.State ?? "";
+  const pincode = vendor.pincode ?? vendor.Pincode ?? "";
   const contacts = Array.isArray(vendor.contacts)
     ? vendor.contacts.map(normalizeVendorContact)
     : Array.isArray(vendor.VendorContacts)
@@ -31,6 +34,9 @@ export const normalizeVendor = (vendor = {}) => {
     email,
     gstNumber,
     address,
+    city,
+    state,
+    pincode,
     contacts,
     VendorId: vendor.VendorId ?? id,
     VendorName: vendor.VendorName ?? name,
@@ -38,6 +44,9 @@ export const normalizeVendor = (vendor = {}) => {
     Email: vendor.Email ?? email,
     GSTNumber: vendor.GSTNumber ?? gstNumber,
     Address: vendor.Address ?? address,
+    City: vendor.City ?? city,
+    State: vendor.State ?? state,
+    Pincode: vendor.Pincode ?? pincode,
     VendorContacts: vendor.VendorContacts ?? contacts,
   };
 };

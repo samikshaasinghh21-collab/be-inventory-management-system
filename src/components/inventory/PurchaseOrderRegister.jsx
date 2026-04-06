@@ -14,12 +14,20 @@ import { resolveBrandLogo } from "../../utils/branding";
 import DocumentViewPanel from "./DocumentViewPanel";
 import { buildGstSummary } from "../../utils/taxUtils";
 import { isClosedPurchaseOrder } from "../../utils/purchaseOrderStatus";
+import { getGstTaxMode } from "../../utils/gstUtils";
+import PasswordPromptModal from "../common/PasswordPromptModal";
+import { getClosedPoAuthError } from "../../utils/closedPoAuth";
 
 const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   const alignClass = align === "right" ? "text-right" : "text-left";
   return (
     <div className={`space-y-1 text-sm text-slate-700 ${alignClass}`}>
       <div className="font-medium">Subtotal: {formatCurrency(summary.subtotal)}</div>
+      {summary.igstGroups?.map((group) => (
+        <div key={`igst-${group.rate}`}>
+          IGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
       {summary.cgstGroups.map((group) => (
         <div key={`cgst-${group.rate}`}>
           CGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
@@ -50,6 +58,9 @@ const PurchaseOrderRegister = () => {
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [viewRecord, setViewRecord] = useState(null);
+  const [closedPoPromptRecord, setClosedPoPromptRecord] = useState(null);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState("");
   const company = settings?.company || {};
   const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
   const brandName = company.name || "Bangalore Electronics";
@@ -185,7 +196,9 @@ const PurchaseOrderRegister = () => {
 
   const handleEdit = (record) => {
     if (isClosedPurchaseOrder(record?.status)) {
-      setApiError("This Purchase Order is Closed.");
+      setClosedPoPromptRecord(record);
+      setAdminPassword("");
+      setAdminPasswordError("");
       return;
     }
     navigate("/inventory/purchase-order", { state: { purchaseOrder: record } });
@@ -223,7 +236,7 @@ const PurchaseOrderRegister = () => {
       setApiError("");
       const record = records.find((entry) => String(entry.id) === String(id));
       if (isClosedPurchaseOrder(record?.status)) {
-        setApiError("This Purchase Order is Closed.");
+        setApiError("Closed purchase orders cannot be deleted.");
         return;
       }
       await deletePurchaseOrder(id);
@@ -236,6 +249,36 @@ const PurchaseOrderRegister = () => {
         error?.response?.data?.error || error?.message || "Failed to delete purchase order."
       );
     }
+  };
+
+  const getRecordTaxMode = (record) => {
+    const vendor = vendorMap[String(record?.vendorId)];
+    return getGstTaxMode({
+      vendorState: vendor?.state,
+      vendorGstin: vendor?.gstNumber,
+      companyState: company.state,
+      companyGstin: company.gstin,
+    });
+  };
+
+  const confirmClosedPoEdit = () => {
+    const nextError = getClosedPoAuthError(settings, adminPassword);
+    if (nextError) {
+      setAdminPasswordError(nextError);
+      return;
+    }
+    if (!closedPoPromptRecord) {
+      return;
+    }
+    navigate("/inventory/purchase-order", {
+      state: {
+        purchaseOrder: closedPoPromptRecord,
+        closedPoAuthorized: true,
+      },
+    });
+    setClosedPoPromptRecord(null);
+    setAdminPassword("");
+    setAdminPasswordError("");
   };
 
   return (
@@ -354,7 +397,9 @@ const PurchaseOrderRegister = () => {
                 const project = projectMap[String(record.projectId)];
                 const vendor = vendorMap[String(record.vendorId)];
                 const location = locationMap[String(record.locationId)];
-                const summary = buildGstSummary(record.items || []);
+                const summary = buildGstSummary(record.items || [], {
+                  taxMode: getRecordTaxMode(record),
+                });
                 const isClosed = isClosedPurchaseOrder(record.status);
                 return (
                   <Fragment key={key}>
@@ -544,7 +589,9 @@ const PurchaseOrderRegister = () => {
       </div>
       {viewRecord && (
         (() => {
-          const summary = buildGstSummary(viewRecord.items || []);
+          const summary = buildGstSummary(viewRecord.items || [], {
+            taxMode: getRecordTaxMode(viewRecord),
+          });
           const vendor = vendorMap[String(viewRecord.vendorId)];
           const primaryContact = vendor?.contacts?.[0];
           return (
@@ -620,6 +667,27 @@ const PurchaseOrderRegister = () => {
           );
         })()
       )}
+
+      <PasswordPromptModal
+        isOpen={Boolean(closedPoPromptRecord)}
+        title="Unlock Closed PO"
+        description="Enter the admin password to edit this closed purchase order."
+        password={adminPassword}
+        error={adminPasswordError}
+        confirmLabel="Unlock"
+        onPasswordChange={(value) => {
+          setAdminPassword(value);
+          if (adminPasswordError) {
+            setAdminPasswordError("");
+          }
+        }}
+        onCancel={() => {
+          setClosedPoPromptRecord(null);
+          setAdminPassword("");
+          setAdminPasswordError("");
+        }}
+        onConfirm={confirmClosedPoEdit}
+      />
     </div>
   );
 };

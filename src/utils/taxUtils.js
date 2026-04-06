@@ -32,13 +32,16 @@ export const calculateLineSubtotal = (item = {}) =>
 export const calculateLineTax = (item = {}) =>
   (calculateLineSubtotal(item) * parseTaxPercentage(item.taxPercentage ?? item.gst)) / 100;
 
-export const buildGstSummary = (items = []) => {
+export const buildGstSummary = (items = [], options = {}) => {
+  const taxMode = options.taxMode === "inter" ? "inter" : "intra";
   const summary = {
     subtotal: 0,
     totalTax: 0,
     total: 0,
+    taxMode,
     cgstGroups: [],
     sgstGroups: [],
+    igstGroups: [],
   };
 
   const groups = new Map();
@@ -50,21 +53,22 @@ export const buildGstSummary = (items = []) => {
     summary.totalTax += taxAmount;
 
     if (taxPercentage > 0 && taxAmount > 0) {
-      const splitRate = taxPercentage / 2;
-      const splitAmount = taxAmount / 2;
-      const groupKey = splitRate.toFixed(2);
-      const current = groups.get(groupKey) ?? {
-        rate: splitRate,
-        amount: 0,
-      };
-      current.amount += splitAmount;
+      const groupRate = taxMode === "inter" ? taxPercentage : taxPercentage / 2;
+      const groupAmount = taxMode === "inter" ? taxAmount : taxAmount / 2;
+      const groupKey = groupRate.toFixed(2);
+      const current = groups.get(groupKey) ?? { rate: groupRate, amount: 0 };
+      current.amount += groupAmount;
       groups.set(groupKey, current);
     }
   }
 
   const orderedGroups = Array.from(groups.values()).sort((a, b) => a.rate - b.rate);
-  summary.cgstGroups = orderedGroups.map((group) => ({ ...group }));
-  summary.sgstGroups = orderedGroups.map((group) => ({ ...group }));
+  if (taxMode === "inter") {
+    summary.igstGroups = orderedGroups.map((group) => ({ ...group }));
+  } else {
+    summary.cgstGroups = orderedGroups.map((group) => ({ ...group }));
+    summary.sgstGroups = orderedGroups.map((group) => ({ ...group }));
+  }
   summary.total = summary.subtotal + summary.totalTax;
 
   return summary;

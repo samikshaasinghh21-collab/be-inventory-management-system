@@ -14,6 +14,10 @@ import DateInput from "../common/DateInput";
 import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
 import { defaultBrandLogoUrl, resolveBrandLogo } from "../../utils/branding";
+import {
+  getActiveProjectId,
+  setActiveProjectId,
+} from "../../services/projectSelectionStore";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -97,6 +101,29 @@ const DeliveryChallan = () => {
     void loadLocations();
     void loadBoqs();
   }, []);
+
+  useEffect(() => {
+    if (editingId || form.projectId || !projects.length) {
+      return;
+    }
+    const activeProjectId = getActiveProjectId();
+    if (!activeProjectId) {
+      return;
+    }
+    const exists = projects.some(
+      (project) => String(project.id) === String(activeProjectId)
+    );
+    if (!exists) {
+      return;
+    }
+    setForm((prev) => ({ ...prev, projectId: String(activeProjectId) }));
+  }, [editingId, form.projectId, projects]);
+
+  useEffect(() => {
+    if (form.projectId) {
+      setActiveProjectId(form.projectId);
+    }
+  }, [form.projectId]);
 
   const projectMap = useMemo(() => {
     return projects.reduce((acc, project) => {

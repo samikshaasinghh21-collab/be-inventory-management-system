@@ -13,6 +13,9 @@ const emptyForm = {
   Email: "",
   GSTNumber: "",
   Address: "",
+  City: "",
+  State: "",
+  Pincode: "",
 };
 
 const createEmptyContact = () => ({
@@ -22,6 +25,12 @@ const createEmptyContact = () => ({
   designation: "",
   phone: "",
 });
+
+const formatVendorLocation = (vendor = {}) =>
+  [vendor.city, vendor.state, vendor.pincode]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
 
 const Vendors = () => {
   const navigate = useNavigate();
@@ -75,6 +84,9 @@ const Vendors = () => {
         vendor.email,
         vendor.gstNumber,
         vendor.address,
+        vendor.city,
+        vendor.state,
+        vendor.pincode,
         ...(vendor.contacts || []).flatMap((contact) => [
           contact.contactName,
           contact.email,
@@ -95,6 +107,9 @@ const Vendors = () => {
       Email: vendor.email ?? "",
       GSTNumber: vendor.gstNumber ?? "",
       Address: vendor.address ?? "",
+      City: vendor.city ?? "",
+      State: vendor.state ?? "",
+      Pincode: vendor.pincode ?? "",
     });
     setContacts(
       vendor.contacts?.length
@@ -193,6 +208,9 @@ const Vendors = () => {
         email: editForm.Email.trim() || undefined,
         gstNumber: editForm.GSTNumber.trim() || undefined,
         address: editForm.Address.trim() || undefined,
+        city: editForm.City.trim() || undefined,
+        state: editForm.State.trim() || undefined,
+        pincode: editForm.Pincode.trim() || undefined,
         contacts: contacts
           .filter((contact) =>
             [
@@ -340,6 +358,11 @@ const Vendors = () => {
                     <div className="text-xs text-slate-500">
                       {vendor.address || "No address"}
                     </div>
+                    {formatVendorLocation(vendor) ? (
+                      <div className="text-xs text-slate-500">
+                        {formatVendorLocation(vendor)}
+                      </div>
+                    ) : null}
                   </td>
                   <td className="p-3">{vendor.phone || "-"}</td>
                   <td className="p-3">{vendor.email || "-"}</td>
@@ -499,6 +522,42 @@ const Vendors = () => {
                           updateEditField("Address", event.target.value)
                         }
                         className="mt-1 min-h-[120px] w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        City
+                      </label>
+                      <input
+                        value={editForm.City}
+                        onChange={(event) =>
+                          updateEditField("City", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        State
+                      </label>
+                      <input
+                        value={editForm.State}
+                        onChange={(event) =>
+                          updateEditField("State", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Pincode
+                      </label>
+                      <input
+                        value={editForm.Pincode}
+                        onChange={(event) =>
+                          updateEditField("Pincode", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
                     </div>
                   </div>
