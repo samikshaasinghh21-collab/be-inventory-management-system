@@ -23,7 +23,6 @@ import Login from "../pages/Login";
 import CreateAccount from "../pages/CreateAccount";
 import SsoCallback from "../pages/SsoCallback";
 
-import CreateItems from "../components/inventory/CreateItems";
 import EditItems from "../components/inventory/EditItems";
 import CreateVendors from "../components/inventory/CreateVendors";
 import CreateProjects from "../components/inventory/CreateProjects";
@@ -93,7 +92,7 @@ const AppRoutes = () => {
         <Route path="/inventory/projects" element={<ProjectsHome />} />
         <Route path="/inventory/products" element={<Product />} />
 
-        <Route path="/inventory/create-item" element={<CreateItems />} />
+        <Route path="/inventory/create-item" element={<CreateProduct />} />
         <Route path="/inventory/edit/:id" element={<EditItems />} />
         <Route path="/inventory/vendors" element={<Vendors />} />
         <Route path="/inventory/customers" element={<Customers />} />

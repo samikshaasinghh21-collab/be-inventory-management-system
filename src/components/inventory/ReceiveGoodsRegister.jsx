@@ -21,6 +21,10 @@ import DocumentViewPanel from "./DocumentViewPanel";
 import PasswordPromptModal from "../common/PasswordPromptModal";
 import { getClosedPoAuthError } from "../../utils/closedPoAuth";
 import { getGstTaxMode } from "../../utils/gstUtils";
+import {
+  isCancelledPurchaseOrder,
+  isLockedPurchaseOrder,
+} from "../../utils/purchaseOrderStatus";
 
 const toQuantity = (value) => {
   const parsed = Number(value);
@@ -283,8 +287,7 @@ const ReceiveGoodsRegister = () => {
       receipts
         .filter((receipt) => {
           const po = poMap[String(receipt.purchaseOrderId)];
-          const status = (po?.status || "").toLowerCase();
-          return status !== "closed";
+          return !isLockedPurchaseOrder(po?.status);
         })
         .map((receipt) => receipt.purchaseOrderId)
         .filter(Boolean)
@@ -295,7 +298,9 @@ const ReceiveGoodsRegister = () => {
   const statusBadge = (status) => {
     const label = status || "Draft";
     const base =
-      label.toLowerCase() === "closed"
+      isCancelledPurchaseOrder(label)
+        ? "bg-rose-100 text-rose-700"
+        : label.toLowerCase() === "closed"
         ? "bg-green-100 text-green-700"
         : label.toLowerCase().includes("partial")
         ? "bg-amber-100 text-amber-700"
@@ -330,7 +335,7 @@ const ReceiveGoodsRegister = () => {
 
   const handleEditReceipt = (receipt) => {
     const po = poMap[String(receipt.purchaseOrderId)];
-    if (String(po?.status || "").toLowerCase() === "closed") {
+    if (isLockedPurchaseOrder(po?.status)) {
       setClosedPoPromptReceipt(receipt);
       setAdminPassword("");
       setAdminPasswordError("");
@@ -845,8 +850,8 @@ const ReceiveGoodsRegister = () => {
 
       <PasswordPromptModal
         isOpen={Boolean(closedPoPromptReceipt)}
-        title="Unlock Closed PO Receipt"
-        description="Enter the admin password to edit a receipt linked to a closed purchase order."
+        title="Unlock Locked PO Receipt"
+        description="Enter the admin password to edit a receipt linked to a locked purchase order."
         password={adminPassword}
         error={adminPasswordError}
         confirmLabel="Unlock"

@@ -11,6 +11,7 @@ import {
   setProducts,
   updateProduct,
 } from "../../services/productsStore";
+import { fetchItems, updateItemApi } from "../../services/inventoryApi";
  
 const initialItems = [
   {
@@ -292,10 +293,15 @@ const formatCompactNumber = (value) =>
   compactFormatter.format(Number(value) || 0);
 
 const normalizeProduct = (product) => {
-  const rate = Number(product?.rate ?? product?.salesPrice ?? 0);
+  const rate = Number(product?.rate ?? product?.salesPrice ?? product?.price ?? 0);
   const qty = Number(product?.qty ?? 0);
   const taxPercentage = Number(
     product?.taxPercentage ?? product?.TaxPercentage ?? 0
+  );
+  const serialRequiredRaw =
+    product?.serialRequired ?? product?.SerialRequired ?? product?.IsSerialTracked ?? false;
+  const serialRequired = !["0", "false", "no"].includes(
+    String(serialRequiredRaw).trim().toLowerCase()
   );
   return {
     ...product,
@@ -308,6 +314,12 @@ const normalizeProduct = (product) => {
     brand: product?.brand || "",
     unit: product?.unit || "Nos",
     taxPercentage: Number.isFinite(taxPercentage) ? taxPercentage : 0,
+    serialRequired,
+    serialNumber:
+      product?.serialNumber ??
+      product?.SerialNumber ??
+      product?.SerialNumbe ??
+      "",
     qty: Number.isFinite(qty) ? qty : 0,
     rate: Number.isFinite(rate) ? rate : 0,
   };
@@ -318,6 +330,35 @@ const normalizeStoredProducts = (stored) =>
     normalizeProduct(product)
   );
 
+const mergeStoredProducts = (apiItems, storedItems) => {
+  const storedMap = new Map(
+    (Array.isArray(storedItems) ? storedItems : []).map((item) => [
+      String(item.id ?? ""),
+      item,
+    ])
+  );
+  const merged = (Array.isArray(apiItems) ? apiItems : []).map((item) => {
+    const stored = storedMap.get(String(item.id ?? ""));
+    if (!stored) {
+      return item;
+    }
+    return {
+      ...item,
+      ...stored,
+      qty: stored.qty ?? item.qty ?? 0,
+      serialRequired: item.serialRequired ?? stored.serialRequired ?? false,
+      serialNumber:
+        String(item.serialNumber ?? "").trim() ||
+        String(stored.serialNumber ?? "").trim() ||
+        "",
+    };
+  });
+  const apiIds = new Set(merged.map((item) => String(item.id ?? "")));
+  const extras = (Array.isArray(storedItems) ? storedItems : []).filter(
+    (item) => !apiIds.has(String(item.id ?? ""))
+  );
+  return [...merged, ...extras];
+};
 function StatCard({ label, value, detail, accentClass }) {
   return (
     <div className="rounded-[24px] border border-slate-200/80 bg-white/95 p-5 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.7)]">
@@ -390,9 +431,12 @@ export default function Product() {
     unit: "Nos",
     hsn: "",
     rate: "",
+    serialNumber: "",
+    serialRequired: false,
     description: "",
   });
   const [editErrors, setEditErrors] = useState({});
+  const [editApiError, setEditApiError] = useState("");
 
   const seedInitialProducts = () => {
     const existing = normalizeStoredProducts(getProducts());
@@ -401,29 +445,48 @@ export default function Product() {
       .filter((product) => !existingIds.has(product.id))
       .map((product) => normalizeProduct(product));
 
+    const next = missing.length > 0 ? [...existing, ...missing] : existing;
     if (missing.length > 0) {
-      setProducts([...existing, ...missing]);
+      setProducts(next);
+    }
+    return next;
+  };
+
+  const loadProducts = async () => {
+    const storedItems = normalizeStoredProducts(getProducts());
+    try {
+      const apiItems = normalizeStoredProducts(await fetchItems());
+      const merged = mergeStoredProducts(apiItems, storedItems);
+      setProducts(merged);
+      setItems(merged);
+    } catch (error) {
+      if (storedItems.length > 0) {
+        setItems(storedItems);
+        return;
+      }
+      const seeded = seedInitialProducts();
+      setItems(seeded);
     }
   };
 
-  const loadProducts = () => {
+  const refreshFromStorage = () => {
     setItems(normalizeStoredProducts(getProducts()));
   };
 
   useEffect(() => {
     const handleStorage = (event) => {
       if (event.key === "products") {
-        loadProducts();
+        refreshFromStorage();
       }
     };
 
     const handleProductsChanged = () => {
-      loadProducts();
+      refreshFromStorage();
     };
 
     window.addEventListener("storage", handleStorage);
     window.addEventListener("products:changed", handleProductsChanged);
-    seedInitialProducts();
+    void loadProducts();
 
     return () => {
       window.removeEventListener("storage", handleStorage);
@@ -474,14 +537,18 @@ export default function Product() {
       unit: product.unit || "Nos",
       hsn: product.hsn || "",
       rate: product.rate ?? "",
+      serialNumber: product.serialNumber || "",
+      serialRequired: product.serialRequired ?? false,
       description: product.description || "",
     });
     setEditErrors({});
+    setEditApiError("");
   };
 
   const cancelEdit = () => {
     setEditingProduct(null);
     setEditErrors({});
+    setEditApiError("");
   };
 
   const validateEdit = () => {
@@ -497,7 +564,7 @@ export default function Product() {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleEditSave = () => {
+  const handleEditSave = async () => {
     if (!editingProduct || !validateEdit()) {
       return;
     }
@@ -510,17 +577,32 @@ export default function Product() {
       unit: editValues.unit,
       hsn: editValues.hsn.trim(),
       rate: Number(editValues.rate),
+      serialNumber: editValues.serialNumber.trim(),
+      serialRequired: editValues.serialRequired ?? false,
       description: editValues.description.trim(),
       qty: editingProduct.qty ?? 0,
     };
-    updateProduct(editingProduct.id, updates);
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === editingProduct.id ? { ...item, ...updates } : item
-      )
-    );
-    setEditingProduct(null);
-    setEditErrors({});
+    try {
+      setEditApiError("");
+      const savedItem = await updateItemApi(editingProduct.id, updates);
+      const nextItem = {
+        ...editingProduct,
+        ...updates,
+        ...savedItem,
+      };
+      updateProduct(editingProduct.id, nextItem);
+      setItems((prev) =>
+        prev.map((item) => (item.id === editingProduct.id ? { ...item, ...nextItem } : item))
+      );
+      setEditingProduct(null);
+      setEditErrors({});
+    } catch (error) {
+      setEditApiError(
+        error?.response?.data?.error ??
+          error?.message ??
+          "Failed to update product."
+      );
+    }
   };
 
   const handleDelete = (id) => {
@@ -550,6 +632,7 @@ export default function Product() {
           item.sku,
           item.brand,
           item.category,
+          item.serialNumber,
         ]
           .filter(Boolean)
           .map((value) => String(value).toLowerCase());
@@ -601,6 +684,8 @@ export default function Product() {
       unit: item.unit || "PCS",
       hsn: item.hsn || "",
       gst: item.gst || "",
+      serialRequired: item.serialRequired ?? false,
+      serialNumber: item.serialNumber ?? "",
       taxPercentage: item.taxPercentage ?? 0,
       rate: item.rate || 0,
       quantity: item.qty || 0,
@@ -622,6 +707,7 @@ export default function Product() {
       unit: item.unit || "PCS",
       hsn: item.hsn || "",
       gst: item.gst || "",
+      serialNumber: item.serialNumber ?? "",
       taxPercentage: item.taxPercentage ?? 0,
       rate: item.rate || 0,
       quantity: item.qty || 0,
@@ -689,13 +775,13 @@ export default function Product() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 xl:w-[460px]">
-              <button
-                type="button"
-                onClick={loadProducts}
-                className="rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition hover:bg-white/15"
-              >
-                Refresh Catalog
-              </button>
+            <button
+              type="button"
+              onClick={() => void loadProducts()}
+              className="rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition hover:bg-white/15"
+            >
+              Refresh Catalog
+            </button>
               <button
                 type="button"
                 onClick={goToCreateProduct}
@@ -913,6 +999,7 @@ export default function Product() {
                       <th className="px-6 py-4 font-semibold">Product</th>
                       <th className="px-4 py-4 font-semibold">HSN / SAC</th>
                       <th className="px-4 py-4 font-semibold">Unit</th>
+                      <th className="px-4 py-4 font-semibold">Serial Number</th>
                       <th className="px-4 py-4 font-semibold text-center">
                         Qty
                       </th>
@@ -992,6 +1079,14 @@ export default function Product() {
                             <span className="inline-flex rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700">
                               {item.unit || "-"}
                             </span>
+                          </td>
+                          <td className="px-4 py-5">
+                            <p className="font-medium text-slate-900 break-all">
+                              {item.serialNumber || "-"}
+                            </p>
+                            <p className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">
+                              Serial Number
+                            </p>
                           </td>
                           <td className="px-4 py-5 text-center">
                             <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-1 shadow-sm">
@@ -1140,6 +1235,14 @@ export default function Product() {
                         </div>
                         <div className="col-span-2">
                           <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                            Serial Number
+                          </p>
+                          <p className="mt-1 font-medium text-slate-900">
+                            {item.serialNumber || "-"}
+                          </p>
+                        </div>
+                        <div className="col-span-2">
+                          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
                             Rate
                           </p>
                           <p className="mt-1 font-medium text-slate-900">
@@ -1206,6 +1309,7 @@ export default function Product() {
               <th className="p-4 border text-left">Brand</th>
               <th className="p-4 border">Unit</th>
               <th className="p-4 border">HSN</th>
+              <th className="p-4 border">Serial Number</th>
               <th className="p-4 border">Qty</th>
               <th className="p-4 border">Rate</th>
               <th className="p-4 border">Amount</th>
@@ -1233,6 +1337,7 @@ export default function Product() {
                   onChange={(e) => setHsnSearch(e.target.value)}
                 />
               </th>
+              <th className="p-2 border"></th>
               <th className="p-2 border"></th>
               <th className="p-2 border"></th>
               <th className="p-2 border"></th>
@@ -1268,6 +1373,9 @@ export default function Product() {
                   {item.unit || "-"}
                 </td>
                 <td className="border p-4 text-center">{item.hsn}</td>
+                <td className="border p-4 text-center">
+                  {item.serialNumber || "-"}
+                </td>
                 <td className="border p-4 text-center">
                   <button onClick={() => decreaseQty(item.id)}>−</button>
                   <span className="mx-3">{item.qty}</span>
@@ -1327,6 +1435,11 @@ export default function Product() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6">
+              {editApiError && (
+                <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {editApiError}
+                </div>
+              )}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 <div className="lg:col-span-2">
                   <label className="text-sm font-medium text-slate-700">
@@ -1468,6 +1581,24 @@ export default function Product() {
                       {editErrors.rate}
                     </p>
                   )}
+                </div>
+
+                <div className="lg:col-span-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    Serial Number
+                  </label>
+                  <input
+                    value={editValues.serialNumber}
+                    onChange={(event) =>
+                      setEditValues((prev) => ({
+                        ...prev,
+                        serialNumber: event.target.value,
+                      }))
+                    }
+                    type="text"
+                    placeholder="Type serial number manually"
+                    className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                  />
                 </div>
 
                 <div className="lg:col-span-2">

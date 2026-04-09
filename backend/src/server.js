@@ -164,6 +164,90 @@ const formatTaxPercentageLabel = (value) => {
   return parsed === null ? "" : `${formatPercentageNumber(parsed)}%`;
 };
 
+const normalizeBooleanFlag = (value, fallback = false) => {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  return !["0", "false", "no", "off"].includes(normalized);
+};
+
+const roundCurrencyValue = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Number(parsed.toFixed(2));
+};
+
+const normalizeSerialNumbers = (value) => {
+  const list = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+    ? value
+        .split(/\r?\n|,|;|\t/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
+  return list.map((item) => String(item ?? "").trim()).filter(Boolean);
+};
+
+const serializeJson = (value) => {
+  try {
+    return JSON.stringify(value ?? null);
+  } catch {
+    return JSON.stringify(null);
+  }
+};
+
+const parseJsonArray = (value) => {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const buildReceiveTaxBreakdown = ({
+  quantity = 0,
+  unitPrice = 0,
+  taxPercentage = 0,
+  taxMode = "intra",
+} = {}) => {
+  const safeQuantity = Number(quantity) || 0;
+  const safeUnitPrice = Number(unitPrice) || 0;
+  const safeTaxPercentage = Number(taxPercentage) || 0;
+  const taxableAmount = roundCurrencyValue(safeQuantity * safeUnitPrice);
+  const gstAmount = roundCurrencyValue((taxableAmount * safeTaxPercentage) / 100);
+  const interState = String(taxMode).trim().toLowerCase() === "inter";
+  const halfRate = roundCurrencyValue(safeTaxPercentage / 2);
+  const halfAmount = roundCurrencyValue(gstAmount / 2);
+
+  return {
+    taxableAmount,
+    cgstPercent: interState ? 0 : halfRate,
+    sgstPercent: interState ? 0 : halfRate,
+    igstPercent: interState ? safeTaxPercentage : 0,
+    cgstAmount: interState ? 0 : halfAmount,
+    sgstAmount: interState ? 0 : halfAmount,
+    igstAmount: interState ? gstAmount : 0,
+    gstAmount,
+  };
+};
+
 const projectDependencySources = [
   { key: "locations", table: "Locations", singular: "location", plural: "locations" },
   {
@@ -323,6 +407,20 @@ const resolveItemsSchema = async () => {
     "tax",
     "Tax"
   );
+  const serialRequiredColumns = findColumns(
+    "serial_required",
+    "SerialRequired",
+    "serialRequired",
+    "IsSerialTracked",
+    "isSerialTracked"
+  );
+  const serialNumberColumns = findColumns(
+    "serial_number",
+    "SerialNumber",
+    "serialNumber",
+    "SerialNumbe",
+    "serialNumbe"
+  );
   const descriptionColumns = findColumns(
     "item_description",
     "ItemDescription",
@@ -359,6 +457,8 @@ const resolveItemsSchema = async () => {
     gstColumns,
     unitColumns,
     taxColumns,
+    serialRequiredColumns,
+    serialNumberColumns,
     descriptionColumns,
     createdAtColumns,
     updatedAtColumns,
@@ -451,6 +551,21 @@ const normalizeItem = (row = {}) => {
     ),
     taxPercentage: taxPercentage ?? 0,
     gst: String(gstLabel ?? "").trim(),
+    serialRequired: normalizeBooleanFlag(
+      row.serial_required ??
+        row.SerialRequired ??
+        row.serialRequired ??
+        row.IsSerialTracked ??
+        row.isSerialTracked,
+      false
+    ),
+    serialNumber:
+      row.serial_number ??
+      row.SerialNumber ??
+      row.SerialNumbe ??
+      row.serialNumber ??
+      row.serialNumbe ??
+      "",
     description:
       row.item_description ??
       row.Description ??
@@ -663,6 +778,11 @@ const normalizePoItem = (row = {}) => {
     unit: row.Unit ?? row.unit ?? "PCS",
     hsn: row.HSN ?? row.hsn ?? row.Hsn ?? "",
     gst: row.GST ?? row.gst ?? row.Gst ?? "",
+    serialNumber: row.SerialNumber ?? row.serialNumber ?? "",
+    serialRequired: normalizeBooleanFlag(
+      row.SerialRequired ?? row.serialRequired ?? row.IsSerialTracked,
+      false
+    ),
     taxPercentage:
       parseTaxPercentageValue(
         row.TaxPercentage ??
@@ -717,6 +837,7 @@ const normalizeBoqItem = (row = {}) => {
     boqId: row.BOQId ?? row.boqId ?? null,
     name: row.ItemName ?? row.name ?? "",
     description: row.Description ?? row.description ?? "",
+    serialNumber: row.SerialNumber ?? row.serialNumber ?? "",
     unit: row.Unit ?? row.unit ?? "",
     hsn: row.HSN ?? row.hsn ?? row.Hsn ?? "",
     gst: row.GST ?? row.gst ?? row.Gst ?? "",
@@ -1197,8 +1318,24 @@ const computeReceiveStatus = (items = [], fallback = "Draft") => {
   return fallback;
 };
 
+const normalizePurchaseOrderStatusValue = (status) =>
+  String(status ?? "").trim().toLowerCase();
+
 const isClosedPurchaseOrderStatus = (status) =>
-  String(status ?? "").trim().toLowerCase() === "closed";
+  normalizePurchaseOrderStatusValue(status) === "closed";
+
+const isCancelledPurchaseOrderStatus = (status) => {
+  const normalized = normalizePurchaseOrderStatusValue(status);
+  return normalized === "cancelled" || normalized === "canceled";
+};
+
+const isLockedPurchaseOrderStatus = (status) =>
+  isClosedPurchaseOrderStatus(status) || isCancelledPurchaseOrderStatus(status);
+
+const getLockedPurchaseOrderError = (status) =>
+  isCancelledPurchaseOrderStatus(status)
+    ? "This Purchase Order is Cancelled."
+    : "This Purchase Order is Closed.";
 
 const normalizeReceiveGoods = (row = {}) => {
   const id =
@@ -1210,6 +1347,7 @@ const normalizeReceiveGoods = (row = {}) => {
     receiveGoodsId: id,
     purchaseOrderId:
       row.PurchaseOrderId ?? row.purchaseOrderId ?? row.PurchaseorderId ?? null,
+    boqId: row.BOQId ?? row.boqId ?? null,
     projectId: row.ProjectId ?? row.projectId ?? null,
     vendorId: row.VendorId ?? row.vendorId ?? null,
     locationId: row.LocationId ?? row.locationId ?? null,
@@ -1222,6 +1360,10 @@ const normalizeReceiveGoods = (row = {}) => {
         ? true
         : !["0", "false", "no"].includes(String(rawShowProjectDetails).toLowerCase()),
     notes: row.Notes ?? row.notes ?? "",
+    taxMode:
+      String(row.TaxMode ?? row.taxMode ?? "intra").trim().toLowerCase() === "inter"
+        ? "inter"
+        : "intra",
     status: row.Status ?? row.status ?? "",
     createdAt: row.CreatedAt ?? row.createdAt ?? null,
     updatedAt: row.UpdatedAt ?? row.updatedAt ?? null,
@@ -1231,6 +1373,15 @@ const normalizeReceiveGoods = (row = {}) => {
 const normalizeReceiveGoodsItem = (row = {}) => {
   const orderedQty = Number(row.OrderedQty ?? row.orderedQty ?? 0) || 0;
   const receivedQty = Number(row.ReceivedQty ?? row.receivedQty ?? 0) || 0;
+  const taxPercentage =
+    parseTaxPercentageValue(
+      row.TaxPercentage ??
+        row.taxPercentage ??
+        row.GST ??
+        row.gst ??
+        row.Gst ??
+        null
+    ) ?? 0;
   const receiveId =
     row.ReceiveGoodsId ??
     row.ReceiveGoodsID ??
@@ -1253,6 +1404,25 @@ const normalizeReceiveGoodsItem = (row = {}) => {
     name: row.ItemName ?? row.itemName ?? row.Name ?? row.name ?? "",
     description: row.Description ?? row.description ?? "",
     unit: row.Unit ?? row.unit ?? "PCS",
+    hsn: row.HSN ?? row.hsn ?? row.Hsn ?? "",
+    gst: row.GST ?? row.gst ?? row.Gst ?? formatTaxPercentageLabel(taxPercentage),
+    taxPercentage,
+    unitPrice: Number(row.UnitPrice ?? row.unitPrice ?? row.Rate ?? row.rate ?? 0) || 0,
+    taxableAmount: Number(row.TaxableAmount ?? row.taxableAmount ?? 0) || 0,
+    cgstPercent: Number(row.CGSTPercent ?? row.cgstPercent ?? 0) || 0,
+    sgstPercent: Number(row.SGSTPercent ?? row.sgstPercent ?? 0) || 0,
+    igstPercent: Number(row.IGSTPercent ?? row.igstPercent ?? 0) || 0,
+    cgstAmount: Number(row.CGSTAmount ?? row.cgstAmount ?? 0) || 0,
+    sgstAmount: Number(row.SGSTAmount ?? row.sgstAmount ?? 0) || 0,
+    igstAmount: Number(row.IGSTAmount ?? row.igstAmount ?? 0) || 0,
+    gstAmount: Number(row.GSTAmount ?? row.gstAmount ?? 0) || 0,
+    serialRequired: normalizeBooleanFlag(
+      row.SerialRequired ?? row.serialRequired ?? row.IsSerialTracked,
+      false
+    ),
+    serialNumbers: normalizeSerialNumbers(
+      parseJsonArray(row.SerialNumbersJson ?? row.serialNumbersJson)
+    ),
     notes: row.ItemNotes ?? row.itemNotes ?? row.Notes ?? row.notes ?? "",
     orderedQty,
     receivedQty,
@@ -1435,6 +1605,24 @@ const replaceReceiveGoodsItems = async (
     insertItemReq.input("ItemName", sql.NVarChar(255), item.name ?? null);
     insertItemReq.input("Description", sql.NVarChar(sql.MAX), item.description ?? null);
     insertItemReq.input("Unit", sql.NVarChar(50), item.unit ?? "PCS");
+    insertItemReq.input("HSN", sql.NVarChar(50), item.hsn ?? null);
+    insertItemReq.input("GST", sql.NVarChar(100), item.gst ?? null);
+    insertItemReq.input("TaxPercentage", sql.Decimal(5, 2), item.taxPercentage ?? 0);
+    insertItemReq.input("SerialRequired", sql.Bit, normalizeBooleanFlag(item.serialRequired, false));
+    insertItemReq.input("UnitPrice", sql.Decimal(18, 2), item.unitPrice ?? 0);
+    insertItemReq.input("TaxableAmount", sql.Decimal(18, 2), item.taxableAmount ?? 0);
+    insertItemReq.input("CGSTPercent", sql.Decimal(5, 2), item.cgstPercent ?? 0);
+    insertItemReq.input("SGSTPercent", sql.Decimal(5, 2), item.sgstPercent ?? 0);
+    insertItemReq.input("IGSTPercent", sql.Decimal(5, 2), item.igstPercent ?? 0);
+    insertItemReq.input("CGSTAmount", sql.Decimal(18, 2), item.cgstAmount ?? 0);
+    insertItemReq.input("SGSTAmount", sql.Decimal(18, 2), item.sgstAmount ?? 0);
+    insertItemReq.input("IGSTAmount", sql.Decimal(18, 2), item.igstAmount ?? 0);
+    insertItemReq.input("GSTAmount", sql.Decimal(18, 2), item.gstAmount ?? 0);
+    insertItemReq.input(
+      "SerialNumbersJson",
+      sql.NVarChar(sql.MAX),
+      serializeJson(normalizeSerialNumbers(item.serialNumbers))
+    );
     insertItemReq.input("ItemNotes", sql.NVarChar(sql.MAX), item.itemNotes ?? null);
     insertItemReq.input("OrderedQty", sql.Int, item.orderedQty);
     insertItemReq.input("ReceivedQty", sql.Int, item.receivedQty);
@@ -1442,10 +1630,51 @@ const replaceReceiveGoodsItems = async (
 
     await insertItemReq.query(`
       INSERT INTO dbo.ReceiveGoodsItems
-        (${fkCol}, PurchaseOrderId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, ItemNotes, OrderedQty, ReceivedQty, BalanceQty)
+        (${fkCol}, PurchaseOrderId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, HSN, GST, TaxPercentage, SerialRequired, UnitPrice, TaxableAmount, CGSTPercent, SGSTPercent, IGSTPercent, CGSTAmount, SGSTAmount, IGSTAmount, GSTAmount, SerialNumbersJson, ItemNotes, OrderedQty, ReceivedQty, BalanceQty)
       VALUES
-        (@ReceiptId, @PurchaseOrderId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @ItemNotes, @OrderedQty, @ReceivedQty, @BalanceQty)
+        (@ReceiptId, @PurchaseOrderId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @HSN, @GST, @TaxPercentage, @SerialRequired, @UnitPrice, @TaxableAmount, @CGSTPercent, @SGSTPercent, @IGSTPercent, @CGSTAmount, @SGSTAmount, @IGSTAmount, @GSTAmount, @SerialNumbersJson, @ItemNotes, @OrderedQty, @ReceivedQty, @BalanceQty)
     `);
+  }
+};
+
+const replaceReceiveSerialNumbers = async (
+  tx,
+  {
+    receiptId,
+    purchaseOrderId,
+    locationId = null,
+    items = [],
+  }
+) => {
+  await new sql.Request(tx)
+    .input("ReceiptId", sql.Int, receiptId)
+    .query(`
+      DELETE FROM dbo.SerialNumbers WHERE ReceiveGoodsId = @ReceiptId
+    `);
+
+  for (const item of items) {
+    const serialNumbers = normalizeSerialNumbers(item.serialNumbers).slice(
+      0,
+      Math.max(toReceiveQuantity(item.receivedQty), 0)
+    );
+
+    for (const serialNumber of serialNumbers) {
+      await new sql.Request(tx)
+        .input("PurchaseOrderId", sql.Int, purchaseOrderId)
+        .input("PurchaseOrderItemId", sql.Int, item.poItemId ?? null)
+        .input("ReceiveGoodsId", sql.Int, receiptId)
+        .input("ItemId", sql.Int, item.itemId ?? null)
+        .input("SerialNumber", sql.NVarChar(255), serialNumber)
+        .input("Status", sql.NVarChar(50), "In Stock")
+        .input("LocationId", sql.Int, toNullableInt(locationId))
+        .input("ProductName", sql.NVarChar(255), item.name ?? null)
+        .query(`
+          INSERT INTO dbo.SerialNumbers
+            (PurchaseOrderId, PurchaseOrderItemId, ReceiveGoodsId, ItemId, ProductName, SerialNumber, Status, LocationId)
+          VALUES
+            (@PurchaseOrderId, @PurchaseOrderItemId, @ReceiveGoodsId, @ItemId, @ProductName, @SerialNumber, @Status, @LocationId)
+        `);
+    }
   }
 };
 
@@ -1490,6 +1719,10 @@ const recalculateReceiveGoodsChain = async (
     const source =
       overrideItemsByReceiptId[String(receiptId)] ??
       buildReceiveItemSource(groupedItems[receiptId] ?? []);
+    const taxMode =
+      String(headerRow?.TaxMode ?? headerRow?.taxMode ?? "intra").toLowerCase() === "inter"
+        ? "inter"
+        : "intra";
 
     const recalculatedItems = purchaseOrderItems.map((poItem, index) => {
       const itemKey = buildReceivePoItemKey(poItem, index);
@@ -1503,6 +1736,26 @@ const recalculateReceiveGoodsChain = async (
       );
       const appliedQty = Math.min(requestedQty, receivableQty);
       const balanceQty = Math.max(receivableQty - appliedQty, 0);
+      const taxPercentage =
+        parseTaxPercentageValue(
+          matchedItem?.taxPercentage ??
+            matchedItem?.TaxPercentage ??
+            poItem.taxPercentage ??
+            poItem.gst
+        ) ?? 0;
+      const taxBreakdown = buildReceiveTaxBreakdown({
+        quantity: appliedQty,
+        unitPrice: matchedItem?.unitPrice ?? poItem.unitPrice ?? 0,
+        taxPercentage,
+        taxMode,
+      });
+      const serialRequired = normalizeBooleanFlag(
+        matchedItem?.serialRequired ?? poItem.serialRequired,
+        false
+      );
+      const serialNumbers = normalizeSerialNumbers(
+        matchedItem?.serialNumbers
+      ).slice(0, appliedQty);
 
       cumulativeByKey.set(itemKey, previouslyReceived + appliedQty);
 
@@ -1519,6 +1772,16 @@ const recalculateReceiveGoodsChain = async (
           ) ?? null,
         unit:
           normalizeOptionalString(matchedItem?.unit ?? poItem.unit) ?? "PCS",
+        hsn:
+          normalizeOptionalString(matchedItem?.hsn ?? poItem.hsn) ?? null,
+        gst:
+          normalizeOptionalString(matchedItem?.gst ?? poItem.gst) ??
+          formatTaxPercentageLabel(taxPercentage),
+        taxPercentage,
+        serialRequired,
+        unitPrice: roundCurrencyValue(matchedItem?.unitPrice ?? poItem.unitPrice ?? 0),
+        ...taxBreakdown,
+        serialNumbers,
         itemNotes:
           normalizeOptionalString(
             matchedItem?.notes ?? matchedItem?.itemNotes ?? poItem.notes
@@ -1535,6 +1798,12 @@ const recalculateReceiveGoodsChain = async (
       receiptId,
       purchaseOrderId,
       fkCol,
+      items: recalculatedItems,
+    });
+    await replaceReceiveSerialNumbers(tx, {
+      receiptId,
+      purchaseOrderId,
+      locationId: headerRow?.LocationId ?? null,
       items: recalculatedItems,
     });
 
@@ -1569,6 +1838,39 @@ const normalizeReceiveGoodsItemsInput = (items = []) =>
       description:
         normalizeOptionalString(item.description ?? item.Description) ?? null,
       unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+      hsn:
+        normalizeOptionalString(
+          item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode
+        ) ?? null,
+      gst:
+        normalizeOptionalString(
+          item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate
+        ) ?? null,
+      taxPercentage:
+        parseTaxPercentageValue(
+          item.taxPercentage ??
+            item.TaxPercentage ??
+            item.gst ??
+            item.GST ??
+            item.gstRate ??
+            item.GSTRate
+        ) ?? 0,
+      serialRequired: normalizeBooleanFlag(
+        item.serialRequired ?? item.SerialRequired,
+        false
+      ),
+      unitPrice: roundCurrencyValue(item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0),
+      taxableAmount: roundCurrencyValue(item.taxableAmount ?? item.TaxableAmount ?? 0),
+      cgstPercent: roundCurrencyValue(item.cgstPercent ?? item.CGSTPercent ?? 0),
+      sgstPercent: roundCurrencyValue(item.sgstPercent ?? item.SGSTPercent ?? 0),
+      igstPercent: roundCurrencyValue(item.igstPercent ?? item.IGSTPercent ?? 0),
+      cgstAmount: roundCurrencyValue(item.cgstAmount ?? item.CGSTAmount ?? 0),
+      sgstAmount: roundCurrencyValue(item.sgstAmount ?? item.SGSTAmount ?? 0),
+      igstAmount: roundCurrencyValue(item.igstAmount ?? item.IGSTAmount ?? 0),
+      gstAmount: roundCurrencyValue(item.gstAmount ?? item.GSTAmount ?? 0),
+      serialNumbers: normalizeSerialNumbers(
+        item.serialNumbers ?? item.SerialNumbers ?? item.serials
+      ),
       itemNotes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
       receivedQty: Math.max(
         toReceiveQuantity(item.receivedQty ?? item.ReceivedQty ?? item.received),
@@ -1592,6 +1894,8 @@ const ensureItemsTable = async () => {
         Price DECIMAL(18, 2) NOT NULL DEFAULT 0,
         GST NVARCHAR(100) NULL,
         TaxPercentage DECIMAL(5, 2) NULL,
+        SerialRequired BIT NOT NULL DEFAULT 0,
+        SerialNumber NVARCHAR(255) NULL,
         Description NVARCHAR(MAX) NULL,
         CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -1638,6 +1942,29 @@ const ensureItemsTable = async () => {
     IF COL_LENGTH('dbo.Items', 'TaxPercentage') IS NULL
     BEGIN
       ALTER TABLE dbo.Items ADD TaxPercentage DECIMAL(5, 2) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'SerialRequired') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD SerialRequired BIT NOT NULL CONSTRAINT DF_Items_SerialRequired DEFAULT 0;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'SerialNumber') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD SerialNumber NVARCHAR(255) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'SerialNumbe') IS NOT NULL
+       AND COL_LENGTH('dbo.Items', 'SerialNumber') IS NOT NULL
+    BEGIN
+      EXEC(N'
+        UPDATE dbo.Items
+        SET
+          SerialNumber = COALESCE(NULLIF(SerialNumber, ''''''), NULLIF(SerialNumbe, '''''')),
+          SerialNumbe = COALESCE(NULLIF(SerialNumbe, ''''''), NULLIF(SerialNumber, ''''''))
+        WHERE NULLIF(SerialNumber, '''''') IS NOT NULL
+           OR NULLIF(SerialNumbe, '''''') IS NOT NULL;
+      ');
     END;
 
     IF COL_LENGTH('dbo.Items', 'Description') IS NULL
@@ -2154,6 +2481,8 @@ const ensurePurchaseTables = async () => {
         HSN NVARCHAR(50) NULL,
         GST NVARCHAR(100) NULL,
         TaxPercentage DECIMAL(5,2) NULL,
+        SerialRequired BIT NOT NULL DEFAULT 0,
+        SerialNumber NVARCHAR(255) NULL,
         Quantity INT NOT NULL DEFAULT 0,
         UnitPrice DECIMAL(10, 2) NULL,
         Rate DECIMAL(10, 2) NOT NULL DEFAULT 0,
@@ -2181,6 +2510,14 @@ const ensurePurchaseTables = async () => {
     IF COL_LENGTH('dbo.PurchaseOrderItems', 'TaxPercentage') IS NULL
     BEGIN
       ALTER TABLE dbo.PurchaseOrderItems ADD TaxPercentage DECIMAL(5,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.PurchaseOrderItems', 'SerialRequired') IS NULL
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrderItems ADD SerialRequired BIT NOT NULL CONSTRAINT DF_POItems_SerialRequired DEFAULT 0;
+    END;
+    IF COL_LENGTH('dbo.PurchaseOrderItems', 'SerialNumber') IS NULL
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrderItems ADD SerialNumber NVARCHAR(255) NULL;
     END;
     IF COL_LENGTH('dbo.PurchaseOrderItems', 'UnitPrice') IS NULL
     BEGIN
@@ -2234,6 +2571,12 @@ const normalizePurchaseOrderItemsInput = (items = []) =>
             item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode
           ) ?? "",
         gst: gstLabel ?? "",
+        serialNumber:
+          normalizeOptionalString(item.serialNumber ?? item.SerialNumber) ?? "",
+        serialRequired: normalizeBooleanFlag(
+          item.serialRequired ?? item.SerialRequired,
+          false
+        ),
         taxPercentage,
         quantity,
         unitPrice,
@@ -2259,6 +2602,12 @@ const resolvePurchaseOrderItemColumns = (cols = new Set()) => {
       : cols.has("Tax")
       ? "Tax"
       : null,
+    serialNumberCol: cols.has("SerialNumber")
+      ? "SerialNumber"
+      : cols.has("serialNumber")
+      ? "serialNumber"
+      : null,
+    serialRequiredCol: cols.has("SerialRequired") ? "SerialRequired" : null,
     qtyCol: cols.has("Quantity") ? "Quantity" : cols.has("Qty") ? "Qty" : null,
     unitPriceCol: cols.has("UnitPrice")
       ? "UnitPrice"
@@ -2297,6 +2646,8 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
     req.input("HSN", sql.NVarChar(50), item.hsn || null);
     req.input("GST", sql.NVarChar(100), item.gst || null);
     req.input("TaxPercentage", sql.Decimal(5, 2), item.taxPercentage ?? 0);
+    req.input("SerialNumber", sql.NVarChar(255), item.serialNumber || null);
+    req.input("SerialRequired", sql.Bit, normalizeBooleanFlag(item.serialRequired, false));
     req.input("Qty", sql.Decimal(18, 2), item.quantity);
     req.input("UnitPrice", sql.Decimal(18, 2), item.unitPrice);
     req.input("Total", sql.Decimal(18, 2), item.totalPrice);
@@ -2311,6 +2662,8 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
       config.hsnCol,
       config.gstCol,
       config.taxCol,
+      config.serialNumberCol,
+      config.serialRequiredCol,
       config.qtyCol,
       config.unitPriceCol,
       config.rateCol && config.rateCol !== config.unitPriceCol ? config.rateCol : null,
@@ -2327,6 +2680,8 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
       if (column === config.hsnCol) return "@HSN";
       if (column === config.gstCol) return "@GST";
       if (column === config.taxCol) return "@TaxPercentage";
+      if (column === config.serialNumberCol) return "@SerialNumber";
+      if (column === config.serialRequiredCol) return "@SerialRequired";
       if (column === config.qtyCol) return "@Qty";
       if (column === config.unitPriceCol || column === config.rateCol) return "@UnitPrice";
       if (column === config.totalCol) return "@Total";
@@ -2473,6 +2828,268 @@ const refreshReceiveGoodsItemsFk = async () => {
   return receiveGoodsItemsFk;
 };
 
+const loadReceiveItemTotalsByItemId = async (tx, purchaseOrderId) => {
+  const result = await new sql.Request(tx)
+    .input("PurchaseOrderId", sql.Int, purchaseOrderId)
+    .query(`
+      SELECT ItemId, SUM(COALESCE(ReceivedQty, 0)) AS ReceivedQty
+      FROM dbo.ReceiveGoodsItems
+      WHERE PurchaseOrderId = @PurchaseOrderId
+        AND ItemId IS NOT NULL
+      GROUP BY ItemId
+    `);
+
+  return (result.recordset ?? []).reduce((acc, row) => {
+    const itemId = toNullableInt(row.ItemId);
+    if (itemId === null) {
+      return acc;
+    }
+    acc.set(itemId, toReceiveQuantity(row.ReceivedQty));
+    return acc;
+  }, new Map());
+};
+
+const applyReceiveStockDelta = async (tx, beforeTotals = new Map(), afterTotals = new Map()) => {
+  const itemSchema = await resolveItemsSchema();
+  if (!itemSchema.idColumn || !itemSchema.stockColumns.length) {
+    return;
+  }
+
+  const impactedIds = new Set([
+    ...beforeTotals.keys(),
+    ...afterTotals.keys(),
+  ]);
+  if (!impactedIds.size) {
+    return;
+  }
+
+  const stockSetClauses = uniqueColumnNames(itemSchema.stockColumns).map(
+    (column) =>
+      `${toIdentifier(column)} = COALESCE(TRY_CONVERT(INT, ${toIdentifier(
+        column
+      )}), 0) + @Delta`
+  );
+  const timestampSetClauses = uniqueColumnNames(itemSchema.updatedAtColumns).map(
+    (column) => `${toIdentifier(column)} = @Now`
+  );
+  const setClauses = [...stockSetClauses, ...timestampSetClauses];
+  if (!setClauses.length) {
+    return;
+  }
+
+  for (const itemId of impactedIds) {
+    const beforeQty = toReceiveQuantity(beforeTotals.get(itemId));
+    const afterQty = toReceiveQuantity(afterTotals.get(itemId));
+    const delta = afterQty - beforeQty;
+    if (!delta) {
+      continue;
+    }
+
+    await new sql.Request(tx)
+      .input("ItemId", sql.Int, itemId)
+      .input("Delta", sql.Int, delta)
+      .input("Now", sql.DateTime2, new Date())
+      .query(`
+        UPDATE dbo.Items
+        SET ${setClauses.join(", ")}
+        WHERE ${toIdentifier(itemSchema.idColumn)} = @ItemId
+      `);
+  }
+};
+
+const buildRequestedReceiveTotalsBeforeReceipt = (
+  purchaseOrderItems = [],
+  headers = [],
+  groupedItems = {},
+  targetReceiptId = null
+) => {
+  const totals = new Map();
+  const stopAtId = targetReceiptId === null ? null : String(targetReceiptId);
+
+  for (const header of headers) {
+    const receiptId = String(
+      header?.ReceiveGoodsId ?? header?.receiveGoodsId ?? header?.Id ?? header?.id ?? ""
+    );
+    if (stopAtId && receiptId === stopAtId) {
+      break;
+    }
+
+    const items = groupedItems[receiptId] ?? groupedItems[Number(receiptId)] ?? [];
+    items.forEach((item, index) => {
+      const key = buildReceivePoItemKey(item, index);
+      totals.set(key, toReceiveQuantity(totals.get(key)) + toReceiveQuantity(item.receivedQty));
+    });
+  }
+
+  if (!stopAtId) {
+    return totals;
+  }
+
+  return purchaseOrderItems.reduce((acc, item, index) => {
+    const key = buildReceivePoItemKey(item, index);
+    acc.set(key, toReceiveQuantity(acc.get(key)));
+    return acc;
+  }, totals);
+};
+
+const validateReceiveQuantitiesAgainstAvailability = async (
+  tx,
+  {
+    purchaseOrderId,
+    receivePk,
+    targetReceiptId = null,
+    normalizedItems,
+  }
+) => {
+  const headersResult = await new sql.Request(tx)
+    .input("PurchaseOrderId", sql.Int, purchaseOrderId)
+    .query(withSqlLockTimeout(`
+      SELECT *
+      FROM dbo.ReceiveGoods
+      WHERE PurchaseOrderId = @PurchaseOrderId
+    `));
+  const itemsResult = await new sql.Request(tx)
+    .input("PurchaseOrderId", sql.Int, purchaseOrderId)
+    .query(withSqlLockTimeout(`
+      SELECT *
+      FROM dbo.ReceiveGoodsItems
+      WHERE PurchaseOrderId = @PurchaseOrderId
+    `));
+
+  const purchaseOrderItems = await loadReceivePurchaseOrderItems(tx, purchaseOrderId);
+  const groupedItems = groupReceiveItemsByReceipt(itemsResult.recordset ?? []);
+  const sortedHeaders = sortReceiveRowsChronologically(
+    headersResult.recordset ?? [],
+    receivePk
+  );
+  const priorTotals = buildRequestedReceiveTotalsBeforeReceipt(
+    purchaseOrderItems,
+    sortedHeaders,
+    groupedItems,
+    targetReceiptId
+  );
+
+  purchaseOrderItems.forEach((poItem, index) => {
+    const itemKey = buildReceivePoItemKey(poItem, index);
+    const requestedItem =
+      normalizedItems.byKey.get(itemKey) ?? normalizedItems.ordered[index] ?? null;
+    const orderedQty = toReceiveQuantity(poItem.quantity ?? poItem.orderedQty);
+    const remainingQty = Math.max(
+      orderedQty - toReceiveQuantity(priorTotals.get(itemKey)),
+      0
+    );
+    const requestedQty = Math.max(
+      toReceiveQuantity(requestedItem?.receivedQty ?? requestedItem?.ReceivedQty),
+      0
+    );
+
+    if (requestedQty > remainingQty) {
+      const error = new Error(
+        `Received quantity for ${poItem.name || "item"} cannot exceed remaining PO quantity (${remainingQty}).`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  });
+};
+
+const validateReceiveSerialNumbers = async (
+  tx,
+  {
+    targetReceiptId = null,
+    normalizedItems,
+  }
+) => {
+  const allSerials = [];
+
+  normalizedItems.ordered.forEach((item) => {
+    const receivedQty = toReceiveQuantity(item.receivedQty);
+    const serialRequired = normalizeBooleanFlag(item.serialRequired, false);
+    const serialNumbers = normalizeSerialNumbers(item.serialNumbers);
+
+    if (serialRequired && receivedQty > 0 && serialNumbers.length !== receivedQty) {
+      const error = new Error(
+        `Serial count for ${item.name || "item"} must match the received quantity (${receivedQty}).`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!serialRequired && serialNumbers.length > receivedQty) {
+      const error = new Error(
+        `Serial count for ${item.name || "item"} cannot exceed the received quantity (${receivedQty}).`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    allSerials.push(...serialNumbers);
+  });
+
+  const uniquePayloadSerials = new Set();
+  for (const serialNumber of allSerials) {
+    const key = serialNumber.toLowerCase();
+    if (uniquePayloadSerials.has(key)) {
+      const error = new Error(`Serial number ${serialNumber} is duplicated in this receipt.`);
+      error.statusCode = 400;
+      throw error;
+    }
+    uniquePayloadSerials.add(key);
+  }
+
+  if (!allSerials.length) {
+    return;
+  }
+
+  const existingResult = await new sql.Request(tx)
+    .input("ReceiptId", sql.Int, toNullableInt(targetReceiptId))
+    .query(`
+      SELECT SerialNumber
+      FROM dbo.SerialNumbers
+      WHERE @ReceiptId IS NULL OR ReceiveGoodsId <> @ReceiptId
+    `);
+
+  const existingSerials = new Set(
+    (existingResult.recordset ?? [])
+      .map((row) => String(row.SerialNumber ?? "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  for (const serialNumber of allSerials) {
+    if (existingSerials.has(serialNumber.toLowerCase())) {
+      const error = new Error(`Serial number ${serialNumber} already exists.`);
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+};
+
+const writeReceiveAuditLog = async (
+  tx,
+  {
+    receiptId = null,
+    purchaseOrderId = null,
+    action = "",
+    performedBy = null,
+    details = null,
+    snapshot = null,
+  } = {}
+) => {
+  await new sql.Request(tx)
+    .input("ReceiveGoodsId", sql.Int, toNullableInt(receiptId))
+    .input("PurchaseOrderId", sql.Int, toNullableInt(purchaseOrderId))
+    .input("Action", sql.NVarChar(50), String(action || "").trim() || "UPDATE")
+    .input("PerformedBy", sql.NVarChar(255), normalizeOptionalString(performedBy) ?? null)
+    .input("Details", sql.NVarChar(sql.MAX), normalizeOptionalString(details) ?? null)
+    .input("Snapshot", sql.NVarChar(sql.MAX), serializeJson(snapshot))
+    .query(`
+      INSERT INTO dbo.ReceiveGoodsAuditLog
+        (ReceiveGoodsId, PurchaseOrderId, ActionName, PerformedBy, Details, SnapshotJson)
+      VALUES
+        (@ReceiveGoodsId, @PurchaseOrderId, @Action, @PerformedBy, @Details, @Snapshot)
+    `);
+};
+
 let ensureReceiveTablesPromise = null;
 
 const ensureReceiveTables = async () => {
@@ -2498,6 +3115,7 @@ const ensureReceiveTables = async () => {
         ShipTo NVARCHAR(MAX) NULL,
         ShowProjectDetails BIT NOT NULL DEFAULT 1,
         Notes NVARCHAR(MAX) NULL,
+        TaxMode NVARCHAR(20) NULL,
         Status NVARCHAR(50) NULL,
         CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -2566,6 +3184,10 @@ const ensureReceiveTables = async () => {
     BEGIN
       ALTER TABLE dbo.ReceiveGoods ADD Notes NVARCHAR(MAX) NULL;
     END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'TaxMode') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD TaxMode NVARCHAR(20) NULL;
+    END;
     IF COL_LENGTH('dbo.ReceiveGoods', 'Status') IS NULL
     BEGIN
       ALTER TABLE dbo.ReceiveGoods ADD Status NVARCHAR(50) NULL;
@@ -2592,6 +3214,23 @@ const ensureReceiveTables = async () => {
         PurchaseOrderId INT NULL,
         PurchaseOrderItemId INT NULL,
         ItemId INT NULL,
+        ItemName NVARCHAR(255) NULL,
+        Description NVARCHAR(MAX) NULL,
+        Unit NVARCHAR(50) NULL,
+        HSN NVARCHAR(50) NULL,
+        GST NVARCHAR(100) NULL,
+        TaxPercentage DECIMAL(5,2) NULL,
+        SerialRequired BIT NOT NULL DEFAULT 0,
+        UnitPrice DECIMAL(18,2) NULL,
+        TaxableAmount DECIMAL(18,2) NULL,
+        CGSTPercent DECIMAL(5,2) NULL,
+        SGSTPercent DECIMAL(5,2) NULL,
+        IGSTPercent DECIMAL(5,2) NULL,
+        CGSTAmount DECIMAL(18,2) NULL,
+        SGSTAmount DECIMAL(18,2) NULL,
+        IGSTAmount DECIMAL(18,2) NULL,
+        GSTAmount DECIMAL(18,2) NULL,
+        SerialNumbersJson NVARCHAR(MAX) NULL,
         OrderedQty INT NOT NULL DEFAULT 0,
         ReceivedQty INT NOT NULL DEFAULT 0,
         BalanceQty INT NOT NULL DEFAULT 0,
@@ -2629,6 +3268,62 @@ const ensureReceiveTables = async () => {
     BEGIN
       ALTER TABLE dbo.ReceiveGoodsItems ADD Unit NVARCHAR(50) NULL;
     END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'HSN') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD HSN NVARCHAR(50) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'GST') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD GST NVARCHAR(100) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'TaxPercentage') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD TaxPercentage DECIMAL(5,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'SerialRequired') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD SerialRequired BIT NOT NULL CONSTRAINT DF_ReceiveGoodsItems_SerialRequired DEFAULT 0;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'UnitPrice') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD UnitPrice DECIMAL(18,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'TaxableAmount') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD TaxableAmount DECIMAL(18,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'CGSTPercent') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD CGSTPercent DECIMAL(5,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'SGSTPercent') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD SGSTPercent DECIMAL(5,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'IGSTPercent') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD IGSTPercent DECIMAL(5,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'CGSTAmount') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD CGSTAmount DECIMAL(18,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'SGSTAmount') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD SGSTAmount DECIMAL(18,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'IGSTAmount') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD IGSTAmount DECIMAL(18,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'GSTAmount') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD GSTAmount DECIMAL(18,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoodsItems', 'SerialNumbersJson') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoodsItems ADD SerialNumbersJson NVARCHAR(MAX) NULL;
+    END;
     IF COL_LENGTH('dbo.ReceiveGoodsItems', 'ItemNotes') IS NULL
     BEGIN
       ALTER TABLE dbo.ReceiveGoodsItems ADD ItemNotes NVARCHAR(MAX) NULL;
@@ -2649,6 +3344,54 @@ const ensureReceiveTables = async () => {
     BEGIN
       ALTER TABLE dbo.ReceiveGoodsItems ADD CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_ReceiveGoodsItems_CreatedAt DEFAULT SYSUTCDATETIME();
     END;
+  `);
+
+    await pool.request().query(`
+    IF OBJECT_ID('dbo.SerialNumbers', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.SerialNumbers (
+        SerialNumberId INT IDENTITY(1,1) PRIMARY KEY,
+        PurchaseOrderId INT NULL,
+        PurchaseOrderItemId INT NULL,
+        ReceiveGoodsId INT NULL,
+        ItemId INT NULL,
+        ProductName NVARCHAR(255) NULL,
+        SerialNumber NVARCHAR(255) NOT NULL,
+        Status NVARCHAR(50) NOT NULL DEFAULT N'In Stock',
+        LocationId INT NULL,
+        CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+      )
+    END
+  `);
+
+    await pool.request().query(`
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.indexes
+      WHERE name = 'UX_SerialNumbers_SerialNumber'
+        AND object_id = OBJECT_ID('dbo.SerialNumbers')
+    )
+    BEGIN
+      CREATE UNIQUE INDEX UX_SerialNumbers_SerialNumber
+      ON dbo.SerialNumbers(SerialNumber);
+    END
+  `);
+
+    await pool.request().query(`
+    IF OBJECT_ID('dbo.ReceiveGoodsAuditLog', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.ReceiveGoodsAuditLog (
+        AuditId INT IDENTITY(1,1) PRIMARY KEY,
+        ReceiveGoodsId INT NULL,
+        PurchaseOrderId INT NULL,
+        ActionName NVARCHAR(50) NOT NULL,
+        PerformedBy NVARCHAR(255) NULL,
+        Details NVARCHAR(MAX) NULL,
+        SnapshotJson NVARCHAR(MAX) NULL,
+        CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+      )
+    END
   `);
 
     const fkCol = await refreshReceiveGoodsItemsFk();
@@ -2754,6 +3497,7 @@ const ensureBoqTables = async () => {
         BOQId INT NOT NULL,
         ItemName NVARCHAR(200) NOT NULL,
         Description NVARCHAR(MAX) NULL,
+        SerialNumber NVARCHAR(255) NULL,
         Unit NVARCHAR(50) NULL,
         HSN NVARCHAR(50) NULL,
         GST NVARCHAR(100) NULL,
@@ -2780,6 +3524,10 @@ const ensureBoqTables = async () => {
     IF COL_LENGTH('dbo.BOQLineItems', 'GST') IS NULL
     BEGIN
       ALTER TABLE dbo.BOQLineItems ADD GST NVARCHAR(100) NULL;
+    END;
+    IF COL_LENGTH('dbo.BOQLineItems', 'SerialNumber') IS NULL
+    BEGIN
+      ALTER TABLE dbo.BOQLineItems ADD SerialNumber NVARCHAR(255) NULL;
     END;
     IF COL_LENGTH('dbo.BOQLineItems', 'AvailableQty') IS NULL
     BEGIN
@@ -3529,6 +4277,8 @@ app.get("/api/items", async (_req, res) => {
         ${buildNumberCoalesceExpr(itemSchema.priceColumns)} AS [price],
         ${buildNumberCoalesceExpr(itemSchema.taxColumns, "0")} AS [taxPercentage],
         ${buildTextCoalesceExpr(itemSchema.gstColumns)} AS [gst],
+        ${buildNumberCoalesceExpr(itemSchema.serialRequiredColumns, "0")} AS [serialRequired],
+        ${buildTextCoalesceExpr(itemSchema.serialNumberColumns)} AS [serialNumber],
         ${buildTextCoalesceExpr(itemSchema.descriptionColumns)} AS [description],
         ${buildDateCoalesceExpr(itemSchema.createdAtColumns)} AS [createdAt],
         ${buildDateCoalesceExpr(itemSchema.updatedAtColumns)} AS [updatedAt]
@@ -3563,6 +4313,8 @@ app.post("/api/items", async (req, res) => {
       price,
       gst,
       taxPercentage,
+      serialRequired,
+      serialNumber,
       description,
     } = req.body ?? {};
     if (!String(name ?? "").trim()) {
@@ -3580,6 +4332,7 @@ app.post("/api/items", async (req, res) => {
     const validTaxPercentage = Number.isFinite(cleanTaxPercentage)
       ? cleanTaxPercentage
       : 0;
+    const validSerialRequired = normalizeBooleanFlag(serialRequired, false);
     const normalizedGstLabel =
       normalizeOptionalString(gst) ?? formatTaxPercentageLabel(validTaxPercentage);
 
@@ -3595,6 +4348,8 @@ app.post("/api/items", async (req, res) => {
       .input("Price", sql.Decimal(18, 2), validPrice)
       .input("GST", sql.NVarChar(100), normalizedGstLabel)
       .input("TaxPercentage", sql.Decimal(5, 2), validTaxPercentage)
+      .input("SerialRequired", sql.Bit, validSerialRequired)
+      .input("SerialNumber", sql.NVarChar(255), String(serialNumber ?? "").trim())
       .input("Description", sql.NVarChar(sql.MAX), String(description ?? "").trim())
       .input("Now", sql.DateTime2, new Date());
 
@@ -3621,6 +4376,8 @@ app.post("/api/items", async (req, res) => {
     addInsertFields(itemSchema.priceColumns, "Price");
     addInsertFields(itemSchema.gstColumns, "GST");
     addInsertFields(itemSchema.taxColumns, "TaxPercentage");
+    addInsertFields(itemSchema.serialRequiredColumns, "SerialRequired");
+    addInsertFields(itemSchema.serialNumberColumns, "SerialNumber");
     addInsertFields(itemSchema.descriptionColumns, "Description");
     addInsertFields(itemSchema.createdAtColumns, "Now");
     addInsertFields(itemSchema.updatedAtColumns, "Now");
@@ -3665,6 +4422,8 @@ app.put("/api/items/:id", async (req, res) => {
       price,
       gst,
       taxPercentage,
+      serialRequired,
+      serialNumber,
       description,
     } = req.body ?? {};
 
@@ -3680,6 +4439,7 @@ app.put("/api/items/:id", async (req, res) => {
     const validTaxPercentage = Number.isFinite(cleanTaxPercentage)
       ? cleanTaxPercentage
       : 0;
+    const validSerialRequired = normalizeBooleanFlag(serialRequired, false);
     const normalizedGstLabel =
       normalizeOptionalString(gst) ?? formatTaxPercentageLabel(validTaxPercentage);
 
@@ -3704,6 +4464,8 @@ app.put("/api/items/:id", async (req, res) => {
     addSetClauses(itemSchema.priceColumns, "Price");
     addSetClauses(itemSchema.gstColumns, "GST");
     addSetClauses(itemSchema.taxColumns, "TaxPercentage");
+    addSetClauses(itemSchema.serialRequiredColumns, "SerialRequired");
+    addSetClauses(itemSchema.serialNumberColumns, "SerialNumber");
     addSetClauses(itemSchema.descriptionColumns, "Description");
     for (const column of uniqueColumnNames(itemSchema.updatedAtColumns)) {
       setClauses.push(`${toIdentifier(column)} = @Now`);
@@ -3720,6 +4482,8 @@ app.put("/api/items/:id", async (req, res) => {
       .input("Price", sql.Decimal(18, 2), validPrice)
       .input("GST", sql.NVarChar(100), normalizedGstLabel)
       .input("TaxPercentage", sql.Decimal(5, 2), validTaxPercentage)
+      .input("SerialRequired", sql.Bit, validSerialRequired)
+      .input("SerialNumber", sql.NVarChar(255), String(serialNumber ?? "").trim())
       .input("Description", sql.NVarChar(sql.MAX), String(description ?? "").trim())
       .input("Now", sql.DateTime2, new Date())
       .query(`
@@ -5481,7 +6245,8 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
     return res.status(400).json({ ok: false, error: "Invalid purchase order id" });
   }
 
-  const allowClosedEdit = req.body?.allowClosedEdit === true;
+  const allowLockedEdit =
+    req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true;
 
   const {
     projectId = null,
@@ -5519,11 +6284,11 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
       await tx.rollback();
       return res.status(404).json({ ok: false, error: "Purchase order not found" });
     }
-    if (isClosedPurchaseOrderStatus(existingOrder.Status) && !allowClosedEdit) {
+    if (isLockedPurchaseOrderStatus(existingOrder.Status) && !allowLockedEdit) {
       await tx.rollback();
       return res.status(409).json({
         ok: false,
-        error: "This Purchase Order is Closed.",
+        error: getLockedPurchaseOrderError(existingOrder.Status),
       });
     }
 
@@ -5612,6 +6377,97 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
   }
 });
 
+app.patch("/api/purchase-orders/:id/status", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid purchase order id" });
+  }
+
+  const allowLockedEdit =
+    req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true;
+  const requestedStatus = normalizeOptionalString(req.body?.status);
+  if (!requestedStatus) {
+    return res.status(400).json({ ok: false, error: "Status is required" });
+  }
+
+  let tx;
+  try {
+    await ensurePurchaseTables();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const existingOrderResult = await new sql.Request(tx)
+      .input("Id", sql.Int, id)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.PurchaseOrders
+        WHERE Id = @Id
+      `);
+    const existingOrder = existingOrderResult.recordset?.[0] ?? null;
+
+    if (!existingOrder) {
+      await tx.rollback();
+      return res.status(404).json({ ok: false, error: "Purchase order not found" });
+    }
+
+    if (isLockedPurchaseOrderStatus(existingOrder.Status) && !allowLockedEdit) {
+      await tx.rollback();
+      return res.status(409).json({
+        ok: false,
+        error: getLockedPurchaseOrderError(existingOrder.Status),
+      });
+    }
+
+    const updateOrderResult = await new sql.Request(tx)
+      .input("Id", sql.Int, id)
+      .input("Status", sql.NVarChar(50), requestedStatus)
+      .query(`
+        UPDATE dbo.PurchaseOrders
+        SET Status = @Status,
+            UpdatedAt = SYSUTCDATETIME()
+        OUTPUT INSERTED.*
+        WHERE Id = @Id
+      `);
+    const updatedOrder = updateOrderResult.recordset?.[0] ?? null;
+
+    if (!updatedOrder) {
+      await tx.rollback();
+      return res.status(404).json({ ok: false, error: "Purchase order not found" });
+    }
+
+    await tx.commit();
+    tx = null;
+
+    const itemsResult = await pool
+      .request()
+      .input("PurchaseOrderId", sql.Int, id)
+      .query(`
+        SELECT * FROM PurchaseOrderItems WHERE PurchaseOrderId = @PurchaseOrderId
+      `);
+    const items = (itemsResult.recordset ?? []).map(normalizePoItem);
+    const total =
+      items.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0) ||
+      Number(updatedOrder.Total ?? updatedOrder.total ?? 0) ||
+      0;
+
+    return res.json({
+      ok: true,
+      purchaseOrder: {
+        ...normalizePurchaseOrder(updatedOrder),
+        items,
+        total,
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to update purchase order status",
+    });
+  }
+});
+
 app.delete("/api/purchase-orders/:id", async (req, res) => {
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) {
@@ -5639,11 +6495,11 @@ app.delete("/api/purchase-orders/:id", async (req, res) => {
       return res.status(404).json({ ok: false, error: "Purchase order not found" });
     }
 
-    if (isClosedPurchaseOrderStatus(existingOrder.Status)) {
+    if (isLockedPurchaseOrderStatus(existingOrder.Status)) {
       await tx.rollback();
       return res.status(409).json({
         ok: false,
-        error: "This Purchase Order is Closed.",
+        error: getLockedPurchaseOrderError(existingOrder.Status),
       });
     }
 
@@ -5800,6 +6656,7 @@ app.post("/api/receive-goods", async (req, res) => {
     projectId = null,
     vendorId = null,
     locationId = null,
+    boqId = null,
     receivedDate = null,
     receivedBy = null,
     billTo = null,
@@ -5808,6 +6665,8 @@ app.post("/api/receive-goods", async (req, res) => {
     notes = null,
     items = [],
     status = null,
+    taxMode = "intra",
+    auditBy = null,
   } = req.body ?? {};
 
   const poId = Number.parseInt(purchaseOrderId, 10);
@@ -5838,6 +6697,8 @@ app.post("/api/receive-goods", async (req, res) => {
       error: "Invalid receivedDate",
     });
   }
+  const normalizedTaxMode =
+    String(taxMode).trim().toLowerCase() === "inter" ? "inter" : "intra";
 
   let tx;
   try {
@@ -5864,14 +6725,24 @@ app.post("/api/receive-goods", async (req, res) => {
         error: "Purchase order not found",
       });
     }
-    if (isClosedPurchaseOrderStatus(poRow.Status)) {
+    if (isLockedPurchaseOrderStatus(poRow.Status)) {
       await rollbackTx(tx);
       tx = null;
       return res.status(409).json({
         ok: false,
-        error: "This Purchase Order is Closed.",
+        error: getLockedPurchaseOrderError(poRow.Status),
       });
     }
+
+    await validateReceiveQuantitiesAgainstAvailability(tx, {
+      purchaseOrderId: poId,
+      receivePk,
+      normalizedItems,
+    });
+    await validateReceiveSerialNumbers(tx, {
+      normalizedItems,
+    });
+    const beforeItemTotals = await loadReceiveItemTotalsByItemId(tx, poId);
 
     const upsertReq = new sql.Request(tx);
     upsertReq.input("PurchaseOrderId", sql.Int, poId);
@@ -5890,14 +6761,16 @@ app.post("/api/receive-goods", async (req, res) => {
         : !["0", "false", "no"].includes(String(showProjectDetails).toLowerCase())
     );
     upsertReq.input("Notes", sql.NVarChar(sql.MAX), normalizeOptionalString(notes) ?? null);
+    upsertReq.input("TaxMode", sql.NVarChar(20), normalizedTaxMode);
     upsertReq.input("Status", sql.NVarChar(50), status || "Draft");
+    upsertReq.input("BOQId", sql.Int, toNullableInt(boqId));
 
     const insertResult = await upsertReq.query(`
       INSERT INTO dbo.ReceiveGoods
-        (PurchaseOrderId, ProjectId, VendorId, LocationId, ReceivedDate, ReceivedBy, BillTo, ShipTo, ShowProjectDetails, Notes, Status)
+        (PurchaseOrderId, ProjectId, VendorId, LocationId, ReceivedDate, ReceivedBy, BillTo, ShipTo, ShowProjectDetails, Notes, TaxMode, Status, BOQId)
       OUTPUT INSERTED.*
       VALUES
-        (@PurchaseOrderId, @ProjectId, @VendorId, @LocationId, @ReceivedDate, @ReceivedBy, @BillTo, @ShipTo, @ShowProjectDetails, @Notes, @Status)
+        (@PurchaseOrderId, @ProjectId, @VendorId, @LocationId, @ReceivedDate, @ReceivedBy, @BillTo, @ShipTo, @ShowProjectDetails, @Notes, @TaxMode, @Status, @BOQId)
     `);
     const receiptRow = insertResult.recordset?.[0] ?? null;
 
@@ -5910,6 +6783,8 @@ app.post("/api/receive-goods", async (req, res) => {
         [String(receiptId)]: normalizedItems,
       },
     });
+    const afterItemTotals = await loadReceiveItemTotalsByItemId(tx, poId);
+    await applyReceiveStockDelta(tx, beforeItemTotals, afterItemTotals);
 
     await new sql.Request(tx)
       .input("Id", sql.Int, poId)
@@ -5920,6 +6795,21 @@ app.post("/api/receive-goods", async (req, res) => {
             UpdatedAt = SYSUTCDATETIME()
         WHERE Id = @Id
       `);
+
+    await writeReceiveAuditLog(tx, {
+      receiptId,
+      purchaseOrderId: poId,
+      action: "CREATE",
+      performedBy: auditBy,
+      details: "Receipt created",
+      snapshot: {
+        receipt: {
+          ...normalizeReceiveGoods(receiptRow),
+          taxMode: normalizedTaxMode,
+        },
+        items: normalizedItems.ordered,
+      },
+    });
 
     await tx.commit();
     tx = null;
@@ -5949,7 +6839,12 @@ app.post("/api/receive-goods", async (req, res) => {
     await rollbackTx(tx);
     tx = null;
     console.error("POST /api/receive-goods failed:", error?.message ?? error);
-    return res.status(isSqlLockTimeoutError(error) ? 503 : 500).json({
+    const statusCode = isSqlLockTimeoutError(error)
+      ? 503
+      : Number.isInteger(error?.statusCode)
+      ? error.statusCode
+      : 500;
+    return res.status(statusCode).json({
       ok: false,
       error: isSqlLockTimeoutError(error)
         ? RECEIVE_GOODS_LOCK_MESSAGE
@@ -5977,9 +6872,13 @@ app.put("/api/receive-goods/:id", async (req, res) => {
     projectId = null,
     vendorId = null,
     locationId = null,
+    boqId = null,
+    taxMode = "intra",
+    auditBy = null,
   } = req.body ?? {};
 
-  const allowClosedEdit = req.body?.allowClosedEdit === true;
+  const allowLockedEdit =
+    req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true;
   const normalizedItems = normalizeReceiveGoodsItemsInput(items);
   const hasItems = normalizedItems.ordered.some((item) => item.receivedQty > 0);
   if (!hasItems) {
@@ -5996,6 +6895,8 @@ app.put("/api/receive-goods/:id", async (req, res) => {
       error: "Invalid receivedDate",
     });
   }
+  const normalizedTaxMode =
+    String(taxMode).trim().toLowerCase() === "inter" ? "inter" : "intra";
 
   let tx;
   try {
@@ -6043,14 +6944,34 @@ app.put("/api/receive-goods/:id", async (req, res) => {
       });
     }
 
-    if (isClosedPurchaseOrderStatus(poRow.Status) && !allowClosedEdit) {
+    if (isLockedPurchaseOrderStatus(poRow.Status) && !allowLockedEdit) {
       await rollbackTx(tx);
       tx = null;
       return res.status(409).json({
         ok: false,
-        error: "This Purchase Order is Closed.",
+        error: getLockedPurchaseOrderError(poRow.Status),
       });
     }
+
+    const existingItemsResult = await new sql.Request(tx)
+      .input("ReceiptId", sql.Int, receiptId)
+      .query(withSqlLockTimeout(`
+        SELECT *
+        FROM dbo.ReceiveGoodsItems
+        WHERE ${fkCol} = @ReceiptId
+      `));
+
+    await validateReceiveQuantitiesAgainstAvailability(tx, {
+      purchaseOrderId: poId,
+      receivePk,
+      targetReceiptId: receiptId,
+      normalizedItems,
+    });
+    await validateReceiveSerialNumbers(tx, {
+      targetReceiptId: receiptId,
+      normalizedItems,
+    });
+    const beforeItemTotals = await loadReceiveItemTotalsByItemId(tx, poId);
 
     const updateReq = new sql.Request(tx);
     updateReq.input("ReceiptId", sql.Int, receiptId);
@@ -6069,6 +6990,8 @@ app.put("/api/receive-goods/:id", async (req, res) => {
         : !["0", "false", "no"].includes(String(showProjectDetails).toLowerCase())
     );
     updateReq.input("Notes", sql.NVarChar(sql.MAX), normalizeOptionalString(notes) ?? null);
+    updateReq.input("TaxMode", sql.NVarChar(20), normalizedTaxMode);
+    updateReq.input("BOQId", sql.Int, toNullableInt(boqId));
 
     await updateReq.query(`
       UPDATE dbo.ReceiveGoods
@@ -6081,6 +7004,8 @@ app.put("/api/receive-goods/:id", async (req, res) => {
           ShipTo = @ShipTo,
           ShowProjectDetails = @ShowProjectDetails,
           Notes = @Notes,
+          TaxMode = @TaxMode,
+          BOQId = @BOQId,
           UpdatedAt = SYSUTCDATETIME()
       WHERE ${receivePk} = @ReceiptId
     `);
@@ -6093,6 +7018,8 @@ app.put("/api/receive-goods/:id", async (req, res) => {
         [String(receiptId)]: normalizedItems,
       },
     });
+    const afterItemTotals = await loadReceiveItemTotalsByItemId(tx, poId);
+    await applyReceiveStockDelta(tx, beforeItemTotals, afterItemTotals);
 
     await new sql.Request(tx)
       .input("Id", sql.Int, poId)
@@ -6103,6 +7030,27 @@ app.put("/api/receive-goods/:id", async (req, res) => {
             UpdatedAt = SYSUTCDATETIME()
         WHERE Id = @Id
       `);
+
+    await writeReceiveAuditLog(tx, {
+      receiptId,
+      purchaseOrderId: poId,
+      action: "UPDATE",
+      performedBy: auditBy,
+      details: "Receipt updated",
+      snapshot: {
+        before: {
+          receipt: normalizeReceiveGoods(receiptRow),
+          items: (existingItemsResult.recordset ?? []).map(normalizeReceiveGoodsItem),
+        },
+        after: {
+          receipt: {
+            ...normalizeReceiveGoods(receiptRow),
+            taxMode: normalizedTaxMode,
+          },
+          items: normalizedItems.ordered,
+        },
+      },
+    });
 
     await tx.commit();
     tx = null;
@@ -6131,11 +7079,160 @@ app.put("/api/receive-goods/:id", async (req, res) => {
     await rollbackTx(tx);
     tx = null;
     console.error("PUT /api/receive-goods/:id failed:", error?.message ?? error);
-    return res.status(isSqlLockTimeoutError(error) ? 503 : 500).json({
+    const statusCode = isSqlLockTimeoutError(error)
+      ? 503
+      : Number.isInteger(error?.statusCode)
+      ? error.statusCode
+      : 500;
+    return res.status(statusCode).json({
       ok: false,
       error: isSqlLockTimeoutError(error)
         ? RECEIVE_GOODS_LOCK_MESSAGE
         : error?.message ?? "Failed to update receipt",
+    });
+  } finally {
+    await rollbackTx(tx);
+  }
+});
+
+app.delete("/api/receive-goods/:id", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid receive goods id" });
+  }
+
+  const allowLockedEdit =
+    req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true;
+  const auditBy = req.body?.auditBy ?? null;
+
+  let tx;
+  try {
+    if (ensureSchemaOnRequest) {
+      await ensurePurchaseTables();
+      await ensureReceiveTables();
+    }
+
+    const receivePk = await refreshReceiveGoodsPk();
+    const fkCol = await refreshReceiveGoodsItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const receiptResult = await new sql.Request(tx)
+      .input("ReceiptId", sql.Int, id)
+      .query(withSqlLockTimeout(`
+        SELECT TOP 1 *
+        FROM dbo.ReceiveGoods
+        WHERE ${receivePk} = @ReceiptId
+      `));
+    const receiptRow = receiptResult.recordset?.[0] ?? null;
+    if (!receiptRow) {
+      await rollbackTx(tx);
+      tx = null;
+      return res.status(404).json({ ok: false, error: "Receipt not found" });
+    }
+
+    const receiptId =
+      receiptRow?.[receivePk] ?? receiptRow?.ReceiveGoodsId ?? receiptRow?.Id ?? id;
+    const poId = toNullableInt(receiptRow.PurchaseOrderId);
+
+    const poResult = await new sql.Request(tx)
+      .input("Id", sql.Int, poId)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.PurchaseOrders
+        WHERE Id = @Id
+      `);
+    const poRow = poResult.recordset?.[0] ?? null;
+    if (!poRow) {
+      await rollbackTx(tx);
+      tx = null;
+      return res.status(404).json({ ok: false, error: "Purchase order not found" });
+    }
+
+    if (isLockedPurchaseOrderStatus(poRow.Status) && !allowLockedEdit) {
+      await rollbackTx(tx);
+      tx = null;
+      return res.status(409).json({
+        ok: false,
+        error: getLockedPurchaseOrderError(poRow.Status),
+      });
+    }
+
+    const itemsResult = await new sql.Request(tx)
+      .input("ReceiptId", sql.Int, receiptId)
+      .query(withSqlLockTimeout(`
+        SELECT *
+        FROM dbo.ReceiveGoodsItems
+        WHERE ${fkCol} = @ReceiptId
+      `));
+    const receiptItems = (itemsResult.recordset ?? []).map(normalizeReceiveGoodsItem);
+    const beforeItemTotals = await loadReceiveItemTotalsByItemId(tx, poId);
+
+    await writeReceiveAuditLog(tx, {
+      receiptId,
+      purchaseOrderId: poId,
+      action: "DELETE",
+      performedBy: auditBy,
+      details: "Receipt deleted",
+      snapshot: {
+        receipt: normalizeReceiveGoods(receiptRow),
+        items: receiptItems,
+      },
+    });
+
+    await new sql.Request(tx)
+      .input("ReceiptId", sql.Int, receiptId)
+      .query(`
+        DELETE FROM dbo.SerialNumbers
+        WHERE ReceiveGoodsId = @ReceiptId
+      `);
+
+    await new sql.Request(tx)
+      .input("ReceiptId", sql.Int, receiptId)
+      .query(`
+        DELETE FROM dbo.ReceiveGoodsItems
+        WHERE ${fkCol} = @ReceiptId
+      `);
+
+    await new sql.Request(tx)
+      .input("ReceiptId", sql.Int, receiptId)
+      .query(`
+        DELETE FROM dbo.ReceiveGoods
+        WHERE ${receivePk} = @ReceiptId
+      `);
+
+    const { finalStatus } = await recalculateReceiveGoodsChain(tx, {
+      purchaseOrderId: poId,
+      receivePk,
+      fkCol,
+    });
+    const afterItemTotals = await loadReceiveItemTotalsByItemId(tx, poId);
+    await applyReceiveStockDelta(tx, beforeItemTotals, afterItemTotals);
+
+    await new sql.Request(tx)
+      .input("Id", sql.Int, poId)
+      .input("Status", sql.NVarChar(50), finalStatus || "Draft")
+      .query(`
+        UPDATE dbo.PurchaseOrders
+        SET Status = @Status,
+            UpdatedAt = SYSUTCDATETIME()
+        WHERE Id = @Id
+      `);
+
+    await tx.commit();
+    tx = null;
+
+    return res.json({ ok: true });
+  } catch (error) {
+    await rollbackTx(tx);
+    tx = null;
+    console.error("DELETE /api/receive-goods/:id failed:", error?.message ?? error);
+    return res.status(isSqlLockTimeoutError(error) ? 503 : 500).json({
+      ok: false,
+      error: isSqlLockTimeoutError(error)
+        ? RECEIVE_GOODS_LOCK_MESSAGE
+        : error?.message ?? "Failed to delete receipt",
     });
   } finally {
     await rollbackTx(tx);
@@ -6290,6 +7387,7 @@ app.post("/api/boqs", async (req, res) => {
       insertItem.input("BOQId", sql.Int, boqId);
       insertItem.input("ItemName", sql.NVarChar(200), String(item.name ?? "").trim());
       insertItem.input("Description", sql.NVarChar(sql.MAX), String(item.description ?? "").trim());
+      insertItem.input("SerialNumber", sql.NVarChar(255), String(item.serialNumber ?? "").trim());
       insertItem.input("Unit", sql.NVarChar(50), String(item.unit ?? "").trim());
       insertItem.input("HSN", sql.NVarChar(50), String(item.hsn ?? "").trim());
       insertItem.input("GST", sql.NVarChar(100), String(item.gst ?? "").trim());
@@ -6300,9 +7398,9 @@ app.post("/api/boqs", async (req, res) => {
       insertItem.input("Notes", sql.NVarChar(sql.MAX), String(item.notes ?? "").trim());
       await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
-          (BOQId, ItemName, Description, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
+          (BOQId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
         VALUES
-          (@BOQId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
+          (@BOQId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
       `);
     }
 
@@ -6429,6 +7527,7 @@ app.put("/api/boqs/:id", async (req, res) => {
       insertItem.input("BOQId", sql.Int, id);
       insertItem.input("ItemName", sql.NVarChar(200), String(item.name ?? "").trim());
       insertItem.input("Description", sql.NVarChar(sql.MAX), String(item.description ?? "").trim());
+      insertItem.input("SerialNumber", sql.NVarChar(255), String(item.serialNumber ?? "").trim());
       insertItem.input("Unit", sql.NVarChar(50), String(item.unit ?? "").trim());
       insertItem.input("HSN", sql.NVarChar(50), String(item.hsn ?? "").trim());
       insertItem.input("GST", sql.NVarChar(100), String(item.gst ?? "").trim());
@@ -6439,9 +7538,9 @@ app.put("/api/boqs/:id", async (req, res) => {
       insertItem.input("Notes", sql.NVarChar(sql.MAX), String(item.notes ?? "").trim());
       await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
-          (BOQId, ItemName, Description, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
+          (BOQId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
         VALUES
-          (@BOQId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
+          (@BOQId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
       `);
     }
 

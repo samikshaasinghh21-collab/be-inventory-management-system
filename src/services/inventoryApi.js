@@ -6,6 +6,8 @@ const normalizeItem = (item = {}) => {
     item.gst ??
     item.GST ??
     (Number.isFinite(taxPercentage) ? `${taxPercentage}%` : "");
+  const serialRequiredRaw =
+    item.serialRequired ?? item.SerialRequired ?? item.IsSerialTracked ?? false;
 
   return {
     id: item.id ?? item.ItemId ?? null,
@@ -17,6 +19,14 @@ const normalizeItem = (item = {}) => {
     price: Number(item.price ?? item.Price ?? 0),
     taxPercentage: Number.isFinite(taxPercentage) ? taxPercentage : 0,
     gst,
+    serialRequired: !["0", "false", "no"].includes(
+      String(serialRequiredRaw).trim().toLowerCase()
+    ),
+    serialNumber:
+      item.serialNumber ??
+      item.SerialNumber ??
+      item.SerialNumbe ??
+      "",
     description: item.description ?? item.Description ?? "",
   };
 };

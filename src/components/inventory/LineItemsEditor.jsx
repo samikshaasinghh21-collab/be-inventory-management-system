@@ -8,6 +8,7 @@ const createEmptyItem = (extraFieldKey = "notes") => {
     unit: "PCS",
     hsn: "",
     gst: "",
+    serialNumber: "",
     quantity: "",
     rate: "",
     notes: "",
@@ -31,6 +32,9 @@ const LineItemsEditor = ({
   gstLabel = "GST",
   hsnPlaceholder = "HSN",
   gstPlaceholder = "GST",
+  showSerialNumber = false,
+  serialNumberLabel = "Serial Number",
+  serialNumberPlaceholder = "Serial number",
   extraFieldKey = "notes",
   extraFieldLabel = "Notes",
   extraFieldPlaceholder = "Notes",
@@ -119,6 +123,9 @@ const LineItemsEditor = ({
               {showHsnGst && (
                 <th className="p-3 text-left min-w-[110px]">{gstLabel}</th>
               )}
+              {showSerialNumber && (
+                <th className="p-3 text-left min-w-[150px]">{serialNumberLabel}</th>
+              )}
               <th className="p-3 text-left min-w-[90px]">Unit</th>
               <th className="p-3 text-left min-w-[90px]">Qty</th>
               <th className="p-3 text-right min-w-[130px]">{priceLabel}</th>
@@ -187,6 +194,20 @@ const LineItemsEditor = ({
                           handleUpdate(item.id, "gst", event.target.value)
                         }
                         placeholder={gstPlaceholder}
+                        className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                      />
+                    </td>
+                  )}
+                  {showSerialNumber && (
+                    <td className="p-3">
+                      <input
+                        type="text"
+                        value={item.serialNumber ?? ""}
+                        disabled={readOnly}
+                        onChange={(event) =>
+                          handleUpdate(item.id, "serialNumber", event.target.value)
+                        }
+                        placeholder={serialNumberPlaceholder}
                         className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                       />
                     </td>

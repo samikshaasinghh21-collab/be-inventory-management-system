@@ -6,6 +6,7 @@ import { fetchLocations } from "../../services/locationsApi";
 import {
   fetchPurchaseOrders,
   deletePurchaseOrder,
+  updatePurchaseOrderStatus,
 } from "../../services/purchaseOrdersApi";
 import useSettings from "../../hooks/useSettings";
 import { formatDate } from "../../utils/dateFormat";
@@ -13,10 +14,14 @@ import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import DocumentViewPanel from "./DocumentViewPanel";
 import { buildGstSummary } from "../../utils/taxUtils";
-import { isClosedPurchaseOrder } from "../../utils/purchaseOrderStatus";
+import {
+  getPurchaseOrderLockMessage,
+  isCancelledPurchaseOrder,
+  isLockedPurchaseOrder,
+} from "../../utils/purchaseOrderStatus";
 import { getGstTaxMode } from "../../utils/gstUtils";
 import PasswordPromptModal from "../common/PasswordPromptModal";
-import { getClosedPoAuthError } from "../../utils/closedPoAuth";
+import { getClosedPoAuthError, isAdminRole } from "../../utils/closedPoAuth";
 
 const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   const alignClass = align === "right" ? "text-right" : "text-left";
@@ -58,10 +63,13 @@ const PurchaseOrderRegister = () => {
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [viewRecord, setViewRecord] = useState(null);
-  const [closedPoPromptRecord, setClosedPoPromptRecord] = useState(null);
+  const [lockedPoPromptContext, setLockedPoPromptContext] = useState(null);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminPasswordError, setAdminPasswordError] = useState("");
+  const [statusActionBusyId, setStatusActionBusyId] = useState(null);
+  const [unlockedPoIds, setUnlockedPoIds] = useState([]);
   const company = settings?.company || {};
+  const isAdminUser = isAdminRole(settings);
   const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
@@ -95,6 +103,19 @@ const PurchaseOrderRegister = () => {
     }
   };
 
+  const isPoUnlocked = (recordId) =>
+    unlockedPoIds.includes(String(recordId));
+
+  const unlockPoLocally = (recordId) => {
+    const key = String(recordId);
+    setUnlockedPoIds((prev) => (prev.includes(key) ? prev : [...prev, key]));
+  };
+
+  const clearPoUnlock = (recordId) => {
+    const key = String(recordId);
+    setUnlockedPoIds((prev) => prev.filter((id) => id !== key));
+  };
+
   const loadVendors = async () => {
     try {
       const list = await fetchVendors();
@@ -119,6 +140,11 @@ const PurchaseOrderRegister = () => {
     void loadLocations();
     void loadRecords();
   }, []);
+
+  useEffect(() => {
+    const activeIds = new Set(records.map((record) => String(record.id)));
+    setUnlockedPoIds((prev) => prev.filter((id) => activeIds.has(id)));
+  }, [records]);
 
   const projectMap = useMemo(() => {
     return projects.reduce((acc, project) => {
@@ -147,7 +173,7 @@ const PurchaseOrderRegister = () => {
   );
 
   const openOrdersCount = useMemo(
-    () => records.filter((record) => !isClosedPurchaseOrder(record.status)).length,
+    () => records.filter((record) => !isLockedPurchaseOrder(record.status)).length,
     [records]
   );
 
@@ -178,7 +204,9 @@ const PurchaseOrderRegister = () => {
   const statusBadge = (status) => {
     const label = status || "Draft";
     const base =
-      label.toLowerCase() === "closed"
+      isCancelledPurchaseOrder(label)
+        ? "bg-rose-100 text-rose-700"
+        : label.toLowerCase() === "closed"
         ? "bg-green-100 text-green-700"
         : label.toLowerCase().includes("partial")
         ? "bg-amber-100 text-amber-700"
@@ -194,19 +222,110 @@ const PurchaseOrderRegister = () => {
     setExpandedId((prev) => (prev === id ? null : id));
   };
 
-  const handleEdit = (record) => {
-    if (isClosedPurchaseOrder(record?.status)) {
-      setClosedPoPromptRecord(record);
-      setAdminPassword("");
-      setAdminPasswordError("");
+  const promptLockedPoAction = (record, action) => {
+    setLockedPoPromptContext({ record, action });
+    setAdminPassword("");
+    setAdminPasswordError("");
+  };
+
+  const handleStatusUpdate = async (record, status, options = {}) => {
+    if (!record?.id) {
       return;
     }
-    navigate("/inventory/purchase-order", { state: { purchaseOrder: record } });
+    try {
+      setStatusActionBusyId(record.id);
+      setApiError("");
+      const updated = await updatePurchaseOrderStatus(record.id, status, {
+        allowLockedEdit: options.allowLockedEdit === true,
+      });
+      await loadRecords();
+      if (viewRecord?.id === record.id) {
+        setViewRecord(updated);
+      }
+      return updated;
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error || error?.message || "Failed to update purchase order."
+      );
+      return null;
+    } finally {
+      setStatusActionBusyId(null);
+    }
+  };
+
+  const handleEdit = (record) => {
+    if (isLockedPurchaseOrder(record?.status) && !isPoUnlocked(record?.id)) {
+      if (!isAdminUser) {
+        setApiError(getPurchaseOrderLockMessage(record?.status));
+        return;
+      }
+      promptLockedPoAction(record, "edit");
+      return;
+    }
+    navigate("/inventory/purchase-order", {
+      state: {
+        purchaseOrder: record,
+        closedPoAuthorized: isLockedPurchaseOrder(record?.status),
+      },
+    });
+  };
+
+  const handleCancelPo = async (record) => {
+    const isLocked = isLockedPurchaseOrder(record?.status);
+    if (isLocked && !isPoUnlocked(record?.id)) {
+      if (!isAdminUser) {
+        setApiError(getPurchaseOrderLockMessage(record?.status));
+        return;
+      }
+      promptLockedPoAction(record, "cancel");
+      return;
+    }
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Cancel PO "${record.poNumber || record.id}"? This will lock the purchase order.`
+          );
+    if (!confirmed) {
+      return;
+    }
+    await handleStatusUpdate(record, "Cancelled", {
+      allowLockedEdit: isLocked,
+    });
+  };
+
+  const handleRecallPo = async (record) => {
+    if (!isCancelledPurchaseOrder(record?.status)) {
+      return;
+    }
+    if (!isAdminUser) {
+      setApiError("Only Admin users can recall a cancelled purchase order.");
+      return;
+    }
+    if (!isPoUnlocked(record?.id)) {
+      setApiError("Unlock this cancelled PO before recalling it.");
+      return;
+    }
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Recall PO "${record.poNumber || record.id}" to Draft status?`
+          );
+    if (!confirmed) {
+      return;
+    }
+    const updated = await handleStatusUpdate(record, "Draft", {
+      allowLockedEdit: true,
+    });
+    if (updated) {
+      clearPoUnlock(record.id);
+    }
   };
 
   const handleReceive = (record) => {
-    if (isClosedPurchaseOrder(record?.status)) {
-      setApiError("This Purchase Order is Closed.");
+    if (isLockedPurchaseOrder(record?.status)) {
+      setApiError(getPurchaseOrderLockMessage(record?.status));
       return;
     }
     navigate(`/inventory/receive-goods?purchaseOrderId=${record.id}`, {
@@ -235,12 +354,13 @@ const PurchaseOrderRegister = () => {
     try {
       setApiError("");
       const record = records.find((entry) => String(entry.id) === String(id));
-      if (isClosedPurchaseOrder(record?.status)) {
-        setApiError("Closed purchase orders cannot be deleted.");
+      if (isLockedPurchaseOrder(record?.status)) {
+        setApiError("Locked purchase orders cannot be deleted.");
         return;
       }
       await deletePurchaseOrder(id);
       await loadRecords();
+      clearPoUnlock(id);
       if (viewRecord?.id === id) {
         setViewRecord(null);
       }
@@ -261,22 +381,33 @@ const PurchaseOrderRegister = () => {
     });
   };
 
-  const confirmClosedPoEdit = () => {
+  const confirmLockedPoAction = async () => {
     const nextError = getClosedPoAuthError(settings, adminPassword);
     if (nextError) {
       setAdminPasswordError(nextError);
       return;
     }
-    if (!closedPoPromptRecord) {
+    const context = lockedPoPromptContext;
+    if (!context?.record) {
       return;
     }
-    navigate("/inventory/purchase-order", {
-      state: {
-        purchaseOrder: closedPoPromptRecord,
-        closedPoAuthorized: true,
-      },
-    });
-    setClosedPoPromptRecord(null);
+    const targetRecord = context.record;
+    unlockPoLocally(targetRecord.id);
+    if (context.action === "edit") {
+      navigate("/inventory/purchase-order", {
+        state: {
+          purchaseOrder: targetRecord,
+          closedPoAuthorized: true,
+        },
+      });
+    } else if (context.action === "cancel") {
+      await handleStatusUpdate(targetRecord, "Cancelled", {
+        allowLockedEdit: true,
+      });
+    } else {
+      setApiError("");
+    }
+    setLockedPoPromptContext(null);
     setAdminPassword("");
     setAdminPasswordError("");
   };
@@ -400,7 +531,10 @@ const PurchaseOrderRegister = () => {
                 const summary = buildGstSummary(record.items || [], {
                   taxMode: getRecordTaxMode(record),
                 });
-                const isClosed = isClosedPurchaseOrder(record.status);
+                const isLocked = isLockedPurchaseOrder(record.status);
+                const isCancelled = isCancelledPurchaseOrder(record.status);
+                const isUnlocked = isPoUnlocked(record.id);
+                const isRowBusy = statusActionBusyId === record.id;
                 return (
                   <Fragment key={key}>
                     <tr
@@ -427,7 +561,7 @@ const PurchaseOrderRegister = () => {
                       <td className="p-3">
                         {formatDate(record.expectedDate || record.orderDate)}
                       </td>
-                      <td className="p-3 flex gap-3">
+                      <td className="p-3 flex flex-wrap gap-3">
                         <button
                           type="button"
                           onClick={(event) => {
@@ -454,7 +588,7 @@ const PurchaseOrderRegister = () => {
                             event.stopPropagation();
                             handleReceive(record);
                           }}
-                          disabled={isClosed}
+                          disabled={isLocked || isRowBusy}
                           className="text-emerald-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Receive
@@ -465,7 +599,7 @@ const PurchaseOrderRegister = () => {
                             event.stopPropagation();
                             handleEdit(record);
                           }}
-                          disabled={isClosed}
+                          disabled={isLocked && !isAdminUser && !isUnlocked}
                           className="text-indigo-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Edit
@@ -474,9 +608,54 @@ const PurchaseOrderRegister = () => {
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
+                            handleCancelPo(record);
+                          }}
+                          disabled={
+                            isCancelled ||
+                            (isLocked && !isAdminUser && !isUnlocked) ||
+                            isRowBusy
+                          }
+                          className="text-rose-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
+                        >
+                          Cancel
+                        </button>
+                        {isLocked ? (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (!isAdminUser) {
+                                setApiError("Only Admin users can unlock a locked purchase order.");
+                                return;
+                              }
+                              promptLockedPoAction(record, "unlock");
+                            }}
+                            disabled={isUnlocked || isRowBusy}
+                            className="text-amber-700 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
+                          >
+                            {isUnlocked ? "Unlocked" : "Unlock"}
+                          </button>
+                        ) : null}
+                        {isCancelled ? (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleRecallPo(record);
+                            }}
+                            disabled={!isAdminUser || !isUnlocked || isRowBusy}
+                            className="text-sky-700 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
+                          >
+                            Recall
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
                             handleDelete(record.id);
                           }}
-                          disabled={isClosed}
+                          disabled={isLocked || isRowBusy}
                           className="text-red-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Delete
@@ -488,9 +667,9 @@ const PurchaseOrderRegister = () => {
                       <tr className="bg-slate-50">
                         <td colSpan="11" className="p-4">
                           <div className="space-y-4">
-                            {isClosed && (
+                            {isLocked && (
                               <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                                This Purchase Order is Closed.
+                                {getPurchaseOrderLockMessage(record.status)}
                               </div>
                             )}
                             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm text-slate-700">
@@ -537,6 +716,7 @@ const PurchaseOrderRegister = () => {
                                   <thead className="bg-slate-100 text-slate-600">
                                     <tr>
                                       <th className="p-2 text-left">Item</th>
+                                      <th className="p-2 text-left">Serial Number</th>
                                       <th className="p-2 text-left">Description</th>
                                       <th className="p-2 text-left">Unit</th>
                                       <th className="p-2 text-left">Qty</th>
@@ -547,7 +727,7 @@ const PurchaseOrderRegister = () => {
                                   <tbody>
                                     {(record.items || []).length === 0 && (
                                       <tr>
-                                        <td colSpan="6" className="p-3 text-slate-500 text-center">
+                                        <td colSpan="7" className="p-3 text-slate-500 text-center">
                                           No line items.
                                         </td>
                                       </tr>
@@ -565,6 +745,7 @@ const PurchaseOrderRegister = () => {
                                           <td className="p-2 font-medium text-slate-800">
                                             {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
                                           </td>
+                                          <td className="p-2">{item.serialNumber || "-"}</td>
                                           <td className="p-2">{item.description || "-"}</td>
                                           <td className="p-2">{item.unit || "-"}</td>
                                           <td className="p-2">{qty}</td>
@@ -626,6 +807,7 @@ const PurchaseOrderRegister = () => {
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
+            { key: "serialNumber", label: "Serial Number", widthClass: "w-28" },
             { key: "description", label: "Description" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
@@ -640,6 +822,7 @@ const PurchaseOrderRegister = () => {
               id: item.id || index,
               serial: index + 1,
               name: item.name,
+              serialNumber: item.serialNumber || "-",
               description: item.description || "-",
               unit: item.unit,
               quantity: qty,
@@ -648,9 +831,9 @@ const PurchaseOrderRegister = () => {
             };
           })}
           bottomLeftContent={
-            isClosedPurchaseOrder(viewRecord.status) ? (
+            isLockedPurchaseOrder(viewRecord.status) ? (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">
-                This Purchase Order is Closed.
+                {getPurchaseOrderLockMessage(viewRecord.status)}
               </div>
             ) : null
           }
@@ -669,9 +852,9 @@ const PurchaseOrderRegister = () => {
       )}
 
       <PasswordPromptModal
-        isOpen={Boolean(closedPoPromptRecord)}
-        title="Unlock Closed PO"
-        description="Enter the admin password to edit this closed purchase order."
+        isOpen={Boolean(lockedPoPromptContext)}
+        title="Unlock Locked PO"
+        description="Enter the admin password to unlock this purchase order."
         password={adminPassword}
         error={adminPasswordError}
         confirmLabel="Unlock"
@@ -682,11 +865,11 @@ const PurchaseOrderRegister = () => {
           }
         }}
         onCancel={() => {
-          setClosedPoPromptRecord(null);
+          setLockedPoPromptContext(null);
           setAdminPassword("");
           setAdminPasswordError("");
         }}
-        onConfirm={confirmClosedPoEdit}
+        onConfirm={confirmLockedPoAction}
       />
     </div>
   );

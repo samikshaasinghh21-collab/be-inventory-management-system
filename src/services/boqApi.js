@@ -20,6 +20,7 @@ const normalizeBoqItem = (item = {}) => {
     boqId: item.boqId ?? item.BOQId ?? null,
     name: item.name ?? item.ItemName ?? "",
     description: item.description ?? item.Description ?? "",
+    serialNumber: item.serialNumber ?? item.SerialNumber ?? "",
     unit: item.unit ?? item.Unit ?? "",
     hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
     gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",

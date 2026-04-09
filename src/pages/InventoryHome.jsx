@@ -338,10 +338,10 @@ const InventoryHome = () => {
           </button>
           <button
             type="button"
-            onClick={() => navigate("/inventory/create-item")}
+            onClick={() => navigate("/inventory/create-product")}
             className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
           >
-            + Create Item
+            + Create Product
           </button>
         </div>
       </section>
@@ -724,10 +724,10 @@ const InventoryHome = () => {
             </button>
             <button
               type="button"
-              onClick={() => navigate("/inventory/create-item")}
+              onClick={() => navigate("/inventory/create-product")}
               className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
             >
-              Add New Item
+              Add New Product
             </button>
           </div>
         </div>

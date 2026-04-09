@@ -52,6 +52,7 @@ const BoqDetail = () => {
         [
           "Item",
           "Description",
+          "Serial Number",
           "Unit",
           "Planned Qty",
           "Consumed Qty",
@@ -65,6 +66,7 @@ const BoqDetail = () => {
       const itemLines = (boq.items ?? []).map((item) => [
         item.name ?? "",
         (item.description ?? "").replace(/\r?\n/g, " "),
+        item.serialNumber ?? "",
         item.unit ?? "",
         item.quantity ?? "",
         item.consumedQty ?? "",
@@ -230,6 +232,7 @@ const BoqDetail = () => {
             <tr>
               <th className="p-3 text-left min-w-[200px]">Item</th>
               <th className="p-3 text-left min-w-[200px]">Description</th>
+              <th className="p-3 text-left min-w-[150px]">Serial Number</th>
               <th className="p-3 text-left min-w-[80px]">Unit</th>
               <th className="p-3 text-left min-w-[90px]">Planned Qty</th>
               <th className="p-3 text-left min-w-[110px]">Consumed Qty</th>
@@ -242,7 +245,7 @@ const BoqDetail = () => {
           <tbody>
             {boq.items?.length === 0 && (
               <tr>
-                <td colSpan="9" className="p-6 text-center text-slate-500">
+                <td colSpan="10" className="p-6 text-center text-slate-500">
                   No items.
                 </td>
               </tr>
@@ -251,6 +254,7 @@ const BoqDetail = () => {
               <tr key={item.id} className="border-t">
                 <td className="p-3 font-medium text-slate-800">{item.name || "-"}</td>
                 <td className="p-3">{item.description || "-"}</td>
+                <td className="p-3">{item.serialNumber || "-"}</td>
                 <td className="p-3">{item.unit || "-"}</td>
                 <td className="p-3">{item.quantity ?? "-"}</td>
                 <td className="p-3">{item.consumedQty ?? 0}</td>

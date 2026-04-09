@@ -13,10 +13,10 @@ export const verifyClosedPoAdminPassword = (settings, password) =>
 
 export const getClosedPoAuthError = (settings, password) => {
   if (!isAdminRole(settings)) {
-    return "Only Admin users can unlock a closed purchase order.";
+    return "Only Admin users can unlock a locked purchase order.";
   }
   if (!hasClosedPoAdminPassword(settings)) {
-    return "Set the closed PO admin password in Settings before unlocking closed orders.";
+    return "Set the closed PO admin password in Settings before unlocking locked orders.";
   }
   if (!verifyClosedPoAdminPassword(settings, password)) {
     return "Incorrect admin password.";

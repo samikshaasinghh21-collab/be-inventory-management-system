@@ -17,8 +17,7 @@ const PasswordPromptModal = ({
     event.preventDefault();
     onConfirm();
   };
-
-  const passwordInputId = "admin-password";
+    const passwordInputId = "admin-password";
   const usernameInputId = "admin-username";
 
   return (

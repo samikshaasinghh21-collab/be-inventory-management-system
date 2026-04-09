@@ -18,6 +18,7 @@ const DocumentViewPanel = ({
   companyGstin = "",
   companyPhone = "",
   companyEmail = "",
+  hideCompanyEmail = false,
   logoUrl = "",
   primaryPairs = [],
   leftBlockTitle = "",
@@ -39,6 +40,11 @@ const DocumentViewPanel = ({
   const normalizedLogo = useMemo(() => resolveBrandLogo(logoUrl), [logoUrl]);
   const [resolvedLogo, setResolvedLogo] = useState(normalizedLogo);
   const canPrint = Boolean(id);
+  const normalizedCompanyEmail = String(companyEmail ?? "").trim();
+  const shouldShowCompanyEmail =
+    !hideCompanyEmail &&
+    normalizedCompanyEmail &&
+    normalizedCompanyEmail.toLowerCase() !== "admin@example.com";
   const hasBottomLeft = Boolean(
     bottomLeftContent || bottomLeftTitle || bottomLeftValue
   );
@@ -108,7 +114,9 @@ const DocumentViewPanel = ({
           </p>
           <p className="text-[11px] mt-1">GST No: {toDisplay(companyGstin)}</p>
           <p className="text-[11px]">Phone: {toDisplay(companyPhone)}</p>
-          <p className="text-[11px]">Email: {toDisplay(companyEmail)}</p>
+          {shouldShowCompanyEmail ? (
+            <p className="text-[11px]">Email: {toDisplay(companyEmail)}</p>
+          ) : null}
         </div>
         <div className="p-3">
           <div className="grid grid-cols-2 gap-2 text-[11px]">

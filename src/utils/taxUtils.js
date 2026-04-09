@@ -32,6 +32,28 @@ export const calculateLineSubtotal = (item = {}) =>
 export const calculateLineTax = (item = {}) =>
   (calculateLineSubtotal(item) * parseTaxPercentage(item.taxPercentage ?? item.gst)) / 100;
 
+export const buildLineTaxBreakdown = (item = {}, options = {}) => {
+  const quantity = getItemQuantity(item);
+  const unitPrice = getItemUnitPrice(item);
+  const taxPercentage = parseTaxPercentage(item.taxPercentage ?? item.gst);
+  const taxMode = options.taxMode === "inter" ? "inter" : "intra";
+  const taxableAmount = quantity * unitPrice;
+  const gstAmount = (taxableAmount * taxPercentage) / 100;
+  const halfRate = taxPercentage / 2;
+  const halfAmount = gstAmount / 2;
+
+  return {
+    taxableAmount,
+    gstAmount,
+    cgstPercent: taxMode === "inter" ? 0 : halfRate,
+    sgstPercent: taxMode === "inter" ? 0 : halfRate,
+    igstPercent: taxMode === "inter" ? taxPercentage : 0,
+    cgstAmount: taxMode === "inter" ? 0 : halfAmount,
+    sgstAmount: taxMode === "inter" ? 0 : halfAmount,
+    igstAmount: taxMode === "inter" ? gstAmount : 0,
+  };
+};
+
 export const buildGstSummary = (items = [], options = {}) => {
   const taxMode = options.taxMode === "inter" ? "inter" : "intra";
   const summary = {

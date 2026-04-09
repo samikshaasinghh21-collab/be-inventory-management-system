@@ -5,7 +5,6 @@ const highlights = [
   { label: "Warehouses", value: "18" },
   { label: "On-time POs", value: "97%" },
 ];
-
 const AuthShell = ({ title, subtitle, children, helper }) => (
   <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-50 flex items-center justify-center px-4 py-10">
     <div className="w-full max-w-6xl grid gap-10 lg:grid-cols-[1.05fr_0.95fr] items-stretch">
@@ -60,5 +59,4 @@ const AuthShell = ({ title, subtitle, children, helper }) => (
     </div>
   </div>
 );
-
 export default AuthShell;

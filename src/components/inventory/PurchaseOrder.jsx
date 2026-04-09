@@ -18,7 +18,10 @@ import {
   parseTaxPercentage,
 } from "../../utils/taxUtils";
 import { generateNextPurchaseOrderNumber } from "../../utils/purchaseOrderNumber";
-import { isClosedPurchaseOrder } from "../../utils/purchaseOrderStatus";
+import {
+  getPurchaseOrderLockMessage,
+  isLockedPurchaseOrder,
+} from "../../utils/purchaseOrderStatus";
 import PasswordPromptModal from "../common/PasswordPromptModal";
 import { getClosedPoAuthError } from "../../utils/closedPoAuth";
 import {
@@ -33,6 +36,8 @@ const createLineItem = () => ({
   unit: "PCS",
   hsn: "",
   gst: "",
+  serialNumber: "",
+  serialRequired: false,
   taxPercentage: 0,
   quantity: "",
   rate: "",
@@ -98,6 +103,8 @@ const PurchaseOrder = () => {
         unit: item.unit ?? "PCS",
         hsn: item.hsn ?? "",
         gst: item.gst ?? "",
+        serialNumber: item.serialNumber ?? "",
+        serialRequired: item.serialRequired ?? false,
         taxPercentage: item.taxPercentage ?? 0,
         quantity: item.quantity ?? "",
         rate: item.unitPrice ?? item.rate ?? "",
@@ -240,6 +247,8 @@ const PurchaseOrder = () => {
           unit: product.unit || "PCS",
           hsn: product.hsn || "",
           gst: product.gst || "",
+          serialNumber: product.serialNumber ?? "",
+          serialRequired: product.serialRequired ?? false,
           taxPercentage: product.taxPercentage ?? parseTaxPercentage(product.gst),
           quantity: product.quantity ?? product.qty ?? 1,
           rate: product.rate ?? product.salesPrice ?? product.price ?? 0,
@@ -285,8 +294,8 @@ const PurchaseOrder = () => {
     );
   }, [boqs, form.projectId]);
 
-  const isEditingClosed = Boolean(editingId) && isClosedPurchaseOrder(editingStatus);
-  const isEditingClosedLocked = isEditingClosed && !closedPoOverrideApproved;
+  const isEditingLocked = Boolean(editingId) && isLockedPurchaseOrder(editingStatus);
+  const isEditingLockedWithoutOverride = isEditingLocked && !closedPoOverrideApproved;
 
   const resetForm = () => {
     setForm(createFormState());
@@ -320,8 +329,8 @@ const PurchaseOrder = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (isEditingClosedLocked) {
-      setApiError("This Purchase Order is Closed.");
+    if (isEditingLockedWithoutOverride) {
+      setApiError(getPurchaseOrderLockMessage(editingStatus));
       return;
     }
     if (!validate()) {
@@ -340,7 +349,7 @@ const PurchaseOrder = () => {
       orderDate: form.orderDate || null,
       expectedDate: form.expectedDate || null,
       notes: form.notes || "",
-      allowClosedEdit: isEditingClosed && closedPoOverrideApproved,
+      allowLockedEdit: isEditingLocked && closedPoOverrideApproved,
       items: cleanedItems.map((item) => {
         const qty = Number(item.quantity) || 0;
         const unitPrice = Number(item.rate) || 0;
@@ -354,6 +363,8 @@ const PurchaseOrder = () => {
           gst:
             String(item.gst ?? "").trim() ||
             formatTaxPercentage(item.taxPercentage ?? 0),
+          serialNumber: String(item.serialNumber ?? "").trim(),
+          serialRequired: item.serialRequired ?? false,
           taxPercentage: parseTaxPercentage(
             item.taxPercentage ?? item.gst ?? 0
           ),
@@ -408,6 +419,8 @@ const PurchaseOrder = () => {
         unit: item.unit || "PCS",
         hsn: item.hsn || "",
         gst: item.gst || "",
+        serialNumber: item.serialNumber ?? "",
+        serialRequired: item.serialRequired ?? false,
         taxPercentage:
           item.taxPercentage ?? parseTaxPercentage(item.gst ?? item.GST ?? 0),
         quantity: qty,
@@ -498,7 +511,7 @@ const PurchaseOrder = () => {
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
           <p className="text-sm text-slate-500">Open Orders</p>
           <p className="text-2xl font-semibold text-slate-800">
-            {records.filter((record) => !isClosedPurchaseOrder(record.status)).length}
+            {records.filter((record) => !isLockedPurchaseOrder(record.status)).length}
           </p>
         </div>
       </div>
@@ -508,18 +521,18 @@ const PurchaseOrder = () => {
           {apiError}
         </div>
       )}
-      {isEditingClosed && (
+      {isEditingLocked && (
         <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-medium">This Purchase Order is Closed.</p>
+              <p className="font-medium">{getPurchaseOrderLockMessage(editingStatus)}</p>
               <p className="mt-1">
-                {isEditingClosedLocked
+                {isEditingLockedWithoutOverride
                   ? "Only Admin users can unlock and edit this PO."
-                  : "Admin override is active for this closed PO."}
+                  : "Admin override is active for this locked PO."}
               </p>
             </div>
-            {isEditingClosedLocked ? (
+            {isEditingLockedWithoutOverride ? (
               <button
                 type="button"
                 onClick={() => {
@@ -565,7 +578,7 @@ const PurchaseOrder = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, projectId: event.target.value }))
                 }
-                disabled={isEditingClosedLocked}
+                disabled={isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="">Select project</option>
@@ -588,7 +601,7 @@ const PurchaseOrder = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, vendorId: event.target.value }))
                 }
-                disabled={isEditingClosedLocked}
+                disabled={isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="">Select vendor</option>
@@ -614,7 +627,7 @@ const PurchaseOrder = () => {
                     locationId: event.target.value,
                   }))
                 }
-                disabled={isEditingClosedLocked}
+                disabled={isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="">Select location</option>
@@ -634,13 +647,14 @@ const PurchaseOrder = () => {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, status: event.target.value }))
                 }
-                disabled={isEditingClosedLocked}
+                disabled={isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
                 <option value="Draft">Draft</option>
                 <option value="Sent">Sent</option>
                 <option value="Partially Received">Partially Received</option>
                 <option value="Closed">Closed</option>
+                <option value="Cancelled">Cancelled</option>
               </select>
             </div>
             <div>
@@ -652,8 +666,8 @@ const PurchaseOrder = () => {
                 onChange={(value) =>
                   setForm((prev) => ({ ...prev, orderDate: value }))
                 }
-                disabled={isEditingClosedLocked}
-                showCalendarButton={!isEditingClosedLocked}
+                disabled={isEditingLockedWithoutOverride}
+                showCalendarButton={!isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
             </div>
@@ -669,8 +683,8 @@ const PurchaseOrder = () => {
                     expectedDate: value,
                   }))
                 }
-                disabled={isEditingClosedLocked}
-                showCalendarButton={!isEditingClosedLocked}
+                disabled={isEditingLockedWithoutOverride}
+                showCalendarButton={!isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
             </div>
@@ -688,7 +702,7 @@ const PurchaseOrder = () => {
                   <select
                     value={selectedBoqId}
                     onChange={(event) => setSelectedBoqId(event.target.value)}
-                    disabled={!form.projectId || boqsLoading || isEditingClosedLocked}
+                    disabled={!form.projectId || boqsLoading || isEditingLockedWithoutOverride}
                     className="w-full md:w-64 border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                   >
                     <option value="">
@@ -709,7 +723,7 @@ const PurchaseOrder = () => {
                   <button
                     type="button"
                     onClick={applyBoqToItems}
-                    disabled={!selectedBoqId || boqsLoading || isEditingClosedLocked}
+                    disabled={!selectedBoqId || boqsLoading || isEditingLockedWithoutOverride}
                     className="md:ml-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
                   >
                     Use BOQ Items
@@ -777,7 +791,7 @@ const PurchaseOrder = () => {
                   setForm((prev) => ({ ...prev, notes: event.target.value }))
                 }
                 placeholder="Delivery terms, remarks, or approvals."
-                disabled={isEditingClosedLocked}
+                disabled={isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               />
             </div>
@@ -790,11 +804,12 @@ const PurchaseOrder = () => {
           onPickFromProducts={goPickProducts}
           pickLabel="Pick from Products"
           showHsnGst
+          showSerialNumber
           priceLabel="Unit Price"
           extraFieldKey="location"
           extraFieldLabel="Location"
           extraFieldPlaceholder="Site/store location"
-          readOnly={isEditingClosedLocked}
+          readOnly={isEditingLockedWithoutOverride}
         />
         {errors.items && (
           <p className="text-xs text-red-600">{errors.items}</p>
@@ -810,11 +825,11 @@ const PurchaseOrder = () => {
           </button>
           <button
             type="submit"
-            disabled={isEditingClosedLocked}
+            disabled={isEditingLockedWithoutOverride}
             className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
           >
-            {isEditingClosedLocked
-              ? "Closed PO"
+            {isEditingLockedWithoutOverride
+              ? "Locked PO"
               : editingId
               ? "Update PO"
               : "Save PO"}
@@ -824,8 +839,8 @@ const PurchaseOrder = () => {
 
       <PasswordPromptModal
         isOpen={passwordPromptOpen}
-        title="Unlock Closed PO"
-        description="Enter the admin password to edit this closed purchase order."
+        title="Unlock Locked PO"
+        description="Enter the admin password to edit this locked purchase order."
         password={adminPassword}
         error={adminPasswordError}
         confirmLabel="Unlock"
@@ -848,5 +863,6 @@ const PurchaseOrder = () => {
 };
 
 export default PurchaseOrder;
+
 
 

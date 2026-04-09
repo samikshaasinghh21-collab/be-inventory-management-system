@@ -14,6 +14,7 @@ import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import DocumentViewPanel from "./DocumentViewPanel";
+import { buildGstSummary } from "../../utils/taxUtils";
 import {
   getActiveProjectId,
   setActiveProjectId,
@@ -23,6 +24,7 @@ const createLineItem = () => ({
   id: Date.now() + Math.random(),
   name: "",
   description: "",
+  serialNumber: "",
   unit: "PCS",
   hsn: "",
   gst: "",
@@ -74,6 +76,59 @@ const generateNextBoqNumber = (records = []) => {
   }
 
   return candidate;
+};
+
+const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
+  const alignClass = align === "right" ? "text-right" : "text-left";
+  return (
+    <div className={`space-y-1 text-sm text-slate-700 ${alignClass}`}>
+      <div className="font-medium">Subtotal: {formatCurrency(summary.subtotal)}</div>
+      {summary.igstGroups?.map((group) => (
+        <div key={`igst-${group.rate}`}>
+          IGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
+      {summary.cgstGroups.map((group) => (
+        <div key={`cgst-${group.rate}`}>
+          CGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
+      {summary.sgstGroups.map((group) => (
+        <div key={`sgst-${group.rate}`}>
+          SGST @ {Number(group.rate)}%: {formatCurrency(group.amount)}
+        </div>
+      ))}
+      <div className="pt-1 font-semibold text-slate-900">
+        Total Value: {formatCurrency(summary.total)}
+      </div>
+    </div>
+  );
+};
+
+const buildBoqSerialPreview = (items = []) => {
+  const serials = [];
+  const seen = new Set();
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const serial = String(item?.serialNumber ?? "").trim();
+    if (!serial) {
+      return;
+    }
+    const key = serial.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    serials.push(serial);
+  });
+
+  if (!serials.length) {
+    return "-";
+  }
+  if (serials.length <= 2) {
+    return serials.join(", ");
+  }
+  return `${serials.slice(0, 2).join(", ")} +${serials.length - 2} more`;
 };
 
 const Boq = () => {
@@ -185,6 +240,7 @@ const Boq = () => {
             id: item.id ?? Date.now() + Math.random(),
             name: item.name ?? "",
             description: item.description ?? "",
+            serialNumber: item.serialNumber ?? "",
             unit: item.unit ?? "PCS",
             hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
             gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
@@ -209,10 +265,10 @@ const Boq = () => {
     }, {});
   }, [projects]);
 
-  const totalValue = records.reduce(
-    (sum, record) => sum + (Number(record.total) || 0),
-    0
-  );
+  const totalValue = records.reduce((sum, record) => {
+    const summary = buildGstSummary(record.items || []);
+    return sum + summary.total;
+  }, 0);
 
   const draftCount = records.filter((record) => record.status === "Draft").length;
 
@@ -276,6 +332,7 @@ const Boq = () => {
       items: cleanedItems.map((item) => ({
         name: item.name,
         description: item.description,
+        serialNumber: item.serialNumber,
         unit: item.unit,
         hsn: item.hsn,
         gst: item.gst,
@@ -322,6 +379,7 @@ const Boq = () => {
             id: item.id ?? Date.now() + Math.random(),
             name: item.name ?? "",
             description: item.description ?? "",
+            serialNumber: item.serialNumber ?? "",
             unit: item.unit ?? "PCS",
             hsn: item.hsn ?? item.HSN ?? "",
             gst: item.gst ?? item.GST ?? "",
@@ -564,6 +622,7 @@ const Boq = () => {
           onPickFromProducts={handlePickFromProducts}
           pickLabel="Pick from Products"
           showHsnGst
+          showSerialNumber
           priceLabel="Unit Price"
         />
         {errors.items && (
@@ -624,7 +683,9 @@ const Boq = () => {
               <th className="p-3 text-left min-w-[90px]">Version</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[110px]">Items</th>
-              <th className="p-3 text-left min-w-[140px]">Value</th>
+              <th className="p-3 text-left min-w-[180px]">Serial Numbers</th>
+              <th className="p-3 text-left min-w-[220px]">Tax Details</th>
+              <th className="p-3 text-left min-w-[140px]">Total Value</th>
               <th className="p-3 text-left min-w-[140px]">Date</th>
               <th className="p-3 text-left min-w-[160px]">Actions</th>
             </tr>
@@ -632,70 +693,82 @@ const Boq = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="8" className="p-6 text-center text-slate-500">
+                <td colSpan="10" className="p-6 text-center text-slate-500">
                   Loading BOQs...
                 </td>
               </tr>
             )}
             {!loading && records.length === 0 && (
               <tr>
-                <td colSpan="8" className="p-6 text-center text-slate-500">
+                <td colSpan="10" className="p-6 text-center text-slate-500">
                   No BOQs created yet.
                 </td>
               </tr>
             )}
-            {records.map((record) => (
-              <tr key={record.id} className="border-t hover:bg-slate-50">
-                <td className="p-3 font-medium text-slate-800">
-                  {record.boqNumber || "-"}
-                </td>
-                <td className="p-3">
-                  {projectMap[String(record.projectId)]?.name || "-"}
-                </td>
-                <td className="p-3">{record.version || "-"}</td>
-                <td className="p-3">{record.status || "-"}</td>
-                <td className="p-3">{record.items?.length || 0}</td>
-                <td className="p-3 font-medium">
-                  {formatCurrency(record.total || 0)}
-                </td>
-                <td className="p-3">{formatDate(record.date) || "-"}</td>
-                <td className="p-3 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleView(record)}
-                    className="text-slate-700 text-sm underline"
-                  >
-                    View
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePrint(record)}
-                    className="text-slate-600 text-sm"
-                  >
-                    Print
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleEdit(record)}
-                    className="text-indigo-600 text-sm"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(record.id)}
-                    className="text-red-600 text-sm"
-                    disabled={saving}
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {records.map((record) => {
+              const summary = buildGstSummary(record.items || []);
+              return (
+                <tr key={record.id} className="border-t hover:bg-slate-50">
+                  <td className="p-3 font-medium text-slate-800">
+                    {record.boqNumber || "-"}
+                  </td>
+                  <td className="p-3">
+                    {projectMap[String(record.projectId)]?.name || "-"}
+                  </td>
+                  <td className="p-3">{record.version || "-"}</td>
+                  <td className="p-3">{record.status || "-"}</td>
+                  <td className="p-3">{record.items?.length || 0}</td>
+                  <td className="p-3 text-xs text-slate-600">
+                    {buildBoqSerialPreview(record.items)}
+                  </td>
+                  <td className="p-3">
+                    <GstSummaryBlock summary={summary} formatCurrency={formatCurrency} />
+                  </td>
+                  <td className="p-3 font-medium">
+                    {formatCurrency(summary.total)}
+                  </td>
+                  <td className="p-3">{formatDate(record.date) || "-"}</td>
+                  <td className="p-3 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleView(record)}
+                      className="text-slate-700 text-sm underline"
+                    >
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePrint(record)}
+                      className="text-slate-600 text-sm"
+                    >
+                      Print
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEdit(record)}
+                      className="text-indigo-600 text-sm"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(record.id)}
+                      className="text-red-600 text-sm"
+                      disabled={saving}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
       {viewRecord && (
+        (() => {
+          const summary = buildGstSummary(viewRecord.items || []);
+          return (
         <DocumentViewPanel
           id="boq-view-panel"
           title="BILL OF QUANTITY"
@@ -719,6 +792,7 @@ const Boq = () => {
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
+            { key: "serialNumber", label: "Serial Number", widthClass: "w-28" },
             { key: "hsn", label: "HSN", widthClass: "w-20" },
             { key: "gst", label: "GST", widthClass: "w-20" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
@@ -744,6 +818,7 @@ const Boq = () => {
               id: item.id || index,
               serial: index + 1,
               name: item.name || "-",
+              serialNumber: item.serialNumber || "-",
               hsn: item.hsn || "-",
               gst: item.gst || "-",
               unit: item.unit || "-",
@@ -756,10 +831,17 @@ const Boq = () => {
           })}
           bottomLeftTitle="Notes"
           bottomLeftValue={viewRecord.notes || "-"}
-          bottomRightTitle="Total Value"
-          bottomRightValue={formatCurrency(viewRecord.total || 0)}
+          bottomRightContent={
+            <GstSummaryBlock
+              summary={summary}
+              formatCurrency={formatCurrency}
+              align="right"
+            />
+          }
           footerCompanyName={brandName}
         />
+          );
+        })()
       )}
     </div>
   );

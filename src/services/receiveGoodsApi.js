@@ -50,6 +50,24 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
       ? null
       : toQuantity(rawExplicitBalance);
   const computedBalance = Math.max(orderedQty - receivedQty, 0);
+  const serialRequiredRaw =
+    item.serialRequired ?? item.SerialRequired ?? item.IsSerialTracked ?? false;
+  const parseSerialNumbers = (value) => {
+    if (Array.isArray(value)) {
+      return value.map((entry) => String(entry ?? "").trim()).filter(Boolean);
+    }
+    if (!value) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed)
+        ? parsed.map((entry) => String(entry ?? "").trim()).filter(Boolean)
+        : [];
+    } catch {
+      return [];
+    }
+  };
   return {
     id: item.id ?? item.Id ?? null,
     receiveGoodsId:
@@ -67,6 +85,24 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
     name: item.name ?? item.Name ?? item.ItemName ?? "",
     description: item.description ?? item.Description ?? "",
     unit: item.unit ?? item.Unit ?? "PCS",
+    hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
+    gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
+    taxPercentage: toQuantity(item.taxPercentage ?? item.TaxPercentage ?? 0),
+    unitPrice: toQuantity(item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0),
+    taxableAmount: toQuantity(item.taxableAmount ?? item.TaxableAmount ?? 0),
+    cgstPercent: toQuantity(item.cgstPercent ?? item.CGSTPercent ?? 0),
+    sgstPercent: toQuantity(item.sgstPercent ?? item.SGSTPercent ?? 0),
+    igstPercent: toQuantity(item.igstPercent ?? item.IGSTPercent ?? 0),
+    cgstAmount: toQuantity(item.cgstAmount ?? item.CGSTAmount ?? 0),
+    sgstAmount: toQuantity(item.sgstAmount ?? item.SGSTAmount ?? 0),
+    igstAmount: toQuantity(item.igstAmount ?? item.IGSTAmount ?? 0),
+    gstAmount: toQuantity(item.gstAmount ?? item.GSTAmount ?? 0),
+    serialRequired: !["0", "false", "no"].includes(
+      String(serialRequiredRaw).trim().toLowerCase()
+    ),
+    serialNumbers: parseSerialNumbers(
+      item.serialNumbers ?? item.SerialNumbers ?? item.serialNumbersJson ?? item.SerialNumbersJson
+    ),
     notes: item.notes ?? item.Notes ?? "",
     orderedQty,
     receivedQty,
@@ -92,6 +128,7 @@ export const normalizeReceiveGoods = (receipt = {}) => {
       receipt.PurchaseOrderId ??
       receipt.purchaseorderId ??
       null,
+    boqId: receipt.boqId ?? receipt.BOQId ?? receipt.BoqId ?? null,
     projectId: receipt.projectId ?? receipt.ProjectId ?? null,
     vendorId: receipt.vendorId ?? receipt.VendorId ?? null,
     locationId: receipt.locationId ?? receipt.LocationId ?? null,
@@ -104,6 +141,10 @@ export const normalizeReceiveGoods = (receipt = {}) => {
         ? true
         : !["0", "false", "no"].includes(String(rawShowProjectDetails).toLowerCase()),
     notes: receipt.notes ?? receipt.Notes ?? "",
+    taxMode:
+      String(receipt.taxMode ?? receipt.TaxMode ?? "intra").trim().toLowerCase() === "inter"
+        ? "inter"
+        : "intra",
     status: receipt.status ?? receipt.Status ?? "",
     createdAt: receipt.createdAt ?? receipt.CreatedAt ?? null,
     updatedAt: receipt.updatedAt ?? receipt.UpdatedAt ?? null,
@@ -141,4 +182,12 @@ export const updateReceiveGoods = async (id, payload) => {
   const normalized = normalizeReceiveGoods(response.data?.receipt ?? response.data);
   emitReceiveGoodsChange();
   return normalized;
+};
+
+export const deleteReceiveGoods = async (id, payload = {}) => {
+  await api.delete(`/receive-goods/${id}`, {
+    data: payload,
+    timeout: 60000,
+  });
+  emitReceiveGoodsChange();
 };

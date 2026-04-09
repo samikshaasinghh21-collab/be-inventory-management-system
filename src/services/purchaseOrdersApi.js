@@ -1,31 +1,46 @@
 import api from "./api";
 
-const normalizePoItem = (item = {}) => ({
-  id: item.id ?? item.Id ?? null,
-  poItemId: item.poItemId ?? item.purchaseOrderItemId ?? item.PurchaseOrderItemId ?? item.id ?? item.Id ?? null,
-  purchaseOrderId: item.purchaseOrderId ?? item.PurchaseOrderId ?? null,
-  itemId: item.itemId ?? item.ItemId ?? null,
-  name: item.name ?? item.Name ?? item.ItemName ?? "",
-  description: item.description ?? item.Description ?? "",
-  unit: item.unit ?? item.Unit ?? "PCS",
-  hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
-  gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
-  taxPercentage: Number(item.taxPercentage ?? item.TaxPercentage ?? 0),
-  location: item.location ?? item.Location ?? item.notes ?? item.Notes ?? "",
-  notes: item.notes ?? item.Notes ?? item.location ?? item.Location ?? "",
-  quantity: Number(item.quantity ?? item.Quantity ?? item.Qty ?? 0),
-  unitPrice: Number(
-    item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0
-  ),
-  totalPrice: Number(
-    item.totalPrice ??
-      item.TotalPrice ??
-      item.total ??
-      item.Total ??
-      ((item.quantity ?? item.Quantity ?? item.Qty ?? 0) *
-        (item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0))
-  ),
-});
+const normalizePoItem = (item = {}) => {
+  const serialRequiredRaw =
+    item.serialRequired ?? item.SerialRequired ?? item.IsSerialTracked ?? false;
+
+  return {
+    id: item.id ?? item.Id ?? null,
+    poItemId:
+      item.poItemId ??
+      item.purchaseOrderItemId ??
+      item.PurchaseOrderItemId ??
+      item.id ??
+      item.Id ??
+      null,
+    purchaseOrderId: item.purchaseOrderId ?? item.PurchaseOrderId ?? null,
+    itemId: item.itemId ?? item.ItemId ?? null,
+    name: item.name ?? item.Name ?? item.ItemName ?? "",
+    description: item.description ?? item.Description ?? "",
+    unit: item.unit ?? item.Unit ?? "PCS",
+    hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
+    gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
+    serialNumber: item.serialNumber ?? item.SerialNumber ?? "",
+    serialRequired: !["0", "false", "no"].includes(
+      String(serialRequiredRaw).trim().toLowerCase()
+    ),
+    taxPercentage: Number(item.taxPercentage ?? item.TaxPercentage ?? 0),
+    location: item.location ?? item.Location ?? item.notes ?? item.Notes ?? "",
+    notes: item.notes ?? item.Notes ?? item.location ?? item.Location ?? "",
+    quantity: Number(item.quantity ?? item.Quantity ?? item.Qty ?? 0),
+    unitPrice: Number(
+      item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0
+    ),
+    totalPrice: Number(
+      item.totalPrice ??
+        item.TotalPrice ??
+        item.total ??
+        item.Total ??
+        ((item.quantity ?? item.Quantity ?? item.Qty ?? 0) *
+          (item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0))
+    ),
+  };
+};
 
 const normalizePurchaseOrder = (order = {}) => ({
   id: order.id ?? order.PurchaseOrderId ?? null,
@@ -72,6 +87,14 @@ export const createPurchaseOrder = async (payload) => {
 
 export const updatePurchaseOrder = async (id, payload) => {
   const response = await api.put(`/purchase-orders/${id}`, payload);
+  return normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
+};
+
+export const updatePurchaseOrderStatus = async (id, status, options = {}) => {
+  const response = await api.patch(`/purchase-orders/${id}/status`, {
+    status,
+    allowLockedEdit: options.allowLockedEdit === true,
+  });
   return normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
 };
 
