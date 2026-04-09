@@ -17,6 +17,7 @@ import { isClosedPurchaseOrder } from "../../utils/purchaseOrderStatus";
 import { getGstTaxMode } from "../../utils/gstUtils";
 import PasswordPromptModal from "../common/PasswordPromptModal";
 import { getClosedPoAuthError } from "../../utils/closedPoAuth";
+import { DEFAULT_PURCHASE_ORDER_TERMS } from "../../../shared/purchaseOrderTerms.js";
 
 const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   const alignClass = align === "right" ? "text-right" : "text-left";
@@ -401,6 +402,7 @@ const PurchaseOrderRegister = () => {
                   taxMode: getRecordTaxMode(record),
                 });
                 const isClosed = isClosedPurchaseOrder(record.status);
+                const recordNotes = record.notes || DEFAULT_PURCHASE_ORDER_TERMS;
                 return (
                   <Fragment key={key}>
                     <tr
@@ -528,6 +530,15 @@ const PurchaseOrderRegister = () => {
                               />
                             </div>
 
+                            <div className="rounded-lg border border-slate-200 bg-white p-4">
+                              <h4 className="font-semibold text-slate-700 mb-2">
+                                Notes
+                              </h4>
+                              <p className="whitespace-pre-line text-sm text-slate-700">
+                                {recordNotes}
+                              </p>
+                            </div>
+
                             <div>
                               <h4 className="font-semibold text-slate-700 mb-2">
                                 Line Items
@@ -594,6 +605,7 @@ const PurchaseOrderRegister = () => {
           });
           const vendor = vendorMap[String(viewRecord.vendorId)];
           const primaryContact = vendor?.contacts?.[0];
+          const viewNotes = viewRecord.notes || DEFAULT_PURCHASE_ORDER_TERMS;
           return (
         <DocumentViewPanel
           id="purchase-order-view-panel"
@@ -648,11 +660,19 @@ const PurchaseOrderRegister = () => {
             };
           })}
           bottomLeftContent={
-            isClosedPurchaseOrder(viewRecord.status) ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">
-                This Purchase Order is Closed.
+            <div className="space-y-3 text-left">
+              <div>
+                <p className="font-semibold">Notes</p>
+                <p className="mt-1 whitespace-pre-line text-[11px] leading-relaxed">
+                  {viewNotes}
+                </p>
               </div>
-            ) : null
+              {isClosedPurchaseOrder(viewRecord.status) ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">
+                  This Purchase Order is Closed.
+                </div>
+              ) : null}
+            </div>
           }
           bottomRightContent={
             <GstSummaryBlock

@@ -5,11 +5,18 @@ import {
 } from "./projectNormalization";
 
 export const fetchProjects = async () => {
-  const response = await api.get("/projects");
-  const list = Array.isArray(response.data)
-    ? response.data
-    : response.data?.projects ?? [];
-  return normalizeProjectsList(list);
+  try {
+    const response = await api.get("/projects");
+
+    const list = Array.isArray(response.data)
+      ? response.data
+      : response.data?.projects ?? [];
+
+    return normalizeProjectsList(list);
+  } catch (error) {
+    console.error("API Error:", error);
+    throw error;
+  }
 };
 
 export const createProject = async (payload) => {

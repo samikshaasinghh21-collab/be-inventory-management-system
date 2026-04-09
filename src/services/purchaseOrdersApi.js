@@ -1,5 +1,28 @@
 import api from "./api";
 
+const getPurchaseOrderNotes = (order = {}) => {
+  const candidates = [
+    order.notes,
+    order.Notes,
+    order.Terms,
+    order.terms,
+    order.TermsAndConditions,
+    order.termsAndConditions,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string") {
+      if (candidate.trim()) return candidate;
+      continue;
+    }
+    if (candidate != null) {
+      return candidate;
+    }
+  }
+
+  return "";
+};
+
 const normalizePoItem = (item = {}) => ({
   id: item.id ?? item.Id ?? null,
   poItemId: item.poItemId ?? item.purchaseOrderItemId ?? item.PurchaseOrderItemId ?? item.id ?? item.Id ?? null,
@@ -46,7 +69,7 @@ const normalizePurchaseOrder = (order = {}) => ({
     order.expectedDate ??
     order.ExpectedDate ??
     null,
-  notes: order.notes ?? order.Notes ?? "",
+  notes: getPurchaseOrderNotes(order),
   total: Number(order.total ?? order.Total ?? 0),
   items: Array.isArray(order.items)
     ? order.items.map(normalizePoItem)
@@ -57,17 +80,33 @@ const normalizePurchaseOrder = (order = {}) => ({
 
 export const fetchPurchaseOrders = async () => {
   const response = await api.get("/purchase-orders");
+  console.log("API:", response.data);
   const list = Array.isArray(response.data?.purchaseOrders)
     ? response.data.purchaseOrders
     : Array.isArray(response.data)
     ? response.data
     : [];
-  return list.map(normalizePurchaseOrder);
+  const normalizedList = list.map((order) => {
+    const normalizedOrder = normalizePurchaseOrder(order);
+    console.log("purchaseOrdersApi normalizePurchaseOrder:", normalizedOrder);
+    return normalizedOrder;
+  });
+  return normalizedList;
 };
 
 export const createPurchaseOrder = async (payload) => {
   const response = await api.post("/purchase-orders", payload);
   return normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
+};
+
+export const fetchPurchaseOrderById = async (id) => {
+  const response = await api.get(`/purchase-orders/${id}`);
+  console.log("API:", response.data);
+  const normalizedOrder = normalizePurchaseOrder(
+    response.data?.purchaseOrder ?? response.data
+  );
+  console.log("purchaseOrdersApi normalizePurchaseOrder:", normalizedOrder);
+  return normalizedOrder;
 };
 
 export const updatePurchaseOrder = async (id, payload) => {

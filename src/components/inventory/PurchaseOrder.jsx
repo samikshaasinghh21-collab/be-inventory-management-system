@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getProjects } from "../../services/projectsStore";
 import {
   fetchPurchaseOrders,
+  fetchPurchaseOrderById,
   createPurchaseOrder,
   updatePurchaseOrder,
 } from "../../services/purchaseOrdersApi";
@@ -25,6 +26,7 @@ import {
   getActiveProjectId,
   setActiveProjectId,
 } from "../../services/projectSelectionStore";
+import { DEFAULT_PURCHASE_ORDER_TERMS } from "../../../shared/purchaseOrderTerms.js";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -48,7 +50,7 @@ const createFormState = () => ({
   status: "Draft",
   orderDate: new Date().toISOString().slice(0, 10),
   expectedDate: "",
-  notes: "",
+  notes: DEFAULT_PURCHASE_ORDER_TERMS,
 });
 
 const PurchaseOrder = () => {
@@ -74,22 +76,72 @@ const PurchaseOrder = () => {
   const [passwordPromptOpen, setPasswordPromptOpen] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminPasswordError, setAdminPasswordError] = useState("");
+  const notesTouchedRef = useRef(false);
+  const appliedPurchaseOrderStateRef = useRef(null);
+
   useEffect(() => {
-    const record = location.state?.purchaseOrder;
-    if (record && record.id !== editingId) {
+    console.log("FORM:", form);
+  }, [form]);
+
+  useEffect(() => {
+    const stateRecord = location.state?.purchaseOrder;
+    if (!stateRecord) {
+      return undefined;
+    }
+
+    const stateRecordId =
+      stateRecord.id != null ? String(stateRecord.id) : "__purchase-order-state__";
+
+    if (appliedPurchaseOrderStateRef.current === stateRecordId) {
+      return undefined;
+    }
+
+    let isActive = true;
+
+    const loadPurchaseOrderForEdit = async () => {
+      let record = stateRecord;
+      notesTouchedRef.current = false;
+
+      if (stateRecord.id != null) {
+        try {
+          record = await fetchPurchaseOrderById(stateRecord.id);
+        } catch (error) {
+          console.warn("PurchaseOrder fetchPurchaseOrderById failed, using router state:", error);
+        }
+      }
+
+      if (!isActive) {
+        return;
+      }
+
       setEditingId(record.id);
       setEditingStatus(record.status || "Draft");
       setClosedPoOverrideApproved(Boolean(location.state?.closedPoAuthorized));
-      setForm({
-        poNumber: record.poNumber || "",
-        projectId: record.projectId || "",
-        vendorId: record.vendorId || "",
-        locationId: record.locationId || "",
-        status: record.status || "Draft",
-        orderDate: record.orderDate || new Date().toISOString().slice(0, 10),
-        expectedDate: record.expectedDate || "",
-        notes: record.notes || "",
-      });
+
+      const nextFormData = {
+        poNumber: record.poNumber ?? "",
+        projectId: record.projectId ?? "",
+        vendorId: record.vendorId ?? "",
+        locationId: record.locationId ?? "",
+        status: record.status ?? "Draft",
+        orderDate: record.orderDate ?? new Date().toISOString().slice(0, 10),
+        expectedDate: record.expectedDate ?? "",
+      };
+      const incomingNotes =
+        record.notes ??
+        record.Notes ??
+        record.Terms ??
+        record.terms ??
+        record.TermsAndConditions ??
+        record.termsAndConditions ??
+        DEFAULT_PURCHASE_ORDER_TERMS;
+
+      setForm((prev) => ({
+        ...prev,
+        ...nextFormData,
+        notes: notesTouchedRef.current ? prev.notes : incomingNotes,
+      }));
+
       const mappedItems = (record.items ?? []).map((item) => ({
         id: item.id ?? Date.now() + Math.random(),
         itemId: item.itemId ?? item.id ?? null,
@@ -104,14 +156,20 @@ const PurchaseOrder = () => {
         location: item.location ?? item.notes ?? "",
         notes: item.notes ?? item.location ?? "",
       }));
+
       setItems(mappedItems.length ? mappedItems : [createLineItem()]);
       setErrors({});
       setAdminPassword("");
       setAdminPasswordError("");
-      // Clear navigation state so we don't re-apply on re-render
-      window.history.replaceState({}, document.title);
-    }
-  }, [location.state, editingId]);
+      appliedPurchaseOrderStateRef.current = stateRecordId;
+    };
+
+    void loadPurchaseOrderForEdit();
+
+    return () => {
+      isActive = false;
+    };
+  }, [location.state]);
 
   const formatCurrency = (value) => {
     const amount = Number(value) || 0;
@@ -289,6 +347,7 @@ const PurchaseOrder = () => {
   const isEditingClosedLocked = isEditingClosed && !closedPoOverrideApproved;
 
   const resetForm = () => {
+    notesTouchedRef.current = false;
     setForm(createFormState());
     setItems([createLineItem()]);
     setErrors({});
@@ -772,12 +831,12 @@ const PurchaseOrder = () => {
                 Notes
               </label>
               <textarea
-                value={form.notes}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, notes: event.target.value }))
-                }
+                value={form.notes || ""}
+                onChange={(event) => {
+                  notesTouchedRef.current = true;
+                  setForm((prev) => ({ ...prev, notes: event.target.value }));
+                }}
                 placeholder="Delivery terms, remarks, or approvals."
-                disabled={isEditingClosedLocked}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               />
             </div>

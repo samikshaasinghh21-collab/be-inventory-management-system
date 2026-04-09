@@ -39,6 +39,7 @@ const DocumentViewPanel = ({
   const normalizedLogo = useMemo(() => resolveBrandLogo(logoUrl), [logoUrl]);
   const [resolvedLogo, setResolvedLogo] = useState(normalizedLogo);
   const canPrint = Boolean(id);
+  const hasPrimaryPairs = primaryPairs.length > 0;
   const hasBottomLeft = Boolean(
     bottomLeftContent || bottomLeftTitle || bottomLeftValue
   );
@@ -91,8 +92,10 @@ const DocumentViewPanel = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 border-b border-slate-800 text-[11px]">
-        <div className="p-3 border-r border-slate-800">
+      <div
+        className={`grid ${hasPrimaryPairs ? "grid-cols-2" : "grid-cols-1"} border-b border-slate-800 text-[11px]`}
+      >
+        <div className={hasPrimaryPairs ? "p-3 border-r border-slate-800" : "p-3"}>
           <div className="mb-2">
             <img
               src={resolvedLogo}
@@ -110,16 +113,18 @@ const DocumentViewPanel = ({
           <p className="text-[11px]">Phone: {toDisplay(companyPhone)}</p>
           <p className="text-[11px]">Email: {toDisplay(companyEmail)}</p>
         </div>
-        <div className="p-3">
-          <div className="grid grid-cols-2 gap-2 text-[11px]">
-            {primaryPairs.map((row) => (
-              <div key={row.label} className="contents">
-                <p className="text-slate-600">{row.label}:</p>
-                <p className="font-semibold">{toDisplay(row.value)}</p>
-              </div>
-            ))}
+        {hasPrimaryPairs && (
+          <div className="p-3">
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              {primaryPairs.map((row) => (
+                <div key={row.label} className="contents">
+                  <p className="text-slate-600">{row.label}:</p>
+                  <p className="font-semibold">{toDisplay(row.value)}</p>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {(leftBlockTitle || rightBlockTitle) && (

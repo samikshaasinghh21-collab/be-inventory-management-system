@@ -617,8 +617,8 @@ const DeliveryChallan = () => {
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">DC No</th>
-              <th className="p-3 text-left min-w-[180px]">Project</th>
-              <th className="p-3 text-left min-w-[180px]"> (Pick From)</th>
+              <th className="p-3 text-left min-w-[180px]">Ship To Project</th>
+              <th className="p-3 text-left min-w-[180px]">Ship From</th>
               <th className="p-3 text-left min-w-[180px]">Ship To</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
@@ -733,13 +733,13 @@ const DeliveryChallan = () => {
                   <p className="font-semibold">{formatDate(selectedChallan.issueDate)}</p>
                   <p className="text-slate-600">E-Way Bill No:</p>
                   <p className="font-semibold">{selectedChallan.eWayBillNumber || "-"}</p>
-                  <p className="text-slate-600">Project:</p>
+                  <p className="text-slate-600">Ship To Project:</p>
                   <p className="font-semibold">{selectedProject.name || "-"}</p>
                   <p className="text-slate-600">Client:</p>
                   <p className="font-semibold">{selectedProject.client || "-"}</p>
-                  <p className="text-slate-600">Deliver To:</p>
+                  <p className="text-slate-600">Ship To:</p>
                   <p className="font-semibold">{selectedChallan.toLocation || "-"}</p>
-                  <p className="text-slate-600"> ( Pick From):</p>
+                  <p className="text-slate-600">Ship From:</p>
                   <p className="font-semibold">{selectedFromLocation.name || "-"}</p>
                 </div>
               </div>
@@ -827,3 +827,4 @@ const DeliveryChallan = () => {
 };
 
 export default DeliveryChallan;
+  

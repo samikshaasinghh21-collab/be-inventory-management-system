@@ -1045,31 +1045,13 @@ const ReallocateReturn = () => {
           companyPhone={company.phone}
           companyEmail={company.email}
           logoUrl={logoUrl}
-          primaryPairs={[
-            {
-              label: "Reference",
-              value:
-                activeViewRecord.referenceNumber || `REL-${activeViewRecord.id}`,
-            },
-            { label: "Type", value: getMovementTypeLabel(activeViewRecord.type) },
-            {
-              label: "Request Date",
-              value: formatDate(
-                activeViewRecord.requestDate || activeViewRecord.transferDate
-              ),
-            },
-            { label: "Status", value: activeViewRecord.status || "Pending" },
-            { label: "Receive Ref", value: activeViewRecord.consumptionNumber || "-" },
-            { label: "Requested By", value: activeViewRecord.requestedBy || "-" },
-          ]}
-          leftBlockTitle="Project / From"
+          primaryPairs={[]}
+          leftBlockTitle="SHIP FROM"
           leftBlockLines={[
             projectMap[String(activeViewRecord.projectId)]?.name || "-",
             locationMap[String(activeViewRecord.fromLocationId)]?.name || "-",
           ]}
-          rightBlockTitle={
-            activeViewRecord.type === "Return" ? "Return Vendor" : "To Location"
-          }
+          rightBlockTitle="SHIP TO"
           rightBlockLines={[
             activeViewRecord.type === "Return"
               ? vendorMap[String(activeViewRecord.returnVendorId)]?.name || "-"

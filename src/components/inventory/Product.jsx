@@ -1,279 +1,14 @@
-import React, {
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  deleteProduct,
-  getProducts,
-  setProducts,
-  updateProduct,
-} from "../../services/productsStore";
- 
-const initialItems = [
-  {
-    id: 1,
-    name: "MX204-HWBASE-AC-FS",
-    description:
-      "MX204 Fixed AC System - HW and STD Junos; Feature right to use must be ordered separately",
-    hsn: "85176290",
-    qty: 0,
-    unit: "Nos",
-    rate: 568924.43,
-  },
-  {
-    id: 2,
-    name: "CBL-EX-PWR-C13-IN",
-    description: "AC Power Cable - India (6A/250V, 2.5m)",
-    hsn: "854442",
-    qty: 0,
-    unit: "Nos",
-    rate: 1746.77,
-  },
-  {
-    id: 3,
-    name: "QSFPP 4X10GE-SR",
-    description:
-      "QSFP+, 4x10GBASE-SR, MMF OM3 300m and OM4 400m, MPO-12 connector, Std Temp",
-    hsn: "851762",
-    qty: 0,
-    unit: "Nos",
-    rate: 20853.92,
-  },
-  {
-    id: 4,
-    name: "SFPP-10G-LR-C",
-    description:
-      "SFP, 1G, Copper 100m, Standard Temperature, RJ-45 connector",
-    hsn: "85176290",
-    qty: 0,
-    unit: "Nos",
-    rate: 2696.76,
-  },
-  {
-    id: 5,
-    name: "RJ45 CONNECTOR (SFP-1G-T-C)",
-    description:
-      "SFP, 1G, Copper 100m, Standard Temperature",
-    hsn: "85366990",
-    qty: 0,
-    unit: "Nos",
-    rate: 4208.58,
-  },
-  {
-    id: 6,
-    name: "S-MX-4C-A1-C1-P",
-    description:
-      "SW, MX, 4x100GE ports, Adv1, Class 1, without SW Support, Perpetual",
-    hsn: "997331",
-    qty: 0,
-    unit: "Nos",
-    rate: 201567.49,
-  },
-  {
-    id: 7,
-    name: "PAR-SUP-MX-4C-A1P",
-    description:
-      "PSS Basic Support for S-MX-4C-A1-C1-P",
-    hsn: "998313",
-    qty: 0,
-    unit: "Nos",
-    rate: 226849.61,
-  },
-  {
-    id: 8,
-    name: "PAR-NDS-MX204-B",
-    description:
-      "PSS Next Day Ship Support for MX204-HW-BASE",
-    hsn: "998313",
-    qty: 0,
-    unit: "Nos",
-    rate: 206968.67,
-  },
-  {
-    id: 9,
-    name: "EX9208-RED3B-AC",
-    description:
-      "Redundant EX9208 system configuration with chassis, routing engines, switch fabrics, PSUs and blank panels",
-    hsn: "85176290",
-    qty: 0,
-    unit: "Nos",
-    rate: 1940647.0,
-  },
-  {
-    id: 10,
-    name: "CBL-M-PWR-RA-EU",
-    description:
-      "M320 AC Power Cable, Europe, Right Angle",
-    hsn: "85444299",
-    qty: 0,
-    unit: "Nos",
-    rate: 2083.86,
-  },
-  {
-    id: 11,
-    name: "EX9200-40XS",
-    description:
-      "0-port 10GbE SFP+ line card; MACsec capable; optics sold separately",
-    hsn: "85176290",
-    qty: 0,
-    unit: "Nos",
-    rate: 962865.9,
-  },
-  {
-    id: 12,
-    name: "SFPP-10G-SR-C",
-    description:
-      "SFP+, 10GBASE-SR, MMF OM3/OM4, Duplex LC connector, Std Temp",
-    hsn: "85176290",
-    qty: 0,
-    unit: "Nos",
-    rate: 2574.18,
-  },
-  {
-    id: 13,
-    name: "SFP-1G-SX-C",
-    description:
-      "SFP, 1G, FDDI/OM1/OM2 MMF, Extended Temp, Duplex LC",
-    hsn: "85176290",
-    qty: 0,
-    unit: "Nos",
-    rate: 1866.28,
-  },
-  {
-    id: 14,
-    name: "PAR-NDS-EX9208-3B",
-    description:
-      "PSS Next Day Ship Support for EX9208-BASE3B",
-    hsn: "998313",
-    qty: 0,
-    unit: "Nos",
-    rate: 1198257.8,
-  },
-  {
-    id: 15,
-    name: "EX4400-24X",
-    description:
-      "24x10GbaseX switch with 2x100G uplinks, MACsec AES256",
-    hsn: "851762",
-    qty: 0,
-    unit: "Nos",
-    rate: 303354.86,
-  },
-  {
-    id: 16,
-    name: "EX4400-EM-1C",
-    description:
-      "1x100G MACsec AES256 extension module for EX4400",
-    hsn: "851762",
-    qty: 0,
-    unit: "Nos",
-    rate: 69395.6,
-  },
-  {
-    id: 17,
-    name: "S-EX-P-C2-P",
-    description:
-      "SW, EX, Premium, Class 2 (24 ports), Perpetual",
-    hsn: "997311",
-    qty: 0,
-    unit: "Nos",
-    rate: 66627.34,
-  },
-  {
-    id: 18,
-    name: "JPSU-550-C-AC-AFO",
-    description:
-      "550W compact AC AFO power supply for EX4400 switches",
-    hsn: "850440",
-    qty: 0,
-    unit: "Nos",
-    rate: 18468.72,
-  },
-  {
-    id: 19,
-    name: "CBL-EX-PWR-C13-IN",
-    description:
-      "AC Power Cable - India (10A/250V, 2.5m)",
-    hsn: "854442",
-    qty: 0,
-    unit: "Nos",
-    rate: 4075.79,
-  },
-  {
-    id: 20,
-    name: "PAR-NDS-EX44-24X",
-    description:
-      "PSS Next Day Ship Support for EX4400-24X",
-    hsn: "998313",
-    qty: 0,
-    unit: "Nos",
-    rate: 131467.05,
-  },
-  {
-    id: 21,
-    name: "EX4100-24T",
-    description:
-      "EX4100 24-Port 10/100/1000BaseT, 4x10G SFP+, 4x25G SFP28, Std SW",
-    hsn: "85176290",
-    qty: 0,
-    unit: "Nos",
-    rate: 108095.13,
-  },
-  {
-    id: 22,
-    name: "JNP-SFP-25G-DAC-1M",
-    description:
-      "SFP28, 25GE DAC Cable, 1 meter, Std Temp, 30 AWG",
-    hsn: "851762",
-    qty: 0,
-    unit: "Nos",
-    rate: 3105.36,
-  },
-  {
-    id: 23,
-    name: "PAR-NDS-EX41-24T",
-    description:
-      "PSS Next Day Ship Support for EX4100-24T",
-    hsn: "998313",
-    qty: 0,
-    unit: "Nos",
-    rate: 33556.28,
-  },
-  {
-    id: 24,
-    name: "JPSU-150-AC-AFO",
-    description:
-      "EX4100 / EX3400 150W AC PSU front-to-back airflow",
-    hsn: "85044090",
-    qty: 0,
-    unit: "Nos",
-    rate: 24490.46,
-  },
-];
- 
-const CATEGORY_OPTIONS = [
-  "Networking",
-  "Hardware",
-  "Software",
-  "Electrical",
-  "Consumables",
-  "Services",
-];
-
-const UNIT_OPTIONS = [
-  "Nos",
-  "PCS",
-  "Set",
-  "Box",
-  "Bundle",
-  "Meter",
-  "Foot",
-  "Kilogram",
-  "Litre",
-];
+  deleteItemApi,
+  fetchItems,
+  updateItemApi,
+} from "../../services/inventoryApi";
+import {
+  PRODUCT_CATEGORY_OPTIONS,
+  PRODUCT_UNIT_OPTIONS,
+} from "./productCatalogOptions";
 
 const currencyFormatter = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -291,32 +26,100 @@ const formatCurrency = (value) => currencyFormatter.format(Number(value) || 0);
 const formatCompactNumber = (value) =>
   compactFormatter.format(Number(value) || 0);
 
-const normalizeProduct = (product) => {
-  const rate = Number(product?.rate ?? product?.salesPrice ?? 0);
-  const qty = Number(product?.qty ?? 0);
+const EDIT_INPUT_CLASSNAME =
+  "mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-70";
+
+const EDIT_SECTION_CLASSNAME =
+  "rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.55)] sm:p-6";
+
+const createEditValues = () => ({
+  name: "",
+  serialNumber: "",
+  category: "",
+  unit: "Nos",
+  hsn: "",
+  rate: "",
+  description: "",
+});
+
+const normalizeProduct = (product = {}, selectedQty = 0) => {
+  const rate = Number(product?.rate ?? product?.price ?? product?.salesPrice ?? 0);
+  const qty = Number(product?.qty ?? selectedQty ?? 0);
+  const stock = Number(product?.stock ?? product?.Stock ?? 0);
   const taxPercentage = Number(
     product?.taxPercentage ?? product?.TaxPercentage ?? 0
   );
   return {
     ...product,
+    id: product?.id ?? product?.ItemId ?? null,
     name: product?.name || "",
     description: product?.description || "",
+    serialNumber:
+      product?.serialNumber ??
+      product?.SerialNumber ??
+      product?.serialNo ??
+      product?.SerialNo ??
+      "",
     hsn: product?.hsn ? String(product.hsn) : "",
     gst: product?.gst ?? product?.GST ?? "",
     sku: product?.sku || "",
     category: product?.category || "",
     brand: product?.brand || "",
     unit: product?.unit || "Nos",
+    stock: Number.isFinite(stock) ? stock : 0,
     taxPercentage: Number.isFinite(taxPercentage) ? taxPercentage : 0,
     qty: Number.isFinite(qty) ? qty : 0,
     rate: Number.isFinite(rate) ? rate : 0,
   };
 };
 
-const normalizeStoredProducts = (stored) =>
-  (Array.isArray(stored) ? stored : []).map((product) =>
-    normalizeProduct(product)
+const mergeSelectionIntoProducts = (products, previousItems = []) => {
+  const qtyById = new Map(
+    (Array.isArray(previousItems) ? previousItems : []).map((product) => [
+      String(product.id),
+      Number(product.qty) || 0,
+    ])
   );
+
+  return (Array.isArray(products) ? products : []).map((product) =>
+    normalizeProduct(product, qtyById.get(String(product.id)) ?? 0)
+  );
+};
+
+const upsertProductIntoList = (product, previousItems = []) => {
+  const normalizedProduct = normalizeProduct(product);
+  let wasReplaced = false;
+
+  const nextItems = (Array.isArray(previousItems) ? previousItems : []).map(
+    (item) => {
+      if (String(item.id) !== String(normalizedProduct.id)) {
+        return item;
+      }
+      wasReplaced = true;
+      return normalizeProduct(
+        { ...item, ...normalizedProduct },
+        Number(item.qty) || 0
+      );
+    }
+  );
+
+  return wasReplaced ? nextItems : [normalizedProduct, ...nextItems];
+};
+
+function LoadingState() {
+  return (
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-emerald-500" />
+      <h3 className="display-font mt-5 text-3xl font-semibold text-slate-900">
+        Loading product catalog
+      </h3>
+      <p className="mt-3 max-w-xl text-sm leading-7 text-slate-500">
+        Pulling the latest products from the inventory API so the listing stays
+        aligned with what is saved in the database.
+      </p>
+    </div>
+  );
+}
 
 function StatCard({ label, value, detail, accentClass }) {
   return (
@@ -372,72 +175,82 @@ function EmptyState({ hasFilters, onClearFilters, onCreate }) {
 }
 
 export default function Product() {
-  const [items, setItems] = useState(() =>
-    normalizeStoredProducts(getProducts())
-  );
+  const [items, setItems] = useState([]);
   const [productSearch, setProductSearch] = useState("");
   const [hsnSearch, setHsnSearch] = useState("");
   const deferredProductSearch = useDeferredValue(productSearch);
   const deferredHsnSearch = useDeferredValue(hsnSearch);
   const navigate = useNavigate();
   const location = useLocation();
+  const [isLoading, setIsLoading] = useState(true);
+  const [apiError, setApiError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [editingProduct, setEditingProduct] = useState(null);
-  const [editValues, setEditValues] = useState({
-    name: "",
-    sku: "",
-    category: "",
-    brand: "",
-    unit: "Nos",
-    hsn: "",
-    rate: "",
-    description: "",
-  });
+  const [editValues, setEditValues] = useState(createEditValues);
   const [editErrors, setEditErrors] = useState({});
+  const [isSaving, setIsSaving] = useState(false);
 
-  const seedInitialProducts = () => {
-    const existing = normalizeStoredProducts(getProducts());
-    const existingIds = new Set(existing.map((product) => product.id));
-    const missing = initialItems
-      .filter((product) => !existingIds.has(product.id))
-      .map((product) => normalizeProduct(product));
+  const loadProducts = async ({ showLoader = true } = {}) => {
+    if (showLoader) {
+      setIsLoading(true);
+    }
+    setApiError("");
 
-    if (missing.length > 0) {
-      setProducts([...existing, ...missing]);
+    try {
+      const list = await fetchItems();
+      console.log("Product loadProducts normalized items:", list);
+      // Preserve local selection quantities while refreshing the catalog from the API.
+      setItems((prev) => mergeSelectionIntoProducts(list, prev));
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error ??
+          error?.message ??
+          "Failed to load products."
+      );
+    } finally {
+      if (showLoader) {
+        setIsLoading(false);
+      }
     }
   };
 
-  const loadProducts = () => {
-    setItems(normalizeStoredProducts(getProducts()));
-  };
+  useEffect(() => {
+    void loadProducts();
+  }, []);
 
   useEffect(() => {
-    const handleStorage = (event) => {
-      if (event.key === "products") {
-        loadProducts();
-      }
-    };
+    const navigationState = location.state ?? {};
+    const nextSuccessMessage = navigationState.successMessage;
+    const createdProduct = navigationState.createdProduct;
+    const shouldRefreshProducts = Boolean(navigationState.refreshProducts);
 
-    const handleProductsChanged = () => {
-      loadProducts();
-    };
+    if (!nextSuccessMessage && !createdProduct && !shouldRefreshProducts) {
+      return;
+    }
 
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener("products:changed", handleProductsChanged);
-    seedInitialProducts();
+    if (nextSuccessMessage) {
+      setSuccessMessage(nextSuccessMessage);
+    }
+    if (createdProduct) {
+      console.log("Product navigation state createdProduct:", createdProduct);
+      setItems((prev) => upsertProductIntoList(createdProduct, prev));
+    }
+    if (shouldRefreshProducts) {
+      void loadProducts({ showLoader: false });
+    }
 
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener("products:changed", handleProductsChanged);
-    };
-  }, []);
- 
+    navigate(`${location.pathname}${location.search}`, {
+      replace: true,
+      state: {},
+    });
+  }, [location.pathname, location.search, location.state, navigate]);
+
   const updateQty = (id, nextQty) => {
     const safeQty = Math.max(0, Number(nextQty) || 0);
 
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, qty: safeQty } : item))
     );
-    updateProduct(id, { qty: safeQty });
   };
 
   const increaseQty = (id) => {
@@ -461,16 +274,14 @@ export default function Product() {
     );
 
     setItems(nextItems);
-    setProducts(nextItems);
   };
 
   const startEdit = (product) => {
     setEditingProduct(product);
     setEditValues({
       name: product.name || "",
-      sku: product.sku || "",
+      serialNumber: product.serialNumber || "",
       category: product.category || "",
-      brand: product.brand || "",
       unit: product.unit || "Nos",
       hsn: product.hsn || "",
       rate: product.rate ?? "",
@@ -481,6 +292,7 @@ export default function Product() {
 
   const cancelEdit = () => {
     setEditingProduct(null);
+    setEditValues(createEditValues());
     setEditErrors({});
   };
 
@@ -497,33 +309,72 @@ export default function Product() {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleEditSave = () => {
-    if (!editingProduct || !validateEdit()) {
+  const updateEditField = (key, value) => {
+    setEditValues((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+
+    if (editErrors[key]) {
+      setEditErrors((prev) => ({
+        ...prev,
+        [key]: undefined,
+      }));
+    }
+  };
+
+  const handleEditSave = async () => {
+    if (!editingProduct || !validateEdit() || isSaving) {
       return;
     }
 
     const updates = {
       name: editValues.name.trim(),
-      sku: editValues.sku.trim(),
       category: editValues.category,
-      brand: editValues.brand.trim(),
+      serialNumber: editValues.serialNumber.trim() || null,
       unit: editValues.unit,
       hsn: editValues.hsn.trim(),
-      rate: Number(editValues.rate),
+      price: Number(editValues.rate),
       description: editValues.description.trim(),
-      qty: editingProduct.qty ?? 0,
+      stock: editingProduct.stock ?? 0,
+      gst: editingProduct.gst || "",
+      taxPercentage: editingProduct.taxPercentage ?? 0,
     };
-    updateProduct(editingProduct.id, updates);
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === editingProduct.id ? { ...item, ...updates } : item
-      )
-    );
-    setEditingProduct(null);
-    setEditErrors({});
+    console.log("Product handleEditSave payload:", {
+      id: editingProduct.id,
+      updates,
+    });
+
+    setIsSaving(true);
+    setApiError("");
+
+    try {
+      const updated = await updateItemApi(editingProduct.id, updates);
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === editingProduct.id
+            ? normalizeProduct({ ...item, ...updated }, item.qty)
+            : item
+        )
+      );
+      setSuccessMessage(
+        `${updated.name || editValues.name.trim() || "Product"} updated successfully.`
+      );
+      setEditingProduct(null);
+      setEditValues(createEditValues());
+      setEditErrors({});
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error ??
+          error?.message ??
+          "Failed to update product."
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     const target = items.find((item) => item.id === id);
     const label = target?.name || "this product";
 
@@ -534,8 +385,19 @@ export default function Product() {
       return;
     }
 
-    deleteProduct(id);
-    setItems((prev) => prev.filter((item) => item.id !== id));
+    setApiError("");
+
+    try {
+      await deleteItemApi(id);
+      setItems((prev) => prev.filter((item) => item.id !== id));
+      setSuccessMessage(`${label} deleted successfully.`);
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error ??
+          error?.message ??
+          "Failed to delete product."
+      );
+    }
   };
 
   const normalizedProductSearch = deferredProductSearch.trim().toLowerCase();
@@ -547,6 +409,7 @@ export default function Product() {
         const searchableFields = [
           item.name,
           item.description,
+          item.serialNumber,
           item.sku,
           item.brand,
           item.category,
@@ -587,7 +450,9 @@ export default function Product() {
     navigate("/inventory/cart");
   };
 
-  const goToCreateProduct = () => navigate("/inventory/create-product");
+  const goToCreateProduct = () => {
+    navigate("/inventory/create-product");
+  };
 
   const pickParam = new URLSearchParams(location.search).get("pick");
   const isPickingForPo = pickParam === "po";
@@ -598,6 +463,7 @@ export default function Product() {
       id: item.id,
       name: item.name || "",
       description: item.description || "",
+      serialNumber: item.serialNumber || "",
       unit: item.unit || "PCS",
       hsn: item.hsn || "",
       gst: item.gst || "",
@@ -619,6 +485,7 @@ export default function Product() {
       id: item.id,
       name: item.name || "",
       description: item.description || "",
+      serialNumber: item.serialNumber || "",
       unit: item.unit || "PCS",
       hsn: item.hsn || "",
       gst: item.gst || "",
@@ -691,10 +558,11 @@ export default function Product() {
             <div className="grid gap-3 sm:grid-cols-2 xl:w-[460px]">
               <button
                 type="button"
-                onClick={loadProducts}
-                className="rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition hover:bg-white/15"
+                onClick={() => void loadProducts()}
+                disabled={isLoading}
+                className="rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Refresh Catalog
+                {isLoading ? "Refreshing..." : "Refresh Catalog"}
               </button>
               <button
                 type="button"
@@ -735,11 +603,26 @@ export default function Product() {
           </div>
         </section>
 
+        {(successMessage || apiError) && (
+          <section className="mt-6 space-y-3">
+            {successMessage && (
+              <div className="rounded-[22px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-[0_16px_40px_-34px_rgba(21,128,61,0.65)]">
+                {successMessage}
+              </div>
+            )}
+            {apiError && (
+              <div className="rounded-[22px] border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700 shadow-[0_16px_40px_-34px_rgba(220,38,38,0.55)]">
+                {apiError}
+              </div>
+            )}
+          </section>
+        )}
+
         <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Catalog Items"
             value={items.length}
-            detail="Products available in the local product catalog."
+            detail="Products currently synced from the inventory API."
             accentClass="bg-emerald-500"
           />
           <StatCard
@@ -772,8 +655,8 @@ export default function Product() {
                 Search and shortlist products
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-500">
-                Find products by name, description, SKU, brand, category, or
-                HSN code without losing the pricing context.
+                Find products by name, description, serial number, category, or
+                HSN code without losing pricing context.
               </p>
             </div>
 
@@ -800,7 +683,7 @@ export default function Product() {
               </span>
               <input
                 className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
-                placeholder="Search by name, SKU, brand, category, or description"
+                placeholder="Search by name, serial number, category, or description"
                 value={productSearch}
                 onChange={(event) => setProductSearch(event.target.value)}
               />
@@ -883,8 +766,8 @@ export default function Product() {
                 Professionally organized product list
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-500">
-                Each row keeps pricing, quantity, and catalog details aligned
-                for purchase orders, BOQs, and cart handoff.
+                Each row keeps API-synced catalog details, pick quantity, and
+                pricing aligned for purchase orders, BOQs, and cart handoff.
               </p>
             </div>
 
@@ -898,7 +781,9 @@ export default function Product() {
             </div>
           </div>
 
-          {filteredItems.length === 0 ? (
+          {isLoading ? (
+            <LoadingState />
+          ) : filteredItems.length === 0 ? (
             <EmptyState
               hasFilters={hasFilters}
               onClearFilters={clearFilters}
@@ -914,7 +799,7 @@ export default function Product() {
                       <th className="px-4 py-4 font-semibold">HSN / SAC</th>
                       <th className="px-4 py-4 font-semibold">Unit</th>
                       <th className="px-4 py-4 font-semibold text-center">
-                        Qty
+                        Pick Qty
                       </th>
                       <th className="px-4 py-4 font-semibold text-right">
                         Rate
@@ -934,7 +819,7 @@ export default function Product() {
                       return (
                         <tr
                           key={item.id}
-                          className="align-top transition hover:bg-slate-50/80"
+                          className="align-top odd:bg-white even:bg-slate-50/50 transition hover:bg-emerald-50/50"
                         >
                           <td className="px-6 py-5">
                             <div className="flex gap-4">
@@ -965,6 +850,14 @@ export default function Product() {
                                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
                                   <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
                                     {item.category || "Unassigned category"}
+                                  </span>
+                                  {item.serialNumber && (
+                                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
+                                      Serial {item.serialNumber}
+                                    </span>
+                                  )}
+                                  <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">
+                                    Stock {item.stock}
                                   </span>
                                   {item.brand && (
                                     <span className="rounded-full bg-sky-50 px-3 py-1 text-sky-700">
@@ -1029,7 +922,7 @@ export default function Product() {
                               {formatCurrency(amount)}
                             </p>
                             <p className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">
-                              Qty x rate
+                              Pick qty x rate
                             </p>
                           </td>
                           <td className="px-6 py-5">
@@ -1109,6 +1002,14 @@ export default function Product() {
                         <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
                           {item.category || "Unassigned category"}
                         </span>
+                        {item.serialNumber && (
+                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
+                            Serial {item.serialNumber}
+                          </span>
+                        )}
+                        <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">
+                          Stock {item.stock}
+                        </span>
                         {item.brand && (
                           <span className="rounded-full bg-sky-50 px-3 py-1 text-sky-700">
                             {item.brand}
@@ -1138,12 +1039,20 @@ export default function Product() {
                             {item.hsn || "-"}
                           </p>
                         </div>
-                        <div className="col-span-2">
+                        <div>
                           <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
                             Rate
                           </p>
                           <p className="mt-1 font-medium text-slate-900">
                             {formatCurrency(item.rate)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                            Serial Number
+                          </p>
+                          <p className="mt-1 font-medium text-slate-900">
+                            {item.serialNumber || "-"}
                           </p>
                         </div>
                       </div>
@@ -1305,206 +1214,287 @@ export default function Product() {
       </div>
 
       {editingProduct && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center z-50">
-          <div className="bg-white w-[900px] max-w-[96vw] rounded-2xl shadow-2xl overflow-hidden border border-slate-200 max-h-[92vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b bg-slate-50">
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-                  Product Catalog
-                </p>
-                <h2 className="text-xl font-semibold text-slate-900">
-                  Edit Product
-                </h2>
-              </div>
-              <button
-                onClick={cancelEdit}
-                className="h-9 w-9 grid place-items-center rounded-full border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 transition"
-                aria-label="Close"
-                type="button"
-              >
-                X
-              </button>
-            </div>
+        <div className="fixed inset-0 z-50 bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5">
+          <div className="mx-auto flex h-full max-w-5xl flex-col overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_40px_120px_-52px_rgba(15,23,42,0.72)]">
+            <div className="relative overflow-hidden border-b border-slate-200 bg-slate-950 px-6 py-6 text-white sm:px-8 sm:py-7">
+              <div className="absolute -right-16 top-0 h-48 w-48 rounded-full bg-emerald-400/20 blur-3xl" />
+              <div className="absolute bottom-0 left-1/3 h-40 w-40 rounded-full bg-sky-400/10 blur-3xl" />
 
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                <div className="lg:col-span-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Product Name *
-                  </label>
-                  <input
-                    value={editValues.name}
-                    onChange={(event) =>
-                      setEditValues((prev) => ({
-                        ...prev,
-                        name: event.target.value,
-                      }))
-                    }
-                    type="text"
-                    className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                    aria-invalid={Boolean(editErrors.name)}
-                  />
-                  {editErrors.name && (
-                    <p className="mt-1 text-sm text-red-600">
-                      {editErrors.name}
-                    </p>
-                  )}
+              <div className="relative flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-3xl">
+                  <p className="text-xs uppercase tracking-[0.35em] text-emerald-200/80">
+                    Product Catalog
+                  </p>
+                  <h2 className="display-font mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+                    Edit product details
+                  </h2>
+                  <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
+                    Update the catalog record and keep the product listing,
+                    purchasing flows, and serial metadata in sync.
+                  </p>
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <span className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm text-slate-100">
+                      Stock {editingProduct.stock ?? 0}
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200">
+                      Tax {editingProduct.gst || `${editingProduct.taxPercentage ?? 0}%`}
+                    </span>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="text-sm font-medium text-slate-700">
-                    SKU / Part No
-                  </label>
-                  <input
-                    value={editValues.sku}
-                    onChange={(event) =>
-                      setEditValues((prev) => ({
-                        ...prev,
-                        sku: event.target.value,
-                      }))
-                    }
-                    type="text"
-                    className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-slate-700">
-                    Category
-                  </label>
-                  <select
-                    value={editValues.category}
-                    onChange={(event) =>
-                      setEditValues((prev) => ({
-                        ...prev,
-                        category: event.target.value,
-                      }))
-                    }
-                    className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                  >
-                    <option value="">Select Category</option>
-                    {CATEGORY_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-slate-700">
-                    Brand
-                  </label>
-                  <input
-                    value={editValues.brand}
-                    onChange={(event) =>
-                      setEditValues((prev) => ({
-                        ...prev,
-                        brand: event.target.value,
-                      }))
-                    }
-                    type="text"
-                    className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-slate-700">
-                    Unit
-                  </label>
-                  <select
-                    value={editValues.unit}
-                    onChange={(event) =>
-                      setEditValues((prev) => ({
-                        ...prev,
-                        unit: event.target.value,
-                      }))
-                    }
-                    className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                  >
-                    {UNIT_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-slate-700">
-                    HSN / SAC
-                  </label>
-                  <input
-                    value={editValues.hsn}
-                    onChange={(event) =>
-                      setEditValues((prev) => ({
-                        ...prev,
-                        hsn: event.target.value,
-                      }))
-                    }
-                    type="text"
-                    className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-slate-700">
-                    Selling Price *
-                  </label>
-                  <input
-                    value={editValues.rate}
-                    onChange={(event) =>
-                      setEditValues((prev) => ({
-                        ...prev,
-                        rate: event.target.value,
-                      }))
-                    }
-                    type="text"
-                    className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                    aria-invalid={Boolean(editErrors.rate)}
-                  />
-                  {editErrors.rate && (
-                    <p className="mt-1 text-sm text-red-600">
-                      {editErrors.rate}
-                    </p>
-                  )}
-                </div>
-
-                <div className="lg:col-span-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Description
-                  </label>
-                  <textarea
-                    value={editValues.description}
-                    onChange={(event) =>
-                      setEditValues((prev) => ({
-                        ...prev,
-                        description: event.target.value,
-                      }))
-                    }
-                    className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm min-h-[120px] focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between px-6 py-4 border-t bg-slate-50">
-              <p className="text-xs text-slate-500">
-                Update catalog details and keep pricing accurate.
-              </p>
-              <div className="flex gap-3">
                 <button
                   onClick={cancelEdit}
-                  className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 hover:border-slate-300 hover:text-slate-900"
+                  className="grid h-10 w-10 place-items-center rounded-full border border-white/15 bg-white/10 text-slate-100 transition hover:border-white/30 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+                  aria-label="Close"
                   type="button"
+                  disabled={isSaving}
+                >
+                  X
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_35%,#eef4f7_100%)] px-4 py-5 sm:px-6 sm:py-6">
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_320px]">
+                <div className="space-y-6">
+                  <section className={EDIT_SECTION_CLASSNAME}>
+                    <div className="flex flex-col gap-2 border-b border-slate-100 pb-5 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+                          Core Details
+                        </p>
+                        <h3 className="mt-2 text-xl font-semibold text-slate-900">
+                          Product identity
+                        </h3>
+                      </div>
+                      <span className="text-xs text-slate-500">
+                        Required fields marked *
+                      </span>
+                    </div>
+
+                    <div className="mt-5 grid gap-5 md:grid-cols-2">
+                      <div className="md:col-span-2">
+                        <label className="text-sm font-medium text-slate-700">
+                          Product Name *
+                        </label>
+                        <input
+                          value={editValues.name}
+                          onChange={(event) =>
+                            updateEditField("name", event.target.value)
+                          }
+                          type="text"
+                          className={EDIT_INPUT_CLASSNAME}
+                          placeholder="Enter the catalog product name"
+                          aria-invalid={Boolean(editErrors.name)}
+                          disabled={isSaving}
+                        />
+                        {editErrors.name && (
+                          <p className="mt-2 text-sm text-red-600">
+                            {editErrors.name}
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-slate-700">
+                          Category
+                        </label>
+                        <select
+                          value={editValues.category}
+                          onChange={(event) =>
+                            updateEditField("category", event.target.value)
+                          }
+                          className={EDIT_INPUT_CLASSNAME}
+                          disabled={isSaving}
+                        >
+                          <option value="">Select category</option>
+                          {PRODUCT_CATEGORY_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-slate-700">
+                          Serial Number
+                        </label>
+                        <input
+                          value={editValues.serialNumber}
+                          onChange={(event) =>
+                            updateEditField("serialNumber", event.target.value)
+                          }
+                          type="text"
+                          className={EDIT_INPUT_CLASSNAME}
+                          placeholder="Enter serial number"
+                          disabled={isSaving}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-slate-700">
+                          Unit
+                        </label>
+                        <select
+                          value={editValues.unit}
+                          onChange={(event) =>
+                            updateEditField("unit", event.target.value)
+                          }
+                          className={EDIT_INPUT_CLASSNAME}
+                          disabled={isSaving}
+                        >
+                          {PRODUCT_UNIT_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-slate-700">
+                          HSN / SAC
+                        </label>
+                        <input
+                          value={editValues.hsn}
+                          onChange={(event) =>
+                            updateEditField("hsn", event.target.value)
+                          }
+                          type="text"
+                          className={EDIT_INPUT_CLASSNAME}
+                          placeholder="Enter HSN or SAC code"
+                          disabled={isSaving}
+                        />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className={EDIT_SECTION_CLASSNAME}>
+                    <div className="border-b border-slate-100 pb-5">
+                      <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+                        Pricing & Notes
+                      </p>
+                      <h3 className="mt-2 text-xl font-semibold text-slate-900">
+                        Financial and descriptive fields
+                      </h3>
+                      <p className="mt-2 text-sm leading-6 text-slate-500">
+                        These values flow back into the catalog table and
+                        purchasing pickers after save.
+                      </p>
+                    </div>
+
+                    <div className="mt-5 grid gap-5">
+                      <div>
+                        <label className="text-sm font-medium text-slate-700">
+                          Selling Price *
+                        </label>
+                        <input
+                          value={editValues.rate}
+                          onChange={(event) =>
+                            updateEditField("rate", event.target.value)
+                          }
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          className={EDIT_INPUT_CLASSNAME}
+                          placeholder="0.00"
+                          aria-invalid={Boolean(editErrors.rate)}
+                          disabled={isSaving}
+                        />
+                        {editErrors.rate && (
+                          <p className="mt-2 text-sm text-red-600">
+                            {editErrors.rate}
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium text-slate-700">
+                          Description
+                        </label>
+                        <textarea
+                          value={editValues.description}
+                          onChange={(event) =>
+                            updateEditField("description", event.target.value)
+                          }
+                          className={`${EDIT_INPUT_CLASSNAME} min-h-[140px] resize-y`}
+                          placeholder="Add a short description or buying context"
+                          disabled={isSaving}
+                        />
+                      </div>
+                    </div>
+                  </section>
+                </div>
+
+                <aside className="space-y-6">
+                  <section className={EDIT_SECTION_CLASSNAME}>
+                    <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+                      Live Preview
+                    </p>
+                    <h3 className="mt-4 text-lg font-semibold text-slate-900">
+                      {editValues.name.trim() || "Untitled product"}
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                      {editValues.description.trim() ||
+                        "Add a short description so the product listing stays easy to scan."}
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
+                        {editValues.category || "Unassigned category"}
+                      </span>
+                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
+                        {editValues.serialNumber.trim() || "No serial number"}
+                      </span>
+                      <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">
+                        {editValues.rate === ""
+                          ? "Awaiting price"
+                          : formatCurrency(editValues.rate)}
+                      </span>
+                    </div>
+                  </section>
+
+                  <section className={EDIT_SECTION_CLASSNAME}>
+                    <p className="text-xs uppercase tracking-[0.28em] text-slate-400">
+                      Sync Status
+                    </p>
+                    <div className="mt-4 space-y-3 text-sm text-slate-600">
+                      <p>
+                        Serial number, category, price, unit, HSN, and
+                        description are saved through the API-backed product
+                        payload.
+                      </p>
+                      <p>
+                        The catalog refresh runs after create flows and the
+                        updated row is patched in place after save.
+                      </p>
+                    </div>
+                  </section>
+                </aside>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 border-t border-slate-200 bg-slate-50/90 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-500">
+                Save changes to update the product listing and keep pricing
+                accurate across downstream workflows.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={cancelEdit}
+                  className="rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+                  type="button"
+                  disabled={isSaving}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleEditSave}
-                  className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+                  className="rounded-full bg-emerald-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isSaving}
                 >
-                  Save Changes
+                  {isSaving ? "Saving Changes..." : "Save Changes"}
                 </button>
               </div>
             </div>

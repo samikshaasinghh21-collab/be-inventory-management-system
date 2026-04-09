@@ -5,6 +5,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { checkDbConnection, getPool, sql } from "./config/db.js";
+import { DEFAULT_PURCHASE_ORDER_TERMS } from "../../shared/purchaseOrderTerms.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -291,6 +292,14 @@ const resolveItemsSchema = async () => {
     "Category",
     "category"
   );
+  const serialNumberColumns = findColumns(
+    "serial_number",
+    "SerialNumber",
+    "serialNumber",
+    "serial_no",
+    "SerialNo",
+    "serialNo"
+  );
   const hsnColumns = findColumns("hsn_code", "HSNCode", "HsnCode", "HSN", "hsn");
   const stockColumns = findColumns(
     "stock_qty",
@@ -353,6 +362,7 @@ const resolveItemsSchema = async () => {
     idColumns,
     nameColumns,
     categoryColumns,
+    serialNumberColumns,
     hsnColumns,
     stockColumns,
     priceColumns,
@@ -411,6 +421,14 @@ const normalizeItem = (row = {}) => {
       row.ItemCategory ??
       row.category ??
       row.itemCategory ??
+      "",
+    serialNumber:
+      row.serial_number ??
+      row.SerialNumber ??
+      row.serialNumber ??
+      row.serial_no ??
+      row.SerialNo ??
+      row.serialNo ??
       "",
     hsn:
       row.hsn_code ??
@@ -644,7 +662,7 @@ const normalizePurchaseOrder = (row = {}) => ({
     row.ExpectedDate ??
     null,
   status: row.Status ?? row.status ?? "",
-  notes: row.Notes ?? row.notes ?? "",
+  notes: normalizePurchaseOrderNotesValue(row.Notes ?? row.notes),
   total: Number(row.Total ?? row.total ?? 0),
 });
 
@@ -927,6 +945,9 @@ const normalizeOptionalString = (value) => {
   const trimmed = String(value ?? "").trim();
   return trimmed.length ? trimmed : null;
 };
+
+const normalizePurchaseOrderNotesValue = (value) =>
+  normalizeOptionalString(value) ?? DEFAULT_PURCHASE_ORDER_TERMS;
 
 const toNullableInt = (value) => {
   const n = Number(value);
@@ -1586,6 +1607,7 @@ const ensureItemsTable = async () => {
         ItemId INT IDENTITY(1,1) PRIMARY KEY,
         Name NVARCHAR(255) NOT NULL,
         Category NVARCHAR(100) NULL,
+        SerialNumber NVARCHAR(255) NULL,
         HSN NVARCHAR(50) NULL,
         Unit NVARCHAR(50) NULL,
         Stock INT NOT NULL DEFAULT 0,
@@ -1608,6 +1630,13 @@ const ensureItemsTable = async () => {
     IF COL_LENGTH('dbo.Items', 'Category') IS NULL
     BEGIN
       ALTER TABLE dbo.Items ADD Category NVARCHAR(100) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'SerialNumber') IS NULL
+       AND COL_LENGTH('dbo.Items', 'SerialNo') IS NULL
+       AND COL_LENGTH('dbo.Items', 'serial_number') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD SerialNumber NVARCHAR(255) NULL;
     END;
 
     IF COL_LENGTH('dbo.Items', 'HSN') IS NULL
@@ -2128,6 +2157,16 @@ const ensurePurchaseTables = async () => {
     IF COL_LENGTH('dbo.PurchaseOrders', 'ExpectedDeliveryDate') IS NULL
     BEGIN
       ALTER TABLE dbo.PurchaseOrders ADD ExpectedDeliveryDate DATE NULL;
+    END;
+    IF EXISTS (
+      SELECT 1
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.PurchaseOrders')
+        AND name = 'Notes'
+        AND max_length <> -1
+    )
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrders ALTER COLUMN Notes NVARCHAR(MAX) NULL;
     END;
     IF COL_LENGTH('dbo.PurchaseOrders', 'CreatedAt') IS NULL
     BEGIN
@@ -3512,7 +3551,7 @@ app.get("/api/db-test", async (_req, res) => {
   }
 });
 
-app.get("/api/items", async (_req, res) => {
+app.get(["/api/items", "/api/products"], async (_req, res) => {
   try {
     await ensureItemsTable();
     const pool = await getPool();
@@ -3523,6 +3562,7 @@ app.get("/api/items", async (_req, res) => {
         ${buildIdCoalesceExpr(itemSchema.idColumns)} AS [id],
         ${buildTextCoalesceExpr(itemSchema.nameColumns)} AS [name],
         ${buildTextCoalesceExpr(itemSchema.categoryColumns)} AS [category],
+        ${buildTextCoalesceExpr(itemSchema.serialNumberColumns)} AS [serialNumber],
         ${buildTextCoalesceExpr(itemSchema.hsnColumns)} AS [hsn],
         ${buildTextCoalesceExpr(itemSchema.unitColumns, "N'PCS'")} AS [unit],
         ${buildNumberCoalesceExpr(itemSchema.stockColumns)} AS [stock],
@@ -3550,13 +3590,17 @@ app.get("/api/items", async (_req, res) => {
   }
 });
 
-app.post("/api/items", async (req, res) => {
+app.post(["/api/items", "/api/products"], async (req, res) => {
   try {
     await ensureItemsTable();
 
     const {
       name,
       category,
+      serialNumber,
+      SerialNumber,
+      serialNo,
+      SerialNo,
       hsn,
       unit,
       stock,
@@ -3580,6 +3624,10 @@ app.post("/api/items", async (req, res) => {
     const validTaxPercentage = Number.isFinite(cleanTaxPercentage)
       ? cleanTaxPercentage
       : 0;
+    const normalizedSerialNumber =
+      normalizeOptionalString(
+        serialNumber ?? SerialNumber ?? serialNo ?? SerialNo
+      ) ?? null;
     const normalizedGstLabel =
       normalizeOptionalString(gst) ?? formatTaxPercentageLabel(validTaxPercentage);
 
@@ -3589,6 +3637,7 @@ app.post("/api/items", async (req, res) => {
       .request()
       .input("Name", sql.NVarChar(255), String(name).trim())
       .input("Category", sql.NVarChar(100), String(category ?? "").trim())
+      .input("SerialNumber", sql.NVarChar(255), normalizedSerialNumber)
       .input("HSN", sql.NVarChar(50), String(hsn ?? "").trim())
       .input("Unit", sql.NVarChar(50), String(unit ?? "PCS").trim() || "PCS")
       .input("Stock", sql.Int, validStock)
@@ -3615,6 +3664,7 @@ app.post("/api/items", async (req, res) => {
 
     addInsertFields(itemSchema.nameColumns, "Name");
     addInsertFields(itemSchema.categoryColumns, "Category");
+    addInsertFields(itemSchema.serialNumberColumns, "SerialNumber");
     addInsertFields(itemSchema.hsnColumns, "HSN");
     addInsertFields(itemSchema.unitColumns, "Unit");
     addInsertFields(itemSchema.stockColumns, "Stock");
@@ -3647,7 +3697,7 @@ app.post("/api/items", async (req, res) => {
   }
 });
 
-app.put("/api/items/:id", async (req, res) => {
+app.put(["/api/items/:id", "/api/products/:id"], async (req, res) => {
   try {
     await ensureItemsTable();
 
@@ -3659,6 +3709,10 @@ app.put("/api/items/:id", async (req, res) => {
     const {
       name,
       category,
+      serialNumber,
+      SerialNumber,
+      serialNo,
+      SerialNo,
       hsn,
       unit,
       stock,
@@ -3680,6 +3734,10 @@ app.put("/api/items/:id", async (req, res) => {
     const validTaxPercentage = Number.isFinite(cleanTaxPercentage)
       ? cleanTaxPercentage
       : 0;
+    const normalizedSerialNumber =
+      normalizeOptionalString(
+        serialNumber ?? SerialNumber ?? serialNo ?? SerialNo
+      ) ?? null;
     const normalizedGstLabel =
       normalizeOptionalString(gst) ?? formatTaxPercentageLabel(validTaxPercentage);
 
@@ -3698,6 +3756,7 @@ app.put("/api/items/:id", async (req, res) => {
 
     addSetClauses(itemSchema.nameColumns, "Name");
     addSetClauses(itemSchema.categoryColumns, "Category");
+    addSetClauses(itemSchema.serialNumberColumns, "SerialNumber");
     addSetClauses(itemSchema.hsnColumns, "HSN");
     addSetClauses(itemSchema.unitColumns, "Unit");
     addSetClauses(itemSchema.stockColumns, "Stock");
@@ -3714,6 +3773,7 @@ app.put("/api/items/:id", async (req, res) => {
       .input("ItemId", sql.BigInt, id)
       .input("Name", sql.NVarChar(255), String(name ?? "").trim())
       .input("Category", sql.NVarChar(100), String(category ?? "").trim())
+      .input("SerialNumber", sql.NVarChar(255), normalizedSerialNumber)
       .input("HSN", sql.NVarChar(50), String(hsn ?? "").trim())
       .input("Unit", sql.NVarChar(50), String(unit ?? "PCS").trim() || "PCS")
       .input("Stock", sql.Int, validStock)
@@ -3743,7 +3803,9 @@ app.put("/api/items/:id", async (req, res) => {
   }
 });
 
-app.patch("/api/items/:id/quantity", async (req, res) => {
+app.patch(
+  ["/api/items/:id/quantity", "/api/products/:id/quantity"],
+  async (req, res) => {
   try {
     await ensureItemsTable();
 
@@ -3797,7 +3859,7 @@ app.patch("/api/items/:id/quantity", async (req, res) => {
   }
 });
 
-app.delete("/api/items/:id", async (req, res) => {
+app.delete(["/api/items/:id", "/api/products/:id"], async (req, res) => {
   try {
     await ensureItemsTable();
 
@@ -5400,6 +5462,7 @@ app.post("/api/purchase-orders", async (req, res) => {
   } = req.body ?? {};
 
   const normalizedItems = normalizePurchaseOrderItemsInput(items);
+  const normalizedNotes = normalizePurchaseOrderNotesValue(notes);
   if (!normalizedItems.length) {
     return res.status(400).json({ ok: false, error: "At least one line item is required" });
   }
@@ -5425,7 +5488,7 @@ app.post("/api/purchase-orders", async (req, res) => {
     insertOrder.input("OrderDate", sql.Date, parsedOrderDate || null);
     insertOrder.input("ExpectedDate", sql.Date, parsedExpected ?? parsedExpectedDelivery ?? null);
     insertOrder.input("ExpectedDeliveryDate", sql.Date, parsedExpectedDelivery ?? null);
-    insertOrder.input("Notes", sql.NVarChar(sql.MAX), notes || null);
+    insertOrder.input("Notes", sql.NVarChar(sql.MAX), normalizedNotes);
 
     const orderResult = await insertOrder.query(`
       INSERT INTO PurchaseOrders
@@ -5496,6 +5559,7 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
   } = req.body ?? {};
 
   const normalizedItems = normalizePurchaseOrderItemsInput(items);
+  const normalizedNotes = normalizePurchaseOrderNotesValue(notes);
   if (!normalizedItems.length) {
     return res.status(400).json({ ok: false, error: "At least one line item is required" });
   }
@@ -5544,7 +5608,7 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
     updateOrder.input("OrderDate", sql.Date, parsedOrderDate || null);
     updateOrder.input("ExpectedDate", sql.Date, parsedExpected ?? parsedExpectedDelivery ?? null);
     updateOrder.input("ExpectedDeliveryDate", sql.Date, parsedExpectedDelivery ?? null);
-    updateOrder.input("Notes", sql.NVarChar(sql.MAX), notes || null);
+    updateOrder.input("Notes", sql.NVarChar(sql.MAX), normalizedNotes);
 
     const orderResult = await updateOrder.query(`
       UPDATE PurchaseOrders
