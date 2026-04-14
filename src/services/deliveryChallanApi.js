@@ -1,5 +1,11 @@
 import api from "./api";
 
+const emitDeliveryChallanChange = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("delivery-challans:changed"));
+  }
+};
+
 const normalizeDeliveryChallanItem = (item = {}) => ({
   id:
     item.id ??
@@ -61,16 +67,25 @@ export const createDeliveryChallan = async (payload) => {
   const response = await api.post("/delivery-challans", payload, {
     timeout: 60000,
   });
-  return normalizeDeliveryChallan(response.data?.deliveryChallan ?? response.data);
+  const normalized = normalizeDeliveryChallan(
+    response.data?.deliveryChallan ?? response.data
+  );
+  emitDeliveryChallanChange();
+  return normalized;
 };
 
 export const updateDeliveryChallan = async (id, payload) => {
   const response = await api.put(`/delivery-challans/${id}`, payload, {
     timeout: 60000,
   });
-  return normalizeDeliveryChallan(response.data?.deliveryChallan ?? response.data);
+  const normalized = normalizeDeliveryChallan(
+    response.data?.deliveryChallan ?? response.data
+  );
+  emitDeliveryChallanChange();
+  return normalized;
 };
 
 export const deleteDeliveryChallan = async (id) => {
   await api.delete(`/delivery-challans/${id}`);
+  emitDeliveryChallanChange();
 };

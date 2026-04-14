@@ -916,6 +916,14 @@ const normalizeConsumption = (row = {}) => {
     consumptionNumber: row.ConsumptionNumber ?? row.consumptionNumber ?? "",
     projectId: row.ProjectId ?? row.projectId ?? null,
     locationId: row.LocationId ?? row.locationId ?? null,
+    deliveryChallanId:
+      row.DeliveryChallanId ?? row.deliveryChallanId ?? row.DeliverychallanId ?? null,
+    deliveryChallanRef:
+      row.DeliveryChallanRef ??
+      row.deliveryChallanRef ??
+      row.DCReference ??
+      row.dcReference ??
+      "",
     consumptionDate:
       row.ConsumptionDate ?? row.consumptionDate ?? row.Date ?? row.date ?? null,
     issuedBy: row.IssuedBy ?? row.issuedBy ?? "",
@@ -3896,6 +3904,8 @@ const ensureConsumptionTables = async () => {
           ConsumptionNumber NVARCHAR(50) NULL,
           ProjectId INT NULL,
           LocationId INT NULL,
+          DeliveryChallanId INT NULL,
+          DeliveryChallanRef NVARCHAR(100) NULL,
           ConsumptionDate DATE NULL,
           IssuedBy NVARCHAR(200) NULL,
           Status NVARCHAR(50) NULL,
@@ -3945,6 +3955,14 @@ const ensureConsumptionTables = async () => {
       IF COL_LENGTH('dbo.Consumption', 'LocationId') IS NULL
       BEGIN
         ALTER TABLE dbo.Consumption ADD LocationId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'DeliveryChallanId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD DeliveryChallanId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'DeliveryChallanRef') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD DeliveryChallanRef NVARCHAR(100) NULL;
       END;
       IF COL_LENGTH('dbo.Consumption', 'ConsumptionDate') IS NULL
       BEGIN
@@ -8142,6 +8160,8 @@ app.post("/api/consumptions", async (req, res) => {
     consumptionNumber,
     projectId,
     locationId,
+    deliveryChallanId = null,
+    deliveryChallanRef = null,
     consumptionDate = null,
     issuedBy = null,
     status = "Logged",
@@ -8156,6 +8176,8 @@ app.post("/api/consumptions", async (req, res) => {
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber);
   const safeProjectId = toNullableInt(projectId);
   const safeLocationId = toNullableInt(locationId);
+  const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
+  const safeDeliveryChallanRef = normalizeOptionalString(deliveryChallanRef) ?? null;
   const safeIssuedBy = normalizeOptionalString(issuedBy) ?? null;
   const safeStatus = normalizeOptionalString(status) ?? "Logged";
   const safeNotes = normalizeOptionalString(notes) ?? null;
@@ -8224,6 +8246,8 @@ app.post("/api/consumptions", async (req, res) => {
     insertHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
     insertHeaderReq.input("ProjectId", sql.Int, safeProjectId);
     insertHeaderReq.input("LocationId", sql.Int, safeLocationId);
+    insertHeaderReq.input("DeliveryChallanId", sql.Int, safeDeliveryChallanId);
+    insertHeaderReq.input("DeliveryChallanRef", sql.NVarChar(100), safeDeliveryChallanRef);
     insertHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
     insertHeaderReq.input("IssuedBy", sql.NVarChar(200), safeIssuedBy);
     insertHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
@@ -8235,10 +8259,10 @@ app.post("/api/consumptions", async (req, res) => {
 
     const headerResult = await insertHeaderReq.query(`
       INSERT INTO dbo.Consumption
-        (ConsumptionNumber, ProjectId, LocationId, ConsumptionDate, IssuedBy, Status, Notes, CompanyAddress, CompanyGstin, CompanyPhone, CompanyEmail)
+        (ConsumptionNumber, ProjectId, LocationId, DeliveryChallanId, DeliveryChallanRef, ConsumptionDate, IssuedBy, Status, Notes, CompanyAddress, CompanyGstin, CompanyPhone, CompanyEmail)
       OUTPUT INSERTED.*
       VALUES
-        (@ConsumptionNumber, @ProjectId, @LocationId, @ConsumptionDate, @IssuedBy, @Status, @Notes, @CompanyAddress, @CompanyGstin, @CompanyPhone, @CompanyEmail)
+        (@ConsumptionNumber, @ProjectId, @LocationId, @DeliveryChallanId, @DeliveryChallanRef, @ConsumptionDate, @IssuedBy, @Status, @Notes, @CompanyAddress, @CompanyGstin, @CompanyPhone, @CompanyEmail)
     `);
 
     const headerRow = headerResult.recordset?.[0];
@@ -8308,6 +8332,8 @@ app.put("/api/consumptions/:id", async (req, res) => {
     consumptionNumber,
     projectId,
     locationId,
+    deliveryChallanId = null,
+    deliveryChallanRef = null,
     consumptionDate = null,
     issuedBy = null,
     status = "Logged",
@@ -8322,6 +8348,8 @@ app.put("/api/consumptions/:id", async (req, res) => {
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber);
   const safeProjectId = toNullableInt(projectId);
   const safeLocationId = toNullableInt(locationId);
+  const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
+  const safeDeliveryChallanRef = normalizeOptionalString(deliveryChallanRef) ?? null;
   const safeIssuedBy = normalizeOptionalString(issuedBy) ?? null;
   const safeStatus = normalizeOptionalString(status) ?? "Logged";
   const safeNotes = normalizeOptionalString(notes) ?? null;
@@ -8400,6 +8428,8 @@ app.put("/api/consumptions/:id", async (req, res) => {
     updateHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
     updateHeaderReq.input("ProjectId", sql.Int, safeProjectId);
     updateHeaderReq.input("LocationId", sql.Int, safeLocationId);
+    updateHeaderReq.input("DeliveryChallanId", sql.Int, safeDeliveryChallanId);
+    updateHeaderReq.input("DeliveryChallanRef", sql.NVarChar(100), safeDeliveryChallanRef);
     updateHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
     updateHeaderReq.input("IssuedBy", sql.NVarChar(200), safeIssuedBy);
     updateHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
@@ -8414,6 +8444,8 @@ app.put("/api/consumptions/:id", async (req, res) => {
       SET ConsumptionNumber = @ConsumptionNumber,
           ProjectId = @ProjectId,
           LocationId = @LocationId,
+          DeliveryChallanId = @DeliveryChallanId,
+          DeliveryChallanRef = @DeliveryChallanRef,
           ConsumptionDate = @ConsumptionDate,
           IssuedBy = @IssuedBy,
           Status = @Status,

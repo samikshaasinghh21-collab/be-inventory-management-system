@@ -41,9 +41,9 @@ import PurchaseOrderRegister from "../components/inventory/PurchaseOrderRegister
 import Invoice from "../components/inventory/Invoice";
 import ReceiveGoodsRegister from "../components/inventory/ReceiveGoodsRegister";
 import Consumption from "../components/inventory/Consumption";
-import ReturnReallocate from "../components/inventory/ReturnReallocate";
 import ReturnDc from "../components/inventory/ReturnDc";
 import BoqDetail from "../components/inventory/BoqDetail";
+import ReportsPage from "../components/inventory/ReportsPage";
 
 const AppRoutes = () => {
   return (
@@ -115,9 +115,8 @@ const AppRoutes = () => {
         />
         <Route path="/inventory/invoice" element={<Invoice />} />
         <Route path="/inventory/consumption" element={<Consumption />} />
-        <Route path="/inventory/return-reallocate" element={<ReturnReallocate />} />
-        <Route path="/inventory/reallocate-return" element={<ReturnReallocate />} />
         <Route path="/inventory/return-dc" element={<ReturnDc />} />
+        <Route path="/inventory/reports" element={<ReportsPage />} />
 
         <Route path="/inventory/cart" element={<Cart />} />
         <Route path="/account" element={<Profile />} />

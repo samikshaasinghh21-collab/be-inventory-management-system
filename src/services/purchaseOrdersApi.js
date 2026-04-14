@@ -1,5 +1,11 @@
 import api from "./api";
 
+const emitPurchaseOrdersChange = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("purchase-orders:changed"));
+  }
+};
+
 const normalizePoItem = (item = {}) => {
   const serialRequiredRaw =
     item.serialRequired ?? item.SerialRequired ?? item.IsSerialTracked ?? false;
@@ -82,12 +88,16 @@ export const fetchPurchaseOrders = async () => {
 
 export const createPurchaseOrder = async (payload) => {
   const response = await api.post("/purchase-orders", payload);
-  return normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
+  const normalized = normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
+  emitPurchaseOrdersChange();
+  return normalized;
 };
 
 export const updatePurchaseOrder = async (id, payload) => {
   const response = await api.put(`/purchase-orders/${id}`, payload);
-  return normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
+  const normalized = normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
+  emitPurchaseOrdersChange();
+  return normalized;
 };
 
 export const updatePurchaseOrderStatus = async (id, status, options = {}) => {
@@ -95,9 +105,12 @@ export const updatePurchaseOrderStatus = async (id, status, options = {}) => {
     status,
     allowLockedEdit: options.allowLockedEdit === true,
   });
-  return normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
+  const normalized = normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
+  emitPurchaseOrdersChange();
+  return normalized;
 };
 
 export const deletePurchaseOrder = async (id) => {
   await api.delete(`/purchase-orders/${id}`);
+  emitPurchaseOrdersChange();
 };

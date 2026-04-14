@@ -17,7 +17,10 @@ const ToolsAnalytics = () => {
         {
           title: "Idle Alerts",
           description: "Highlight tools that sit unused for too long.",
-        },
+        },{
+        title: "Maintainance Signals",
+        description: "Receive notifications for tools requiring maintenance."
+        }
       ]}
       note="Connect live checkout data to unlock real time analytics."
     />

@@ -9,20 +9,20 @@ import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import DocumentViewPanel from "./DocumentViewPanel";
-
+ 
 const panel =
   "rounded-xl border border-slate-200 bg-[#f8f9ff] shadow-[0_8px_24px_-18px_rgba(15,23,42,0.35)]";
 const field =
   "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
-
+ 
 const qty = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-
+ 
 const fmtQty = (value) =>
   (Number(value) || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
-
+ 
 const sortValue = (record = {}) => {
   const raw =
     record.updatedAt ??
@@ -33,13 +33,13 @@ const sortValue = (record = {}) => {
   const time = raw ? new Date(raw).getTime() : 0;
   return Number.isFinite(time) ? time : 0;
 };
-
+ 
 const err = (error, fallback) =>
   error?.response?.data?.error || error?.message || fallback;
-
+ 
 const getMovementTypeLabel = (type) =>
   type === "Reallocate" ? "DC (Delivery Challan)" : type || "-";
-
+ 
 const ReallocationRegister = () => {
   const navigate = useNavigate();
   const settings = useSettings();
@@ -47,7 +47,7 @@ const ReallocationRegister = () => {
   const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
-
+ 
   const [records, setRecords] = useState([]);
   const [projects, setProjects] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -57,12 +57,12 @@ const ReallocationRegister = () => {
   const [viewRecord, setViewRecord] = useState(null);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-
+ 
   const sortedRecords = useMemo(
     () => [...records].sort((a, b) => sortValue(b) - sortValue(a)),
     [records]
   );
-
+ 
   const projectMap = useMemo(
     () =>
       projects.reduce((acc, project) => {
@@ -71,7 +71,7 @@ const ReallocationRegister = () => {
       }, {}),
     [projects]
   );
-
+ 
   const locationMap = useMemo(
     () =>
       locations.reduce((acc, location) => {
@@ -80,7 +80,7 @@ const ReallocationRegister = () => {
       }, {}),
     [locations]
   );
-
+ 
   const vendorMap = useMemo(
     () =>
       vendors.reduce((acc, vendor) => {
@@ -89,7 +89,7 @@ const ReallocationRegister = () => {
       }, {}),
     [vendors]
   );
-
+ 
   const totalQty = useMemo(
     () =>
       sortedRecords.reduce(
@@ -100,7 +100,7 @@ const ReallocationRegister = () => {
       ),
     [sortedRecords]
   );
-
+ 
   const visibleRecords = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return sortedRecords.filter((record) => {
@@ -149,7 +149,7 @@ const ReallocationRegister = () => {
     locationMap,
     vendorMap,
   ]);
-
+ 
   const activeViewRecord = useMemo(() => {
     if (!viewRecord?.id) {
       return viewRecord;
@@ -158,7 +158,7 @@ const ReallocationRegister = () => {
       records.find((record) => String(record.id) === String(viewRecord.id)) ?? viewRecord
     );
   }, [records, viewRecord]);
-
+ 
   const loadRecords = async () => {
     const list = await fetchReallocateInventory();
     const safe = Array.isArray(list) ? list : [];
@@ -166,7 +166,7 @@ const ReallocationRegister = () => {
     setRecords(sorted);
     return sorted;
   };
-
+ 
   useEffect(() => {
     let mounted = true;
     const loadAll = async () => {
@@ -197,7 +197,7 @@ const ReallocationRegister = () => {
       if (loadError) setErrorMessage(loadError);
       setLoading(false);
     };
-
+ 
     const refreshOnEvent = () => {
       void (async () => {
         try {
@@ -207,7 +207,7 @@ const ReallocationRegister = () => {
         }
       })();
     };
-
+ 
     void loadAll();
     if (typeof window !== "undefined") {
       window.addEventListener("reallocate-inventory:changed", refreshOnEvent);
@@ -219,14 +219,14 @@ const ReallocationRegister = () => {
       }
     };
   }, []);
-
+ 
   const statusClass = (status) => {
     const normalized = String(status || "").toLowerCase();
     if (normalized === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
     if (normalized === "in transit") return "border-blue-200 bg-blue-50 text-blue-700";
     return "border-slate-200 bg-slate-100 text-slate-700";
   };
-
+ 
   const printRegister = () => {
     printSection({
       selector: "#reallocation-register",
@@ -241,7 +241,7 @@ const ReallocationRegister = () => {
       brandDescription,
     });
   };
-
+ 
   const printRecord = (record) => {
     setViewRecord(record);
     setTimeout(() => {
@@ -254,7 +254,7 @@ const ReallocationRegister = () => {
       });
     }, 80);
   };
-
+ 
   return (
     <div className="space-y-4 p-4 md:p-6">
       <section className="space-y-3">
@@ -270,7 +270,7 @@ const ReallocationRegister = () => {
           PROJECTS / Delivery Challan
         </p>
       </section>
-
+ 
       <section className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
         <article className={panel}>
           <div className="p-4">
@@ -298,13 +298,13 @@ const ReallocationRegister = () => {
           </button>
         </div>
       </section>
-
+ 
       {errorMessage && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {errorMessage}
         </div>
       )}
-
+ 
       <section id="reallocation-register" className={panel}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <h2 className="text-3xl font-semibold text-slate-800">
@@ -430,75 +430,73 @@ const ReallocationRegister = () => {
           </table>
         </div>
       </section>
-
+ 
       {activeViewRecord && (
-        <DocumentViewPanel
-          id="reallocation-view-panel"
-          title="DELIVERY CHALLAN DETAILS"
-          onClose={() => setViewRecord(null)}
-          companyName={brandName}
-          companyAddress={brandDescription}
-          companyGstin={company.gstin}
-          companyPhone={company.phone}
-          companyEmail={company.email}
-          logoUrl={logoUrl}
-          primaryPairs={[
-            {
-              label: "Reference",
-              value:
-                activeViewRecord.referenceNumber || `REL-${activeViewRecord.id}`,
-            },
-            { label: "Type", value: getMovementTypeLabel(activeViewRecord.type) },
-            {
-              label: "Request Date",
-              value: formatDate(
-                activeViewRecord.requestDate || activeViewRecord.transferDate
-              ),
-            },
-            { label: "Status", value: activeViewRecord.status || "Pending" },
-            { label: "Receive Ref", value: activeViewRecord.consumptionNumber || "-" },
-            { label: "Requested By", value: activeViewRecord.requestedBy || "-" },
-          ]}
-          leftBlockTitle="Project / From"
-          leftBlockLines={[
-            projectMap[String(activeViewRecord.projectId)]?.name || "-",
-            locationMap[String(activeViewRecord.fromLocationId)]?.name || "-",
-          ]}
-          rightBlockTitle={
-            activeViewRecord.type === "Return" ? "Return Vendor" : "To Location"
-          }
-          rightBlockLines={[
-            activeViewRecord.type === "Return"
-              ? vendorMap[String(activeViewRecord.returnVendorId)]?.name || "-"
-              : locationMap[String(activeViewRecord.toLocationId)]?.name || "-",
-          ]}
-          tableColumns={[
-            { key: "serial", label: "Sl No", widthClass: "w-16" },
-            { key: "name", label: "Material" },
-            { key: "unit", label: "Unit", widthClass: "w-20" },
-            { key: "quantity", label: "Qty", align: "right", widthClass: "w-24" },
-          ]}
-          tableRows={(activeViewRecord.items || []).map((item, index) => ({
-            id: item.id ?? index,
-            serial: index + 1,
-            name: item.name || item.item || "-",
-            unit: item.unit || "PCS",
-            quantity: fmtQty(item.quantity),
-          }))}
-          bottomLeftTitle="Notes"
-          bottomLeftValue={activeViewRecord.notes || "-"}
-          bottomRightTitle="Total Quantity"
-          bottomRightValue={fmtQty(
-            (activeViewRecord.items || []).reduce(
-              (sum, item) => sum + qty(item.quantity),
-              0
-            )
-          )}
-          footerCompanyName={brandName || "Company"}
-        />
-      )}
+  <DocumentViewPanel
+    id="reallocation-view-panel"
+    title="DELIVERY CHALLAN DETAILS"
+    onClose={() => setViewRecord(null)}
+    companyName={brandName}
+    companyAddress={brandDescription}
+    companyGstin={company.gstin}
+    companyPhone={company.phone}
+    companyEmail={company.email}
+    logoUrl={logoUrl}
+
+    /* ✅ Only E-Way Bill will show now */
+    primaryPairs={[
+      {
+        label: "E-Way Bill",
+        value: activeViewRecord.eWayBill || "-",
+      },
+    ]}
+
+    leftBlockTitle="SHIP FROM"
+    leftBlockLines={[
+      projectMap[String(activeViewRecord.projectId)]?.name || "-",
+      locationMap[String(activeViewRecord.fromLocationId)]?.name || "-",
+    ]}
+
+    rightBlockTitle="SHIP TO"
+    rightBlockLines={[
+      activeViewRecord.type === "Return"
+        ? vendorMap[String(activeViewRecord.returnVendorId)]?.name || "-"
+        : locationMap[String(activeViewRecord.toLocationId)]?.name || "-",
+    ]}
+
+    tableColumns={[
+      { key: "serial", label: "Sl No", widthClass: "w-16" },
+      { key: "name", label: "Material" },
+      { key: "unit", label: "Unit", widthClass: "w-20" },
+      { key: "quantity", label: "Qty", align: "right", widthClass: "w-24" },
+    ]}
+
+    tableRows={(activeViewRecord.items || []).map((item, index) => ({
+      id: item.id ?? index,
+      serial: index + 1,
+      name: item.name || item.item || "-",
+      unit: item.unit || "PCS",
+      quantity: fmtQty(item.quantity),
+    }))}
+
+    bottomLeftTitle="Notes"
+    bottomLeftValue={activeViewRecord.notes || "-"}
+
+    bottomRightTitle="Total Quantity"
+    bottomRightValue={fmtQty(
+      (activeViewRecord.items || []).reduce(
+        (sum, item) => sum + qty(item.quantity),
+        0
+      )
+    )}
+
+    footerCompanyName={brandName || "Company"}
+  />
+)}
     </div>
   );
 };
-
+ 
 export default ReallocationRegister;
+ 
+ 

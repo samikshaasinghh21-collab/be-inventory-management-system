@@ -1,5 +1,11 @@
 import api from "./api";
 
+const emitBoqChange = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("boqs:changed"));
+  }
+};
+
 const normalizeBoqItem = (item = {}) => {
   const quantity = Number(item.quantity ?? item.Quantity ?? 0);
   const rate = Number(item.rate ?? item.Rate ?? 0);
@@ -76,14 +82,19 @@ export const fetchBoq = async (id) => {
 
 export const createBoq = async (payload) => {
   const response = await api.post("/boqs", payload);
-  return normalizeBoq(response.data?.boq ?? response.data);
+  const normalized = normalizeBoq(response.data?.boq ?? response.data);
+  emitBoqChange();
+  return normalized;
 };
 
 export const updateBoq = async (id, payload) => {
   const response = await api.put(`/boqs/${id}`, payload);
-  return normalizeBoq(response.data?.boq ?? response.data);
+  const normalized = normalizeBoq(response.data?.boq ?? response.data);
+  emitBoqChange();
+  return normalized;
 };
 
 export const deleteBoq = async (id) => {
   await api.delete(`/boqs/${id}`);
+  emitBoqChange();
 };

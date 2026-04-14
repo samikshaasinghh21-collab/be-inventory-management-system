@@ -34,6 +34,17 @@ const normalizeConsumption = (consumption = {}) => ({
     consumption.consumptionNumber ?? consumption.ConsumptionNumber ?? "",
   projectId: consumption.projectId ?? consumption.ProjectId ?? null,
   locationId: consumption.locationId ?? consumption.LocationId ?? null,
+  deliveryChallanId:
+    consumption.deliveryChallanId ??
+    consumption.DeliveryChallanId ??
+    consumption.DeliverychallanId ??
+    null,
+  deliveryChallanRef:
+    consumption.deliveryChallanRef ??
+    consumption.DeliveryChallanRef ??
+    consumption.dcReference ??
+    consumption.DCReference ??
+    "",
   consumptionDate:
     consumption.consumptionDate ??
     consumption.ConsumptionDate ??

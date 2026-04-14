@@ -7,6 +7,7 @@ import {
   fetchConsumptions,
   updateConsumption,
 } from "../../services/consumptionApi";
+import { fetchDeliveryChallans } from "../../services/deliveryChallanApi";
 import { fetchLocations } from "../../services/locationsApi";
 import { fetchProjects } from "../../services/projectsApi";
 import { getProjects as getCachedProjects } from "../../services/projectsStore";
@@ -62,6 +63,8 @@ const formState = (consumptionNumber = "", companyDefaults = {}) => ({
   consumptionNumber,
   projectId: "",
   locationId: "",
+  deliveryChallanId: "",
+  deliveryChallanRef: "",
   consumptionDate: new Date().toISOString().slice(0, 10),
   issuedBy: "Store Keeper",
   status: "Logged",
@@ -203,6 +206,146 @@ const byProject = (projectId, locations = []) =>
         (l) => !l.projectId || String(l.projectId) === String(projectId)
       );
 
+const deliveryChallansByProject = (projectId, deliveryChallans = []) =>
+  !projectId
+    ? []
+    : deliveryChallans
+        .filter((challan) => String(challan.projectId) === String(projectId))
+        .sort((left, right) => sortValue(right) - sortValue(left));
+
+const findMatchingBoqItem = (projectId, boqs = [], item = {}, preferredBoqItemId = null) => {
+  if (preferredBoqItemId !== null && preferredBoqItemId !== undefined && preferredBoqItemId !== "") {
+    const preferredKey = String(preferredBoqItemId);
+    for (const boq of boqs) {
+      const match = (boq.items || []).find(
+        (boqItem) =>
+          String(boqItem.id ?? boqItem.LineItemId ?? boqItem.boqItemId ?? "") === preferredKey
+      );
+      if (match) {
+        return match;
+      }
+    }
+  }
+  const boq = pickBoq(projectId, boqs);
+  if (!boq) {
+    return null;
+  }
+  const itemKey = keyOf(item);
+  return (
+    (boq.items || []).find((boqItem) => keyOf(boqItem) === itemKey) ??
+    null
+  );
+};
+
+const deliveryChallanItems = ({
+  deliveryChallanId,
+  projectId,
+  deliveryChallans = [],
+  consumptions = [],
+  boqs = [],
+  editingId = null,
+  savedItems = [],
+}) => {
+  const challan = deliveryChallans.find(
+    (entry) => String(entry.id) === String(deliveryChallanId)
+  );
+  if (!challan) {
+    return savedItems.length
+      ? savedItems.map((item) =>
+          lineItem({
+            id: item.id ?? rowId(),
+            boqItemId: item.boqItemId ?? null,
+            name: item.name ?? "",
+            unit: item.unit ?? "PCS",
+            hsn: item.hsn ?? "",
+            gst: item.gst ?? "",
+            receivedQty: Math.max(qty(item.receivedQty), qty(item.quantity)),
+            quantity: item.quantity ?? "",
+            notes: item.notes ?? "",
+          })
+        )
+      : [lineItem()];
+  }
+
+  const consumedMap = new Map();
+  consumptions.forEach((record) => {
+    if (editingId && String(record.id) === String(editingId)) {
+      return;
+    }
+    const isSameDeliveryChallan =
+      String(record.deliveryChallanId ?? "") === String(deliveryChallanId) ||
+      (challan.dcNumber &&
+        String(record.deliveryChallanRef ?? "").trim().toLowerCase() ===
+          String(challan.dcNumber).trim().toLowerCase());
+    if (!isSameDeliveryChallan) {
+      return;
+    }
+    (record.items || []).forEach((item) => {
+      const itemKey = keyOf(item);
+      consumedMap.set(itemKey, qty(consumedMap.get(itemKey)) + qty(item.quantity));
+    });
+  });
+
+  const savedItemsByKey = new Map();
+  savedItems.forEach((item) => {
+    const itemKey = keyOf(item);
+    if (!savedItemsByKey.has(itemKey)) {
+      savedItemsByKey.set(itemKey, []);
+    }
+    savedItemsByKey.get(itemKey).push(item);
+  });
+
+  const mapped = (challan.items || []).map((item, index) => {
+    const itemKey = keyOf(item);
+    const savedMatches = savedItemsByKey.get(itemKey) || [];
+    const found = savedMatches.shift() ?? null;
+    if (!savedMatches.length) {
+      savedItemsByKey.delete(itemKey);
+    }
+    const matchedBoqItem = findMatchingBoqItem(
+      projectId,
+      boqs,
+      item,
+      found?.boqItemId
+    );
+    const availableQty = Math.max(qty(item.quantity) - qty(consumedMap.get(itemKey)), 0);
+    return lineItem({
+      id: found?.id ?? item.id ?? `${deliveryChallanId}-${index}`,
+      boqItemId:
+        found?.boqItemId ??
+        matchedBoqItem?.id ??
+        matchedBoqItem?.LineItemId ??
+        matchedBoqItem?.boqItemId ??
+        null,
+      name: item.name ?? "",
+      unit: item.unit ?? "PCS",
+      hsn: found?.hsn ?? item.hsn ?? "",
+      gst: found?.gst ?? item.gst ?? "",
+      receivedQty: found ? availableQty + qty(found.quantity) : availableQty,
+      quantity: found?.quantity ?? "",
+      notes: found?.notes ?? item.notes ?? "",
+    });
+  });
+
+  const extraSavedItems = Array.from(savedItemsByKey.values())
+    .flat()
+    .map((item) =>
+      lineItem({
+        id: item.id ?? rowId(),
+        boqItemId: item.boqItemId ?? null,
+        name: item.name ?? "",
+        unit: item.unit ?? "PCS",
+        hsn: item.hsn ?? "",
+        gst: item.gst ?? "",
+        receivedQty: Math.max(qty(item.receivedQty), qty(item.quantity)),
+        quantity: item.quantity ?? "",
+        notes: item.notes ?? "",
+      })
+    );
+
+  return [...mapped, ...extraSavedItems].length ? [...mapped, ...extraSavedItems] : [lineItem()];
+};
+
 const Consumption = () => {
   const navigate = useNavigate();
   const settings = useSettings();
@@ -220,6 +363,7 @@ const Consumption = () => {
   const [projects, setProjects] = useState([]);
   const [locations, setLocations] = useState([]);
   const [boqs, setBoqs] = useState([]);
+  const [deliveryChallans, setDeliveryChallans] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(() => formState("", companyDefaults));
   const [items, setItems] = useState([lineItem()]);
@@ -257,6 +401,14 @@ const Consumption = () => {
       }, {}),
     [projects]
   );
+  const deliveryChallanMap = useMemo(
+    () =>
+      deliveryChallans.reduce((acc, challan) => {
+        acc[String(challan.id)] = challan;
+        return acc;
+      }, {}),
+    [deliveryChallans]
+  );
   const locationMap = useMemo(
     () =>
       locations.reduce((acc, l) => {
@@ -269,7 +421,18 @@ const Consumption = () => {
     () => byProject(form.projectId, locations),
     [form.projectId, locations]
   );
+  const filteredDeliveryChallans = useMemo(
+    () => deliveryChallansByProject(form.projectId, deliveryChallans),
+    [form.projectId, deliveryChallans]
+  );
   const selectedBoq = useMemo(() => pickBoq(form.projectId, boqs), [form.projectId, boqs]);
+  const selectedDeliveryChallan = useMemo(
+    () =>
+      deliveryChallans.find(
+        (challan) => String(challan.id) === String(form.deliveryChallanId)
+      ) ?? null,
+    [deliveryChallans, form.deliveryChallanId]
+  );
   const totalQty = useMemo(
     () =>
       sortedRecords.reduce(
@@ -287,6 +450,7 @@ const Consumption = () => {
       if (!q) return true;
       const t = [
         r.consumptionNumber,
+        r.deliveryChallanRef,
         projectMap[String(r.projectId)]?.name,
         locationMap[String(r.locationId)]?.name,
         r.status,
@@ -315,6 +479,13 @@ const Consumption = () => {
     return safe;
   };
 
+  const loadDeliveryChallans = async () => {
+    const list = await fetchDeliveryChallans();
+    const safe = Array.isArray(list) ? list : [];
+    setDeliveryChallans(safe);
+    return safe;
+  };
+
   const reset = (latest = sortedRecords) => {
     setForm(formState(nextConNo(latest), companyDefaults));
     setItems([lineItem()]);
@@ -335,11 +506,12 @@ const Consumption = () => {
     const loadAll = async () => {
       setLoading(true);
       setErrorMessage("");
-      const [pr, lr, br, rr] = await Promise.allSettled([
+      const [pr, lr, br, rr, dcr] = await Promise.allSettled([
         fetchProjects(),
         fetchLocations(),
         fetchBoqs(),
         fetchConsumptions(),
+        fetchDeliveryChallans(),
       ]);
       if (!mounted) return;
       const fallbackProjects = getCachedProjects();
@@ -353,9 +525,12 @@ const Consumption = () => {
       const b = br.status === "fulfilled" && Array.isArray(br.value) ? br.value : [];
       const r = rr.status === "fulfilled" && Array.isArray(rr.value) ? rr.value : [];
       const rs = [...r].sort((a, b2) => sortValue(b2) - sortValue(a));
+      const d =
+        dcr?.status === "fulfilled" && Array.isArray(dcr.value) ? dcr.value : [];
       setProjects(p);
       setLocations(l);
       setBoqs(b);
+      setDeliveryChallans(d);
       setRecords(rs);
       setForm((prev) =>
         prev.consumptionNumber ? prev : formState(nextConNo(rs), companyDefaults)
@@ -364,14 +539,17 @@ const Consumption = () => {
         (pr.status === "rejected" && !p.length ? err(pr.reason, "Failed to load projects.") : "") ||
         (lr.status === "rejected" ? err(lr.reason, "Failed to load locations.") : "") ||
         (br.status === "rejected" ? err(br.reason, "Failed to load BOQs.") : "") ||
-        (rr.status === "rejected" ? err(rr.reason, "Failed to load consumption records.") : "");
+        (rr.status === "rejected" ? err(rr.reason, "Failed to load consumption records.") : "") ||
+        (dcr?.status === "rejected"
+          ? err(dcr.reason, "Failed to load delivery challans.")
+          : "");
       if (e) setErrorMessage(e);
       setLoading(false);
     };
     const refreshOnEvent = () => {
       void (async () => {
         try {
-          await Promise.all([loadRecords(), loadBoqs()]);
+          await Promise.all([loadRecords(), loadBoqs(), loadDeliveryChallans()]);
         } catch (e) {
           setErrorMessage(err(e, "Failed to refresh records."));
         }
@@ -380,11 +558,13 @@ const Consumption = () => {
     void loadAll();
     if (typeof window !== "undefined") {
       window.addEventListener("consumptions:changed", refreshOnEvent);
+      window.addEventListener("delivery-challans:changed", refreshOnEvent);
     }
     return () => {
       mounted = false;
       if (typeof window !== "undefined") {
         window.removeEventListener("consumptions:changed", refreshOnEvent);
+        window.removeEventListener("delivery-challans:changed", refreshOnEvent);
       }
     };
   }, []);
@@ -394,6 +574,26 @@ const Consumption = () => {
     const ok = filteredLocations.some((l) => String(l.id) === String(form.locationId));
     if (!ok) setForm((p) => ({ ...p, locationId: "" }));
   }, [filteredLocations, form.locationId]);
+
+  useEffect(() => {
+    if (!form.deliveryChallanId) {
+      return;
+    }
+    const activeChallan = filteredDeliveryChallans.find(
+      (challan) => String(challan.id) === String(form.deliveryChallanId)
+    );
+    if (activeChallan) {
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      deliveryChallanId: "",
+      deliveryChallanRef: "",
+    }));
+    if (!editingId) {
+      setItems(boqItems(form.projectId, boqs));
+    }
+  }, [filteredDeliveryChallans, form.deliveryChallanId, form.projectId, boqs, editingId]);
 
   useEffect(() => {
     if (!viewRecord?.id) return;
@@ -424,6 +624,8 @@ const Consumption = () => {
     setForm((p) => ({
       ...p,
       projectId,
+      deliveryChallanId: "",
+      deliveryChallanRef: "",
       locationId: byProject(projectId, locations).some((l) => String(l.id) === String(p.locationId))
         ? p.locationId
         : "",
@@ -435,6 +637,30 @@ const Consumption = () => {
     if (projectId) {
       setActiveProjectId(projectId);
     }
+  };
+
+  const onDeliveryChallanChange = (deliveryChallanId) => {
+    const selectedChallan =
+      filteredDeliveryChallans.find(
+        (challan) => String(challan.id) === String(deliveryChallanId)
+      ) ?? null;
+    setForm((prev) => ({
+      ...prev,
+      deliveryChallanId,
+      deliveryChallanRef: selectedChallan?.dcNumber || "",
+    }));
+    setItems(
+      deliveryChallanId
+        ? deliveryChallanItems({
+            deliveryChallanId,
+            projectId: form.projectId,
+            deliveryChallans,
+            consumptions: records,
+            boqs,
+          })
+        : boqItems(form.projectId, boqs)
+    );
+    clearErr("items");
   };
 
   const onItemChange = (id, fieldName, value) => {
@@ -479,6 +705,9 @@ const Consumption = () => {
       consumptionNumber: String(form.consumptionNumber || "").trim(),
       projectId: Number(form.projectId) || form.projectId,
       locationId: Number(form.locationId) || form.locationId,
+      deliveryChallanId:
+        Number(form.deliveryChallanId) || form.deliveryChallanId || null,
+      deliveryChallanRef: String(form.deliveryChallanRef || "").trim() || null,
       consumptionDate: form.consumptionDate,
       issuedBy: form.issuedBy,
       status: form.status,
@@ -528,6 +757,8 @@ const Consumption = () => {
       consumptionNumber: r.consumptionNumber || "",
       projectId: r.projectId ? String(r.projectId) : "",
       locationId: r.locationId ? String(r.locationId) : "",
+      deliveryChallanId: r.deliveryChallanId ? String(r.deliveryChallanId) : "",
+      deliveryChallanRef: r.deliveryChallanRef || "",
       consumptionDate: r.consumptionDate || new Date().toISOString().slice(0, 10),
       issuedBy: r.issuedBy || "Store Keeper",
       status: statusOptions.includes(r.status) ? r.status : "Logged",
@@ -537,7 +768,19 @@ const Consumption = () => {
       companyPhone: r.companyPhone || companyDefaults.phone || "",
       companyEmail: r.companyEmail || companyDefaults.email || "",
     });
-    setItems(mergeEdit(r.projectId, boqs, r.items || []));
+    setItems(
+      r.deliveryChallanId || r.deliveryChallanRef
+        ? deliveryChallanItems({
+            deliveryChallanId: r.deliveryChallanId,
+            projectId: r.projectId,
+            deliveryChallans,
+            consumptions: records,
+            boqs,
+            editingId: r.id,
+            savedItems: r.items || [],
+          })
+        : mergeEdit(r.projectId, boqs, r.items || [])
+    );
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
 

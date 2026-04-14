@@ -1268,7 +1268,7 @@ const Dashboard = () => {
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b px-4 py-3">
-            <h3 className="text-3xl font-semibold text-slate-800">Project Reports</h3>
+            <h3 className="text-3xl font-semibold text-slate-800">Report</h3>
           </div>
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-600">

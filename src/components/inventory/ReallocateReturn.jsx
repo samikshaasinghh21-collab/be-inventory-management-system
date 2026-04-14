@@ -5,6 +5,8 @@ import DateInput from "../common/DateInput";
 import { fetchVendors, syncVendorsCache } from "../../services/vendorsApi";
 import { fetchItems, updateQuantityApi } from "../../services/inventoryApi";
 import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
+import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
+import { fetchBoqs } from "../../services/boqApi";
 import {
   createReallocateInventory,
   deleteReallocateInventory,
@@ -16,7 +18,7 @@ import useSettings from "../../hooks/useSettings";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import DocumentViewPanel from "./DocumentViewPanel";
-
+ 
 const createFormState = () => ({
   referenceNumber: "",
   type: "Reallocate",
@@ -27,25 +29,26 @@ const createFormState = () => ({
   returnVendorId: "",
   requestDate: new Date().toISOString().slice(0, 10),
   requestedBy: "",
+  eWayBillNumber: "",
   status: "Pending",
   notes: "",
 });
-
+ 
 const toQuantity = (value) => {
   const normalized =
     typeof value === "string" ? value.replace(/,/g, ".").trim() : value;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-
+ 
 const fmtQty = (value) =>
   (Number(value) || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
-
+ 
 const panel =
   "rounded-xl border border-slate-200 bg-[#f8f9ff] shadow-[0_8px_24px_-18px_rgba(15,23,42,0.35)]";
 const field =
   "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
-
+ 
 const sortValue = (record = {}) => {
   const raw =
     record.updatedAt ??
@@ -56,32 +59,91 @@ const sortValue = (record = {}) => {
   const time = raw ? new Date(raw).getTime() : 0;
   return Number.isFinite(time) ? time : 0;
 };
-
+ 
 const statusClass = (status) => {
   const normalized = String(status || "").toLowerCase();
   if (normalized === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (normalized === "in transit") return "border-blue-200 bg-blue-50 text-blue-700";
   return "border-slate-200 bg-slate-100 text-slate-700";
 };
-
+ 
 const getMovementTypeLabel = (type) =>
   type === "Reallocate" ? "DC (Delivery Challan)" : type || "-";
-
+ 
 const getReceiveReference = (record = {}) =>
   record.consumptionNumber ??
   record.referenceNumber ??
   `RG-${record.receiveGoodsId ?? record.id ?? ""}`;
-
+ 
+const getReceivePurchaseOrderNumber = (record = {}, purchaseOrderMap = {}) =>
+  purchaseOrderMap[String(record.purchaseOrderId)]?.poNumber ??
+  record.poNumber ??
+  record.purchaseOrderNumber ??
+  "";
+ 
+const getReceiveBoqNumber = (record = {}, boqMap = {}) =>
+  boqMap[String(record.boqId)]?.boqNumber ?? record.boqNumber ?? "";
+ 
+const buildReceiveReferenceLabel = (
+  record = {},
+  purchaseOrderMap = {},
+  boqMap = {}
+) => {
+  const poNumber = getReceivePurchaseOrderNumber(record, purchaseOrderMap);
+  const boqNumber = getReceiveBoqNumber(record, boqMap);
+  const dateText = formatDate(
+    record.receivedDate ?? record.date ?? record.createdAt ?? record.updatedAt
+  );
+  const parts = [
+    poNumber ? `PO: ${poNumber}` : null,
+    boqNumber ? `BOQ: ${boqNumber}` : null,
+    `Receipt: ${getReceiveReference(record)}`,
+    dateText && dateText !== "-" ? dateText : null,
+  ].filter(Boolean);
+ 
+  return parts.join(" | ");
+};
+ 
+const buildReceiveReferenceSearchText = (
+  record = {},
+  purchaseOrderMap = {},
+  boqMap = {}
+) => {
+  const poNumber = getReceivePurchaseOrderNumber(record, purchaseOrderMap);
+  const boqNumber = getReceiveBoqNumber(record, boqMap);
+  const dateText = formatDate(
+    record.receivedDate ?? record.date ?? record.createdAt ?? record.updatedAt
+  );
+  const safeDate = dateText === "-" ? "" : dateText;
+  const itemsText = (record.items || [])
+    .map((item) => item.name || item.item || "")
+    .filter(Boolean)
+    .join(" ");
+ 
+  return [
+    getReceiveReference(record),
+    poNumber,
+    boqNumber,
+    safeDate,
+    itemsText,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+};
+ 
 const ReallocateReturn = () => {
   const settings = useSettings();
   const company = settings?.company || {};
   const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
-
+ 
   const [projects, setProjects] = useState([]);
   const [locations, setLocations] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
+  const [boqs, setBoqs] = useState([]);
   const [consumptions, setConsumptions] = useState([]);
   const [inventoryItems, setInventoryItems] = useState([]);
   const [records, setRecords] = useState([]);
@@ -95,7 +157,7 @@ const ReallocateReturn = () => {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [viewRecord, setViewRecord] = useState(null);
-
+ 
   const loadRecords = async () => {
     try {
       const list = await fetchReallocateInventory();
@@ -109,7 +171,7 @@ const ReallocateReturn = () => {
       );
     }
   };
-
+ 
   const loadLocations = async () => {
     try {
       const list = await fetchLocations();
@@ -118,7 +180,7 @@ const ReallocateReturn = () => {
       setLocations([]);
     }
   };
-
+ 
   const loadVendors = async () => {
     try {
       const data = await fetchVendors();
@@ -128,7 +190,7 @@ const ReallocateReturn = () => {
       setVendors([]);
     }
   };
-
+ 
   const loadConsumptions = async () => {
     try {
       const list = await fetchReceiveGoods();
@@ -137,7 +199,25 @@ const ReallocateReturn = () => {
       setConsumptions([]);
     }
   };
-
+ 
+  const loadPurchaseOrders = async () => {
+    try {
+      const list = await fetchPurchaseOrders();
+      setPurchaseOrders(Array.isArray(list) ? list : []);
+    } catch {
+      setPurchaseOrders([]);
+    }
+  };
+ 
+  const loadBoqs = async () => {
+    try {
+      const list = await fetchBoqs();
+      setBoqs(Array.isArray(list) ? list : []);
+    } catch {
+      setBoqs([]);
+    }
+  };
+ 
   const loadInventory = async () => {
     try {
       const list = await fetchItems();
@@ -146,18 +226,21 @@ const ReallocateReturn = () => {
       setInventoryItems([]);
     }
   };
-
+ 
   useEffect(() => {
     setProjects(getProjects());
     void loadLocations();
     void loadVendors();
+    void loadPurchaseOrders();
+    void loadBoqs();
     void loadConsumptions();
     void loadInventory();
     void loadRecords();
   }, []);
-
+ 
   useEffect(() => {
     const handler = () => {
+      void loadConsumptions();
       void loadRecords();
     };
     window.addEventListener("reallocate-inventory:changed", handler);
@@ -167,56 +250,62 @@ const ReallocateReturn = () => {
       window.removeEventListener("receive-goods:changed", handler);
     };
   }, []);
-
+ 
   const projectMap = useMemo(() => {
     return projects.reduce((acc, project) => {
       acc[String(project.id)] = project;
       return acc;
     }, {});
   }, [projects]);
-
+ 
   const locationMap = useMemo(() => {
     return locations.reduce((acc, location) => {
       acc[String(location.id)] = location;
       return acc;
     }, {});
   }, [locations]);
-
+ 
   const vendorMap = useMemo(() => {
     return vendors.reduce((acc, vendor) => {
       acc[String(vendor.id)] = vendor;
       return acc;
     }, {});
   }, [vendors]);
-
+ 
+  const purchaseOrderMap = useMemo(() => {
+    return purchaseOrders.reduce((acc, order) => {
+      acc[String(order.id)] = order;
+      return acc;
+    }, {});
+  }, [purchaseOrders]);
+ 
+  const boqMap = useMemo(() => {
+    return boqs.reduce((acc, boq) => {
+      acc[String(boq.id)] = boq;
+      return acc;
+    }, {});
+  }, [boqs]);
+ 
   const consumptionMap = useMemo(() => {
     return consumptions.reduce((acc, record) => {
       acc[String(record.id)] = record;
       return acc;
     }, {});
   }, [consumptions]);
-
+ 
   const filteredConsumptions = useMemo(() => {
-    const query = consumptionQuery.trim().toLowerCase();
-    if (!query) return consumptions;
-    return consumptions.filter((entry) => {
-      const ref = getReceiveReference(entry);
-      const dateText = formatDate(
-        entry.receivedDate || entry.date || entry.createdAt || entry.updatedAt
-      );
-      const safeDate = dateText === "-" ? "" : dateText;
-      const itemsText = (entry.items || [])
-        .map((item) => item.name || item.item || "")
-        .filter(Boolean)
-        .join(" ");
-      const haystack = [ref, safeDate, itemsText]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(query);
-    });
-  }, [consumptions, consumptionQuery]);
-
+    const needle = consumptionQuery.trim().toLowerCase();
+    if (!needle) return consumptions;
+    return consumptions.filter((entry) =>
+      buildReceiveReferenceSearchText(entry, purchaseOrderMap, boqMap).includes(needle)
+    );
+  }, [boqMap, consumptions, consumptionQuery, purchaseOrderMap]);
+ 
+  const selectedConsumption = useMemo(
+    () => consumptionMap[String(form.consumptionId)] || null,
+    [consumptionMap, form.consumptionId]
+  );
+ 
   const activeViewRecord = useMemo(() => {
     if (!viewRecord?.id) {
       return viewRecord;
@@ -225,7 +314,15 @@ const ReallocateReturn = () => {
       records.find((record) => String(record.id) === String(viewRecord.id)) ?? viewRecord
     );
   }, [records, viewRecord]);
-
+ 
+  const activeViewConsumption = useMemo(
+    () =>
+      activeViewRecord?.consumptionId
+        ? consumptionMap[String(activeViewRecord.consumptionId)] || null
+        : null,
+    [activeViewRecord, consumptionMap]
+  );
+ 
   const inventoryByName = useMemo(() => {
     return inventoryItems.reduce((acc, item) => {
       const key = String(item.name ?? "").trim().toLowerCase();
@@ -236,12 +333,12 @@ const ReallocateReturn = () => {
       return acc;
     }, {});
   }, [inventoryItems]);
-
+ 
   const sortedRecords = useMemo(
     () => [...records].sort((a, b) => sortValue(b) - sortValue(a)),
     [records]
   );
-
+ 
   const totalQty = useMemo(
     () =>
       sortedRecords.reduce(
@@ -252,7 +349,7 @@ const ReallocateReturn = () => {
       ),
     [sortedRecords]
   );
-
+ 
   const visibleRecords = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return sortedRecords.filter((record) => {
@@ -263,6 +360,11 @@ const ReallocateReturn = () => {
         return false;
       }
       if (!needle) return true;
+      const sourceReceipt = consumptionMap[String(record.consumptionId)] || null;
+      const poNumber = sourceReceipt
+        ? getReceivePurchaseOrderNumber(sourceReceipt, purchaseOrderMap)
+        : "";
+      const boqNumber = sourceReceipt ? getReceiveBoqNumber(sourceReceipt, boqMap) : "";
       const destination =
         record.type === "Return"
           ? vendorMap[String(record.returnVendorId)]?.name
@@ -278,6 +380,9 @@ const ReallocateReturn = () => {
       const haystack = [
         record.referenceNumber,
         record.consumptionNumber,
+        poNumber,
+        boqNumber,
+        record.eWayBillNumber,
         record.type,
         projectMap[String(record.projectId)]?.name,
         locationMap[String(record.fromLocationId)]?.name,
@@ -293,8 +398,18 @@ const ReallocateReturn = () => {
         .toLowerCase();
       return haystack.includes(needle);
     });
-  }, [query, statusFilter, sortedRecords, projectMap, locationMap, vendorMap]);
-
+  }, [
+    boqMap,
+    consumptionMap,
+    locationMap,
+    projectMap,
+    purchaseOrderMap,
+    query,
+    sortedRecords,
+    statusFilter,
+    vendorMap,
+  ]);
+ 
   const returnedQtyByConsumptionMaterial = useMemo(() => {
     return records.reduce((acc, record) => {
       if (editingId && record.id === editingId) {
@@ -315,13 +430,13 @@ const ReallocateReturn = () => {
       return acc;
     }, {});
   }, [records, editingId]);
-
+ 
   const buildItemsFromConsumption = (consumptionId, existingItems = []) => {
     const source = consumptionMap[String(consumptionId)];
     if (!source) {
       return [];
     }
-
+ 
     const existingByMaterial = (existingItems || []).reduce((acc, item) => {
       const key = String(item.name || "").trim().toLowerCase();
       if (key) {
@@ -329,7 +444,7 @@ const ReallocateReturn = () => {
       }
       return acc;
     }, {});
-
+ 
     return (source.items || []).map((item, index) => {
       const name = String(item.name || "").trim();
       const key = name.toLowerCase();
@@ -341,7 +456,7 @@ const ReallocateReturn = () => {
         existingByMaterial[key] !== undefined
           ? Math.min(existingByMaterial[key], availableQty)
           : availableQty;
-
+ 
       return {
         id: item.id ?? `${consumptionId}-${index}`,
         name,
@@ -352,7 +467,7 @@ const ReallocateReturn = () => {
       };
     });
   };
-
+ 
   const applyConsumptionSelection = (consumptionId, options = {}) => {
     const source = consumptionMap[String(consumptionId)] || null;
     if (!source) {
@@ -363,7 +478,7 @@ const ReallocateReturn = () => {
       }));
       return;
     }
-
+ 
     const existingItems = options.existingItems || [];
     setItems(buildItemsFromConsumption(source.id, existingItems));
     setForm((prev) => ({
@@ -373,7 +488,7 @@ const ReallocateReturn = () => {
       fromLocationId: String(source.locationId || ""),
     }));
   };
-
+ 
   const resetForm = () => {
     setForm(createFormState());
     setItems([]);
@@ -381,14 +496,14 @@ const ReallocateReturn = () => {
     setSaveError("");
     setEditingId(null);
   };
-
+ 
   const validate = () => {
     const nextErrors = {};
     if (!form.referenceNumber.trim()) {
       nextErrors.referenceNumber = "Reference number is required.";
     }
     if (!form.consumptionId) {
-      nextErrors.consumptionId = "Select a receive inventory record.";
+      nextErrors.consumptionId = "Select an inventory reference.";
     }
     if (!form.projectId) {
       nextErrors.projectId = "Select a project.";
@@ -402,31 +517,31 @@ const ReallocateReturn = () => {
     if (form.type === "Return" && vendors.length > 0 && !form.returnVendorId) {
       nextErrors.returnVendorId = "Select a vendor.";
     }
-
+ 
     const hasValidItem = items.some(
       (item) => String(item.name || "").trim() && toQuantity(item.quantity) > 0
     );
     if (!hasValidItem) {
       nextErrors.items = "Select at least one received material quantity.";
     }
-
+ 
     const hasOverQty = items.some(
       (item) => toQuantity(item.quantity) > toQuantity(item.availableQty)
     );
     if (hasOverQty) {
       nextErrors.items = "Request quantity cannot exceed available received quantity.";
     }
-
+ 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
-
+ 
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!validate()) {
       return;
     }
-
+ 
     const cleanedItems = items
       .map((item) => ({
         id: item.id,
@@ -437,7 +552,7 @@ const ReallocateReturn = () => {
         quantity: toQuantity(item.quantity),
       }))
       .filter((item) => item.name && item.quantity > 0);
-
+ 
     const source = consumptionMap[String(form.consumptionId)] || null;
     const payload = {
       referenceNumber: form.referenceNumber.trim(),
@@ -450,21 +565,22 @@ const ReallocateReturn = () => {
       returnVendorId: form.returnVendorId ? Number(form.returnVendorId) : null,
       requestDate: form.requestDate,
       requestedBy: form.requestedBy.trim(),
+      eWayBillNumber: form.eWayBillNumber.trim(),
       status: form.status,
       notes: form.notes,
       items: cleanedItems,
     };
-
+ 
     try {
       setSaving(true);
       setSaveError("");
-
+ 
       if (editingId) {
         await updateReallocateInventory(editingId, payload);
       } else {
         await createReallocateInventory(payload);
       }
-
+ 
       if (form.type === "Return" && !editingId) {
         const missingMaterials = [];
         for (const line of cleanedItems) {
@@ -477,14 +593,14 @@ const ReallocateReturn = () => {
           await updateQuantityApi(inv.id, toQuantity(inv.stock) + line.quantity);
         }
         await loadInventory();
-
+ 
         if (missingMaterials.length > 0) {
           setSaveError(
             `Saved request, but stock was not updated for: ${missingMaterials.join(", ")}`
           );
         }
       }
-
+ 
       await loadRecords();
       resetForm();
     } catch (error) {
@@ -497,7 +613,7 @@ const ReallocateReturn = () => {
       setSaving(false);
     }
   };
-
+ 
   const handleEdit = (record) => {
     setEditingId(record.id);
     setForm({
@@ -510,6 +626,7 @@ const ReallocateReturn = () => {
       returnVendorId: record.returnVendorId ? String(record.returnVendorId) : "",
       requestDate: record.requestDate || new Date().toISOString().slice(0, 10),
       requestedBy: record.requestedBy || "",
+      eWayBillNumber: record.eWayBillNumber || "",
       status: record.status || "Pending",
       notes: record.notes || "",
     });
@@ -519,7 +636,7 @@ const ReallocateReturn = () => {
     setErrors({});
     setSaveError("");
   };
-
+ 
   const handleDelete = async (id) => {
     try {
       setSaveError("");
@@ -536,7 +653,7 @@ const ReallocateReturn = () => {
       );
     }
   };
-
+ 
   const handleQuantityChange = (id, value) => {
     setItems((prev) =>
       (prev || []).map((item) => {
@@ -551,7 +668,7 @@ const ReallocateReturn = () => {
       })
     );
   };
-
+ 
   const printRegister = () => {
     printSection({
       selector: "#reallocation-register",
@@ -566,7 +683,7 @@ const ReallocateReturn = () => {
       brandDescription,
     });
   };
-
+ 
   const printRecord = (record) => {
     setViewRecord(record);
     setTimeout(() => {
@@ -579,7 +696,7 @@ const ReallocateReturn = () => {
       });
     }, 80);
   };
-
+ 
   return (
     <div className="p-6">
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -600,7 +717,7 @@ const ReallocateReturn = () => {
           Clear Form
         </button>
       </div>
-
+ 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-sm text-slate-500">Total Requests</p>
@@ -619,13 +736,13 @@ const ReallocateReturn = () => {
           </p>
         </div>
       </div>
-
+ 
       {saveError && (
         <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {saveError}
         </div>
       )}
-
+ 
       <form onSubmit={handleSubmit} className="mb-6 space-y-4">
         <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 text-lg font-semibold text-slate-800">
@@ -647,7 +764,7 @@ const ReallocateReturn = () => {
                 <p className="mt-1 text-xs text-red-600">{errors.referenceNumber}</p>
               )}
             </div>
-
+ 
             <div>
               <label className="text-sm font-medium text-slate-700">Type</label>
               <select
@@ -661,7 +778,7 @@ const ReallocateReturn = () => {
                 <option value="Return">Return</option>
               </select>
             </div>
-
+ 
             <div>
               <label className="text-sm font-medium text-slate-700">
                 Receive Inventory Ref *
@@ -670,26 +787,45 @@ const ReallocateReturn = () => {
                 type="search"
                 value={consumptionQuery}
                 onChange={(event) => setConsumptionQuery(event.target.value)}
-                placeholder="Search by ref, item, or date"
+                placeholder="Search by receive ref, PO, BOQ, item, or date"
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
+              <div className="mt-2">
+                <label className="text-xs font-medium text-slate-600">E-Way Bill</label>
+                <input
+                  type="text"
+                  value={form.eWayBillNumber}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, eWayBillNumber: event.target.value }))
+                  }
+                  placeholder="Enter e-way bill number"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
               <select
                 value={form.consumptionId}
                 onChange={(event) => applyConsumptionSelection(event.target.value)}
                 className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
-                <option value="">Select receive inventory</option>
+                <option value="">Select PO / BOQ / receipt reference</option>
                 {filteredConsumptions.map((entry) => (
                   <option key={entry.id} value={entry.id}>
-                    {getReceiveReference(entry)} | {formatDate(entry.receivedDate)}
+                    {buildReceiveReferenceLabel(entry, purchaseOrderMap, boqMap)}
                   </option>
                 ))}
               </select>
+              {selectedConsumption && (
+                <p className="mt-2 text-xs text-slate-500">
+                  PO:{" "}
+                  {getReceivePurchaseOrderNumber(selectedConsumption, purchaseOrderMap) || "-"} | BOQ:{" "}
+                  {getReceiveBoqNumber(selectedConsumption, boqMap) || "-"}
+                </p>
+              )}
               {errors.consumptionId && (
                 <p className="mt-1 text-xs text-red-600">{errors.consumptionId}</p>
               )}
             </div>
-
+ 
             <div>
               <label className="text-sm font-medium text-slate-700">Project *</label>
               <select
@@ -708,7 +844,7 @@ const ReallocateReturn = () => {
               </select>
               {errors.projectId && <p className="mt-1 text-xs text-red-600">{errors.projectId}</p>}
             </div>
-
+ 
             <div>
               <label className="text-sm font-medium text-slate-700">From Location *</label>
               <select
@@ -729,7 +865,7 @@ const ReallocateReturn = () => {
                 <p className="mt-1 text-xs text-red-600">{errors.fromLocationId}</p>
               )}
             </div>
-
+ 
             {form.type === "Reallocate" ? (
               <div>
                 <label className="text-sm font-medium text-slate-700">To Location *</label>
@@ -773,7 +909,7 @@ const ReallocateReturn = () => {
                 )}
               </div>
             )}
-
+ 
             <div>
               <label className="text-sm font-medium text-slate-700">Request Date</label>
               <DateInput
@@ -782,7 +918,7 @@ const ReallocateReturn = () => {
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               />
             </div>
-
+ 
             <div>
               <label className="text-sm font-medium text-slate-700">Requested By</label>
               <input
@@ -795,7 +931,7 @@ const ReallocateReturn = () => {
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               />
             </div>
-
+ 
             <div>
               <label className="text-sm font-medium text-slate-700">Status</label>
               <select
@@ -810,7 +946,7 @@ const ReallocateReturn = () => {
                 <option value="Completed">Completed</option>
               </select>
             </div>
-
+ 
             <div className="md:col-span-3">
               <label className="text-sm font-medium text-slate-700">Notes</label>
               <textarea
@@ -822,7 +958,7 @@ const ReallocateReturn = () => {
             </div>
           </div>
         </div>
-
+ 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="mb-4 text-base font-semibold text-slate-800">
             Materials From Receive Inventory
@@ -841,7 +977,7 @@ const ReallocateReturn = () => {
                 {items.length === 0 && (
                   <tr>
                     <td colSpan="4" className="p-4 text-center text-slate-500">
-                      Select a receive inventory record to load materials.
+                      Select an inventory reference to load materials.
                     </td>
                   </tr>
                 )}
@@ -869,9 +1005,9 @@ const ReallocateReturn = () => {
             </table>
           </div>
         </div>
-
+ 
         {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
-
+ 
         <div className="flex justify-end gap-3">
           <button
             type="button"
@@ -893,7 +1029,7 @@ const ReallocateReturn = () => {
           </button>
         </div>
       </form>
-
+ 
       <section id="reallocation-register" className={panel}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <h2 className="text-3xl font-semibold text-slate-800">
@@ -912,7 +1048,7 @@ const ReallocateReturn = () => {
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search reference, item, date, project..."
+            placeholder="Search reference, PO, BOQ, e-way bill, item, date..."
             className={field}
           />
           <select
@@ -933,6 +1069,7 @@ const ReallocateReturn = () => {
                 <th className="px-4 py-3 text-left font-semibold min-w-[140px]">Reference</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Type</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Receive Ref</th>
+                <th className="px-4 py-3 text-left font-semibold min-w-[160px]">E-Way Bill</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[180px]">Project</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">From</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">To / Vendor</th>
@@ -945,7 +1082,7 @@ const ReallocateReturn = () => {
             <tbody>
               {visibleRecords.length === 0 && (
                 <tr>
-                  <td colSpan="10" className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan="11" className="px-4 py-10 text-center text-slate-500">
                     {records.length
                       ? "No matching delivery challans found."
                       : "No delivery challans created yet."}
@@ -953,6 +1090,13 @@ const ReallocateReturn = () => {
                 </tr>
               )}
               {visibleRecords.map((record) => {
+                const sourceReceipt = consumptionMap[String(record.consumptionId)] || null;
+                const poNumber = sourceReceipt
+                  ? getReceivePurchaseOrderNumber(sourceReceipt, purchaseOrderMap)
+                  : "";
+                const boqNumber = sourceReceipt
+                  ? getReceiveBoqNumber(sourceReceipt, boqMap)
+                  : "";
                 const destination =
                   record.type === "Return"
                     ? vendorMap[String(record.returnVendorId)]?.name || "-"
@@ -970,7 +1114,19 @@ const ReallocateReturn = () => {
                       {getMovementTypeLabel(record.type)}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
-                      {record.consumptionNumber || "-"}
+                      <div>
+                        <p>{record.consumptionNumber || "-"}</p>
+                        {(poNumber || boqNumber) && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            {poNumber ? `PO: ${poNumber}` : "PO: -"}
+                            {" | "}
+                            {boqNumber ? `BOQ: ${boqNumber}` : "BOQ: -"}
+                          </p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {record.eWayBillNumber || "-"}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                       {projectMap[String(record.projectId)]?.name || "-"}
@@ -1033,7 +1189,7 @@ const ReallocateReturn = () => {
           </table>
         </div>
       </section>
-
+ 
       {activeViewRecord && (
         <DocumentViewPanel
           id="reallocation-view-panel"
@@ -1048,28 +1204,34 @@ const ReallocateReturn = () => {
           primaryPairs={[
             {
               label: "Reference",
-              value:
-                activeViewRecord.referenceNumber || `REL-${activeViewRecord.id}`,
+              value: activeViewRecord.referenceNumber || `REL-${activeViewRecord.id}`,
             },
-            { label: "Type", value: getMovementTypeLabel(activeViewRecord.type) },
+            { label: "Receipt Ref", value: activeViewRecord.consumptionNumber || "-" },
             {
-              label: "Request Date",
-              value: formatDate(
-                activeViewRecord.requestDate || activeViewRecord.transferDate
-              ),
+              label: "PO No",
+              value: activeViewConsumption
+                ? getReceivePurchaseOrderNumber(activeViewConsumption, purchaseOrderMap) || "-"
+                : "-",
             },
-            { label: "Status", value: activeViewRecord.status || "Pending" },
-            { label: "Receive Ref", value: activeViewRecord.consumptionNumber || "-" },
-            { label: "Requested By", value: activeViewRecord.requestedBy || "-" },
+            {
+              label: "BOQ No",
+              value: activeViewConsumption
+                ? getReceiveBoqNumber(activeViewConsumption, boqMap) || "-"
+                : "-",
+            },
+            { label: "E-Way Bill", value: activeViewRecord.eWayBillNumber || "-" },
+            {
+              label: "Date",
+              value: formatDate(activeViewRecord.requestDate || activeViewRecord.transferDate),
+            },
+            { label: "Status", value: activeViewRecord.status || "pending" },
           ]}
-          leftBlockTitle="Project / From"
+          leftBlockTitle="SHIP FROM"
           leftBlockLines={[
             projectMap[String(activeViewRecord.projectId)]?.name || "-",
             locationMap[String(activeViewRecord.fromLocationId)]?.name || "-",
           ]}
-          rightBlockTitle={
-            activeViewRecord.type === "Return" ? "Return Vendor" : "To Location"
-          }
+          rightBlockTitle="SHIP TO"
           rightBlockLines={[
             activeViewRecord.type === "Return"
               ? vendorMap[String(activeViewRecord.returnVendorId)]?.name || "-"
@@ -1103,5 +1265,7 @@ const ReallocateReturn = () => {
     </div>
   );
 };
-
+ 
 export default ReallocateReturn;
+ 
+ 
