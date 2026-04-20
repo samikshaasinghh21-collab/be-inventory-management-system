@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import useSettings from "../../hooks/useSettings";
 import { getProjects } from "../../services/projectsStore";
 import { fetchLocations } from "../../services/locationsApi";
-import { fetchBoqs } from "../../services/boqApi";
+import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
 import {
   createDeliveryChallan,
   deleteDeliveryChallan,
@@ -34,7 +34,9 @@ const createLineItem = () => ({
 const createFormState = () => ({
   dcNumber: "",
   projectId: "",
+  receiveGoodsId: "",
   fromLocationId: "",
+  toLocationId: "",
   toLocation: "",
   vehicleNumber: "",
   eWayBillNumber: "",
@@ -43,17 +45,47 @@ const createFormState = () => ({
   notes: "",
 });
 
+const buildReceiptReferenceLabel = (receipt = {}, projectName = "") => {
+  const receiptNumber = `RG-${String(receipt.receiveGoodsId ?? receipt.id ?? "").padStart(3, "0")}`;
+  const invoiceDateText = formatDate(receipt.invoiceDate ?? receipt.receivedDate ?? receipt.createdAt);
+  return [
+    receiptNumber,
+    receipt.invoiceNumber ? `INV ${receipt.invoiceNumber}` : null,
+    projectName ? `Project: ${projectName}` : null,
+    invoiceDateText && invoiceDateText !== "-" ? invoiceDateText : null,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+};
+
+const mapReceiptItemsToChallanItems = (receipt = {}) =>
+  (receipt.items || [])
+    .map((item, index) => {
+      const quantity = Number(item.receivedQty ?? item.quantity ?? item.balanceQty ?? item.orderedQty ?? 0) || 0;
+      return {
+        id: item.id ?? `${Date.now()}-${index}`,
+        name: item.name || "",
+        description: item.description || "",
+        unit: item.unit || "PCS",
+        hsn: item.hsn || "",
+        gst: item.gst || "",
+        quantity,
+        rate: Number(item.unitPrice ?? item.rate ?? 0) || 0,
+        notes: item.notes || "",
+      };
+    })
+    .filter((item) => item.name && Number(item.quantity) > 0);
+
 const DeliveryChallan = () => {
-  const [projects] = useState(() => getProjects());
+  const [projects, setProjects] = useState(() => getProjects());
   const [locations, setLocations] = useState([]);
+  const [receipts, setReceipts] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
   const [items, setItems] = useState([createLineItem()]);
   const [errors, setErrors] = useState({});
-  const [boqs, setBoqs] = useState([]);
-  const [boqsLoading, setBoqsLoading] = useState(false);
-  const [boqError, setBoqError] = useState("");
-  const [selectedBoqId, setSelectedBoqId] = useState("");
+  const [receiptsLoading, setReceiptsLoading] = useState(false);
+  const [receiptError, setReceiptError] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [selectedChallan, setSelectedChallan] = useState(null);
   const settings = useSettings();
@@ -78,28 +110,54 @@ const DeliveryChallan = () => {
       setLocations([]);
     }
   };
-  const loadBoqs = async () => {
+  const loadReceipts = async () => {
     try {
-      setBoqsLoading(true);
-      const list = await fetchBoqs();
-      setBoqs(Array.isArray(list) ? list : []);
-      setBoqError("");
+      setReceiptsLoading(true);
+      const list = await fetchReceiveGoods();
+      setReceipts(Array.isArray(list) ? list : []);
+      setReceiptError("");
     } catch (error) {
-      setBoqs([]);
-      setBoqError(
+      setReceipts([]);
+      setReceiptError(
         error?.response?.data?.error ||
           error?.message ||
-          "Could not load BOQs."
+          "Could not load receive receipts."
       );
     } finally {
-      setBoqsLoading(false);
+      setReceiptsLoading(false);
     }
   };
 
   useEffect(() => {
     void loadRecords();
     void loadLocations();
-    void loadBoqs();
+    void loadReceipts();
+  }, []);
+
+  useEffect(() => {
+    const refreshRecords = () => {
+      void loadRecords();
+    };
+    const refreshLocations = () => {
+      void loadLocations();
+    };
+    const refreshProjects = () => {
+      setProjects(getProjects());
+    };
+    const refreshReceipts = () => {
+      void loadReceipts();
+    };
+
+    window.addEventListener("delivery-challans:changed", refreshRecords);
+    window.addEventListener("locations:changed", refreshLocations);
+    window.addEventListener("projects:changed", refreshProjects);
+    window.addEventListener("receive-goods:changed", refreshReceipts);
+    return () => {
+      window.removeEventListener("delivery-challans:changed", refreshRecords);
+      window.removeEventListener("locations:changed", refreshLocations);
+      window.removeEventListener("projects:changed", refreshProjects);
+      window.removeEventListener("receive-goods:changed", refreshReceipts);
+    };
   }, []);
 
   useEffect(() => {
@@ -125,6 +183,43 @@ const DeliveryChallan = () => {
     }
   }, [form.projectId]);
 
+  useEffect(() => {
+    if (editingId || !form.projectId || form.toLocationId || form.toLocation) {
+      return;
+    }
+    const preferredLocation = locations.find(
+      (location) => String(location.projectId) === String(form.projectId)
+    );
+    if (!preferredLocation) {
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      toLocationId: String(preferredLocation.id),
+      toLocation: preferredLocation.name || prev.toLocation,
+    }));
+  }, [editingId, form.projectId, form.toLocation, form.toLocationId, locations]);
+
+  useEffect(() => {
+    if (!form.toLocationId) {
+      return;
+    }
+    const selectedLocation = locations.find(
+      (location) => String(location.id) === String(form.toLocationId)
+    );
+    if (!selectedLocation) {
+      return;
+    }
+    setForm((prev) =>
+      prev.toLocation === selectedLocation.name
+        ? prev
+        : {
+            ...prev,
+            toLocation: selectedLocation.name || prev.toLocation,
+          }
+    );
+  }, [form.toLocationId, locations]);
+
   const projectMap = useMemo(() => {
     return projects.reduce((acc, project) => {
       acc[String(project.id)] = project;
@@ -138,21 +233,90 @@ const DeliveryChallan = () => {
       return acc;
     }, {});
   }, [locations]);
-  const boqsForProject = useMemo(() => {
+
+  const receiptMap = useMemo(() => {
+    return receipts.reduce((acc, receipt) => {
+      acc[String(receipt.id)] = receipt;
+      return acc;
+    }, {});
+  }, [receipts]);
+
+  const destinationLocations = useMemo(() => {
     if (!form.projectId) {
-      return [];
+      return locations;
     }
-    return boqs.filter(
-      (boq) => String(boq.projectId) === String(form.projectId)
+    const linkedLocations = locations.filter(
+      (location) => String(location.projectId) === String(form.projectId)
     );
-  }, [boqs, form.projectId]);
+    if (!linkedLocations.length) {
+      return locations;
+    }
+    const linkedIds = new Set(linkedLocations.map((location) => String(location.id)));
+    return [
+      ...linkedLocations,
+      ...locations.filter((location) => !linkedIds.has(String(location.id))),
+    ];
+  }, [locations, form.projectId]);
+
+  const receiptsForSelection = useMemo(() => {
+    if (!form.projectId) {
+      return receipts;
+    }
+    return receipts.filter(
+      (receipt) => String(receipt.projectId) === String(form.projectId)
+    );
+  }, [receipts, form.projectId]);
+
+  const selectedReceipt = useMemo(() => {
+    if (!form.receiveGoodsId) {
+      return null;
+    }
+    return receiptMap[String(form.receiveGoodsId)] ?? null;
+  }, [form.receiveGoodsId, receiptMap]);
+
+  const selectedReceiptLabel = useMemo(() => {
+    if (!selectedReceipt) {
+      return "";
+    }
+    const projectName = projectMap[String(selectedReceipt.projectId)]?.name || "";
+    return buildReceiptReferenceLabel(selectedReceipt, projectName);
+  }, [projectMap, selectedReceipt]);
+
+  const formatReceiptReference = (value) => {
+    if (value === null || value === undefined || value === "") {
+      return "-";
+    }
+    const receipt = receiptMap[String(value)] ?? null;
+    if (receipt) {
+      return buildReceiptReferenceLabel(
+        receipt,
+        projectMap[String(receipt.projectId)]?.name || ""
+      );
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+      ? `RG-${String(numeric).padStart(3, "0")}`
+      : String(value);
+  };
+
+  useEffect(() => {
+    if (receiptsLoading || !form.receiveGoodsId) {
+      return;
+    }
+    const activeReceipt = receiptsForSelection.find(
+      (receipt) => String(receipt.id) === String(form.receiveGoodsId)
+    );
+    if (activeReceipt) {
+      return;
+    }
+    setForm((prev) => ({ ...prev, receiveGoodsId: "" }));
+  }, [form.receiveGoodsId, receiptsForSelection, receiptsLoading]);
 
   const resetForm = () => {
     setForm(createFormState());
     setItems([createLineItem()]);
     setErrors({});
-    setBoqError("");
-    setSelectedBoqId("");
+    setReceiptError("");
     setEditingId(null);
   };
 
@@ -165,10 +329,10 @@ const DeliveryChallan = () => {
       nextErrors.projectId = "Select a project.";
     }
     if (!form.fromLocationId) {
-      nextErrors.fromLocationId = "Select slip source location.";
+      nextErrors.fromLocationId = "Select source.";
     }
-    if (!form.toLocation.trim()) {
-      nextErrors.toLocation = "Enter destination location/site.";
+    if (!form.toLocationId && !form.toLocation.trim()) {
+      nextErrors.toLocationId = "Select destination.";
     }
     const hasValidItem = items.some(
       (item) => item.name.trim() && Number(item.quantity) > 0
@@ -198,6 +362,7 @@ const DeliveryChallan = () => {
 
     const payload = {
       ...form,
+      receiveGoodsId: form.receiveGoodsId ? Number(form.receiveGoodsId) : null,
       items: cleanedItems,
     };
 
@@ -215,12 +380,22 @@ const DeliveryChallan = () => {
   };
 
   const handleEdit = (record) => {
+    const matchedToLocation =
+      (record.toLocationId && locationMap[String(record.toLocationId)]) ||
+      locations.find(
+        (location) =>
+          String(location.name || "").trim().toLowerCase() ===
+          String(record.toLocation || "").trim().toLowerCase()
+      ) ||
+      null;
     setEditingId(record.id);
     setForm({
       dcNumber: record.dcNumber || "",
       projectId: record.projectId || "",
+      receiveGoodsId: record.receiveGoodsId ? String(record.receiveGoodsId) : "",
       fromLocationId: record.fromLocationId || "",
-      toLocation: record.toLocation || "",
+      toLocationId: matchedToLocation ? String(matchedToLocation.id) : "",
+      toLocation: matchedToLocation?.name || record.toLocation || "",
       vehicleNumber: record.vehicleNumber || "",
       eWayBillNumber: record.eWayBillNumber || "",
       issueDate: record.issueDate || new Date().toISOString().slice(0, 10),
@@ -240,46 +415,32 @@ const DeliveryChallan = () => {
     }
   };
 
-  const handlePickFromBoq = () => {
-    if (!form.projectId) {
-      setBoqError("Select a project first.");
+  const handlePickFromReceipt = () => {
+    if (!form.receiveGoodsId) {
+      setReceiptError("Select a receipt reference first.");
       return;
     }
 
-    if (!selectedBoqId) {
-      setBoqError("Select a BOQ to pick materials.");
+    const receipt = receiptMap[String(form.receiveGoodsId)];
+    if (!receipt) {
+      setReceiptError("No receive receipt found for that reference.");
       return;
     }
 
-    const boq = boqs.find(
-      (entry) => String(entry.id) === String(selectedBoqId)
-    );
-
-    if (!boq) {
-      setBoqError("No BOQ found for this project.");
-      return;
-    }
-
-    const mapped = (boq.items || []).map((item, index) => ({
-      id: item.id ?? `${Date.now()}-${index}`,
-      name: item.name || "",
-      description: item.description || "",
-      unit: item.unit || "PCS",
-      hsn: item.hsn || "",
-      gst: item.gst || "",
-      quantity: item.quantity ?? "",
-      rate: item.rate ?? 0,
-      notes: item.notes || "",
-    }));
+    const mapped = mapReceiptItemsToChallanItems(receipt);
 
     if (!mapped.length) {
-      setBoqError("The selected BOQ has no line items.");
+      setReceiptError("The selected receipt has no line items.");
       return;
     }
 
     setItems(mapped);
-    setSelectedBoqId(String(boq.id));
-    setBoqError("");
+    setForm((prev) => ({
+      ...prev,
+      projectId: receipt.projectId ? String(receipt.projectId) : prev.projectId,
+      fromLocationId: receipt.locationId ? String(receipt.locationId) : prev.fromLocationId,
+    }));
+    setReceiptError("");
   };
 
   const challanMetaRows = useMemo(() => {
@@ -307,11 +468,41 @@ const DeliveryChallan = () => {
     setSelectedChallan(record);
   };
 
+  const handleProjectChange = (nextProjectId) => {
+    const preferredLocation =
+      locations.find(
+        (location) => String(location.projectId) === String(nextProjectId)
+      ) || null;
+
+    setForm((prev) => ({
+      ...prev,
+      projectId: nextProjectId,
+      receiveGoodsId: "",
+      toLocationId: preferredLocation ? String(preferredLocation.id) : "",
+      toLocation: preferredLocation?.name || "",
+    }));
+    setReceiptError("");
+  };
+
+  const handleToLocationChange = (nextLocationId) => {
+    const selectedLocation =
+      locations.find((location) => String(location.id) === String(nextLocationId)) || null;
+
+    setForm((prev) => ({
+      ...prev,
+      toLocationId: nextLocationId,
+      toLocation: selectedLocation?.name || "",
+    }));
+  };
+
   const selectedProject = selectedChallan
     ? projectMap[String(selectedChallan.projectId)] || {}
     : {};
   const selectedFromLocation = selectedChallan
     ? locationMap[String(selectedChallan.fromLocationId)] || {}
+    : {};
+  const selectedToLocation = selectedChallan
+    ? locationMap[String(selectedChallan.toLocationId)] || {}
     : {};
   const totalQty = selectedChallan?.items?.reduce(
     (sum, item) => sum + (Number(item.quantity) || 0),
@@ -392,10 +583,7 @@ const DeliveryChallan = () => {
               <select
                 value={form.projectId}
                 onChange={(event) => {
-                  const nextProjectId = event.target.value;
-                  setForm((prev) => ({ ...prev, projectId: nextProjectId }));
-                  setSelectedBoqId("");
-                  setBoqError("");
+                  handleProjectChange(event.target.value);
                 }}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               >
@@ -412,7 +600,7 @@ const DeliveryChallan = () => {
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                 Ship From *
+                From *
               </label>
               <select
                 value={form.fromLocationId}
@@ -424,7 +612,7 @@ const DeliveryChallan = () => {
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               >
-                <option value="">Select location</option>
+                <option value="">Select source</option>
                 {locations.map((location) => (
                   <option key={location.id} value={location.id}>
                     {location.name}
@@ -437,19 +625,37 @@ const DeliveryChallan = () => {
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Ship To *
+                To *
               </label>
-              <input
-                type="text"
-                value={form.toLocation}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, toLocation: event.target.value }))
-                }
-                placeholder="Project site / destination"
+              <select
+                value={form.toLocationId}
+                onChange={(event) => {
+                  handleToLocationChange(event.target.value);
+                }}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
-              />
-              {errors.toLocation && (
-                <p className="text-xs text-red-600 mt-1">{errors.toLocation}</p>
+              >
+                <option value="">
+                  {destinationLocations.length
+                    ? "Select destination"
+                    : "No destinations available"}
+                </option>
+                {destinationLocations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name}
+                    {location.projectId &&
+                    String(location.projectId) === String(form.projectId)
+                      ? " | Project site"
+                      : ""}
+                  </option>
+                ))}
+              </select>
+              {form.toLocation ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  To site: {form.toLocation}
+                </p>
+              ) : null}
+              {errors.toLocationId && (
+                <p className="text-xs text-red-600 mt-1">{errors.toLocationId}</p>
               )}
             </div>
             <div>
@@ -517,32 +723,37 @@ const DeliveryChallan = () => {
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                BOQ (optional)
+                Receive Receipt Reference (optional)
               </label>
               <select
-                value={selectedBoqId}
-                onChange={(event) => {
-                  setSelectedBoqId(event.target.value);
-                  setBoqError("");
-                }}
-                disabled={!form.projectId || boqsLoading}
+                value={form.receiveGoodsId}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, receiveGoodsId: event.target.value }))
+                }
+                disabled={receiptsLoading}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:bg-slate-100"
               >
                 <option value="">
-                  {!form.projectId
-                    ? "Select project first"
-                    : boqsLoading
-                    ? "Loading BOQs..."
-                    : boqsForProject.length
-                    ? "Select BOQ for material pick"
-                    : "No BOQs for project"}
+                  {receiptsLoading
+                    ? "Loading receipts..."
+                    : receiptsForSelection.length
+                    ? "Select receipt reference"
+                    : "No receive receipts available"}
                 </option>
-                {boqsForProject.map((boq) => (
-                  <option key={boq.id} value={boq.id}>
-                    {boq.boqNumber} | v{boq.version} | {boq.status || "Draft"}
+                {receiptsForSelection.map((receipt) => (
+                  <option key={receipt.id} value={receipt.id}>
+                    {buildReceiptReferenceLabel(
+                      receipt,
+                      projectMap[String(receipt.projectId)]?.name || ""
+                    )}
                   </option>
                 ))}
               </select>
+              {selectedReceiptLabel ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  Receipt selected: {selectedReceiptLabel}
+                </p>
+              ) : null}
             </div>
             <div className="md:col-span-3">
               <label className="text-sm font-medium text-slate-700">
@@ -563,11 +774,11 @@ const DeliveryChallan = () => {
         <LineItemsEditor
           items={items}
           onChange={setItems}
-          onPickFromProducts={handlePickFromBoq}
-          pickLabel="Pick from BOQ"
+          onPickFromProducts={handlePickFromReceipt}
+          pickLabel="Fetch Receipt Items"
           showHsnGst
         />
-        {boqError && <p className="text-xs text-red-600">{boqError}</p>}
+        {receiptError && <p className="text-xs text-red-600">{receiptError}</p>}
         {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
 
         <div className="flex justify-end gap-3">
@@ -617,9 +828,10 @@ const DeliveryChallan = () => {
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">DC No</th>
+              <th className="p-3 text-left min-w-[220px]">Receipt Ref</th>
               <th className="p-3 text-left min-w-[180px]">Project</th>
-              <th className="p-3 text-left min-w-[180px]"> (Pick From)</th>
-              <th className="p-3 text-left min-w-[180px]">Ship To</th>
+              <th className="p-3 text-left min-w-[180px]">From</th>
+              <th className="p-3 text-left min-w-[180px]">To</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
               <th className="p-3 text-left min-w-[120px]">Actions</th>
@@ -628,7 +840,7 @@ const DeliveryChallan = () => {
           <tbody>
             {records.length === 0 && (
               <tr>
-                <td colSpan="7" className="p-6 text-center text-slate-500">
+                <td colSpan="8" className="p-6 text-center text-slate-500">
                   No delivery challans created yet.
                 </td>
               </tr>
@@ -638,13 +850,18 @@ const DeliveryChallan = () => {
                 <td className="p-3 font-medium text-slate-800">
                   {record.dcNumber || "-"}
                 </td>
+                <td className="p-3 text-slate-700">
+                  {formatReceiptReference(record.receiveGoodsId)}
+                </td>
                 <td className="p-3">
                   {projectMap[String(record.projectId)]?.name || "-"}
                 </td>
                 <td className="p-3">
                   {locationMap[String(record.fromLocationId)]?.name || "-"}
                 </td>
-                <td className="p-3">{record.toLocation || "-"}</td>
+                <td className="p-3">
+                  {locationMap[String(record.toLocationId)]?.name || record.toLocation || "-"}
+                </td>
                 <td className="p-3">{record.status || "-"}</td>
                 <td className="p-3">{record.items?.length || 0}</td>
                 <td className="p-3 flex gap-3">
@@ -729,6 +946,10 @@ const DeliveryChallan = () => {
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   <p className="text-slate-600">Our Ref:</p>
                   <p className="font-semibold">{selectedChallan.dcNumber || "-"}</p>
+                  <p className="text-slate-600">Receipt Ref:</p>
+                  <p className="font-semibold">
+                    {formatReceiptReference(selectedChallan.receiveGoodsId)}
+                  </p>
                   <p className="text-slate-600">Date:</p>
                   <p className="font-semibold">{formatDate(selectedChallan.issueDate)}</p>
                   <p className="text-slate-600">E-Way Bill No:</p>
@@ -737,9 +958,11 @@ const DeliveryChallan = () => {
                   <p className="font-semibold">{selectedProject.name || "-"}</p>
                   <p className="text-slate-600">Client:</p>
                   <p className="font-semibold">{selectedProject.client || "-"}</p>
-                  <p className="text-slate-600">Deliver To:</p>
-                  <p className="font-semibold">{selectedChallan.toLocation || "-"}</p>
-                  <p className="text-slate-600"> ( Pick From):</p>
+                  <p className="text-slate-600">To:</p>
+                  <p className="font-semibold">
+                    {selectedToLocation.name || selectedChallan.toLocation || "-"}
+                  </p>
+                  <p className="text-slate-600">From:</p>
                   <p className="font-semibold">{selectedFromLocation.name || "-"}</p>
                 </div>
               </div>
@@ -747,7 +970,7 @@ const DeliveryChallan = () => {
 
             <div className="grid grid-cols-2 border-b border-slate-800 text-[11px]">
               <div className="p-3 border-r border-slate-800">
-                <p className="font-semibold">Ship From</p>
+                <p className="font-semibold">From</p>
                 <p>{selectedFromLocation.name || "-"}</p>
                 <p className="whitespace-pre-line mt-1">
                   {selectedFromLocation.address || "-"}
@@ -758,10 +981,10 @@ const DeliveryChallan = () => {
                 </p>
               </div>
               <div className="p-3">
-                <p className="font-semibold">Ship To</p>
-                <p>{selectedProject.name || "-"}</p>
+                <p className="font-semibold">To</p>
+                <p>{selectedToLocation.name || selectedProject.name || "-"}</p>
                 <p className="whitespace-pre-line mt-1">
-                  {selectedChallan.toLocation || "-"}
+                  {selectedToLocation.address || selectedChallan.toLocation || "-"}
                 </p>
               </div>
             </div>

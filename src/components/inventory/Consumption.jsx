@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchBoqs } from "../../services/boqApi";
+import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
 import {
   createConsumption,
   deleteConsumption,
@@ -51,10 +52,10 @@ const keyOf = (it = {}) =>
 const lineItem = (o = {}) => ({
   id: o.id ?? rowId(),
   boqItemId: o.boqItemId ?? null,
+  receiveGoodsItemId: o.receiveGoodsItemId ?? null,
   name: o.name ?? "",
   unit: o.unit ?? "PCS",
   hsn: o.hsn ?? "",
-  gst: o.gst ?? "",
   receivedQty: qty(o.receivedQty ?? 0),
   quantity: o.quantity === "" ? "" : o.quantity ?? "",
   notes: o.notes ?? "",
@@ -63,6 +64,7 @@ const formState = (consumptionNumber = "", companyDefaults = {}) => ({
   consumptionNumber,
   projectId: "",
   locationId: "",
+  receiveGoodsId: "",
   deliveryChallanId: "",
   deliveryChallanRef: "",
   consumptionDate: new Date().toISOString().slice(0, 10),
@@ -70,7 +72,6 @@ const formState = (consumptionNumber = "", companyDefaults = {}) => ({
   status: "Logged",
   notes: "",
   companyAddress: companyDefaults.address ?? "",
-  companyGstin: companyDefaults.gstin ?? "",
   companyPhone: companyDefaults.phone ?? "",
   companyEmail: companyDefaults.email ?? "",
 });
@@ -83,6 +84,18 @@ const sortValue = (r = {}) => {
 const ver = (v) => {
   const n = Number.parseFloat(v);
   return Number.isFinite(n) ? n : 0;
+};
+const buildReceiptReferenceLabel = (receipt = {}, projectName = "") => {
+  const receiptNumber = `RG-${String(receipt.receiveGoodsId ?? receipt.id ?? "").padStart(3, "0")}`;
+  const invoiceDate = formatDate(receipt.invoiceDate ?? receipt.receivedDate ?? receipt.createdAt);
+  return [
+    receiptNumber,
+    receipt.invoiceNumber ? `INV ${receipt.invoiceNumber}` : null,
+    projectName ? `Project: ${projectName}` : null,
+    invoiceDate && invoiceDate !== "-" ? invoiceDate : null,
+  ]
+    .filter(Boolean)
+    .join(" | ");
 };
 const pickBoq = (projectId, boqs = []) => {
   if (!projectId) return null;
@@ -102,12 +115,13 @@ const boqItems = (projectId, boqs = []) => {
   const mapped = (boq?.items || []).map((it) =>
     lineItem({
       boqItemId: it.id ?? it.LineItemId ?? keyOf(it),
+      receiveGoodsItemId: it.id ?? it.LineItemId ?? keyOf(it),
       name: it.name ?? "",
       unit: it.unit ?? "PCS",
       hsn: it.hsn ?? "",
       gst: it.gst ?? "",
-      receivedQty: Number.isFinite(Number(it.availableQty))
-        ? qty(it.availableQty)
+      receivedQty: Number.isFinite(Number(it.availableQty ?? it.receivedQty ?? it.balanceQty))
+        ? qty(it.availableQty ?? it.receivedQty ?? it.balanceQty)
         : qty(it.quantity),
       quantity: "",
       notes: it.notes ?? "",
@@ -123,6 +137,7 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
           lineItem({
             id: it.id ?? rowId(),
             boqItemId: it.boqItemId ?? it.id ?? null,
+            receiveGoodsItemId: it.receiveGoodsItemId ?? it.boqItemId ?? it.id ?? null,
             name: it.name ?? "",
             unit: it.unit ?? "PCS",
             hsn: it.hsn ?? "",
@@ -146,11 +161,16 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
     const found = m.shift() ?? null;
     if (!m.length) byKey.delete(k);
     const hasAvailable = Number.isFinite(Number(bi.availableQty));
-    const baseAvailable = hasAvailable ? qty(bi.availableQty) : qty(bi.quantity);
+    const baseAvailable = hasAvailable
+      ? qty(bi.availableQty)
+      : Number.isFinite(Number(bi.receivedQty))
+      ? qty(bi.receivedQty)
+      : qty(bi.quantity);
     const receivedQty = hasAvailable ? baseAvailable + qty(found?.quantity) : baseAvailable;
     return lineItem({
       id: found?.id ?? rowId(),
       boqItemId: bi.id ?? bi.LineItemId ?? k,
+      receiveGoodsItemId: bi.id ?? bi.LineItemId ?? k,
       name: bi.name ?? "",
       unit: bi.unit ?? "PCS",
       hsn: found?.hsn ?? bi.hsn ?? "",
@@ -163,13 +183,14 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
   const extra = Array.from(byKey.values())
     .flat()
     .map((it) =>
-      lineItem({
-        id: it.id ?? rowId(),
-        boqItemId: it.boqItemId ?? it.id ?? null,
-        name: it.name ?? "",
-        unit: it.unit ?? "PCS",
-        hsn: it.hsn ?? "",
-        gst: it.gst ?? "",
+        lineItem({
+          id: it.id ?? rowId(),
+          boqItemId: it.boqItemId ?? it.id ?? null,
+          receiveGoodsItemId: it.receiveGoodsItemId ?? it.boqItemId ?? it.id ?? null,
+          name: it.name ?? "",
+          unit: it.unit ?? "PCS",
+          hsn: it.hsn ?? "",
+          gst: it.gst ?? "",
         receivedQty: Math.max(qty(it.receivedQty), qty(it.quantity)),
         quantity: it.quantity ?? "",
         notes: it.notes ?? "",
@@ -355,7 +376,6 @@ const Consumption = () => {
   const brandDescription = company.address || "Company address";
   const companyDefaults = {
     address: company.address ?? "",
-    gstin: company.gstin ?? "",
     phone: company.phone ?? "",
     email: company.email ?? "",
   };
@@ -363,6 +383,7 @@ const Consumption = () => {
   const [projects, setProjects] = useState([]);
   const [locations, setLocations] = useState([]);
   const [boqs, setBoqs] = useState([]);
+  const [receipts, setReceipts] = useState([]);
   const [deliveryChallans, setDeliveryChallans] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(() => formState("", companyDefaults));
@@ -381,6 +402,18 @@ const Consumption = () => {
     () => [...records].sort((a, b) => sortValue(b) - sortValue(a)),
     [records]
   );
+  const receiptItemMap = useMemo(() => {
+    const map = new Map();
+    (receipts || []).forEach((receipt) => {
+      (receipt.items || []).forEach((item) => {
+        const key = item.id ?? item.ItemId ?? item.receiveGoodsItemId ?? null;
+        if (key !== null && key !== undefined) {
+          map.set(String(key), item);
+        }
+      });
+    });
+    return map;
+  }, [receipts]);
   const boqItemMap = useMemo(() => {
     const map = new Map();
     (boqs || []).forEach((boq) => {
@@ -409,6 +442,14 @@ const Consumption = () => {
       }, {}),
     [deliveryChallans]
   );
+  const receiptMap = useMemo(
+    () =>
+      receipts.reduce((acc, receipt) => {
+        acc[String(receipt.id)] = receipt;
+        return acc;
+      }, {}),
+    [receipts]
+  );
   const locationMap = useMemo(
     () =>
       locations.reduce((acc, l) => {
@@ -425,6 +466,12 @@ const Consumption = () => {
     () => deliveryChallansByProject(form.projectId, deliveryChallans),
     [form.projectId, deliveryChallans]
   );
+  const selectedReceipt = useMemo(() => {
+    if (form.receiveGoodsId) {
+      return receiptMap[String(form.receiveGoodsId)] ?? null;
+    }
+    return pickBoq(form.projectId, receipts);
+  }, [form.projectId, form.receiveGoodsId, receiptMap, receipts]);
   const selectedBoq = useMemo(() => pickBoq(form.projectId, boqs), [form.projectId, boqs]);
   const selectedDeliveryChallan = useMemo(
     () =>
@@ -441,6 +488,27 @@ const Consumption = () => {
       ),
     [sortedRecords]
   );
+  const selectedReceiptLabel = useMemo(() => {
+    if (!selectedReceipt) {
+      return "";
+    }
+    const projectName = projectMap[String(selectedReceipt.projectId)]?.name || "";
+    return buildReceiptReferenceLabel(selectedReceipt, projectName);
+  }, [projectMap, selectedReceipt]);
+  const formatReceiptReference = (value) => {
+    if (value === null || value === undefined || value === "") {
+      return "-";
+    }
+    const receipt = receiptMap[String(value)] ?? null;
+    if (receipt) {
+      return buildReceiptReferenceLabel(
+        receipt,
+        projectMap[String(receipt.projectId)]?.name || ""
+      );
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? `RG-${String(numeric).padStart(3, "0")}` : String(value);
+  };
   const visibleRecords = useMemo(() => {
     const q = query.trim().toLowerCase();
     return sortedRecords.filter((r) => {
@@ -479,6 +547,13 @@ const Consumption = () => {
     return safe;
   };
 
+  const loadReceipts = async () => {
+    const list = await fetchReceiveGoods();
+    const safe = Array.isArray(list) ? list : [];
+    setReceipts(safe);
+    return safe;
+  };
+
   const loadDeliveryChallans = async () => {
     const list = await fetchDeliveryChallans();
     const safe = Array.isArray(list) ? list : [];
@@ -486,11 +561,15 @@ const Consumption = () => {
     return safe;
   };
 
-  const reset = (latest = sortedRecords) => {
+  const reset = (latest = sortedRecords, options = {}) => {
+    const shouldClearActiveProject = options.clearActiveProject !== false;
     setForm(formState(nextConNo(latest), companyDefaults));
     setItems([lineItem()]);
     setErrors({});
     setEditingId(null);
+    if (shouldClearActiveProject) {
+      setActiveProjectId("");
+    }
   };
 
   const clearErr = (f) =>
@@ -506,11 +585,12 @@ const Consumption = () => {
     const loadAll = async () => {
       setLoading(true);
       setErrorMessage("");
-      const [pr, lr, br, rr, dcr] = await Promise.allSettled([
+      const [pr, lr, br, rr, rec, dcr] = await Promise.allSettled([
         fetchProjects(),
         fetchLocations(),
         fetchBoqs(),
         fetchConsumptions(),
+        fetchReceiveGoods(),
         fetchDeliveryChallans(),
       ]);
       if (!mounted) return;
@@ -524,12 +604,14 @@ const Consumption = () => {
       const l = lr.status === "fulfilled" && Array.isArray(lr.value) ? lr.value : [];
       const b = br.status === "fulfilled" && Array.isArray(br.value) ? br.value : [];
       const r = rr.status === "fulfilled" && Array.isArray(rr.value) ? rr.value : [];
+      const re = rec.status === "fulfilled" && Array.isArray(rec.value) ? rec.value : [];
       const rs = [...r].sort((a, b2) => sortValue(b2) - sortValue(a));
       const d =
         dcr?.status === "fulfilled" && Array.isArray(dcr.value) ? dcr.value : [];
       setProjects(p);
       setLocations(l);
       setBoqs(b);
+      setReceipts(re);
       setDeliveryChallans(d);
       setRecords(rs);
       setForm((prev) =>
@@ -540,6 +622,7 @@ const Consumption = () => {
         (lr.status === "rejected" ? err(lr.reason, "Failed to load locations.") : "") ||
         (br.status === "rejected" ? err(br.reason, "Failed to load BOQs.") : "") ||
         (rr.status === "rejected" ? err(rr.reason, "Failed to load consumption records.") : "") ||
+        (rec.status === "rejected" ? err(rec.reason, "Failed to load receipt register.") : "") ||
         (dcr?.status === "rejected"
           ? err(dcr.reason, "Failed to load delivery challans.")
           : "");
@@ -549,7 +632,12 @@ const Consumption = () => {
     const refreshOnEvent = () => {
       void (async () => {
         try {
-          await Promise.all([loadRecords(), loadBoqs(), loadDeliveryChallans()]);
+          await Promise.all([
+            loadRecords(),
+            loadBoqs(),
+            loadReceipts(),
+            loadDeliveryChallans(),
+          ]);
         } catch (e) {
           setErrorMessage(err(e, "Failed to refresh records."));
         }
@@ -557,12 +645,16 @@ const Consumption = () => {
     };
     void loadAll();
     if (typeof window !== "undefined") {
+      window.addEventListener("boqs:changed", refreshOnEvent);
+      window.addEventListener("receive-goods:changed", refreshOnEvent);
       window.addEventListener("consumptions:changed", refreshOnEvent);
       window.addEventListener("delivery-challans:changed", refreshOnEvent);
     }
     return () => {
       mounted = false;
       if (typeof window !== "undefined") {
+        window.removeEventListener("boqs:changed", refreshOnEvent);
+        window.removeEventListener("receive-goods:changed", refreshOnEvent);
         window.removeEventListener("consumptions:changed", refreshOnEvent);
         window.removeEventListener("delivery-challans:changed", refreshOnEvent);
       }
@@ -596,6 +688,23 @@ const Consumption = () => {
   }, [filteredDeliveryChallans, form.deliveryChallanId, form.projectId, boqs, editingId]);
 
   useEffect(() => {
+    if (!form.receiveGoodsId) {
+      return;
+    }
+    const activeReceipt = receipts.find((receipt) => String(receipt.id) === String(form.receiveGoodsId));
+    if (activeReceipt) {
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      receiveGoodsId: "",
+    }));
+    if (!editingId) {
+      setItems(receipts.length ? boqItems(form.projectId, receipts) : boqItems(form.projectId, boqs));
+    }
+  }, [boqs, editingId, form.projectId, form.receiveGoodsId, receipts]);
+
+  useEffect(() => {
     if (!viewRecord?.id) return;
     const updated = records.find((r) => String(r.id) === String(viewRecord.id));
     if (updated && updated !== viewRecord) {
@@ -604,7 +713,7 @@ const Consumption = () => {
   }, [records, viewRecord?.id]);
 
   useEffect(() => {
-    if (editingId || form.projectId || !projects.length || !boqs.length) {
+    if (editingId || form.projectId || !projects.length || (!receipts.length && !boqs.length)) {
       return;
     }
     const activeProjectId = getActiveProjectId();
@@ -618,25 +727,50 @@ const Consumption = () => {
       return;
     }
     onProjectChange(String(activeProjectId));
-  }, [boqs.length, editingId, form.projectId, projects]);
+  }, [boqs.length, editingId, form.projectId, projects, receipts.length]);
 
   const onProjectChange = (projectId) => {
     setForm((p) => ({
       ...p,
       projectId,
+      receiveGoodsId: "",
       deliveryChallanId: "",
       deliveryChallanRef: "",
       locationId: byProject(projectId, locations).some((l) => String(l.id) === String(p.locationId))
         ? p.locationId
         : "",
     }));
-    setItems(boqItems(projectId, boqs));
+    setItems(receipts.length ? boqItems(projectId, receipts) : boqItems(projectId, boqs));
     clearErr("projectId");
     clearErr("locationId");
     clearErr("items");
     if (projectId) {
       setActiveProjectId(projectId);
     }
+  };
+
+  const onReceiveGoodsChange = (receiveGoodsId) => {
+    const selectedReceiptRecord =
+      receipts.find((receipt) => String(receipt.id) === String(receiveGoodsId)) ?? null;
+    const receiptProjectId = selectedReceiptRecord?.projectId
+      ? String(selectedReceiptRecord.projectId)
+      : form.projectId;
+    setForm((prev) => ({
+      ...prev,
+      receiveGoodsId,
+      projectId: receiptProjectId,
+      locationId: selectedReceiptRecord?.locationId
+        ? String(selectedReceiptRecord.locationId)
+        : prev.locationId,
+    }));
+    setItems(
+      receiveGoodsId && selectedReceiptRecord
+        ? boqItems(receiptProjectId, [selectedReceiptRecord])
+        : receipts.length
+        ? boqItems(form.projectId, receipts)
+        : boqItems(form.projectId, boqs)
+    );
+    clearErr("items");
   };
 
   const onDeliveryChallanChange = (deliveryChallanId) => {
@@ -713,7 +847,6 @@ const Consumption = () => {
       status: form.status,
       notes: form.notes,
       companyAddress: form.companyAddress,
-      companyGstin: form.companyGstin,
       companyPhone: form.companyPhone,
       companyEmail: form.companyEmail,
       items: items
@@ -723,7 +856,6 @@ const Consumption = () => {
           description: null,
           unit: String(it.unit || "PCS").trim() || "PCS",
           hsn: String(it.hsn || "").trim(),
-          gst: String(it.gst || "").trim(),
           quantity: qty(it.quantity),
           rate: 0,
           notes: String(it.notes || "").trim() || null,
@@ -764,7 +896,6 @@ const Consumption = () => {
       status: statusOptions.includes(r.status) ? r.status : "Logged",
       notes: r.notes || "",
       companyAddress: r.companyAddress || companyDefaults.address || "",
-      companyGstin: r.companyGstin || companyDefaults.gstin || "",
       companyPhone: r.companyPhone || companyDefaults.phone || "",
       companyEmail: r.companyEmail || companyDefaults.email || "",
     });
@@ -901,7 +1032,7 @@ const Consumption = () => {
             </button>
           </div>
           <div className="space-y-3 p-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
               <label>
                 <span className="text-sm font-semibold text-slate-700">
                   Consumption Ref#
@@ -997,6 +1128,28 @@ const Consumption = () => {
 
               <label>
                 <span className="text-sm font-semibold text-slate-700">
+                  Delivery Challan
+                </span>
+                <select
+                  className={field}
+                  value={form.deliveryChallanId}
+                  onChange={(e) => onDeliveryChallanChange(e.target.value)}
+                >
+                  <option value="">
+                    {filteredDeliveryChallans.length
+                      ? "Select delivery challan"
+                      : "No delivery challans for selected project"}
+                  </option>
+                  {filteredDeliveryChallans.map((dc) => (
+                    <option key={dc.id} value={dc.id}>
+                      {dc.dcNumber || `DC-${dc.id}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span className="text-sm font-semibold text-slate-700">
                   Consumption Date
                 </span>
                 <DateInput
@@ -1065,18 +1218,6 @@ const Consumption = () => {
               </label>
 
               <label>
-                <span className="text-sm font-semibold text-slate-700">GST No</span>
-                <input
-                  className={field}
-                  value={form.companyGstin}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, companyGstin: e.target.value }))
-                  }
-                  placeholder="GST No"
-                />
-              </label>
-
-              <label>
                 <span className="text-sm font-semibold text-slate-700">Phone</span>
                 <input
                   className={field}
@@ -1139,7 +1280,6 @@ const Consumption = () => {
                 <tr>
                   <th className="px-3 py-3 text-left font-semibold min-w-[220px]">Material</th>
                   <th className="px-3 py-3 text-left font-semibold min-w-[110px]">HSN</th>
-                  <th className="px-3 py-3 text-left font-semibold min-w-[110px]">GST</th>
                   <th className="px-3 py-3 text-left font-semibold min-w-[100px]">Unit</th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[130px]">Received Qty</th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[130px]">Consumed Qty</th>
@@ -1155,7 +1295,6 @@ const Consumption = () => {
                     <tr key={it.id} className="border-b border-slate-200 bg-white">
                       <td className="px-3 py-2"><input value={it.name} onChange={(e) => onItemChange(it.id, "name", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
                       <td className="px-3 py-2"><input value={it.hsn} onChange={(e) => onItemChange(it.id, "hsn", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
-                      <td className="px-3 py-2"><input value={it.gst} onChange={(e) => onItemChange(it.id, "gst", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
                       <td className="px-3 py-2"><input value={it.unit} onChange={(e) => onItemChange(it.id, "unit", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
                       <td className="px-3 py-2"><input readOnly value={fmtQty(it.receivedQty)} className="w-full rounded-md border border-slate-300 bg-slate-50 px-2.5 py-2 text-right text-sm font-medium text-slate-700" /></td>
                       <td className="px-3 py-2"><input type="number" min="0" step="0.01" value={it.quantity} onChange={(e) => onItemChange(it.id, "quantity", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-right text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
@@ -1200,8 +1339,10 @@ const Consumption = () => {
               <tr>
                 <th className="px-4 py-3 text-left font-semibold min-w-[130px]">Ref</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[180px]">Project</th>
-                <th className="px-4 py-3 text-left font-semibold min-w-[180px]">Location</th>
-                <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Date</th>
+<th className="px-4 py-3 text-left font-semibold min-w-[160px]">Location</th>
+<th className="px-4 py-3 text-left font-semibold min-w-[140px]">DC Ref</th>
+<th className="px-4 py-3 text-left font-semibold min-w-[100px]">Date</th>
+
                 <th className="px-4 py-3 text-right font-semibold min-w-[120px]">Qty Consumed</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Status</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[220px]">Actions</th>
@@ -1210,7 +1351,8 @@ const Consumption = () => {
             <tbody>
               {visibleRecords.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan="8" className="px-4 py-10 text-center text-slate-500">
+
                     {loading ? "Loading consumption records..." : "No consumption records found."}
                   </td>
                 </tr>
@@ -1222,7 +1364,9 @@ const Consumption = () => {
                     <td className="px-4 py-3 text-slate-800">{r.consumptionNumber || "-"}</td>
                     <td className="px-4 py-3 text-slate-700">{projectMap[String(r.projectId)]?.name || "-"}</td>
                     <td className="px-4 py-3 text-slate-700">{locationMap[String(r.locationId)]?.name || "-"}</td>
+                    <td className="px-4 py-3 text-slate-700">{deliveryChallanMap[String(r.deliveryChallanId)]?.dcNumber || r.deliveryChallanRef || '-'}</td>
                     <td className="px-4 py-3 text-slate-700">{formatDate(r.consumptionDate)}</td>
+
                     <td className="px-4 py-3 text-right font-semibold text-slate-800">{fmtQty(q)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusClass(r.status)}`}>{r.status || "Logged"}</span></td>
                     <td className="px-4 py-3"><div className="flex flex-wrap gap-3 text-sm"><button type="button" onClick={() => setViewRecord(r)} className="text-blue-700 underline">View</button><button type="button" onClick={() => printRecord(r)} className="text-slate-700 underline">Print</button><button type="button" onClick={() => onEdit(r)} className="text-blue-700 underline">Edit</button><button type="button" onClick={() => { void onDelete(r); }} className="text-red-600 underline">Delete</button></div></td>
@@ -1241,7 +1385,7 @@ const Consumption = () => {
           onClose={() => setViewRecord(null)}
           companyName={brandName}
           companyAddress={viewRecord.companyAddress || brandDescription}
-          companyGstin={viewRecord.companyGstin || company.gstin}
+          hideCompanyGstin
           companyPhone={viewRecord.companyPhone || company.phone}
           companyEmail={viewRecord.companyEmail || company.email}
           logoUrl={logoUrl}
@@ -1250,6 +1394,7 @@ const Consumption = () => {
             { label: "Date", value: formatDate(viewRecord.consumptionDate || viewRecord.createdAt) },
             { label: "Status", value: viewRecord.status || "Logged" },
             { label: "Issued By", value: viewRecord.issuedBy || "-" },
+            { label: "DC Ref", value: deliveryChallanMap[String(viewRecord.deliveryChallanId)]?.dcNumber || viewRecord.deliveryChallanRef || "-" },
           ]}
           leftBlockTitle="Project"
           leftBlockLines={[projectMap[String(viewRecord.projectId)]?.name || "-"]}
@@ -1259,7 +1404,6 @@ const Consumption = () => {
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Material" },
             { key: "hsn", label: "HSN", widthClass: "w-20" },
-            { key: "gst", label: "GST", widthClass: "w-20" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "boqQty", label: "BOQ Qty", align: "right", widthClass: "w-24" },
             { key: "boqConsumed", label: "Total Consumed", align: "right", widthClass: "w-28" },
@@ -1287,7 +1431,6 @@ const Consumption = () => {
               serial: idx + 1,
               name: it.name || "-",
               hsn: it.hsn || "-",
-              gst: it.gst || "-",
               unit: it.unit || "PCS",
               boqQty: Number.isFinite(rawBoqQty) ? fmtQty(rawBoqQty) : "-",
               boqConsumed: Number.isFinite(resolvedConsumed) ? fmtQty(resolvedConsumed) : "-",

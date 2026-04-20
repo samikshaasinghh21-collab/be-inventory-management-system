@@ -1,3 +1,5 @@
+import { formatDate } from "../../../utils/dateFormat";
+
 export const REPORT_ACTIVITY_TYPES = [
   {
     key: "boq",
@@ -15,7 +17,7 @@ export const REPORT_ACTIVITY_TYPES = [
   },
   {
     key: "receive-goods",
-    label: "Receive Goods",
+    label: "Goods Received",
     timelineLabel: "Goods Received",
     badgeClass: "border-indigo-200 bg-indigo-50 text-indigo-700",
     dotClass: "bg-indigo-500",
@@ -77,17 +79,79 @@ const getTimeValue = (value) => {
   return date ? date.getTime() : 0;
 };
 
-const formatTwoDigit = (value) => String(value).padStart(2, "0");
+const normalizeLookupText = (value) => String(value || "").trim().toLowerCase();
 
-export const formatReportDate = (value, { withYear = false } = {}) => {
-  const date = toDateObject(value);
-  if (!date) {
-    return DASH_PLACEHOLDER;
+const appendQuantityToMap = (map, key, quantity) => {
+  if (!key) {
+    return;
   }
-  const month = date.toLocaleString("en-GB", { month: "short" });
-  const day = formatTwoDigit(date.getDate());
-  return withYear ? `${day}-${month}-${date.getFullYear()}` : `${day}-${month}`;
+  map.set(key, toNumber(map.get(key)) + toNumber(quantity));
 };
+
+const createOrderItemKeys = (purchaseOrderId, item = {}, index = 0) => {
+  const normalizedName = normalizeLookupText(item.name ?? item.ItemName);
+  const directPoItemId =
+    item.poItemId ?? item.purchaseOrderItemId ?? item.PurchaseOrderItemId ?? null;
+  return [
+    directPoItemId ? `po:${directPoItemId}` : null,
+    !directPoItemId && item.id ? `po:${item.id}` : null,
+    purchaseOrderId && item.itemId ? `order:${purchaseOrderId}:item:${item.itemId}` : null,
+    purchaseOrderId && normalizedName
+      ? `order:${purchaseOrderId}:name:${normalizedName}`
+      : null,
+    purchaseOrderId ? `order:${purchaseOrderId}:index:${index}` : null,
+  ].filter(Boolean);
+};
+
+const resolveQtyByKeys = (map, keys = []) => {
+  for (const key of keys) {
+    if (map.has(key)) {
+      return toNumber(map.get(key));
+    }
+  }
+  return 0;
+};
+
+const buildReceivedTotalsByOrderItemKey = (receiveGoods = []) => {
+  const totals = new Map();
+  receiveGoods.forEach((receipt) => {
+    (receipt.items || []).forEach((item, index) => {
+      const receivedQty = toNumber(item.receivedQty);
+      if (receivedQty <= 0) {
+        return;
+      }
+      createOrderItemKeys(receipt.purchaseOrderId, item, index).forEach((key) => {
+        appendQuantityToMap(totals, key, receivedQty);
+      });
+    });
+  });
+  return totals;
+};
+
+const buildReceivedTotalsByBoqItemId = (
+  purchaseOrders = [],
+  receivedTotalsByOrderItemKey = new Map()
+) => {
+  const totals = new Map();
+  purchaseOrders.forEach((order) => {
+    (order.items || []).forEach((item, index) => {
+      if (!item.boqItemId) {
+        return;
+      }
+      const receivedQty = resolveQtyByKeys(
+        receivedTotalsByOrderItemKey,
+        createOrderItemKeys(order.id, item, index)
+      );
+      if (receivedQty <= 0) {
+        return;
+      }
+      appendQuantityToMap(totals, `boq:${item.boqItemId}`, receivedQty);
+    });
+  });
+  return totals;
+};
+
+export const formatReportDate = (value) => formatDate(value);
 
 const buildReceiveRef = (receipt) => {
   const id = receipt?.receiveGoodsId ?? receipt?.id;
@@ -122,10 +186,19 @@ const createRow = ({
   vendorId,
   vendorName,
   qty,
+  totalQty = null,
+  receivedQty = null,
+  availableQty = null,
   location,
   status,
 }) => {
   const activityMeta = activityMetaMap[activityKey] ?? REPORT_ACTIVITY_TYPES[0];
+  const hasTotalQty =
+    totalQty !== null && totalQty !== undefined && totalQty !== "";
+  const hasReceivedQty =
+    receivedQty !== null && receivedQty !== undefined && receivedQty !== "";
+  const hasAvailableQty =
+    availableQty !== null && availableQty !== undefined && availableQty !== "";
   return {
     id: `${activityKey}-${documentId ?? "record"}-${lineId ?? "line"}`,
     activityKey,
@@ -144,6 +217,9 @@ const createRow = ({
     vendorId: vendorId ? String(vendorId) : "",
     vendorName: vendorName || DASH_PLACEHOLDER,
     qty: toNumber(qty),
+    totalQty: hasTotalQty ? toNumber(totalQty) : null,
+    receivedQty: hasReceivedQty ? toNumber(receivedQty) : null,
+    availableQty: hasAvailableQty ? toNumber(availableQty) : null,
     location: location || DASH_PLACEHOLDER,
     status: status || DASH_PLACEHOLDER,
   };
@@ -163,11 +239,23 @@ export const buildReportRows = ({
   const vendorMap = asNameMap(vendors);
   const locationMap = asNameMap(locations);
   const purchaseOrderMap = asNameMap(purchaseOrders);
+  const receivedTotalsByOrderItemKey = buildReceivedTotalsByOrderItemKey(receiveGoods);
+  const receivedTotalsByBoqItemId = buildReceivedTotalsByBoqItemId(
+    purchaseOrders,
+    receivedTotalsByOrderItemKey
+  );
   const rows = [];
 
   boqs.forEach((boq) => {
     const project = projectMap[String(boq.projectId)];
     (boq.items || []).forEach((item, index) => {
+      const receivedQty = item.id
+        ? resolveQtyByKeys(receivedTotalsByBoqItemId, [`boq:${item.id}`])
+        : 0;
+      const hasAvailableQty =
+        item.availableQty !== null &&
+        item.availableQty !== undefined &&
+        item.availableQty !== "";
       rows.push(
         createRow({
           activityKey: "boq",
@@ -179,6 +267,11 @@ export const buildReportRows = ({
           refNo: boq.boqNumber || buildFallbackRef("BOQ", boq.id),
           product: item.name,
           qty: item.quantity,
+          totalQty: item.quantity,
+          receivedQty,
+          availableQty: hasAvailableQty
+            ? item.availableQty
+            : Math.max(toNumber(item.quantity) - toNumber(item.consumedQty), 0),
           status: boq.status || "Draft",
         })
       );
@@ -190,6 +283,10 @@ export const buildReportRows = ({
     const vendor = vendorMap[String(order.vendorId)];
     const location = locationMap[String(order.locationId)];
     (order.items || []).forEach((item, index) => {
+      const receivedQty = resolveQtyByKeys(
+        receivedTotalsByOrderItemKey,
+        createOrderItemKeys(order.id, item, index)
+      );
       rows.push(
         createRow({
           activityKey: "purchase-order",
@@ -203,6 +300,9 @@ export const buildReportRows = ({
           vendorId: order.vendorId,
           vendorName: vendor?.name,
           qty: item.quantity,
+          totalQty: item.quantity,
+          receivedQty,
+          availableQty: Math.max(toNumber(item.quantity) - receivedQty, 0),
           location: location?.name,
           status: order.status || "Draft",
         })
@@ -219,6 +319,7 @@ export const buildReportRows = ({
     const vendor = vendorMap[String(vendorId)];
     const location = locationMap[String(locationId)];
     (receipt.items || []).forEach((item, index) => {
+      const orderedQty = item.orderedQty ?? item.quantity ?? null;
       rows.push(
         createRow({
           activityKey: "receive-goods",
@@ -232,8 +333,18 @@ export const buildReportRows = ({
           vendorId,
           vendorName: vendor?.name,
           qty: item.receivedQty,
+          totalQty: orderedQty,
+          receivedQty: item.receivedQty,
+          availableQty:
+            item.balanceQty !== null &&
+            item.balanceQty !== undefined &&
+            item.balanceQty !== ""
+              ? item.balanceQty
+              : orderedQty === null
+              ? null
+              : Math.max(toNumber(orderedQty) - toNumber(item.receivedQty), 0),
           location: location?.name,
-          status: receipt.status || order?.status || "Completed",
+          status: receipt.status || order?.status || "Received",
         })
       );
     });
@@ -242,6 +353,7 @@ export const buildReportRows = ({
   deliveryChallans.forEach((challan) => {
     const project = projectMap[String(challan.projectId)];
     const fromLocation = locationMap[String(challan.fromLocationId)];
+    const toLocation = locationMap[String(challan.toLocationId)];
     (challan.items || []).forEach((item, index) => {
       rows.push(
         createRow({
@@ -254,7 +366,8 @@ export const buildReportRows = ({
           refNo: challan.dcNumber || buildFallbackRef("DC", challan.id),
           product: item.name,
           qty: item.quantity,
-          location: challan.toLocation || fromLocation?.name,
+          totalQty: item.quantity,
+          location: toLocation?.name || challan.toLocation || fromLocation?.name,
           status: challan.status || "Draft",
         })
       );
@@ -278,6 +391,7 @@ export const buildReportRows = ({
             buildFallbackRef("CN", consumption.consumptionId ?? consumption.id),
           product: item.name,
           qty: item.quantity,
+          totalQty: item.quantity,
           location: location?.name,
           status: consumption.status || "Logged",
         })
@@ -347,13 +461,16 @@ export const getStatusBadgeClass = (status) => {
 
 export const buildExcelRows = (rows = []) =>
   rows.map((row) => ({
-    Date: formatReportDate(row.date, { withYear: true }),
+    Date: formatReportDate(row.date),
     Project: row.projectName,
     Activity: row.activityLabel,
     "Ref No": row.refNo,
     Product: row.product,
     Vendor: row.vendorName,
-    Qty: row.qty,
+    "Movement Qty": row.qty,
+    "Total Qty": row.totalQty ?? DASH_PLACEHOLDER,
+    "Received Qty": row.receivedQty ?? DASH_PLACEHOLDER,
+    "Available Qty": row.availableQty ?? DASH_PLACEHOLDER,
     Location: row.location,
     Status: row.status,
   }));

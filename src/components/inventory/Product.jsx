@@ -11,7 +11,7 @@ import {
   setProducts,
   updateProduct,
 } from "../../services/productsStore";
-import { fetchItems, updateItemApi } from "../../services/inventoryApi";
+import { deleteItemApi, fetchItems, updateItemApi } from "../../services/inventoryApi";
  
 const initialItems = [
   {
@@ -605,7 +605,7 @@ export default function Product() {
     }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     const target = items.find((item) => item.id === id);
     const label = target?.name || "this product";
 
@@ -616,8 +616,18 @@ export default function Product() {
       return;
     }
 
-    deleteProduct(id);
-    setItems((prev) => prev.filter((item) => item.id !== id));
+    try {
+      setEditApiError("");
+      await deleteItemApi(id);
+      deleteProduct(id);
+      setItems((prev) => prev.filter((item) => item.id !== id));
+    } catch (error) {
+      setEditApiError(
+        error?.response?.data?.error ??
+          error?.message ??
+          "Failed to delete product."
+      );
+    }
   };
 
   const normalizedProductSearch = deferredProductSearch.trim().toLowerCase();

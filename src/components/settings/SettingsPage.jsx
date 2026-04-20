@@ -353,6 +353,34 @@ const SettingsPage = () => {
                   className={inputClass}
                 />
               </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Business City
+                </label>
+                <input
+                  type="text"
+                  value={form.company.city}
+                  onChange={(event) =>
+                    updateSection("company", "city", event.target.value)
+                  }
+                  placeholder="Ex: Bengaluru"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Business Pincode
+                </label>
+                <input
+                  type="text"
+                  value={form.company.pincode}
+                  onChange={(event) =>
+                    updateSection("company", "pincode", event.target.value)
+                  }
+                  placeholder="Ex: 560001"
+                  className={inputClass}
+                />
+              </div>
               <div className="md:col-span-2">
                 <label className="text-sm font-medium text-slate-700">
                   Business Address
@@ -476,7 +504,7 @@ const SettingsPage = () => {
                   Inventory Defaults
                 </h2>
                 <p className="text-sm text-slate-500">
-                  Configure stock thresholds and valuation rules.
+                  Configure item defaults and valuation rules.
                 </p>
               </div>
               <span className="text-xs uppercase tracking-[0.3em] text-slate-400">
@@ -500,24 +528,6 @@ const SettingsPage = () => {
                   <option value="LTR">LTR</option>
                   <option value="BOX">BOX</option>
                 </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Low Stock Threshold
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={form.inventory.lowStockThreshold}
-                  onChange={(event) =>
-                    handleNumberChange(
-                      "inventory",
-                      "lowStockThreshold",
-                      event.target.value
-                    )
-                  }
-                  className={inputClass}
-                />
               </div>
               <div>
                 <label className="text-sm font-medium text-slate-700">

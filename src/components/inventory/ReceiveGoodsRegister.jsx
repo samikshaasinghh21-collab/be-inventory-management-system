@@ -1,6 +1,9 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
+import {
+  deleteReceiveGoods,
+  fetchReceiveGoods,
+} from "../../services/receiveGoodsApi";
 import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import { getProjects } from "../../services/projectsStore";
 import { fetchVendors } from "../../services/vendorsApi";
@@ -25,6 +28,19 @@ import {
   isCancelledPurchaseOrder,
   isLockedPurchaseOrder,
 } from "../../utils/purchaseOrderStatus";
+
+const formatAddressLine = (vendor) => {
+  const {
+    address = "",
+    city = "",
+    state = "",
+    pincode = "",
+  } = vendor ?? {};
+
+  return [address, [city, state, pincode].filter(Boolean).join(", ")]
+    .filter(Boolean)
+    .join(", ");
+};
 
 const toQuantity = (value) => {
   const parsed = Number(value);
@@ -107,18 +123,63 @@ const getReceiptTotals = (receipt) => {
 };
 
 const getReceiptItemKey = (item = {}, index = 0) =>
-  String(item.itemId ?? item.ItemId ?? item.id ?? item.Id ?? index);
+  String(
+    item.poItemId ??
+      item.PurchaseOrderItemId ??
+      item.itemId ??
+      item.ItemId ??
+      item.id ??
+      item.Id ??
+      index
+  );
 
 const findMatchingPoItem = (purchaseOrder, receiptItem, index) => {
   const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
-  return (
-    poItems.find(
-      (poItem, poIndex) =>
-        getReceiptItemKey(poItem, poIndex) === getReceiptItemKey(receiptItem, index)
-    ) ??
-    poItems[index] ??
-    null
-  );
+  if (!poItems.length) return null;
+
+  const receiptPoItemId = receiptItem.poItemId || receiptItem.PurchaseOrderItemId;
+  if (receiptPoItemId) {
+    const exactMatch = poItems.find(
+      (poItem) =>
+        poItem.id === receiptPoItemId ||
+        poItem.poItemId === receiptPoItemId ||
+        poItem.PurchaseOrderItemId === receiptPoItemId
+    );
+    if (exactMatch) return exactMatch;
+  }
+
+  const receiptItemId = receiptItem.itemId || receiptItem.ItemId;
+  if (receiptItemId) {
+    const itemIdMatch = poItems.find(
+      (poItem) => poItem.itemId === receiptItemId || poItem.ItemId === receiptItemId
+    );
+    if (itemIdMatch) return itemIdMatch;
+  }
+
+  // Try index-based matching first for better accuracy
+  if (index >= 0 && index < poItems.length) {
+    const indexMatch = poItems[index];
+    // Verify by name if available to avoid mismatches
+    const receiptName = String(receiptItem.name || receiptItem.Name || receiptItem.ItemName || "").trim().toLowerCase();
+    const indexItemName = String(indexMatch.name || indexMatch.Name || indexMatch.ItemName || "").trim().toLowerCase();
+
+    // Use index match if names are similar or both empty
+    if (!receiptName || !indexItemName || receiptName === indexItemName) {
+      return indexMatch;
+    }
+  }
+
+  // Only try name matching if we haven't found a match by index
+  const receiptName = String(receiptItem.name || receiptItem.Name || receiptItem.ItemName || "").trim().toLowerCase();
+  if (receiptName) {
+    const nameMatch = poItems.find(
+      (poItem) =>
+        String(poItem.name || poItem.Name || poItem.ItemName || "").trim().toLowerCase() === receiptName
+    );
+    if (nameMatch) return nameMatch;
+  }
+
+  return null;
 };
 
 const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
@@ -151,6 +212,7 @@ const ReceiveGoodsRegister = () => {
   const [filterVendor, setFilterVendor] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [closedPoPromptReceipt, setClosedPoPromptReceipt] = useState(null);
+  const [deleteLockedReceipt, setDeleteLockedReceipt] = useState(null);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminPasswordError, setAdminPasswordError] = useState("");
   const settings = useSettings();
@@ -202,6 +264,25 @@ const ReceiveGoodsRegister = () => {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  useEffect(() => {
+    const refreshData = () => {
+      void loadData();
+    };
+
+    window.addEventListener("purchase-orders:changed", refreshData);
+    window.addEventListener("receive-goods:changed", refreshData);
+    window.addEventListener("projects:changed", refreshData);
+    window.addEventListener("vendors:changed", refreshData);
+    window.addEventListener("locations:changed", refreshData);
+    return () => {
+      window.removeEventListener("purchase-orders:changed", refreshData);
+      window.removeEventListener("receive-goods:changed", refreshData);
+      window.removeEventListener("projects:changed", refreshData);
+      window.removeEventListener("vendors:changed", refreshData);
+      window.removeEventListener("locations:changed", refreshData);
+    };
   }, []);
 
   const poMap = useMemo(() => {
@@ -377,7 +458,68 @@ const ReceiveGoodsRegister = () => {
     setAdminPasswordError("");
   };
 
+  const executeReceiptDelete = async (receipt, { allowLockedEdit = false } = {}) => {
+    if (!receipt?.id) {
+      return;
+    }
+    try {
+      setApiError("");
+      await deleteReceiveGoods(receipt.id, {
+        allowLockedEdit,
+        auditBy: settings?.profile?.fullName || null,
+      });
+      if (viewReceipt?.id === receipt.id) {
+        setViewReceipt(null);
+      }
+      if (expandedId === receipt.id) {
+        setExpandedId(null);
+      }
+      await loadData();
+    } catch (error) {
+      setApiError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to delete receipt."
+      );
+    }
+  };
+
+  const handleDeleteReceipt = async (receipt) => {
+    const po = poMap[String(receipt.purchaseOrderId)];
+    const confirmed = window.confirm(
+      `Delete receipt ${receiptSequenceMap[String(receipt.id)] || receipt.id}? This will update the linked purchase order receipt totals.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    if (isLockedPurchaseOrder(po?.status)) {
+      setDeleteLockedReceipt(receipt);
+      setAdminPassword("");
+      setAdminPasswordError("");
+      return;
+    }
+    await executeReceiptDelete(receipt);
+  };
+
+  const confirmClosedPoReceiptDelete = async () => {
+    const nextError = getClosedPoAuthError(settings, adminPassword);
+    if (nextError) {
+      setAdminPasswordError(nextError);
+      return;
+    }
+    if (!deleteLockedReceipt) {
+      return;
+    }
+    await executeReceiptDelete(deleteLockedReceipt, { allowLockedEdit: true });
+    setDeleteLockedReceipt(null);
+    setAdminPassword("");
+    setAdminPasswordError("");
+  };
+
   const getReceiptTaxMode = (receipt) => {
+    if (String(receipt?.taxMode || "").trim().toLowerCase() === "inter") {
+      return "inter";
+    }
     const po = poMap[String(receipt?.purchaseOrderId)];
     const vendor = vendorMap[String(receipt?.vendorId || po?.vendorId)];
     return getGstTaxMode({
@@ -509,6 +651,7 @@ const ReceiveGoodsRegister = () => {
               <th className="p-3 text-left min-w-[160px]">Vendor</th>
               <th className="p-3 text-left min-w-[140px]">Location</th>
               <th className="p-3 text-left min-w-[140px]">Received Date</th>
+              <th className="p-3 text-left min-w-[180px]">Invoice No / Date</th>
               <th className="p-3 text-left min-w-[140px]">Received By</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[110px]">Items</th>
@@ -519,27 +662,27 @@ const ReceiveGoodsRegister = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   Loading receipts...
                 </td>
               </tr>
             )}
-            {!loading && filteredReceipts.length === 0 && (
+            {!loading && filteredWithSelectors.length === 0 && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   No receipts found.
                 </td>
               </tr>
             )}
             {!loading &&
-              filteredWithSelectors.map((receipt) => {
+              filteredWithSelectors.map((receipt, index) => {
                 const po = poMap[String(receipt.purchaseOrderId)];
                 const project = projectMap[String(receipt.projectId || po?.projectId)];
                 const vendor = vendorMap[String(receipt.vendorId || po?.vendorId)];
                 const location = locationMap[String(receipt.locationId || po?.locationId)];
                 const totals = getReceiptTotals(receipt);
                 return (
-                  <Fragment key={`${receipt.id}-${po?.poNumber || receipt.purchaseOrderId || receipt.receivedDate || ""}`}>
+                  <Fragment key={`${receipt.id ?? "receipt"}-${index}`}>
                     <tr
                       className="border-t hover:bg-slate-50 cursor-pointer"
                       onClick={() => toggleRow(receipt.id)}
@@ -555,6 +698,14 @@ const ReceiveGoodsRegister = () => {
                       <td className="p-3">{location?.name || "-"}</td>
                       <td className="p-3">
                         {formatDate(receipt.receivedDate) || "-"}
+                      </td>
+                      <td className="p-3">
+                        <div className="font-medium text-slate-800">
+                          {receipt.invoiceNumber || "-"}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {formatDate(receipt.invoiceDate) || "-"}
+                        </div>
                       </td>
                       <td className="p-3">{receipt.receivedBy || "-"}</td>
                       <td className="p-3">
@@ -595,11 +746,21 @@ const ReceiveGoodsRegister = () => {
                         >
                           Print
                         </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDeleteReceipt(receipt);
+                          }}
+                          className="text-red-600 text-sm"
+                        >
+                          Delete
+                        </button>
                       </td>
                     </tr>
                     {expandedId === receipt.id && (
                       <tr className="bg-slate-50">
-                        <td colSpan="11" className="p-4">
+                        <td colSpan="12" className="p-4">
                           <div className="space-y-4">
                             <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                               <span>
@@ -618,8 +779,20 @@ const ReceiveGoodsRegister = () => {
                                 <strong>Vendor:</strong> {vendor?.name || "-"}
                               </span>
                               <span>
+                                <strong>Vendor Address:</strong>{" "}
+                                {formatAddressLine(vendor) || "-"}
+                              </span>
+                              <span>
                                 <strong>Location:</strong>{" "}
                                 {location?.name || "-"}
+                              </span>
+                              <span>
+                                <strong>Invoice No:</strong>{" "}
+                                {receipt.invoiceNumber || "-"}
+                              </span>
+                              <span>
+                                <strong>Invoice Date:</strong>{" "}
+                                {formatDate(receipt.invoiceDate) || "-"}
                               </span>
                             </div>
 
@@ -654,19 +827,13 @@ const ReceiveGoodsRegister = () => {
                                         item.balanceQty ??
                                         item.BalanceQty ??
                                         ordered - received;
-                                      const poItemById =
-                                        po?.items?.find(
-                                          (poLine) =>
-                                            String(poLine.itemId ?? poLine.id) ===
-                                            String(item.itemId ?? item.id)
-                                        ) || null;
-                                      const poItemByIndex =
-                                        po?.items?.[idx] || null;
-                                      const poItem = poItemById || poItemByIndex || {};
+                                      const poItem = findMatchingPoItem(po, item, idx) || {};
                                       const displayItemName =
                                         item.name ||
                                         poItem.name ||
-                                        (item.itemId ? `Item ${item.itemId}` : "-");
+                                        item.itemId ||
+                                        `Item ${idx + 1}` ||
+                                        "-";
                                       const displayDescription =
                                         item.description || poItem.description || "-";
                                       const displayUnit = item.unit || poItem.unit || "-";
@@ -728,6 +895,8 @@ const ReceiveGoodsRegister = () => {
                 viewReceipt.id,
             },
             { label: "Received Date", value: formatDate(viewReceipt.receivedDate) },
+            { label: "Invoice No", value: viewReceipt.invoiceNumber || "-" },
+            { label: "Invoice Date", value: formatDate(viewReceipt.invoiceDate) || "-" },
             {
               label: "Status",
               value:
@@ -771,14 +940,7 @@ const ReceiveGoodsRegister = () => {
           ]}
           tableRows={(viewReceipt.items || []).map((item, index) => {
             const po = poMap[String(viewReceipt.purchaseOrderId)];
-            const poItemById =
-              po?.items?.find(
-                (poLine) =>
-                  String(poLine.itemId ?? poLine.id) ===
-                  String(item.itemId ?? item.id)
-              ) || null;
-            const poItemByIndex = po?.items?.[index] || null;
-            const poItem = poItemById || poItemByIndex || {};
+            const poItem = findMatchingPoItem(po, item, index) || {};
             const ordered =
               item.orderedQty ?? item.quantity ?? item.OrderedQty ?? 0;
             const received = item.receivedQty ?? item.ReceivedQty ?? 0;
@@ -792,7 +954,9 @@ const ReceiveGoodsRegister = () => {
               name:
                 item.name ||
                 poItem.name ||
-                (item.itemId ? `Item ${item.itemId}` : "-"),
+                item.itemId ||
+                `Item ${index + 1}` ||
+                "-",
               unit: item.unit || poItem.unit || "-",
               ordered,
               received,
@@ -819,7 +983,9 @@ const ReceiveGoodsRegister = () => {
                             poMap[String(viewReceipt.purchaseOrderId)]?.projectId
                         )
                       ]
-                    ).map((line) => <p key={line}>{line}</p>)
+                    ).map((line, lineIndex) => (
+                      <p key={`${line}-${lineIndex}`}>{line}</p>
+                    ))
                   ) : (
                     <p>-</p>
                   )}
@@ -828,6 +994,27 @@ const ReceiveGoodsRegister = () => {
               <div>
                 <p className="font-semibold">Notes</p>
                 <p>{viewReceipt.notes || "-"}</p>
+              </div>
+              <div>
+                <p className="font-semibold">Vendor</p>
+                <p>
+                  {vendorMap[
+                    String(
+                      viewReceipt.vendorId ||
+                        poMap[String(viewReceipt.purchaseOrderId)]?.vendorId
+                    )
+                  ]?.name || "-"}
+                </p>
+                <p>
+                  {formatAddressLine(
+                    vendorMap[
+                      String(
+                        viewReceipt.vendorId ||
+                          poMap[String(viewReceipt.purchaseOrderId)]?.vendorId
+                      )
+                    ]
+                  ) || "-"}
+                </p>
               </div>
             </div>
           }
@@ -867,6 +1054,26 @@ const ReceiveGoodsRegister = () => {
           setAdminPasswordError("");
         }}
         onConfirm={confirmClosedPoReceiptEdit}
+      />
+      <PasswordPromptModal
+        isOpen={Boolean(deleteLockedReceipt)}
+        title="Delete Locked PO Receipt"
+        description="Enter the admin password to delete a receipt linked to a locked purchase order."
+        password={adminPassword}
+        error={adminPasswordError}
+        confirmLabel="Delete Receipt"
+        onPasswordChange={(value) => {
+          setAdminPassword(value);
+          if (adminPasswordError) {
+            setAdminPasswordError("");
+          }
+        }}
+        onCancel={() => {
+          setDeleteLockedReceipt(null);
+          setAdminPassword("");
+          setAdminPasswordError("");
+        }}
+        onConfirm={confirmClosedPoReceiptDelete}
       />
     </div>
   );

@@ -1,8 +1,17 @@
 import api from "./api";
 
-const emitPurchaseOrdersChange = () => {
+const emitPurchaseOrdersChange = ({
+  includeBoqs = false,
+  includeReceiveGoods = false,
+} = {}) => {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("purchase-orders:changed"));
+    if (includeBoqs) {
+      window.dispatchEvent(new Event("boqs:changed"));
+    }
+    if (includeReceiveGoods) {
+      window.dispatchEvent(new Event("receive-goods:changed"));
+    }
   }
 };
 
@@ -21,6 +30,7 @@ const normalizePoItem = (item = {}) => {
       null,
     purchaseOrderId: item.purchaseOrderId ?? item.PurchaseOrderId ?? null,
     itemId: item.itemId ?? item.ItemId ?? null,
+    boqItemId: item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? null,
     name: item.name ?? item.Name ?? item.ItemName ?? "",
     description: item.description ?? item.Description ?? "",
     unit: item.unit ?? item.Unit ?? "PCS",
@@ -49,7 +59,7 @@ const normalizePoItem = (item = {}) => {
 };
 
 const normalizePurchaseOrder = (order = {}) => ({
-  id: order.id ?? order.PurchaseOrderId ?? null,
+  id: order.id ?? order.Id ?? order.PurchaseOrderId ?? null,
   poNumber:
     order.poNumber ??
     order.PONumber ??
@@ -59,6 +69,7 @@ const normalizePurchaseOrder = (order = {}) => ({
   projectId: order.projectId ?? order.ProjectId ?? null,
   vendorId: order.vendorId ?? order.VendorId ?? null,
   locationId: order.locationId ?? order.LocationId ?? null,
+  boqId: order.boqId ?? order.BOQId ?? order.BoqId ?? null,
   status: order.status ?? order.Status ?? "Draft",
   orderDate: order.orderDate ?? order.OrderDate ?? null,
   expectedDate:
@@ -89,14 +100,14 @@ export const fetchPurchaseOrders = async () => {
 export const createPurchaseOrder = async (payload) => {
   const response = await api.post("/purchase-orders", payload);
   const normalized = normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
-  emitPurchaseOrdersChange();
+  emitPurchaseOrdersChange({ includeBoqs: true, includeReceiveGoods: true });
   return normalized;
 };
 
 export const updatePurchaseOrder = async (id, payload) => {
   const response = await api.put(`/purchase-orders/${id}`, payload);
   const normalized = normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
-  emitPurchaseOrdersChange();
+  emitPurchaseOrdersChange({ includeBoqs: true, includeReceiveGoods: true });
   return normalized;
 };
 
@@ -106,11 +117,11 @@ export const updatePurchaseOrderStatus = async (id, status, options = {}) => {
     allowLockedEdit: options.allowLockedEdit === true,
   });
   const normalized = normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
-  emitPurchaseOrdersChange();
+  emitPurchaseOrdersChange({ includeReceiveGoods: true });
   return normalized;
 };
 
 export const deletePurchaseOrder = async (id) => {
   await api.delete(`/purchase-orders/${id}`);
-  emitPurchaseOrdersChange();
+  emitPurchaseOrdersChange({ includeReceiveGoods: true });
 };

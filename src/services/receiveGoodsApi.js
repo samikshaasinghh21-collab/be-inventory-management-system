@@ -38,6 +38,7 @@ const compareReceiveChronology = (left = {}, right = {}) => {
 const emitReceiveGoodsChange = () => {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("receive-goods:changed"));
+    window.dispatchEvent(new Event("purchase-orders:changed"));
   }
 };
 
@@ -134,6 +135,8 @@ export const normalizeReceiveGoods = (receipt = {}) => {
     locationId: receipt.locationId ?? receipt.LocationId ?? null,
     receivedDate: receipt.receivedDate ?? receipt.ReceivedDate ?? null,
     receivedBy: receipt.receivedBy ?? receipt.ReceivedBy ?? "",
+    invoiceNumber: receipt.invoiceNumber ?? receipt.InvoiceNumber ?? "",
+    invoiceDate: receipt.invoiceDate ?? receipt.InvoiceDate ?? null,
     billTo: receipt.billTo ?? receipt.BillTo ?? "",
     shipTo: receipt.shipTo ?? receipt.ShipTo ?? "",
     showProjectDetails:

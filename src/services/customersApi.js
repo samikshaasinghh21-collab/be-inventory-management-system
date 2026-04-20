@@ -24,6 +24,15 @@ export const normalizeCustomer = (customer = {}) => {
     companyName: customer.companyName ?? customer.CompanyName ?? "",
     address: customer.address ?? customer.Address ?? "",
     gstNumber: customer.gstNumber ?? customer.GSTNumber ?? "",
+    gstType:
+      String(customer.gstType ?? customer.GSTType ?? "intra")
+        .trim()
+        .toLowerCase() === "inter"
+        ? "inter"
+        : "intra",
+    city: customer.city ?? customer.City ?? "",
+    state: customer.state ?? customer.State ?? "",
+    pincode: customer.pincode ?? customer.Pincode ?? "",
     phone:
       customer.phone ??
       customer.ContactNumber ??

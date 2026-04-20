@@ -1,5 +1,11 @@
 import api from "./api";
 
+const emitVendorsChange = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("vendors:changed"));
+  }
+};
+
 export const normalizeVendorContact = (contact = {}) => ({
   id: contact.id ?? contact.VendorContactId ?? null,
   vendorId: contact.vendorId ?? contact.VendorId ?? null,
@@ -59,16 +65,21 @@ export const fetchVendors = async () => {
 
 export const createVendor = async (payload) => {
   const response = await api.post("/vendors", payload);
-  return normalizeVendor(response.data?.vendor ?? response.data);
+  const normalized = normalizeVendor(response.data?.vendor ?? response.data);
+  emitVendorsChange();
+  return normalized;
 };
 
 export const updateVendor = async (id, payload) => {
   const response = await api.put(`/vendors/${id}`, payload);
-  return normalizeVendor(response.data?.vendor ?? response.data);
+  const normalized = normalizeVendor(response.data?.vendor ?? response.data);
+  emitVendorsChange();
+  return normalized;
 };
 
 export const deleteVendor = async (id) => {
   await api.delete(`/vendors/${id}`);
+  emitVendorsChange();
 };
 
 export const syncVendorsCache = (vendors) => {

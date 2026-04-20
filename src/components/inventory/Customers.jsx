@@ -7,8 +7,13 @@ import {
 } from "../../services/customersApi";
 
 const emptyForm = {
+  customerName: "",
   companyName: "",
+  gstType: "intra",
   address: "",
+  city: "",
+  state: "",
+  pincode: "",
   gstNumber: "",
   phone: "",
   email: "",
@@ -22,7 +27,7 @@ const createEmptyContact = () => ({
   phone: "",
 });
 
-const resolveCustomerName = ({ companyName = "" } = {}) => companyName.trim();
+const resolveCustomerName = ({ customerName = "" } = {}) => customerName.trim();
 
 const getCustomerPrimaryName = (customer = {}) =>
   customer.name || customer.companyName || "-";
@@ -113,7 +118,11 @@ const Customers = () => {
         customer.name,
         customer.companyName,
         customer.address,
+        customer.city,
+        customer.state,
+        customer.pincode,
         customer.gstNumber,
+        customer.gstType,
         customer.phone,
         customer.email,
         customer.contactPerson,
@@ -145,8 +154,13 @@ const Customers = () => {
     setIsModalOpen(true);
     setEditingCustomer(customer);
     setForm({
-      companyName: customer.companyName ?? customer.name ?? "",
+      customerName: customer.name ?? customer.companyName ?? "",
+      companyName: customer.companyName ?? "",
+      gstType: customer.gstType ?? "intra",
       address: customer.address ?? "",
+      city: customer.city ?? "",
+      state: customer.state ?? "",
+      pincode: customer.pincode ?? "",
       gstNumber: customer.gstNumber ?? "",
       phone: customer.phone ?? "",
       email: customer.email ?? "",
@@ -193,7 +207,10 @@ const Customers = () => {
   const validate = () => {
     const nextErrors = {};
     if (!resolveCustomerName(form)) {
-      nextErrors.companyName = "Company name is required.";
+      nextErrors.customerName = "Customer name is required.";
+    }
+    if (!String(form.pincode || "").trim()) {
+      nextErrors.pincode = "Pincode is required.";
     }
 
     const normalizedContacts = contacts.filter((contact) =>
@@ -250,7 +267,11 @@ const Customers = () => {
     const payload = {
       name: nextName,
       companyName: form.companyName.trim() || undefined,
+      gstType: form.gstType === "inter" ? "inter" : "intra",
       address: form.address.trim() || undefined,
+      city: form.city.trim() || undefined,
+      state: form.state.trim() || undefined,
+      pincode: form.pincode.trim() || undefined,
       gstNumber: form.gstNumber.trim() || undefined,
       phone: form.phone.trim() || undefined,
       email: form.email.trim() || undefined,
@@ -375,6 +396,9 @@ const Customers = () => {
             <tr>
               <th className="p-3 text-left min-w-[180px]">Customer</th>
               <th className="p-3 text-left min-w-[180px]">Company</th>
+              <th className="p-3 text-left min-w-[120px]">GST Type</th>
+              <th className="p-3 text-left min-w-[180px]">City / State</th>
+              <th className="p-3 text-left min-w-[120px]">Pincode</th>
               <th className="p-3 text-left min-w-[220px]">Primary Contact</th>
               <th className="p-3 text-left min-w-[180px]">Email</th>
               <th className="p-3 text-left min-w-[140px]">Phone</th>
@@ -386,7 +410,7 @@ const Customers = () => {
           <tbody>
             {!loading && filteredCustomers.length === 0 && (
               <tr>
-                <td colSpan="8" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   {customers.length === 0
                     ? "No customers added yet."
                     : "No customers match your search."}
@@ -401,6 +425,15 @@ const Customers = () => {
                     {getCustomerPrimaryName(customer)}
                   </td>
                   <td className="p-3">{getCustomerCompanyName(customer)}</td>
+                  <td className="p-3">
+                    {customer.gstType === "inter"
+                      ? "Inter-State (IGST)"
+                      : "Intra-State (CGST + SGST)"}
+                  </td>
+                  <td className="p-3">
+                    {[customer.city, customer.state].filter(Boolean).join(", ") || "-"}
+                  </td>
+                  <td className="p-3">{customer.pincode || "-"}</td>
                   <td className="p-3">
                     {primaryContact ? (
                       <>
@@ -489,7 +522,24 @@ const Customers = () => {
                   <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                     <div>
                       <label className="text-sm font-medium text-slate-700">
-                        Company Name *
+                        Customer Name *
+                      </label>
+                      <input
+                        value={form.customerName}
+                        onChange={(event) =>
+                          updateField("customerName", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                      {errors.customerName && (
+                        <p className="mt-1 text-sm text-red-600">
+                          {errors.customerName}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Company Name
                       </label>
                       <input
                         value={form.companyName}
@@ -498,11 +548,6 @@ const Customers = () => {
                         }
                         className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
-                      {errors.companyName && (
-                        <p className="mt-1 text-sm text-red-600">
-                          {errors.companyName}
-                        </p>
-                      )}
                     </div>
                     <div>
                       <label className="text-sm font-medium text-slate-700">
@@ -535,6 +580,56 @@ const Customers = () => {
                         }
                         className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        GST Type
+                      </label>
+                      <select
+                        value={form.gstType}
+                        onChange={(event) =>
+                          updateField("gstType", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      >
+                        <option value="intra">Intra-State (CGST + SGST)</option>
+                        <option value="inter">Inter-State (IGST)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        City
+                      </label>
+                      <input
+                        value={form.city}
+                        onChange={(event) => updateField("city", event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        State
+                      </label>
+                      <input
+                        value={form.state}
+                        onChange={(event) => updateField("state", event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Pincode *
+                      </label>
+                      <input
+                        value={form.pincode}
+                        onChange={(event) => updateField("pincode", event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                      {errors.pincode && (
+                        <p className="mt-1 text-sm text-red-600">
+                          {errors.pincode}
+                        </p>
+                      )}
                     </div>
                     <div className="lg:col-span-2">
                       <label className="text-sm font-medium text-slate-700">

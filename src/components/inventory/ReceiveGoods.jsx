@@ -64,6 +64,18 @@ const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+const formatAddressLine = (vendor) => {
+  const {
+    address = "",
+    city = "",
+    state = "",
+    pincode = "",
+  } = vendor ?? {};
+
+  return [address, [city, state, pincode].filter(Boolean).join(", ")]
+    .filter(Boolean)
+    .join(", ");
+};
 const getItemKey = (item = {}, index = 0) =>
   String(
     item.poItemId ??
@@ -294,6 +306,8 @@ const createReceiveForm = (
   return {
     receivedDate: receipt?.receivedDate || getTodayDate(),
     receivedBy: receipt?.receivedBy || "",
+    invoiceNumber: receipt?.invoiceNumber || "",
+    invoiceDate: receipt?.invoiceDate || "",
     billTo: receipt?.billTo ?? defaults.billTo ?? "",
     shipTo: receipt?.shipTo ?? defaults.shipTo ?? "",
     showProjectDetails:
@@ -314,14 +328,41 @@ const createReceiveForm = (
 
 const findMatchingPoItem = (purchaseOrder, receiptItem, index) => {
   const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
-  return (
-    poItems.find(
-      (poItem, poIndex) =>
-        getItemKey(poItem, poIndex) === getItemKey(receiptItem, index)
-    ) ??
-    poItems[index] ??
-    null
-  );
+  if (!poItems.length) return null;
+
+  const receiptPoItemId = receiptItem.poItemId || receiptItem.PurchaseOrderItemId;
+  if (receiptPoItemId) {
+    const exactMatch = poItems.find(
+      (poItem) =>
+        poItem.id === receiptPoItemId ||
+        poItem.poItemId === receiptPoItemId ||
+        poItem.PurchaseOrderItemId === receiptPoItemId
+    );
+    if (exactMatch) return exactMatch;
+  }
+
+  const receiptItemId = receiptItem.itemId || receiptItem.ItemId;
+  if (receiptItemId) {
+    const itemIdMatch = poItems.find(
+      (poItem) => poItem.itemId === receiptItemId || poItem.ItemId === receiptItemId
+    );
+    if (itemIdMatch) return itemIdMatch;
+  }
+
+  const receiptName = String(receiptItem.name || receiptItem.Name || receiptItem.ItemName || "").trim().toLowerCase();
+  if (receiptName) {
+    const nameMatch = poItems.find(
+      (poItem) =>
+        String(poItem.name || poItem.Name || poItem.ItemName || "").trim().toLowerCase() === receiptName
+    );
+    if (nameMatch) return nameMatch;
+  }
+
+  if (index >= 0 && index < poItems.length) {
+    return poItems[index];
+  }
+
+  return null;
 };
 
 const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
@@ -415,6 +456,17 @@ const ReceiveGoods = () => {
 
   useEffect(() => {
     void loadData();
+  }, []);
+
+  useEffect(() => {
+    const refreshPurchaseOrders = () => {
+      void loadData();
+    };
+
+    window.addEventListener("purchase-orders:changed", refreshPurchaseOrders);
+    return () => {
+      window.removeEventListener("purchase-orders:changed", refreshPurchaseOrders);
+    };
   }, []);
 
   useEffect(() => {
@@ -592,58 +644,6 @@ const ReceiveGoods = () => {
       }),
     [receiveForm.items]
   );
-  const serialValidationState = useMemo(() => {
-    const seen = new Set();
-    let firstCountError = null;
-    let duplicateSerial = "";
-
-    receiveItems.forEach((item, index) => {
-      const expectedCount = Math.max(toNumber(item.receivedQty), 0);
-      const serialNumbers = getItemSerialNumbers(item);
-
-      if (
-        item.serialRequired &&
-        expectedCount > 0 &&
-        serialNumbers.length !== expectedCount &&
-        !firstCountError
-      ) {
-        firstCountError = {
-          itemName: item.name || `Item ${index + 1}`,
-          expectedCount,
-          receivedCount: serialNumbers.length,
-          requiresExactMatch: true,
-        };
-      }
-
-      if (
-        !item.serialRequired &&
-        expectedCount > 0 &&
-        serialNumbers.length > expectedCount &&
-        !firstCountError
-      ) {
-        firstCountError = {
-          itemName: item.name || `Item ${index + 1}`,
-          expectedCount,
-          receivedCount: serialNumbers.length,
-          requiresExactMatch: false,
-        };
-      }
-
-      serialNumbers.forEach((serialNumber) => {
-        const key = serialNumber.toLowerCase();
-        if (!duplicateSerial && seen.has(key)) {
-          duplicateSerial = serialNumber;
-        }
-        seen.add(key);
-      });
-    });
-
-    return {
-      firstCountError,
-      duplicateSerial,
-      hasError: Boolean(firstCountError || duplicateSerial),
-    };
-  }, [receiveItems]);
 
   const totals = useMemo(
     () =>
@@ -819,14 +819,6 @@ const ReceiveGoods = () => {
     setApiError("");
   };
 
-  const handleSerialTrackingToggle = (itemKey) => {
-    updateReceiveItem(itemKey, (item) => ({
-      ...item,
-      serialRequired: !Boolean(item.serialRequired),
-    }));
-    setApiError("");
-  };
-
   const handleReceiveSubmit = async (event) => {
     event.preventDefault();
     if (!selectedPurchaseOrder) {
@@ -837,23 +829,25 @@ const ReceiveGoods = () => {
       setApiError(getPurchaseOrderLockMessage(selectedPurchaseOrder?.status));
       return;
     }
-    if (serialValidationState.firstCountError) {
-      const {
-        itemName,
-        expectedCount,
-        receivedCount,
-        requiresExactMatch,
-      } = serialValidationState.firstCountError;
+    if (!selectedPurchaseOrder?.id) {
+      setApiError("Please select a purchase order before saving the receipt.");
+      return;
+    }
+    const positiveItems = receiveItems.filter(
+      (item) => toNumber(item.receivedQty) > 0
+    );
+    if (!positiveItems.length) {
       setApiError(
-        requiresExactMatch
-          ? `Serial count mismatch for ${itemName}. Need ${expectedCount}, received ${receivedCount}.`
-          : `Too many serial numbers entered for ${itemName}. Enter up to ${expectedCount} serial numbers for the received quantity.`
+        "At least one line item must have a received quantity greater than zero."
       );
       return;
     }
-    if (serialValidationState.duplicateSerial) {
+    const invalidQtyItem = positiveItems.find(
+      (item) => toNumber(item.receivedQty) > toNumber(item.pendingQty)
+    );
+    if (invalidQtyItem) {
       setApiError(
-        `Duplicate serial number found in this receipt: ${serialValidationState.duplicateSerial}.`
+        `Received quantity for ${invalidQtyItem.name || "item"} cannot exceed pending quantity (${toNumber(invalidQtyItem.pendingQty)}).`
       );
       return;
     }
@@ -868,10 +862,13 @@ const ReceiveGoods = () => {
         locationId: selectedPurchaseOrder.locationId || null,
         receivedDate: receiveForm.receivedDate || null,
         receivedBy: receiveForm.receivedBy.trim() || null,
+        invoiceNumber: receiveForm.invoiceNumber.trim() || null,
+        invoiceDate: receiveForm.invoiceDate || null,
         billTo: receiveForm.billTo.trim() || null,
         shipTo: receiveForm.shipTo.trim() || null,
         showProjectDetails: receiveForm.showProjectDetails !== false,
         notes: receiveForm.notes.trim() || null,
+        taxMode: getPurchaseOrderTaxMode(selectedPurchaseOrder),
         status: receiveForm.status || nextStatusPreview,
         items: receiveItems.map((item) => ({
           poItemId: item.poItemId ?? item.id ?? null,
@@ -879,12 +876,13 @@ const ReceiveGoods = () => {
           name: item.name || "",
           description: item.description || "",
           unit: item.unit || "PCS",
-          serialRequired: Boolean(item.serialRequired),
+          serialRequired: false,
           serialNumbers:
             toNumber(item.receivedQty) > 0 ? getItemSerialNumbers(item) : [],
-          receivedQty: item.receivedQty,
+          receivedQty: toNumber(item.receivedQty),
         })),
         allowLockedEdit: isSelectedPurchaseOrderClosed && canEditClosedReceipt,
+        auditBy: settings?.profile?.fullName || null,
       };
       const savedReceipt = editingReceipt
         ? await updateReceiveGoods(editingReceipt.id, payload)
@@ -902,9 +900,9 @@ const ReceiveGoods = () => {
       const refreshedPurchaseOrders = await fetchPurchaseOrders();
       setPurchaseOrders(Array.isArray(refreshedPurchaseOrders) ? refreshedPurchaseOrders : []);
     } catch (error) {
-      setApiError(
-        error?.response?.data?.error ?? error?.message ?? "Failed to save receipt."
-      );
+      const responseError = error?.response?.data?.error;
+      const rawMessage = responseError || error?.message || "Failed to save receipt.";
+      setApiError(rawMessage);
     } finally {
       setIsSaving(false);
     }
@@ -932,6 +930,7 @@ const ReceiveGoods = () => {
       companyGstin: company.gstin,
     });
   };
+  const selectedPurchaseOrderTaxMode = getPurchaseOrderTaxMode(selectedPurchaseOrder);
 
   const viewPurchaseOrder = viewReceipt
     ? purchaseOrders.find((record) => String(record.id) === String(viewReceipt.purchaseOrderId)) || null
@@ -947,7 +946,7 @@ const ReceiveGoods = () => {
     : null;
   const viewReceiptSummary = buildGstSummary(
     buildReceiptSummaryItems(viewReceipt, viewPurchaseOrder),
-    { taxMode: getPurchaseOrderTaxMode(viewPurchaseOrder) }
+    { taxMode: viewReceipt?.taxMode || getPurchaseOrderTaxMode(viewPurchaseOrder) }
   );
   const viewBillTo = splitDocumentText(
     viewReceipt?.billTo || buildReceiveBillToText(viewProject)
@@ -1212,6 +1211,14 @@ const ReceiveGoods = () => {
                   </div>
                   <div>
                     <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                      Vendor Address
+                    </span>
+                    <p className="font-medium text-slate-800">
+                      {formatAddressLine(selectedVendor) || "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
                       Location
                     </span>
                     <p className="font-medium text-slate-800">{selectedLocation?.name || "-"}</p>
@@ -1238,6 +1245,16 @@ const ReceiveGoods = () => {
                     </span>
                     <p className="font-medium text-slate-800">
                       {formatDate(selectedReceipt?.receivedDate) || "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                      GST Mode
+                    </span>
+                    <p className="font-medium text-slate-800">
+                      {selectedPurchaseOrderTaxMode === "inter"
+                        ? "Inter-State (IGST)"
+                        : "Intra-State (CGST + SGST)"}
                     </p>
                   </div>
                 </div>
@@ -1348,6 +1365,33 @@ const ReceiveGoods = () => {
                       />
                     </div>
                     <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Invoice Number
+                      </label>
+                      <input
+                        type="text"
+                        value={receiveForm.invoiceNumber}
+                        onChange={(event) =>
+                          handleReceiveFieldChange("invoiceNumber", event.target.value)
+                        }
+                        disabled={isReceiveReadOnly}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Invoice Date
+                      </label>
+                      <DateInput
+                        value={receiveForm.invoiceDate}
+                        onChange={(value) =>
+                          handleReceiveFieldChange("invoiceDate", value || "")
+                        }
+                        disabled={isReceiveReadOnly}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
                       <label className="text-sm font-medium text-slate-700">Bill To</label>
                       <textarea
                         value={receiveForm.billTo}
@@ -1422,10 +1466,10 @@ const ReceiveGoods = () => {
                   </div>
 
                   <div className="mb-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    Serial entry is available for every line item. Type serial numbers
-                    manually or upload an Excel file (`.xlsx`, `.xls`, `.csv`). Turn
-                    tracking on for any line where serial count must match the received
-                    quantity. Supported headers: `Serial`, `Serial No`, `Serial Number`.
+                    Serial entry is optional reference data only. Type serial numbers
+                    manually or upload an Excel file (`.xlsx`, `.xls`, `.csv`) if you want
+                    to capture them, but they will not block saving the receipt. Supported
+                    headers: `Serial`, `Serial No`, `Serial Number`.
                   </div>
 
                   <div className="overflow-x-auto">
@@ -1444,19 +1488,11 @@ const ReceiveGoods = () => {
                           const lineKey = getReceiveLineKey(item, index);
                           const serialNumbers = getItemSerialNumbers(item);
                           const expectedSerialCount = Math.max(toNumber(item.receivedQty), 0);
-                          const hasSerialCountError =
-                            item.serialRequired &&
-                            expectedSerialCount > 0 &&
-                            serialNumbers.length !== expectedSerialCount;
-                          const hasSerialOverflow =
-                            !item.serialRequired &&
-                            expectedSerialCount > 0 &&
-                            serialNumbers.length > expectedSerialCount;
-                          const hasSerialWarning =
-                            hasSerialCountError || hasSerialOverflow;
+                          const hasSerialWarning = false;
+                          const uniqueItemKey = `receive-item-${index}-${item.id ?? item.poItemId ?? item.itemId ?? index}`;
 
                           return (
-                            <Fragment key={lineKey}>
+                            <Fragment key={uniqueItemKey}>
                               <tr className="border-t">
                                 <td className="p-3">
                                   <div className="font-medium text-slate-800">{item.name || "-"}</div>
@@ -1494,27 +1530,18 @@ const ReceiveGoods = () => {
                                     <div>
                                       <div className="mb-2 flex flex-wrap items-center gap-2">
                                         <label className="block text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                                          Manual Serial Entry
+                                          Serial Reference
                                         </label>
                                         <button
                                           type="button"
-                                          onClick={() => handleSerialTrackingToggle(lineKey)}
                                           disabled={isReceiveReadOnly}
-                                          className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${
-                                            item.serialRequired
-                                              ? "border-indigo-200 bg-indigo-50 text-indigo-700"
-                                              : "border-slate-200 bg-white text-slate-600"
-                                          } disabled:cursor-not-allowed disabled:opacity-60`}
+                                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
-                                          {item.serialRequired
-                                            ? "Tracking On"
-                                            : "Tracking Off"}
+                                          Optional
                                         </button>
                                       </div>
                                       <p className="mb-2 text-xs text-slate-500">
-                                        {item.serialRequired
-                                          ? "Write or paste serial numbers here. Tracking is enabled, so the serial count must match the received quantity."
-                                          : "Write or upload serial numbers if you want to capture them. Tracking is off, so serial entry stays optional."}
+                                        Write or paste serial numbers here if you want to keep them as a reference. They are optional and will not block saving.
                                       </p>
                                       <textarea
                                         value={item.serialInput ?? ""}
@@ -1523,9 +1550,7 @@ const ReceiveGoods = () => {
                                         }
                                         disabled={isReceiveReadOnly}
                                         placeholder={
-                                          item.serialRequired
-                                            ? "Type serial numbers manually, one per line"
-                                            : "Optional serial numbers, one per line"
+                                          "Optional serial numbers, one per line"
                                         }
                                         className={`min-h-[92px] w-full rounded-md border px-3 py-2 text-sm ${
                                           hasSerialWarning
@@ -1541,9 +1566,9 @@ const ReceiveGoods = () => {
                                         }`}
                                       >
                                         Entered: {serialNumbers.length}
-                                        {item.serialRequired
-                                          ? ` of ${expectedSerialCount} required`
-                                          : ` of ${expectedSerialCount} received`}
+                                        {expectedSerialCount > 0
+                                          ? ` of ${expectedSerialCount} received`
+                                          : ""}
                                       </p>
                                     </div>
 
@@ -1595,16 +1620,15 @@ const ReceiveGoods = () => {
                       <span>Received: {totals.received}</span>
                       <span>Balance: {totals.balance}</span>
                     </div>
-                    <button
-                      type="submit"
-                      disabled={
-                        isSaving ||
-                        receiptLoading ||
-                        isReceiveReadOnly ||
-                        serialValidationState.hasError
-                      }
-                      className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
+                      <button
+                        type="submit"
+                        disabled={
+                          isSaving ||
+                          receiptLoading ||
+                          isReceiveReadOnly
+                        }
+                        className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
                       {isSaving
                         ? "Saving..."
                         : editingReceipt
@@ -1645,6 +1669,7 @@ const ReceiveGoods = () => {
             purchaseOrderPreviewContact?.phone ||
               purchaseOrderPreviewVendor?.phone ||
               "-",
+            formatAddressLine(purchaseOrderPreviewVendor) || "-",
           ]}
           rightBlockTitle="Project"
           rightBlockLines={[
@@ -1704,6 +1729,8 @@ const ReceiveGoods = () => {
           primaryPairs={[
             { label: "Receipt Ref", value: viewPurchaseOrder?.poNumber || viewReceipt.id },
             { label: "Received Date", value: formatDate(viewReceipt.receivedDate) || "-" },
+            { label: "Invoice No", value: viewReceipt.invoiceNumber || "-" },
+            { label: "Invoice Date", value: formatDate(viewReceipt.invoiceDate) || "-" },
             { label: "Status", value: viewReceipt.status || viewPurchaseOrder?.status || "Draft" },
             { label: "Received By", value: viewReceipt.receivedBy || "-" },
           ]}
@@ -1749,7 +1776,9 @@ const ReceiveGoods = () => {
                 <div>
                   <p className="font-semibold">Project Details</p>
                   {viewProjectDetailLines.length ? (
-                    viewProjectDetailLines.map((line) => <p key={line}>{line}</p>)
+                    viewProjectDetailLines.map((line, lineIndex) => (
+                      <p key={`${line}-${lineIndex}`}>{line}</p>
+                    ))
                   ) : (
                     <p>-</p>
                   )}
@@ -1762,6 +1791,7 @@ const ReceiveGoods = () => {
               <div>
                 <p className="font-semibold">Vendor</p>
                 <p>{viewVendor?.name || "-"}</p>
+                <p>{formatAddressLine(viewVendor) || "-"}</p>
               </div>
             </div>
           }

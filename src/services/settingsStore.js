@@ -17,7 +17,9 @@ export const DEFAULT_SETTINGS = {
     email: "",
     phone: "",
     address: "",
+    city: "",
     state: "",
+    pincode: "",
     gstin: "",
   },
   preferences: {

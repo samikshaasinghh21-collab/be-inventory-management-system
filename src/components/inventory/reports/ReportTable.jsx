@@ -55,7 +55,10 @@ const ReportTable = ({
               <th className="px-4 py-3 text-left font-semibold min-w-[130px]">Ref No</th>
               <th className="px-4 py-3 text-left font-semibold min-w-[180px]">Product</th>
               <th className="px-4 py-3 text-left font-semibold min-w-[170px]">Vendor</th>
-              <th className="px-4 py-3 text-right font-semibold min-w-[90px]">Qty</th>
+              <th className="px-4 py-3 text-right font-semibold min-w-[100px]">Total Qty</th>
+              <th className="px-4 py-3 text-right font-semibold min-w-[110px]">Received Qty</th>
+              <th className="px-4 py-3 text-right font-semibold min-w-[110px]">Available Qty</th>
+              <th className="px-4 py-3 text-right font-semibold min-w-[90px]">Moved Qty</th>
               <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Location</th>
               <th className="px-4 py-3 text-left font-semibold min-w-[130px]">Status</th>
             </tr>
@@ -63,13 +66,13 @@ const ReportTable = ({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="9" className="px-4 py-10 text-center text-slate-500">
+                <td colSpan="12" className="px-4 py-10 text-center text-slate-500">
                   Loading report data...
                 </td>
               </tr>
             ) : pagedRows.length === 0 ? (
               <tr>
-                <td colSpan="9" className="px-4 py-10 text-center text-slate-500">
+                <td colSpan="12" className="px-4 py-10 text-center text-slate-500">
                   No report rows found for the selected filters.
                 </td>
               </tr>
@@ -92,6 +95,21 @@ const ReportTable = ({
                   <td className="px-4 py-3 font-medium text-slate-800">{row.refNo}</td>
                   <td className="px-4 py-3 text-slate-700">{row.product}</td>
                   <td className="px-4 py-3 text-slate-700">{row.vendorName}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                    {row.totalQty === null
+                      ? "-"
+                      : Number(row.totalQty || 0).toLocaleString("en-IN")}
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                    {row.receivedQty === null
+                      ? "-"
+                      : Number(row.receivedQty || 0).toLocaleString("en-IN")}
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                    {row.availableQty === null
+                      ? "-"
+                      : Number(row.availableQty || 0).toLocaleString("en-IN")}
+                  </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">
                     {Number(row.qty || 0).toLocaleString("en-IN")}
                   </td>

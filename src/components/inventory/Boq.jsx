@@ -185,6 +185,17 @@ const Boq = () => {
   }, []);
 
   useEffect(() => {
+    const handleBoqChange = () => {
+      void loadData();
+    };
+
+    window.addEventListener("boqs:changed", handleBoqChange);
+    return () => {
+      window.removeEventListener("boqs:changed", handleBoqChange);
+    };
+  }, []);
+
+  useEffect(() => {
     if (editingId || form.projectId || !projects.length) {
       return;
     }
@@ -330,6 +341,7 @@ const Boq = () => {
       date: form.date,
       notes: form.notes,
       items: cleanedItems.map((item) => ({
+        id: item.id ?? null,
         name: item.name,
         description: item.description,
         serialNumber: item.serialNumber,

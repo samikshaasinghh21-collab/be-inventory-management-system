@@ -282,11 +282,22 @@ const Dashboard = () => {
 
   useEffect(() => {
     const reload = () => void loadDashboard({ silent: true });
+    window.addEventListener("boqs:changed", reload);
+    window.addEventListener("purchase-orders:changed", reload);
+    window.addEventListener("receive-goods:changed", reload);
+    window.addEventListener("delivery-challans:changed", reload);
     window.addEventListener("consumptions:changed", reload);
     window.addEventListener(`${WORKFLOW_CONSUMPTION_KEY}:changed`, reload);
     window.addEventListener(`${WORKFLOW_GOODS_DELIVERED_KEY}:changed`, reload);
     window.addEventListener("projects:changed", reload);
+    window.addEventListener("vendors:changed", reload);
+    window.addEventListener("locations:changed", reload);
+    window.addEventListener("settings:changed", reload);
     return () => {
+      window.removeEventListener("boqs:changed", reload);
+      window.removeEventListener("purchase-orders:changed", reload);
+      window.removeEventListener("receive-goods:changed", reload);
+      window.removeEventListener("delivery-challans:changed", reload);
       window.removeEventListener("consumptions:changed", reload);
       window.removeEventListener(`${WORKFLOW_CONSUMPTION_KEY}:changed`, reload);
       window.removeEventListener(
@@ -294,6 +305,9 @@ const Dashboard = () => {
         reload
       );
       window.removeEventListener("projects:changed", reload);
+      window.removeEventListener("vendors:changed", reload);
+      window.removeEventListener("locations:changed", reload);
+      window.removeEventListener("settings:changed", reload);
     };
   }, [loadDashboard]);
 
@@ -532,8 +546,23 @@ const Dashboard = () => {
       ...receiveGoods.map((receipt) => ({
         id: `receipt-${receipt.id}`,
         date: receipt.receivedDate ?? receipt.createdAt,
-        title: `Receipt ${poMap[String(receipt.purchaseOrderId)]?.poNumber || ""}`,
-        detail: `${sumQty(receipt.items, "receivedQty")} units`,
+        title: `Goods received${
+          locationMap[
+            String(receipt.locationId ?? poMap[String(receipt.purchaseOrderId)]?.locationId)
+          ]?.name
+            ? ` at ${
+                locationMap[
+                  String(
+                    receipt.locationId ??
+                      poMap[String(receipt.purchaseOrderId)]?.locationId
+                  )
+                ]?.name
+              }`
+            : ""
+        }`,
+        detail: `${
+          poMap[String(receipt.purchaseOrderId)]?.poNumber || "Receipt"
+        } • ${sumQty(receipt.items, "receivedQty")} units`,
         color: "#10b981",
         kind: "receipt",
       })),

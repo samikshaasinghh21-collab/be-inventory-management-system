@@ -240,12 +240,18 @@ const ReallocateReturn = () => {
  
   useEffect(() => {
     const handler = () => {
+      void loadPurchaseOrders();
+      void loadBoqs();
       void loadConsumptions();
       void loadRecords();
     };
+    window.addEventListener("purchase-orders:changed", handler);
+    window.addEventListener("boqs:changed", handler);
     window.addEventListener("reallocate-inventory:changed", handler);
     window.addEventListener("receive-goods:changed", handler);
     return () => {
+      window.removeEventListener("purchase-orders:changed", handler);
+      window.removeEventListener("boqs:changed", handler);
       window.removeEventListener("reallocate-inventory:changed", handler);
       window.removeEventListener("receive-goods:changed", handler);
     };

@@ -17,6 +17,7 @@ import {
   formatTaxPercentage,
   parseTaxPercentage,
 } from "../../utils/taxUtils";
+import { getGstTaxMode } from "../../utils/gstUtils";
 import { generateNextPurchaseOrderNumber } from "../../utils/purchaseOrderNumber";
 import {
   getPurchaseOrderLockMessage,
@@ -31,6 +32,7 @@ import {
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
+  boqItemId: null,
   name: "",
   description: "",
   unit: "PCS",
@@ -55,6 +57,19 @@ const createFormState = () => ({
   expectedDate: "",
   notes: "",
 });
+
+const formatAddressLine = (vendor) => {
+  const {
+    address = "",
+    city = "",
+    state = "",
+    pincode = "",
+  } = vendor ?? {};
+
+  return [address, [city, state, pincode].filter(Boolean).join(", ")]
+    .filter(Boolean)
+    .join(", ");
+};
 
 const PurchaseOrder = () => {
   const navigate = useNavigate();
@@ -85,6 +100,7 @@ const PurchaseOrder = () => {
       setEditingId(record.id);
       setEditingStatus(record.status || "Draft");
       setClosedPoOverrideApproved(Boolean(location.state?.closedPoAuthorized));
+      setSelectedBoqId(record.boqId ? String(record.boqId) : "");
       setForm({
         poNumber: record.poNumber || "",
         projectId: record.projectId || "",
@@ -98,6 +114,7 @@ const PurchaseOrder = () => {
       const mappedItems = (record.items ?? []).map((item) => ({
         id: item.id ?? Date.now() + Math.random(),
         itemId: item.itemId ?? item.id ?? null,
+        boqItemId: item.boqItemId ?? null,
         name: item.name ?? "",
         description: item.description ?? "",
         unit: item.unit ?? "PCS",
@@ -181,6 +198,20 @@ const PurchaseOrder = () => {
     void loadLocations();
     void loadVendors();
     void loadBoqs();
+  }, []);
+
+  useEffect(() => {
+    const refreshLinkedData = () => {
+      void loadRecords();
+      void loadBoqs();
+    };
+
+    window.addEventListener("purchase-orders:changed", refreshLinkedData);
+    window.addEventListener("boqs:changed", refreshLinkedData);
+    return () => {
+      window.removeEventListener("purchase-orders:changed", refreshLinkedData);
+      window.removeEventListener("boqs:changed", refreshLinkedData);
+    };
   }, []);
 
   useEffect(() => {
@@ -282,11 +313,6 @@ const PurchaseOrder = () => {
     }
   }, [form.projectId, selectedBoqId, boqs]);
 
-  const totalValue = records.reduce(
-    (sum, record) => sum + buildGstSummary(record.items || []).total,
-    0
-  );
-
   const boqsForProject = useMemo(() => {
     if (!form.projectId) return [];
     return boqs.filter(
@@ -294,12 +320,39 @@ const PurchaseOrder = () => {
     );
   }, [boqs, form.projectId]);
 
+  const vendorMap = useMemo(
+    () =>
+      vendors.reduce((acc, vendor) => {
+        acc[String(vendor.id)] = vendor;
+        return acc;
+      }, {}),
+    [vendors]
+  );
+  const selectedVendor = vendorMap[String(form.vendorId)] ?? null;
+  const selectedTaxMode = getGstTaxMode({
+    vendorState: selectedVendor?.state,
+    vendorGstin: selectedVendor?.gstNumber,
+    companyState: settings?.company?.state,
+    companyGstin: settings?.company?.gstin,
+  });
+  const currentSummary = buildGstSummary(items, { taxMode: selectedTaxMode });
+  const getRecordTaxMode = (record) => {
+    const vendor = vendorMap[String(record?.vendorId)];
+    return getGstTaxMode({
+      vendorState: vendor?.state,
+      vendorGstin: vendor?.gstNumber,
+      companyState: settings?.company?.state,
+      companyGstin: settings?.company?.gstin,
+    });
+  };
+
   const isEditingLocked = Boolean(editingId) && isLockedPurchaseOrder(editingStatus);
   const isEditingLockedWithoutOverride = isEditingLocked && !closedPoOverrideApproved;
 
   const resetForm = () => {
     setForm(createFormState());
     setItems([createLineItem()]);
+    setSelectedBoqId("");
     setErrors({});
     setEditingId(null);
     setEditingStatus("");
@@ -345,6 +398,7 @@ const PurchaseOrder = () => {
       projectId: form.projectId || null,
       vendorId: form.vendorId || null,
       locationId: form.locationId || null,
+      boqId: selectedBoqId || null,
       status: form.status,
       orderDate: form.orderDate || null,
       expectedDate: form.expectedDate || null,
@@ -356,6 +410,7 @@ const PurchaseOrder = () => {
         const lineLocation = String(item.location ?? item.notes ?? "").trim();
         return {
           itemId: item.itemId ?? null,
+          boqItemId: item.boqItemId ?? null,
           name: item.name?.trim() || "",
           description: item.description || "",
           unit: item.unit || "PCS",
@@ -365,9 +420,7 @@ const PurchaseOrder = () => {
             formatTaxPercentage(item.taxPercentage ?? 0),
           serialNumber: String(item.serialNumber ?? "").trim(),
           serialRequired: item.serialRequired ?? false,
-          taxPercentage: parseTaxPercentage(
-            item.taxPercentage ?? item.gst ?? 0
-          ),
+          taxPercentage: parseTaxPercentage(item.gst ?? item.taxPercentage ?? 0),
           location: lineLocation,
           notes: lineLocation,
           quantity: qty,
@@ -414,6 +467,7 @@ const PurchaseOrder = () => {
       return {
         id: item.id ?? Date.now() + Math.random(),
         itemId: item.itemId ?? null,
+        boqItemId: item.id ?? item.boqItemId ?? null,
         name: item.name || "",
         description: item.description || "",
         unit: item.unit || "PCS",
@@ -505,7 +559,16 @@ const PurchaseOrder = () => {
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
           <p className="text-sm text-slate-500">Total Value</p>
           <p className="text-2xl font-semibold text-slate-800">
-            {formatCurrency(totalValue)}
+            {formatCurrency(
+              records.reduce(
+                (sum, record) =>
+                  sum +
+                  buildGstSummary(record.items || [], {
+                    taxMode: getRecordTaxMode(record),
+                  }).total,
+                0
+              )
+            )}
           </p>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
@@ -687,6 +750,46 @@ const PurchaseOrder = () => {
                 showCalendarButton={!isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
+            </div>
+            <div className="md:col-span-3 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr,0.8fr]">
+              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                  Vendor Details
+                </p>
+                <p className="mt-2 text-base font-semibold text-slate-800">
+                  {selectedVendor?.name || "Select a vendor"}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {formatAddressLine(selectedVendor) || "Vendor address will appear here."}
+                </p>
+                <div className="mt-3 grid grid-cols-1 gap-2 text-sm text-slate-600 sm:grid-cols-2">
+                  <p>GST No: {selectedVendor?.gstNumber || "-"}</p>
+                  <p>
+                    Contact:{" "}
+                    {selectedVendor?.contacts?.[0]?.contactName ||
+                      selectedVendor?.phone ||
+                      selectedVendor?.email ||
+                      "-"}
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                  GST Summary
+                </p>
+                <p className="mt-2 text-base font-semibold text-slate-800">
+                  {selectedTaxMode === "inter"
+                    ? "Inter-State (IGST)"
+                    : "Intra-State (CGST + SGST)"}
+                </p>
+                <div className="mt-3 space-y-1 text-sm text-slate-600">
+                  <p>Subtotal: {formatCurrency(currentSummary.subtotal)}</p>
+                  <p>Tax: {formatCurrency(currentSummary.totalTax)}</p>
+                  <p className="font-medium text-slate-800">
+                    Grand Total: {formatCurrency(currentSummary.total)}
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="md:col-span-3 border border-slate-200 rounded-lg p-4 bg-slate-50/70">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

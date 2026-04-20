@@ -18,10 +18,19 @@ const emptyForm = {
 };
 
 const getCustomerPrimaryName = (customer = {}) =>
-  customer.companyName || customer.name || "";
+  customer.name || customer.companyName || "";
+
+const getCustomerSecondaryCompany = (customer = {}) => {
+  const primaryName = getCustomerPrimaryName(customer);
+  return customer.companyName && customer.companyName !== primaryName
+    ? customer.companyName
+    : "";
+};
 
 const getCustomerOptionLabel = (customer = {}) =>
-  getCustomerPrimaryName(customer) || "Unnamed customer";
+  [getCustomerPrimaryName(customer), getCustomerSecondaryCompany(customer)]
+    .filter(Boolean)
+    .join(" | ") || "Unnamed customer";
 
 const CreateProjects = () => {
   const navigate = useNavigate();
@@ -92,7 +101,7 @@ const CreateProjects = () => {
         code: form.code.trim() || undefined,
         customerId: form.customerId || null,
         client: getCustomerPrimaryName(selectedCustomer) || undefined,
-        companyName: selectedCustomer?.companyName || undefined,
+        companyName: getCustomerSecondaryCompany(selectedCustomer) || undefined,
         address: selectedCustomer?.address || undefined,
         gstNumber: selectedCustomer?.gstNumber || undefined,
         phone: selectedCustomer?.phone || undefined,
@@ -290,10 +299,18 @@ const CreateProjects = () => {
                   <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
                       <span className="text-xs uppercase tracking-wide text-slate-500">
-                        Company Name
+                        Customer Name
                       </span>
                       <p className="mt-1 font-medium text-slate-700">
                         {getCustomerPrimaryName(selectedCustomer) || "-"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                      <span className="text-xs uppercase tracking-wide text-slate-500">
+                        Company Name
+                      </span>
+                      <p className="mt-1 font-medium text-slate-700">
+                        {getCustomerSecondaryCompany(selectedCustomer) || "-"}
                       </p>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">

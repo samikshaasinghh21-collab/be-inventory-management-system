@@ -12,6 +12,8 @@ const normalizeConsumptionItem = (item = {}) => ({
     item.consumptionId ?? item.ConsumptionId ?? item.ConsumptionID ?? null,
   boqItemId:
     item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId ?? null,
+  receiveGoodsItemId:
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId ?? null,
   name: item.name ?? item.Item ?? item.item ?? item.Name ?? "",
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",
@@ -34,6 +36,7 @@ const normalizeConsumption = (consumption = {}) => ({
     consumption.consumptionNumber ?? consumption.ConsumptionNumber ?? "",
   projectId: consumption.projectId ?? consumption.ProjectId ?? null,
   locationId: consumption.locationId ?? consumption.LocationId ?? null,
+  receiveGoodsId: consumption.receiveGoodsId ?? consumption.ReceiveGoodsId ?? null,
   deliveryChallanId:
     consumption.deliveryChallanId ??
     consumption.DeliveryChallanId ??

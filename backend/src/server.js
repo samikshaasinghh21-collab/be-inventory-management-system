@@ -67,6 +67,10 @@ const isSqlMissingTableError = (error) => {
 };
 const isSqlForeignKeyViolation = (error) => getSqlErrorNumber(error) === 547;
 const isSqlLockTimeoutError = (error) => getSqlErrorNumber(error) === 1222;
+const isSqlUniqueConstraintError = (error) => {
+  const number = getSqlErrorNumber(error);
+  return number === 2627 || number === 2601;
+};
 const RECEIVE_GOODS_LOCK_TIMEOUT_MS = 5000;
 const RECEIVE_GOODS_LOCK_MESSAGE =
   "Receive goods data is temporarily locked by another request. Retry after the current save finishes. If it keeps happening, restart the backend to clear the stuck transaction.";
@@ -689,6 +693,15 @@ const normalizeCustomer = (row = {}) => ({
   companyName: row.CompanyName ?? row.companyName ?? "",
   address: row.Address ?? row.address ?? "",
   gstNumber: row.GSTNumber ?? row.gstNumber ?? "",
+  gstType:
+    String(row.GSTType ?? row.gstType ?? "intra")
+      .trim()
+      .toLowerCase() === "inter"
+      ? "inter"
+      : "intra",
+  city: row.City ?? row.city ?? "",
+  state: row.State ?? row.state ?? "",
+  pincode: row.Pincode ?? row.pincode ?? "",
   phone: row.ContactNumber ?? row.Phone ?? row.phone ?? "",
   email: row.Email ?? row.email ?? "",
   contactPerson: row.ContactPerson ?? row.contactPerson ?? "",
@@ -752,6 +765,7 @@ const normalizePurchaseOrder = (row = {}) => ({
   projectId: row.ProjectId ?? row.projectId ?? null,
   vendorId: row.VendorId ?? row.vendorId ?? null,
   locationId: row.LocationId ?? row.locationId ?? null,
+  boqId: row.BOQId ?? row.BoqId ?? row.boqId ?? null,
   orderDate: row.OrderDate ?? row.orderDate ?? null,
   expectedDate:
     row.ExpectedDeliveryDate ??
@@ -773,6 +787,7 @@ const normalizePoItem = (row = {}) => {
     poItemId: row.PurchaseOrderItemId ?? row.Id ?? row.id ?? null,
     purchaseOrderId: row.PurchaseOrderId ?? row.purchaseOrderId ?? null,
     itemId: row.ItemId ?? row.itemId ?? null,
+    boqItemId: row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null,
     name: row.ItemName ?? row.Name ?? row.name ?? "",
     description: row.Description ?? row.description ?? "",
     unit: row.Unit ?? row.unit ?? "PCS",
@@ -872,7 +887,9 @@ const normalizeDeliveryChallan = (row = {}) => {
     deliveryChallanId: id,
     dcNumber: row.DCNumber ?? row.DcNumber ?? row.dcNumber ?? "",
     projectId: row.ProjectId ?? row.projectId ?? null,
+    receiveGoodsId: row.ReceiveGoodsId ?? row.receiveGoodsId ?? null,
     fromLocationId: row.FromLocationId ?? row.fromLocationId ?? null,
+    toLocationId: row.ToLocationId ?? row.toLocationId ?? null,
     toLocation: row.ToLocation ?? row.toLocation ?? "",
     vehicleNumber: row.VehicleNumber ?? row.vehicleNumber ?? "",
     eWayBillNumber:
@@ -916,6 +933,7 @@ const normalizeConsumption = (row = {}) => {
     consumptionNumber: row.ConsumptionNumber ?? row.consumptionNumber ?? "",
     projectId: row.ProjectId ?? row.projectId ?? null,
     locationId: row.LocationId ?? row.locationId ?? null,
+    receiveGoodsId: row.ReceiveGoodsId ?? row.receiveGoodsId ?? null,
     deliveryChallanId:
       row.DeliveryChallanId ?? row.deliveryChallanId ?? row.DeliverychallanId ?? null,
     deliveryChallanRef:
@@ -952,6 +970,8 @@ const normalizeConsumptionItem = (row = {}) => ({
     row.ParentId ??
     null,
   boqItemId: row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null,
+  receiveGoodsItemId:
+    row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? null,
   name: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
   description: row.Description ?? row.description ?? "",
   unit: row.Unit ?? row.unit ?? "PCS",
@@ -1193,7 +1213,16 @@ const getProjectSnapshotFromBody = (source = {}) => ({
 const getProjectSnapshotFromCustomer = (customer = null) => ({
   client: customer?.name ?? null,
   companyName: customer?.companyName ?? null,
-  address: customer?.address ?? null,
+  address:
+    [
+      customer?.address,
+      [customer?.city, customer?.state, customer?.pincode]
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean)
+        .join(", "),
+    ]
+      .filter((value) => String(value ?? "").trim())
+      .join("\n") || null,
   gstNumber: customer?.gstNumber ?? null,
   phone: customer?.phone ?? null,
   email: customer?.email ?? null,
@@ -1217,6 +1246,10 @@ const getCustomerById = async (pool, customerId) => {
         CompanyName,
         Address,
         GSTNumber,
+        GSTType,
+        City,
+        State,
+        Pincode,
         ContactNumber,
         Email,
         ContactPerson,
@@ -1361,6 +1394,8 @@ const normalizeReceiveGoods = (row = {}) => {
     locationId: row.LocationId ?? row.locationId ?? null,
     receivedDate: row.ReceivedDate ?? row.receivedDate ?? null,
     receivedBy: row.ReceivedBy ?? row.receivedBy ?? "",
+    invoiceNumber: row.InvoiceNumber ?? row.invoiceNumber ?? "",
+    invoiceDate: row.InvoiceDate ?? row.invoiceDate ?? null,
     billTo: row.BillTo ?? row.billTo ?? "",
     shipTo: row.ShipTo ?? row.shipTo ?? "",
     showProjectDetails:
@@ -1659,31 +1694,7 @@ const replaceReceiveSerialNumbers = async (
     .query(`
       DELETE FROM dbo.SerialNumbers WHERE ReceiveGoodsId = @ReceiptId
     `);
-
-  for (const item of items) {
-    const serialNumbers = normalizeSerialNumbers(item.serialNumbers).slice(
-      0,
-      Math.max(toReceiveQuantity(item.receivedQty), 0)
-    );
-
-    for (const serialNumber of serialNumbers) {
-      await new sql.Request(tx)
-        .input("PurchaseOrderId", sql.Int, purchaseOrderId)
-        .input("PurchaseOrderItemId", sql.Int, item.poItemId ?? null)
-        .input("ReceiveGoodsId", sql.Int, receiptId)
-        .input("ItemId", sql.Int, item.itemId ?? null)
-        .input("SerialNumber", sql.NVarChar(255), serialNumber)
-        .input("Status", sql.NVarChar(50), "In Stock")
-        .input("LocationId", sql.Int, toNullableInt(locationId))
-        .input("ProductName", sql.NVarChar(255), item.name ?? null)
-        .query(`
-          INSERT INTO dbo.SerialNumbers
-            (PurchaseOrderId, PurchaseOrderItemId, ReceiveGoodsId, ItemId, ProductName, SerialNumber, Status, LocationId)
-          VALUES
-            (@PurchaseOrderId, @PurchaseOrderItemId, @ReceiveGoodsId, @ItemId, @ProductName, @SerialNumber, @Status, @LocationId)
-        `);
-    }
-  }
+  return;
 };
 
 const recalculateReceiveGoodsChain = async (
@@ -2121,6 +2132,10 @@ const ensureCustomersTable = async () => {
         CompanyName NVARCHAR(255) NULL,
         Address NVARCHAR(MAX) NULL,
         GSTNumber NVARCHAR(30) NULL,
+        GSTType NVARCHAR(20) NULL,
+        City NVARCHAR(120) NULL,
+        State NVARCHAR(120) NULL,
+        Pincode NVARCHAR(20) NULL,
         ContactNumber NVARCHAR(30) NULL,
         Email NVARCHAR(255) NULL,
         ContactPerson NVARCHAR(255) NULL,
@@ -2147,6 +2162,22 @@ const ensureCustomersTable = async () => {
     IF COL_LENGTH('dbo.Customers', 'GSTNumber') IS NULL
     BEGIN
       ALTER TABLE dbo.Customers ADD GSTNumber NVARCHAR(30) NULL;
+    END;
+    IF COL_LENGTH('dbo.Customers', 'GSTType') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Customers ADD GSTType NVARCHAR(20) NULL;
+    END;
+    IF COL_LENGTH('dbo.Customers', 'City') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Customers ADD City NVARCHAR(120) NULL;
+    END;
+    IF COL_LENGTH('dbo.Customers', 'State') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Customers ADD State NVARCHAR(120) NULL;
+    END;
+    IF COL_LENGTH('dbo.Customers', 'Pincode') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Customers ADD Pincode NVARCHAR(20) NULL;
     END;
     IF COL_LENGTH('dbo.Customers', 'ContactNumber') IS NULL
     BEGIN
@@ -2474,6 +2505,10 @@ const ensurePurchaseTables = async () => {
       ALTER TABLE dbo.PurchaseOrders ADD UpdatedAt DATETIME2 NOT NULL
         CONSTRAINT DF_PurchaseOrders_UpdatedAt DEFAULT SYSUTCDATETIME();
     END;
+    IF COL_LENGTH('dbo.PurchaseOrders', 'BOQId') IS NULL
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrders ADD BOQId INT NULL;
+    END;
   `);
 
   await pool.request().query(`
@@ -2483,6 +2518,7 @@ const ensurePurchaseTables = async () => {
         Id INT IDENTITY(1,1) PRIMARY KEY,
         PurchaseOrderId INT NOT NULL,
         ItemId INT NULL,
+        BoqItemId INT NULL,
         Name NVARCHAR(255) NOT NULL DEFAULT '',
         Description NVARCHAR(MAX) NULL,
         Unit NVARCHAR(30) NULL,
@@ -2506,6 +2542,10 @@ const ensurePurchaseTables = async () => {
     IF COL_LENGTH('dbo.PurchaseOrderItems', 'Rate') IS NULL
     BEGIN
       ALTER TABLE dbo.PurchaseOrderItems ADD Rate DECIMAL(10,2) NOT NULL CONSTRAINT DF_POItems_Rate DEFAULT 0;
+    END;
+    IF COL_LENGTH('dbo.PurchaseOrderItems', 'BoqItemId') IS NULL
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrderItems ADD BoqItemId INT NULL;
     END;
     IF COL_LENGTH('dbo.PurchaseOrderItems', 'HSN') IS NULL
     BEGIN
@@ -2571,6 +2611,9 @@ const normalizePurchaseOrderItemsInput = (items = []) =>
 
       return {
         itemId: toNullableInt(item.itemId ?? item.ItemId),
+        boqItemId: toNullableInt(
+          item.boqItemId ?? item.BoqItemId ?? item.BOQItemId
+        ),
         name: String(item.name ?? item.Name ?? item.ItemName ?? "").trim(),
         description: normalizeOptionalString(item.description ?? item.Description),
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
@@ -2596,11 +2639,39 @@ const normalizePurchaseOrderItemsInput = (items = []) =>
     })
     .filter((item) => item.quantity > 0 && item.name);
 
+const normalizeBoqItemsInput = (items = []) =>
+  (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      id: toNullableInt(item.id ?? item.Id ?? item.LineItemId ?? item.lineItemId),
+      name: String(item.name ?? item.Name ?? item.ItemName ?? "").trim(),
+      description: normalizeOptionalString(item.description ?? item.Description) ?? "",
+      serialNumber:
+        normalizeOptionalString(item.serialNumber ?? item.SerialNumber) ?? "",
+      unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+      hsn:
+        normalizeOptionalString(
+          item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode
+        ) ?? "",
+      gst:
+        normalizeOptionalString(
+          item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate
+        ) ?? "",
+      quantity: Number(item.quantity ?? item.qty ?? item.Quantity ?? 0) || 0,
+      rate: Number(item.rate ?? item.Rate ?? item.unitPrice ?? item.UnitPrice ?? 0) || 0,
+      notes: normalizeOptionalString(item.notes ?? item.Notes) ?? "",
+    }))
+    .filter((item) => item.quantity > 0 && item.name);
+
 const resolvePurchaseOrderItemColumns = (cols = new Set()) => {
   const hasPoId = cols.has("PurchaseOrderId");
   return {
     hasPoId,
     itemIdCol: cols.has("ItemId") ? "ItemId" : null,
+    boqItemIdCol: cols.has("BoqItemId")
+      ? "BoqItemId"
+      : cols.has("BOQItemId")
+      ? "BOQItemId"
+      : null,
     nameCol: cols.has("ItemName") ? "ItemName" : cols.has("Name") ? "Name" : null,
     descCol: cols.has("Description") ? "Description" : null,
     hsnCol: cols.has("HSN") ? "HSN" : cols.has("Hsn") ? "Hsn" : null,
@@ -2649,6 +2720,7 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
     const req = new sql.Request(tx);
     req.input("PurchaseOrderId", sql.Int, purchaseOrderId);
     req.input("ItemId", sql.Int, item.itemId ?? null);
+    req.input("BoqItemId", sql.Int, item.boqItemId ?? null);
     req.input("Name", sql.NVarChar(255), item.name);
     req.input("Desc", sql.NVarChar(sql.MAX), item.description ?? null);
     req.input("HSN", sql.NVarChar(50), item.hsn || null);
@@ -2665,6 +2737,7 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
     const colsToUse = [
       "PurchaseOrderId",
       config.itemIdCol,
+      config.boqItemIdCol,
       config.nameCol,
       config.descCol,
       config.hsnCol,
@@ -2683,6 +2756,7 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
     const values = colsToUse.map((column) => {
       if (column === "PurchaseOrderId") return "@PurchaseOrderId";
       if (column === config.itemIdCol) return "@ItemId";
+      if (column === config.boqItemIdCol) return "@BoqItemId";
       if (column === config.nameCol) return "@Name";
       if (column === config.descCol) return "@Desc";
       if (column === config.hsnCol) return "@HSN";
@@ -2698,14 +2772,399 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
       return "NULL";
     });
 
-    await req.query(`
-      INSERT INTO dbo.PurchaseOrderItems (${colsToUse.join(", ")})
-      VALUES (${values.join(", ")})
-    `);
-    total += item.totalPrice;
+    try {
+      await req.query(`
+        INSERT INTO dbo.PurchaseOrderItems (${colsToUse.join(", ")})
+        VALUES (${values.join(", ")})
+      `);
+      total += item.totalPrice;
+    } catch (insertError) {
+      console.error(
+        "Error inserting purchase order item:",
+        insertError?.message,
+        "Columns:",
+        colsToUse.join(", "),
+        "Values:",
+        values.join(", ")
+      );
+      throw insertError;
+    }
   }
 
   return total;
+};
+
+const loadPurchaseOrderItemsConfig = async (tx) => {
+  const colCheck = await new sql.Request(tx).query(`
+    SELECT name AS ColumnName
+    FROM sys.columns
+    WHERE object_id = OBJECT_ID('dbo.PurchaseOrderItems')
+  `);
+  const cols = new Set((colCheck.recordset ?? []).map((row) => row.ColumnName));
+  return resolvePurchaseOrderItemColumns(cols);
+};
+
+const buildPurchaseOrderItemInClause = (request, ids = [], paramBase = "Id") =>
+  ids
+    .map((id, index) => {
+      const paramName = `${paramBase}${index}`;
+      request.input(paramName, sql.Int, id);
+      return `@${paramName}`;
+    })
+    .join(", ");
+
+const buildPurchaseOrderUnitPriceExpression = (config = {}, tableAlias = "") => {
+  const qualify = (column) =>
+    tableAlias ? `${tableAlias}.${toIdentifier(column)}` : toIdentifier(column);
+  const unitPriceCol = config.unitPriceCol ? qualify(config.unitPriceCol) : null;
+  const rateCol =
+    config.rateCol && config.rateCol !== config.unitPriceCol
+      ? qualify(config.rateCol)
+      : null;
+
+  if (unitPriceCol && rateCol) {
+    return `COALESCE(${unitPriceCol}, ${rateCol}, 0)`;
+  }
+  if (unitPriceCol) {
+    return `COALESCE(${unitPriceCol}, 0)`;
+  }
+  if (rateCol) {
+    return `COALESCE(${rateCol}, 0)`;
+  }
+  return "0";
+};
+
+const recalculatePurchaseOrderTotal = async (tx, purchaseOrderId, config = null) => {
+  const resolvedConfig = config ?? (await loadPurchaseOrderItemsConfig(tx));
+  const qtyCol = resolvedConfig.qtyCol ? toIdentifier(resolvedConfig.qtyCol) : null;
+  const totalCol = resolvedConfig.totalCol ? toIdentifier(resolvedConfig.totalCol) : null;
+  const unitPriceExpr = buildPurchaseOrderUnitPriceExpression(resolvedConfig);
+  const totalExpr =
+    totalCol && qtyCol
+      ? `COALESCE(${totalCol}, ${qtyCol} * ${unitPriceExpr})`
+      : qtyCol
+      ? `${qtyCol} * ${unitPriceExpr}`
+      : "0";
+
+  const totalResult = await new sql.Request(tx)
+    .input("PurchaseOrderId", sql.Int, purchaseOrderId)
+    .query(`
+      SELECT SUM(${totalExpr}) AS Total
+      FROM dbo.PurchaseOrderItems
+      WHERE PurchaseOrderId = @PurchaseOrderId
+    `);
+
+  const total = roundCurrencyValue(totalResult.recordset?.[0]?.Total ?? 0);
+
+  await new sql.Request(tx)
+    .input("PurchaseOrderId", sql.Int, purchaseOrderId)
+    .input("Total", sql.Decimal(18, 2), total)
+    .query(`
+      UPDATE dbo.PurchaseOrders
+      SET Total = @Total,
+          UpdatedAt = SYSUTCDATETIME()
+      WHERE Id = @PurchaseOrderId
+    `);
+
+  return total;
+};
+
+const loadBoqConsumedTotals = async (tx, boqItemIds = []) => {
+  const ids = uniqueBoqItemIds(boqItemIds);
+  if (!ids.length) {
+    return new Map();
+  }
+
+  const tableCheck = await new sql.Request(tx).query(`
+    SELECT OBJECT_ID('dbo.ConsumptionItems', 'U') AS TableId,
+           COL_LENGTH('dbo.ConsumptionItems', 'BoqItemId') AS BoqItemIdLength
+  `);
+  if (!tableCheck.recordset?.[0]?.TableId || !tableCheck.recordset?.[0]?.BoqItemIdLength) {
+    return new Map();
+  }
+
+  const request = new sql.Request(tx);
+  const inClause = buildPurchaseOrderItemInClause(request, ids, "BoqItemId");
+  const result = await request.query(`
+    SELECT BoqItemId, SUM(Quantity) AS TotalConsumed
+    FROM dbo.ConsumptionItems
+    WHERE BoqItemId IN (${inClause})
+    GROUP BY BoqItemId
+  `);
+
+  return (result.recordset ?? []).reduce((acc, row) => {
+    const id = toNullableInt(row.BoqItemId);
+    if (id !== null) {
+      acc.set(id, Number(row.TotalConsumed ?? 0) || 0);
+    }
+    return acc;
+  }, new Map());
+};
+
+const applyBoqQuantitiesFromPurchaseOrderItems = async (
+  tx,
+  { boqId = null, items = [] } = {}
+) => {
+  const linkedItems = (Array.isArray(items) ? items : []).filter(
+    (item) => item?.boqItemId !== null && item?.boqItemId !== undefined
+  );
+  if (!linkedItems.length) {
+    return [];
+  }
+
+  const quantityByBoqItemId = new Map();
+  for (const item of linkedItems) {
+    const boqItemId = toNullableInt(item.boqItemId);
+    if (!boqItemId) {
+      continue;
+    }
+    const nextQuantity = Number(item.quantity ?? 0) || 0;
+    if (quantityByBoqItemId.has(boqItemId)) {
+      const previousQuantity = quantityByBoqItemId.get(boqItemId);
+      if (previousQuantity !== nextQuantity) {
+        const error = new Error(
+          "The same BOQ item cannot be linked to multiple purchase-order rows with different quantities."
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+      continue;
+    }
+    quantityByBoqItemId.set(boqItemId, nextQuantity);
+  }
+
+  const boqItemIds = Array.from(quantityByBoqItemId.keys());
+  if (!boqItemIds.length) {
+    return [];
+  }
+
+  const request = new sql.Request(tx);
+  const inClause = buildPurchaseOrderItemInClause(request, boqItemIds, "BoqItemId");
+  const result = await request.query(`
+    SELECT LineItemId, BOQId, ItemName
+    FROM dbo.BOQLineItems
+    WHERE LineItemId IN (${inClause})
+  `);
+  const existingRows = result.recordset ?? [];
+
+  if (existingRows.length !== boqItemIds.length) {
+    const error = new Error("One or more linked BOQ items could not be found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalizedBoqId = toNullableInt(boqId);
+  if (
+    normalizedBoqId !== null &&
+    existingRows.some((row) => toNullableInt(row.BOQId) !== normalizedBoqId)
+  ) {
+    const error = new Error("The selected BOQ does not match the linked purchase-order items.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const consumedTotals = await loadBoqConsumedTotals(tx, boqItemIds);
+  for (const row of existingRows) {
+    const boqItemId = toNullableInt(row.LineItemId);
+    const nextQuantity = quantityByBoqItemId.get(boqItemId) ?? 0;
+    const consumedQty = consumedTotals.get(boqItemId) ?? 0;
+    if (nextQuantity < consumedQty) {
+      const error = new Error(
+        `Quantity for ${row.ItemName || "the linked BOQ item"} cannot be lower than the consumed quantity (${consumedQty}).`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  for (const row of existingRows) {
+    const boqItemId = toNullableInt(row.LineItemId);
+    const nextQuantity = quantityByBoqItemId.get(boqItemId) ?? 0;
+    const consumedQty = consumedTotals.get(boqItemId) ?? 0;
+
+    await new sql.Request(tx)
+      .input("BoqItemId", sql.Int, boqItemId)
+      .input("Quantity", sql.Decimal(18, 2), nextQuantity)
+      .input("ConsumedQty", sql.Decimal(18, 2), consumedQty)
+      .query(`
+        UPDATE dbo.BOQLineItems
+        SET Quantity = @Quantity,
+            ConsumedQty = @ConsumedQty,
+            AvailableQty = CASE
+              WHEN @Quantity - @ConsumedQty < 0 THEN 0
+              ELSE @Quantity - @ConsumedQty
+            END
+        WHERE LineItemId = @BoqItemId
+      `);
+  }
+
+  const touchedBoqIds = Array.from(
+    new Set(existingRows.map((row) => toNullableInt(row.BOQId)).filter((value) => value !== null))
+  );
+  for (const touchedBoqId of touchedBoqIds) {
+    await new sql.Request(tx)
+      .input("BOQId", sql.Int, touchedBoqId)
+      .query(`
+        UPDATE dbo.BOQProjects
+        SET UpdatedAt = SYSUTCDATETIME()
+        WHERE BOQId = @BOQId
+      `);
+  }
+
+  await refreshBoqAvailability(tx, boqItemIds);
+  return boqItemIds;
+};
+
+const detachPurchaseOrderItemsFromBoq = async (tx, boqItemIds = []) => {
+  const ids = uniqueBoqItemIds(boqItemIds);
+  if (!ids.length) {
+    return [];
+  }
+
+  const config = await loadPurchaseOrderItemsConfig(tx);
+  if (!config.boqItemIdCol || !config.hasPoId) {
+    return [];
+  }
+
+  const selectReq = new sql.Request(tx);
+  const inClause = buildPurchaseOrderItemInClause(selectReq, ids, "BoqItemId");
+  const affectedResult = await selectReq.query(`
+    SELECT DISTINCT PurchaseOrderId
+    FROM dbo.PurchaseOrderItems
+    WHERE ${toIdentifier(config.boqItemIdCol)} IN (${inClause})
+  `);
+  const affectedPurchaseOrderIds = (affectedResult.recordset ?? [])
+    .map((row) => toNullableInt(row.PurchaseOrderId))
+    .filter((value) => value !== null);
+
+  const updateReq = new sql.Request(tx);
+  const updateInClause = buildPurchaseOrderItemInClause(updateReq, ids, "DetachBoqItemId");
+  await updateReq.query(`
+    UPDATE dbo.PurchaseOrderItems
+    SET ${toIdentifier(config.boqItemIdCol)} = NULL
+    WHERE ${toIdentifier(config.boqItemIdCol)} IN (${updateInClause})
+  `);
+
+  return affectedPurchaseOrderIds;
+};
+
+const syncPurchaseOrderItemsFromBoq = async (tx, boqItemIds = []) => {
+  const ids = uniqueBoqItemIds(boqItemIds);
+  if (!ids.length) {
+    return [];
+  }
+
+  const config = await loadPurchaseOrderItemsConfig(tx);
+  if (!config.boqItemIdCol || !config.qtyCol || !config.hasPoId) {
+    return [];
+  }
+
+  const affectedReq = new sql.Request(tx);
+  const affectedInClause = buildPurchaseOrderItemInClause(
+    affectedReq,
+    ids,
+    "BoqItemId"
+  );
+  const affectedResult = await affectedReq.query(`
+    SELECT DISTINCT PurchaseOrderId
+    FROM dbo.PurchaseOrderItems
+    WHERE ${toIdentifier(config.boqItemIdCol)} IN (${affectedInClause})
+  `);
+  const affectedPurchaseOrderIds = (affectedResult.recordset ?? [])
+    .map((row) => toNullableInt(row.PurchaseOrderId))
+    .filter((value) => value !== null);
+
+  if (!affectedPurchaseOrderIds.length) {
+    return [];
+  }
+
+  const unitPriceExpr = buildPurchaseOrderUnitPriceExpression(config, "poi");
+  const setClauses = [`poi.${toIdentifier(config.qtyCol)} = bi.Quantity`];
+  if (config.totalCol) {
+    setClauses.push(
+      `poi.${toIdentifier(config.totalCol)} = ROUND(bi.Quantity * ${unitPriceExpr}, 2)`
+    );
+  }
+
+  const updateReq = new sql.Request(tx);
+  const updateInClause = buildPurchaseOrderItemInClause(
+    updateReq,
+    ids,
+    "SyncBoqItemId"
+  );
+  await updateReq.query(`
+    UPDATE poi
+    SET ${setClauses.join(", ")}
+    FROM dbo.PurchaseOrderItems poi
+    INNER JOIN dbo.BOQLineItems bi
+      ON bi.LineItemId = poi.${toIdentifier(config.boqItemIdCol)}
+    WHERE poi.${toIdentifier(config.boqItemIdCol)} IN (${updateInClause})
+  `);
+
+  return affectedPurchaseOrderIds;
+};
+
+const refreshPurchaseOrdersDerivedData = async (tx, purchaseOrderIds = []) => {
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(purchaseOrderIds) ? purchaseOrderIds : [])
+        .map((value) => toNullableInt(value))
+        .filter((value) => value !== null)
+    )
+  );
+  if (!ids.length) {
+    return;
+  }
+
+  const config = await loadPurchaseOrderItemsConfig(tx);
+  await ensureReceiveTables();
+  const receivePk = await refreshReceiveGoodsPk();
+  const receiveItemsFk = await refreshReceiveGoodsItemsFk();
+
+  for (const purchaseOrderId of ids) {
+    await recalculatePurchaseOrderTotal(tx, purchaseOrderId, config);
+
+    const orderResult = await new sql.Request(tx)
+      .input("PurchaseOrderId", sql.Int, purchaseOrderId)
+      .query(`
+        SELECT Status
+        FROM dbo.PurchaseOrders
+        WHERE Id = @PurchaseOrderId
+      `);
+    const currentStatus =
+      orderResult.recordset?.[0]?.Status ?? orderResult.recordset?.[0]?.status ?? "Draft";
+    if (isCancelledPurchaseOrderStatus(currentStatus)) {
+      continue;
+    }
+
+    const receiptCountResult = await new sql.Request(tx)
+      .input("PurchaseOrderId", sql.Int, purchaseOrderId)
+      .query(`
+        SELECT COUNT(1) AS Total
+        FROM dbo.ReceiveGoods
+        WHERE PurchaseOrderId = @PurchaseOrderId
+      `);
+    const receiptCount = Number(receiptCountResult.recordset?.[0]?.Total ?? 0) || 0;
+    if (!receiptCount) {
+      continue;
+    }
+
+    const { finalStatus } = await recalculateReceiveGoodsChain(tx, {
+      purchaseOrderId,
+      receivePk,
+      fkCol: receiveItemsFk,
+    });
+
+    await new sql.Request(tx)
+      .input("PurchaseOrderId", sql.Int, purchaseOrderId)
+      .input("Status", sql.NVarChar(50), finalStatus || currentStatus || "Draft")
+      .query(`
+        UPDATE dbo.PurchaseOrders
+        SET Status = @Status,
+            UpdatedAt = SYSUTCDATETIME()
+        WHERE Id = @PurchaseOrderId
+      `);
+  }
 };
 
 let receiveGoodsPk = "ReceiveGoodsId";
@@ -2834,6 +3293,33 @@ const refreshReceiveGoodsItemsFk = async () => {
     "ReceiveGoodsId";
 
   return receiveGoodsItemsFk;
+};
+
+const findReceiveGoodsRow = async (poolOrTx, id) => {
+  const colsResult = await poolOrTx
+    .request()
+    .query(`
+      SELECT name AS ColumnName
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.ReceiveGoods')
+    `);
+  const cols = new Set((colsResult.recordset ?? []).map((row) => row.ColumnName));
+  const candidateColumns = ["ReceiveGoodsId", "Id"].filter((column) => cols.has(column));
+  if (!candidateColumns.length) {
+    return null;
+  }
+  const whereClause = candidateColumns
+    .map((column) => `${toIdentifier(column)} = @ReceiptId`)
+    .join(" OR ");
+  const result = await poolOrTx
+    .request()
+    .input("ReceiptId", sql.Int, id)
+    .query(withSqlLockTimeout(`
+      SELECT TOP 1 *
+      FROM dbo.ReceiveGoods
+      WHERE ${whereClause}
+    `));
+  return result.recordset?.[0] ?? null;
 };
 
 const loadReceiveItemTotalsByItemId = async (tx, purchaseOrderId) => {
@@ -3008,68 +3494,7 @@ const validateReceiveSerialNumbers = async (
     normalizedItems,
   }
 ) => {
-  const allSerials = [];
-
-  normalizedItems.ordered.forEach((item) => {
-    const receivedQty = toReceiveQuantity(item.receivedQty);
-    const serialRequired = normalizeBooleanFlag(item.serialRequired, false);
-    const serialNumbers = normalizeSerialNumbers(item.serialNumbers);
-
-    if (serialRequired && receivedQty > 0 && serialNumbers.length !== receivedQty) {
-      const error = new Error(
-        `Serial count for ${item.name || "item"} must match the received quantity (${receivedQty}).`
-      );
-      error.statusCode = 400;
-      throw error;
-    }
-
-    if (!serialRequired && serialNumbers.length > receivedQty) {
-      const error = new Error(
-        `Serial count for ${item.name || "item"} cannot exceed the received quantity (${receivedQty}).`
-      );
-      error.statusCode = 400;
-      throw error;
-    }
-
-    allSerials.push(...serialNumbers);
-  });
-
-  const uniquePayloadSerials = new Set();
-  for (const serialNumber of allSerials) {
-    const key = serialNumber.toLowerCase();
-    if (uniquePayloadSerials.has(key)) {
-      const error = new Error(`Serial number ${serialNumber} is duplicated in this receipt.`);
-      error.statusCode = 400;
-      throw error;
-    }
-    uniquePayloadSerials.add(key);
-  }
-
-  if (!allSerials.length) {
-    return;
-  }
-
-  const existingResult = await new sql.Request(tx)
-    .input("ReceiptId", sql.Int, toNullableInt(targetReceiptId))
-    .query(`
-      SELECT SerialNumber
-      FROM dbo.SerialNumbers
-      WHERE @ReceiptId IS NULL OR ReceiveGoodsId <> @ReceiptId
-    `);
-
-  const existingSerials = new Set(
-    (existingResult.recordset ?? [])
-      .map((row) => String(row.SerialNumber ?? "").trim().toLowerCase())
-      .filter(Boolean)
-  );
-
-  for (const serialNumber of allSerials) {
-    if (existingSerials.has(serialNumber.toLowerCase())) {
-      const error = new Error(`Serial number ${serialNumber} already exists.`);
-      error.statusCode = 400;
-      throw error;
-    }
-  }
+  return;
 };
 
 const writeReceiveAuditLog = async (
@@ -3123,7 +3548,9 @@ const ensureReceiveTables = async () => {
         ShipTo NVARCHAR(MAX) NULL,
         ShowProjectDetails BIT NOT NULL DEFAULT 1,
         Notes NVARCHAR(MAX) NULL,
-        TaxMode NVARCHAR(20) NULL,
+      TaxMode NVARCHAR(20) NULL,
+        InvoiceNumber NVARCHAR(100) NULL,
+        InvoiceDate DATE NULL,
         Status NVARCHAR(50) NULL,
         CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -3195,6 +3622,14 @@ const ensureReceiveTables = async () => {
     IF COL_LENGTH('dbo.ReceiveGoods', 'TaxMode') IS NULL
     BEGIN
       ALTER TABLE dbo.ReceiveGoods ADD TaxMode NVARCHAR(20) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'InvoiceNumber') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD InvoiceNumber NVARCHAR(100) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'InvoiceDate') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD InvoiceDate DATE NULL;
     END;
     IF COL_LENGTH('dbo.ReceiveGoods', 'Status') IS NULL
     BEGIN
@@ -3598,6 +4033,14 @@ const refreshBoqAvailability = async (tx, boqItemIds = []) => {
     return;
   }
 
+  const tableCheck = await new sql.Request(tx).query(`
+    SELECT OBJECT_ID('dbo.ConsumptionItems', 'U') AS TableId,
+           COL_LENGTH('dbo.ConsumptionItems', 'BoqItemId') AS BoqItemIdLength
+  `);
+  if (!tableCheck.recordset?.[0]?.TableId || !tableCheck.recordset?.[0]?.BoqItemIdLength) {
+    return;
+  }
+
   for (const boqItemId of ids) {
     const consumedResult = await new sql.Request(tx)
       .input("BoqItemId", sql.Int, boqItemId)
@@ -3624,9 +4067,199 @@ const refreshBoqAvailability = async (tx, boqItemIds = []) => {
   }
 };
 
+const uniqueReceiveGoodsItemIds = (values = []) => {
+  const set = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const id = toNullableInt(value);
+    if (id) {
+      set.add(id);
+    }
+  });
+  return Array.from(set);
+};
+
+const loadReceiveConsumedTotals = async (tx, receiveGoodsItemIds = []) => {
+  const ids = uniqueReceiveGoodsItemIds(receiveGoodsItemIds);
+  if (!ids.length) {
+    return new Map();
+  }
+
+  const tableCheck = await new sql.Request(tx).query(`
+    SELECT OBJECT_ID('dbo.ConsumptionItems', 'U') AS TableId,
+           COL_LENGTH('dbo.ConsumptionItems', 'ReceiveGoodsItemId') AS ReceiveGoodsItemIdLength
+  `);
+  if (
+    !tableCheck.recordset?.[0]?.TableId ||
+    !tableCheck.recordset?.[0]?.ReceiveGoodsItemIdLength
+  ) {
+    return new Map();
+  }
+
+  const request = new sql.Request(tx);
+  const inClause = buildPurchaseOrderItemInClause(request, ids, "ReceiveGoodsItemId");
+  const result = await request.query(`
+    SELECT ReceiveGoodsItemId, SUM(Quantity) AS TotalConsumed
+    FROM dbo.ConsumptionItems
+    WHERE ReceiveGoodsItemId IN (${inClause})
+    GROUP BY ReceiveGoodsItemId
+  `);
+
+  return (result.recordset ?? []).reduce((acc, row) => {
+    const id = toNullableInt(row.ReceiveGoodsItemId);
+    if (id !== null) {
+      acc.set(id, Number(row.TotalConsumed ?? 0) || 0);
+    }
+    return acc;
+  }, new Map());
+};
+
+const loadReceiveGoodsItemsForConsumption = async (
+  tx,
+  {
+    receiveGoodsId = null,
+    receiveGoodsItemIds = [],
+  } = {}
+) => {
+  const ids = uniqueReceiveGoodsItemIds(receiveGoodsItemIds);
+  if (!ids.length) {
+    return [];
+  }
+
+  await ensureReceiveTables();
+  const receivePk = await refreshReceiveGoodsPk();
+  const request = new sql.Request(tx);
+  const inClause = buildPurchaseOrderItemInClause(request, ids, "ReceiveGoodsItemId");
+  const result = await request.query(`
+    SELECT Id, ReceiveGoodsId, ItemId, ItemName, ReceivedQty, BalanceQty
+    FROM dbo.ReceiveGoodsItems
+    WHERE Id IN (${inClause})
+  `);
+  const rows = result.recordset ?? [];
+
+  if (rows.length !== ids.length) {
+    const error = new Error("One or more linked receive receipt items could not be found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalizedReceiveGoodsId = toNullableInt(receiveGoodsId);
+  if (
+    normalizedReceiveGoodsId !== null &&
+    rows.some((row) => toNullableInt(row.ReceiveGoodsId) !== normalizedReceiveGoodsId)
+  ) {
+    const error = new Error("The selected receipt does not match the linked receipt items.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const receiptRow = normalizedReceiveGoodsId === null
+    ? null
+    : await new sql.Request(tx)
+        .input("ReceiveGoodsId", sql.Int, normalizedReceiveGoodsId)
+        .query(`
+          SELECT TOP 1 *
+          FROM dbo.ReceiveGoods
+          WHERE ${receivePk} = @ReceiveGoodsId
+        `);
+  if (normalizedReceiveGoodsId !== null && !receiptRow?.recordset?.[0]) {
+    const error = new Error("Receive receipt not found");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return rows.map((row) => ({
+    id: row.Id ?? null,
+    receiveGoodsId: row.ReceiveGoodsId ?? null,
+    itemId: row.ItemId ?? null,
+    name: row.ItemName ?? "",
+    receivedQty: Number(row.ReceivedQty ?? 0) || 0,
+    balanceQty: Number(row.BalanceQty ?? 0) || 0,
+  }));
+};
+
 let deliveryChallanPk = "DeliveryChallanId";
 let deliveryChallanItemsFk = "DeliveryChallanId";
 let ensureDeliveryChallanTablesPromise = null;
+
+const resolveDeliveryChallanDestination = async (
+  tx,
+  {
+    toLocationId = null,
+    toLocation = null,
+  } = {}
+) => {
+  const safeToLocationId = toNullableInt(toLocationId);
+  const safeToLocation = normalizeOptionalString(toLocation);
+
+  if (!safeToLocationId) {
+    return {
+      toLocationId: null,
+      toLocation: safeToLocation ?? "",
+    };
+  }
+
+  const locationResult = await new sql.Request(tx)
+    .input("LocationId", sql.Int, safeToLocationId)
+    .query(`
+      SELECT TOP 1 *
+      FROM dbo.Locations
+      WHERE LocationId = @LocationId
+    `);
+  const locationRow = locationResult.recordset?.[0] ?? null;
+
+  if (!locationRow) {
+    const error = new Error("Destination location not found");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    toLocationId: safeToLocationId,
+    toLocation:
+      normalizeOptionalString(
+        locationRow.Name ?? locationRow.LocationName ?? safeToLocation
+      ) ?? "",
+  };
+};
+
+const resolveDeliveryChallanReceiveReference = async (
+  tx,
+  {
+    receiveGoodsId = null,
+    projectId = null,
+  } = {}
+) => {
+  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
+  if (!safeReceiveGoodsId) {
+    return null;
+  }
+
+  await ensureReceiveTables();
+  const receivePk = await refreshReceiveGoodsPk();
+  const receiptResult = await new sql.Request(tx)
+    .input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId)
+    .query(`
+      SELECT TOP 1 *
+      FROM dbo.ReceiveGoods
+      WHERE ${receivePk} = @ReceiveGoodsId
+    `);
+  const receiptRow = receiptResult.recordset?.[0] ?? null;
+  if (!receiptRow) {
+    const error = new Error("Receive receipt not found");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const safeProjectId = toNullableInt(projectId);
+  const receiptProjectId = toNullableInt(receiptRow.ProjectId ?? receiptRow.projectId);
+  if (safeProjectId && receiptProjectId && safeProjectId !== receiptProjectId) {
+    const error = new Error("Selected receipt does not belong to the chosen project");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return safeReceiveGoodsId;
+};
 
 const refreshDeliveryChallanPk = async () => {
   const pool = await getPool();
@@ -3677,7 +4310,9 @@ const ensureDeliveryChallanTables = async () => {
           DeliveryChallanId BIGINT IDENTITY(1,1) PRIMARY KEY,
           DCNumber NVARCHAR(100) NULL,
           ProjectId INT NULL,
+          ReceiveGoodsId INT NULL,
           FromLocationId INT NULL,
+          ToLocationId INT NULL,
           ToLocation NVARCHAR(200) NULL,
           VehicleNumber NVARCHAR(50) NULL,
           EWayBillNumber NVARCHAR(100) NULL,
@@ -3722,9 +4357,17 @@ const ensureDeliveryChallanTables = async () => {
       BEGIN
         ALTER TABLE dbo.DeliveryChallan ADD ProjectId INT NULL;
       END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'ReceiveGoodsId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD ReceiveGoodsId INT NULL;
+      END;
       IF COL_LENGTH('dbo.DeliveryChallan', 'FromLocationId') IS NULL
       BEGIN
         ALTER TABLE dbo.DeliveryChallan ADD FromLocationId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'ToLocationId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD ToLocationId INT NULL;
       END;
       IF COL_LENGTH('dbo.DeliveryChallan', 'ToLocation') IS NULL
       BEGIN
@@ -3904,6 +4547,7 @@ const ensureConsumptionTables = async () => {
           ConsumptionNumber NVARCHAR(50) NULL,
           ProjectId INT NULL,
           LocationId INT NULL,
+          ReceiveGoodsId INT NULL,
           DeliveryChallanId INT NULL,
           DeliveryChallanRef NVARCHAR(100) NULL,
           ConsumptionDate DATE NULL,
@@ -3955,6 +4599,10 @@ const ensureConsumptionTables = async () => {
       IF COL_LENGTH('dbo.Consumption', 'LocationId') IS NULL
       BEGIN
         ALTER TABLE dbo.Consumption ADD LocationId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'ReceiveGoodsId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD ReceiveGoodsId INT NULL;
       END;
       IF COL_LENGTH('dbo.Consumption', 'DeliveryChallanId') IS NULL
       BEGIN
@@ -4059,6 +4707,10 @@ const ensureConsumptionTables = async () => {
       IF COL_LENGTH('dbo.ConsumptionItems', 'BoqItemId') IS NULL
       BEGIN
         ALTER TABLE dbo.ConsumptionItems ADD BoqItemId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'ReceiveGoodsItemId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD ReceiveGoodsItemId INT NULL;
       END;
       IF COL_LENGTH('dbo.ConsumptionItems', 'Item') IS NULL
       BEGIN
@@ -5012,6 +5664,10 @@ app.get("/api/customers", async (_req, res) => {
           CompanyName,
           Address,
           GSTNumber,
+          GSTType,
+          City,
+          State,
+          Pincode,
           ContactNumber,
           Email,
           ContactPerson,
@@ -5068,6 +5724,10 @@ app.post("/api/customers", async (req, res) => {
       name,
       companyName,
       address,
+      gstType,
+      city,
+      state,
+      pincode,
       gstNumber,
       phone,
       email,
@@ -5077,6 +5737,10 @@ app.post("/api/customers", async (req, res) => {
       CustomerName,
       CompanyName,
       Address,
+      GSTType,
+      City,
+      State,
+      Pincode,
       GSTNumber,
       ContactNumber,
       Email,
@@ -5087,6 +5751,10 @@ app.post("/api/customers", async (req, res) => {
     const nextName = normalizeOptionalString(name ?? CustomerName);
     if (!nextName) {
       return res.status(400).json({ ok: false, error: "Customer name is required" });
+    }
+    const nextPincode = normalizeOptionalString(pincode ?? Pincode);
+    if (!nextPincode) {
+      return res.status(400).json({ ok: false, error: "Customer pincode is required" });
     }
     const normalizedContacts = normalizeCustomerContactsInput(contacts);
     const contactsError = getCustomerContactsValidationError(normalizedContacts);
@@ -5108,6 +5776,16 @@ app.post("/api/customers", async (req, res) => {
           normalizeOptionalString(companyName ?? CompanyName)
         )
         .input("Address", sql.NVarChar(sql.MAX), normalizeOptionalString(address ?? Address))
+        .input(
+          "GSTType",
+          sql.NVarChar(20),
+          String(gstType ?? GSTType ?? "intra").trim().toLowerCase() === "inter"
+            ? "inter"
+            : "intra"
+        )
+        .input("City", sql.NVarChar(120), normalizeOptionalString(city ?? City))
+        .input("State", sql.NVarChar(120), normalizeOptionalString(state ?? State))
+        .input("Pincode", sql.NVarChar(20), nextPincode)
         .input(
           "GSTNumber",
           sql.NVarChar(30),
@@ -5135,10 +5813,10 @@ app.post("/api/customers", async (req, res) => {
         )
         .query(`
           INSERT INTO dbo.Customers
-            (CustomerName, CompanyName, Address, GSTNumber, ContactNumber, Email, ContactPerson, Designation)
+            (CustomerName, CompanyName, Address, GSTNumber, GSTType, City, State, Pincode, ContactNumber, Email, ContactPerson, Designation)
           OUTPUT INSERTED.*
           VALUES
-            (@CustomerName, @CompanyName, @Address, @GSTNumber, @ContactNumber, @Email, @ContactPerson, @Designation)
+            (@CustomerName, @CompanyName, @Address, @GSTNumber, @GSTType, @City, @State, @Pincode, @ContactNumber, @Email, @ContactPerson, @Designation)
         `);
 
       const customer = normalizeCustomer(result.recordset?.[0] ?? {});
@@ -5187,6 +5865,10 @@ app.put("/api/customers/:id", async (req, res) => {
       name,
       companyName,
       address,
+      gstType,
+      city,
+      state,
+      pincode,
       gstNumber,
       phone,
       email,
@@ -5196,6 +5878,10 @@ app.put("/api/customers/:id", async (req, res) => {
       CustomerName,
       CompanyName,
       Address,
+      GSTType,
+      City,
+      State,
+      Pincode,
       GSTNumber,
       ContactNumber,
       Email,
@@ -5206,6 +5892,10 @@ app.put("/api/customers/:id", async (req, res) => {
     const nextName = normalizeOptionalString(name ?? CustomerName);
     if (!nextName) {
       return res.status(400).json({ ok: false, error: "Customer name is required" });
+    }
+    const nextPincode = normalizeOptionalString(pincode ?? Pincode);
+    if (!nextPincode) {
+      return res.status(400).json({ ok: false, error: "Customer pincode is required" });
     }
     const hasContactsPayload = Array.isArray(contacts);
     const normalizedContacts = hasContactsPayload
@@ -5233,6 +5923,16 @@ app.put("/api/customers/:id", async (req, res) => {
           normalizeOptionalString(companyName ?? CompanyName)
         )
         .input("Address", sql.NVarChar(sql.MAX), normalizeOptionalString(address ?? Address))
+        .input(
+          "GSTType",
+          sql.NVarChar(20),
+          String(gstType ?? GSTType ?? "intra").trim().toLowerCase() === "inter"
+            ? "inter"
+            : "intra"
+        )
+        .input("City", sql.NVarChar(120), normalizeOptionalString(city ?? City))
+        .input("State", sql.NVarChar(120), normalizeOptionalString(state ?? State))
+        .input("Pincode", sql.NVarChar(20), nextPincode)
         .input(
           "GSTNumber",
           sql.NVarChar(30),
@@ -5264,6 +5964,10 @@ app.put("/api/customers/:id", async (req, res) => {
               CompanyName = @CompanyName,
               Address = @Address,
               GSTNumber = @GSTNumber,
+              GSTType = @GSTType,
+              City = @City,
+              State = @State,
+              Pincode = @Pincode,
               ContactNumber = @ContactNumber,
               Email = @Email,
               ContactPerson = @ContactPerson,
@@ -6173,6 +6877,7 @@ app.post("/api/purchase-orders", async (req, res) => {
     projectId = null,
     vendorId = null,
     locationId = null,
+    boqId = null,
     status = "Draft",
     orderDate = null,
     expectedDate = null,
@@ -6203,6 +6908,7 @@ app.post("/api/purchase-orders", async (req, res) => {
     insertOrder.input("ProjectId", sql.Int, projectId ?? null);
     insertOrder.input("VendorId", sql.Int, vendorId ?? null);
     insertOrder.input("LocationId", sql.Int, locationId ?? null);
+    insertOrder.input("BOQId", sql.Int, toNullableInt(boqId));
     insertOrder.input("Status", sql.NVarChar(50), status || "Draft");
     insertOrder.input("OrderDate", sql.Date, parsedOrderDate || null);
     insertOrder.input("ExpectedDate", sql.Date, parsedExpected ?? parsedExpectedDelivery ?? null);
@@ -6211,9 +6917,9 @@ app.post("/api/purchase-orders", async (req, res) => {
 
     const orderResult = await insertOrder.query(`
       INSERT INTO PurchaseOrders
-        (PONumber, ProjectId, VendorId, LocationId, Status, OrderDate, ExpectedDate, ExpectedDeliveryDate, Notes, Total)
+        (PONumber, ProjectId, VendorId, LocationId, BOQId, Status, OrderDate, ExpectedDate, ExpectedDeliveryDate, Notes, Total)
       OUTPUT INSERTED.*
-      VALUES (@PONumber, @ProjectId, @VendorId, @LocationId, @Status, @OrderDate, @ExpectedDate, @ExpectedDeliveryDate, @Notes, 0)
+      VALUES (@PONumber, @ProjectId, @VendorId, @LocationId, @BOQId, @Status, @OrderDate, @ExpectedDate, @ExpectedDeliveryDate, @Notes, 0)
     `);
 
     const orderRow = orderResult.recordset?.[0];
@@ -6231,21 +6937,45 @@ app.post("/api/purchase-orders", async (req, res) => {
       WHERE Id = @Id
     `);
 
+    const affectedBoqItemIds = await applyBoqQuantitiesFromPurchaseOrderItems(tx, {
+      boqId,
+      items: normalizedItems,
+    });
+    const syncedPurchaseOrderIds = await syncPurchaseOrderItemsFromBoq(
+      tx,
+      affectedBoqItemIds
+    );
+    await refreshPurchaseOrdersDerivedData(tx, [orderId, ...syncedPurchaseOrderIds]);
+
     await tx.commit();
 
+    const refreshedOrderResult = await pool
+      .request()
+      .input("Id", sql.Int, orderId)
+      .query(`
+        SELECT *
+        FROM PurchaseOrders
+        WHERE Id = @Id
+      `);
     const itemsResult = await pool
       .request()
       .input("PurchaseOrderId", sql.Int, orderId)
       .query(`
         SELECT * FROM PurchaseOrderItems WHERE PurchaseOrderId = @PurchaseOrderId
       `);
+    const items = (itemsResult.recordset ?? []).map(normalizePoItem);
+    const refreshedOrderRow = refreshedOrderResult.recordset?.[0] ?? orderRow;
+    const refreshedTotal =
+      items.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0) ||
+      Number(refreshedOrderRow?.Total ?? total) ||
+      0;
 
     return res.status(201).json({
       ok: true,
       purchaseOrder: {
-        ...normalizePurchaseOrder(orderRow),
-        total,
-        items: (itemsResult.recordset ?? []).map(normalizePoItem),
+        ...normalizePurchaseOrder(refreshedOrderRow),
+        total: refreshedTotal,
+        items,
       },
     });
   } catch (error) {
@@ -6270,6 +7000,7 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
     projectId = null,
     vendorId = null,
     locationId = null,
+    boqId = null,
     status = "Draft",
     orderDate = null,
     expectedDate = null,
@@ -6323,6 +7054,7 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
     updateOrder.input("ProjectId", sql.Int, projectId ?? null);
     updateOrder.input("VendorId", sql.Int, vendorId ?? null);
     updateOrder.input("LocationId", sql.Int, locationId ?? null);
+    updateOrder.input("BOQId", sql.Int, toNullableInt(boqId));
     updateOrder.input("Status", sql.NVarChar(50), status || "Draft");
     updateOrder.input("OrderDate", sql.Date, parsedOrderDate || null);
     updateOrder.input("ExpectedDate", sql.Date, parsedExpected ?? parsedExpectedDelivery ?? null);
@@ -6335,6 +7067,7 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
           ProjectId = @ProjectId,
           VendorId = @VendorId,
           LocationId = @LocationId,
+          BOQId = @BOQId,
           Status = @Status,
           OrderDate = @OrderDate,
           ExpectedDate = @ExpectedDate,
@@ -6369,25 +7102,56 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
       WHERE Id = @Id
     `);
 
+    const affectedBoqItemIds = await applyBoqQuantitiesFromPurchaseOrderItems(tx, {
+      boqId,
+      items: normalizedItems,
+    });
+    const syncedPurchaseOrderIds = await syncPurchaseOrderItemsFromBoq(
+      tx,
+      affectedBoqItemIds
+    );
+    await refreshPurchaseOrdersDerivedData(tx, [id, ...syncedPurchaseOrderIds]);
+
     await tx.commit();
 
+    const refreshedOrderResult = await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .query(`
+        SELECT *
+        FROM PurchaseOrders
+        WHERE Id = @Id
+      `);
     const itemsResult = await pool
       .request()
       .input("PurchaseOrderId", sql.Int, id)
       .query(`
         SELECT * FROM PurchaseOrderItems WHERE PurchaseOrderId = @PurchaseOrderId
       `);
+    const itemsResultRows = (itemsResult.recordset ?? []).map(normalizePoItem);
+    const refreshedOrderRow = refreshedOrderResult.recordset?.[0] ?? orderRow;
+    const refreshedTotal =
+      itemsResultRows.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0) ||
+      Number(refreshedOrderRow?.Total ?? total) ||
+      0;
 
     return res.json({
       ok: true,
       purchaseOrder: {
-        ...normalizePurchaseOrder(orderRow),
-        total,
-        items: (itemsResult.recordset ?? []).map(normalizePoItem),
+        ...normalizePurchaseOrder(refreshedOrderRow),
+        total: refreshedTotal,
+        items: itemsResultRows,
       },
     });
   } catch (error) {
     await rollbackTx(tx);
+    console.error("PUT /api/purchase-orders/:id failed:", error?.message ?? error);
+    if (error?.statusCode >= 400 && error?.statusCode < 500) {
+      return res.status(error.statusCode).json({
+        ok: false,
+        error: error?.message ?? "Failed to update purchase order",
+      });
+    }
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to update purchase order",
@@ -6631,14 +7395,7 @@ app.get("/api/receive-goods/:id", async (req, res) => {
     const receivePk = await refreshReceiveGoodsPk();
     const fkCol = await refreshReceiveGoodsItemsFk();
     const pool = await getPool();
-    const receiptResult = await pool
-      .request()
-      .input("ReceiptId", sql.Int, id)
-      .query(withSqlLockTimeout(`
-        SELECT * FROM dbo.ReceiveGoods WHERE ${receivePk} = @ReceiptId
-      `));
-
-    const receiptRow = receiptResult.recordset?.[0];
+    const receiptRow = await findReceiveGoodsRow(pool, id);
     if (!receiptRow) {
       return res.status(404).json({ ok: false, error: "Receipt not found" });
     }
@@ -6677,6 +7434,8 @@ app.post("/api/receive-goods", async (req, res) => {
     boqId = null,
     receivedDate = null,
     receivedBy = null,
+    invoiceNumber = null,
+    invoiceDate = null,
     billTo = null,
     shipTo = null,
     showProjectDetails = true,
@@ -6713,6 +7472,13 @@ app.post("/api/receive-goods", async (req, res) => {
     return res.status(400).json({
       ok: false,
       error: "Invalid receivedDate",
+    });
+  }
+  const parsedInvoiceDate = parseDateInput(invoiceDate);
+  if (Number.isNaN(parsedInvoiceDate)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid invoiceDate",
     });
   }
   const normalizedTaxMode =
@@ -6769,6 +7535,12 @@ app.post("/api/receive-goods", async (req, res) => {
     upsertReq.input("LocationId", sql.Int, safeLocationId ?? toNullableInt(poRow?.LocationId));
     upsertReq.input("ReceivedDate", sql.Date, parsedDate ?? null);
     upsertReq.input("ReceivedBy", sql.NVarChar(100), normalizeOptionalString(receivedBy) ?? null);
+    upsertReq.input(
+      "InvoiceNumber",
+      sql.NVarChar(100),
+      normalizeOptionalString(invoiceNumber) ?? null
+    );
+    upsertReq.input("InvoiceDate", sql.Date, parsedInvoiceDate ?? null);
     upsertReq.input("BillTo", sql.NVarChar(sql.MAX), normalizeOptionalString(billTo) ?? null);
     upsertReq.input("ShipTo", sql.NVarChar(sql.MAX), normalizeOptionalString(shipTo) ?? null);
     upsertReq.input(
@@ -6785,10 +7557,10 @@ app.post("/api/receive-goods", async (req, res) => {
 
     const insertResult = await upsertReq.query(`
       INSERT INTO dbo.ReceiveGoods
-        (PurchaseOrderId, ProjectId, VendorId, LocationId, ReceivedDate, ReceivedBy, BillTo, ShipTo, ShowProjectDetails, Notes, TaxMode, Status, BOQId)
+        (PurchaseOrderId, ProjectId, VendorId, LocationId, ReceivedDate, ReceivedBy, InvoiceNumber, InvoiceDate, BillTo, ShipTo, ShowProjectDetails, Notes, TaxMode, Status, BOQId)
       OUTPUT INSERTED.*
       VALUES
-        (@PurchaseOrderId, @ProjectId, @VendorId, @LocationId, @ReceivedDate, @ReceivedBy, @BillTo, @ShipTo, @ShowProjectDetails, @Notes, @TaxMode, @Status, @BOQId)
+        (@PurchaseOrderId, @ProjectId, @VendorId, @LocationId, @ReceivedDate, @ReceivedBy, @InvoiceNumber, @InvoiceDate, @BillTo, @ShipTo, @ShowProjectDetails, @Notes, @TaxMode, @Status, @BOQId)
     `);
     const receiptRow = insertResult.recordset?.[0] ?? null;
 
@@ -6857,8 +7629,13 @@ app.post("/api/receive-goods", async (req, res) => {
     await rollbackTx(tx);
     tx = null;
     console.error("POST /api/receive-goods failed:", error?.message ?? error);
+    const isDuplicateSerialError =
+      isSqlUniqueConstraintError(error) &&
+      /UX_SerialNumbers_SerialNumber/i.test(String(error?.message || ""));
     const statusCode = isSqlLockTimeoutError(error)
       ? 503
+      : isDuplicateSerialError
+      ? 400
       : Number.isInteger(error?.statusCode)
       ? error.statusCode
       : 500;
@@ -6866,6 +7643,8 @@ app.post("/api/receive-goods", async (req, res) => {
       ok: false,
       error: isSqlLockTimeoutError(error)
         ? RECEIVE_GOODS_LOCK_MESSAGE
+        : isDuplicateSerialError
+        ? "Serial number already exists. Remove the duplicate serial number and try again."
         : error?.message ?? "Failed to save receipt",
     });
   } finally {
@@ -6882,6 +7661,8 @@ app.put("/api/receive-goods/:id", async (req, res) => {
   const {
     receivedDate = null,
     receivedBy = null,
+    invoiceNumber = null,
+    invoiceDate = null,
     billTo = null,
     shipTo = null,
     showProjectDetails = true,
@@ -6913,6 +7694,13 @@ app.put("/api/receive-goods/:id", async (req, res) => {
       error: "Invalid receivedDate",
     });
   }
+  const parsedInvoiceDate = parseDateInput(invoiceDate);
+  if (Number.isNaN(parsedInvoiceDate)) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid invoiceDate",
+    });
+  }
   const normalizedTaxMode =
     String(taxMode).trim().toLowerCase() === "inter" ? "inter" : "intra";
 
@@ -6929,12 +7717,7 @@ app.put("/api/receive-goods/:id", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
-    const receiptResult = await new sql.Request(tx)
-      .input("ReceiptId", sql.Int, id)
-      .query(withSqlLockTimeout(`
-        SELECT TOP 1 * FROM dbo.ReceiveGoods WHERE ${receivePk} = @ReceiptId
-      `));
-    const receiptRow = receiptResult.recordset?.[0] ?? null;
+    const receiptRow = await findReceiveGoodsRow(tx, id);
     if (!receiptRow) {
       await rollbackTx(tx);
       tx = null;
@@ -6998,6 +7781,12 @@ app.put("/api/receive-goods/:id", async (req, res) => {
     updateReq.input("LocationId", sql.Int, toNullableInt(locationId) ?? toNullableInt(poRow.LocationId));
     updateReq.input("ReceivedDate", sql.Date, parsedDate ?? null);
     updateReq.input("ReceivedBy", sql.NVarChar(100), normalizeOptionalString(receivedBy) ?? null);
+    updateReq.input(
+      "InvoiceNumber",
+      sql.NVarChar(100),
+      normalizeOptionalString(invoiceNumber) ?? null
+    );
+    updateReq.input("InvoiceDate", sql.Date, parsedInvoiceDate ?? null);
     updateReq.input("BillTo", sql.NVarChar(sql.MAX), normalizeOptionalString(billTo) ?? null);
     updateReq.input("ShipTo", sql.NVarChar(sql.MAX), normalizeOptionalString(shipTo) ?? null);
     updateReq.input(
@@ -7018,6 +7807,8 @@ app.put("/api/receive-goods/:id", async (req, res) => {
           LocationId = @LocationId,
           ReceivedDate = @ReceivedDate,
           ReceivedBy = @ReceivedBy,
+          InvoiceNumber = @InvoiceNumber,
+          InvoiceDate = @InvoiceDate,
           BillTo = @BillTo,
           ShipTo = @ShipTo,
           ShowProjectDetails = @ShowProjectDetails,
@@ -7097,8 +7888,13 @@ app.put("/api/receive-goods/:id", async (req, res) => {
     await rollbackTx(tx);
     tx = null;
     console.error("PUT /api/receive-goods/:id failed:", error?.message ?? error);
+    const isDuplicateSerialError =
+      isSqlUniqueConstraintError(error) &&
+      /UX_SerialNumbers_SerialNumber/i.test(String(error?.message || ""));
     const statusCode = isSqlLockTimeoutError(error)
       ? 503
+      : isDuplicateSerialError
+      ? 400
       : Number.isInteger(error?.statusCode)
       ? error.statusCode
       : 500;
@@ -7106,6 +7902,8 @@ app.put("/api/receive-goods/:id", async (req, res) => {
       ok: false,
       error: isSqlLockTimeoutError(error)
         ? RECEIVE_GOODS_LOCK_MESSAGE
+        : isDuplicateSerialError
+        ? "Serial number already exists. Remove the duplicate serial number and try again."
         : error?.message ?? "Failed to update receipt",
     });
   } finally {
@@ -7136,14 +7934,7 @@ app.delete("/api/receive-goods/:id", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
-    const receiptResult = await new sql.Request(tx)
-      .input("ReceiptId", sql.Int, id)
-      .query(withSqlLockTimeout(`
-        SELECT TOP 1 *
-        FROM dbo.ReceiveGoods
-        WHERE ${receivePk} = @ReceiptId
-      `));
-    const receiptRow = receiptResult.recordset?.[0] ?? null;
+    const receiptRow = await findReceiveGoodsRow(tx, id);
     if (!receiptRow) {
       await rollbackTx(tx);
       tx = null;
@@ -7340,8 +8131,8 @@ app.post("/api/boqs", async (req, res) => {
     items = [],
   } = req.body ?? {};
 
-  const safeItems = Array.isArray(items) ? items : [];
-  const hasValidItem = safeItems.some((item) => Number(item.quantity ?? 0) > 0);
+  const normalizedItems = normalizeBoqItemsInput(items);
+  const hasValidItem = normalizedItems.length > 0;
   if (!projectId) {
     return res.status(400).json({ ok: false, error: "Project is required" });
   }
@@ -7396,24 +8187,24 @@ app.post("/api/boqs", async (req, res) => {
     const boqId = boqRow?.BOQId;
 
     let total = 0;
-    for (const item of safeItems) {
+    for (const item of normalizedItems) {
       const qty = Number(item.quantity ?? 0) || 0;
       const rate = Number(item.rate ?? 0) || 0;
       total += qty * rate;
 
       const insertItem = new sql.Request(tx);
       insertItem.input("BOQId", sql.Int, boqId);
-      insertItem.input("ItemName", sql.NVarChar(200), String(item.name ?? "").trim());
-      insertItem.input("Description", sql.NVarChar(sql.MAX), String(item.description ?? "").trim());
-      insertItem.input("SerialNumber", sql.NVarChar(255), String(item.serialNumber ?? "").trim());
-      insertItem.input("Unit", sql.NVarChar(50), String(item.unit ?? "").trim());
-      insertItem.input("HSN", sql.NVarChar(50), String(item.hsn ?? "").trim());
-      insertItem.input("GST", sql.NVarChar(100), String(item.gst ?? "").trim());
+      insertItem.input("ItemName", sql.NVarChar(200), item.name);
+      insertItem.input("Description", sql.NVarChar(sql.MAX), item.description);
+      insertItem.input("SerialNumber", sql.NVarChar(255), item.serialNumber);
+      insertItem.input("Unit", sql.NVarChar(50), item.unit);
+      insertItem.input("HSN", sql.NVarChar(50), item.hsn);
+      insertItem.input("GST", sql.NVarChar(100), item.gst);
       insertItem.input("Quantity", sql.Decimal(18, 2), qty);
       insertItem.input("Rate", sql.Decimal(18, 2), rate);
       insertItem.input("ConsumedQty", sql.Decimal(18, 2), 0);
       insertItem.input("AvailableQty", sql.Decimal(18, 2), qty);
-      insertItem.input("Notes", sql.NVarChar(sql.MAX), String(item.notes ?? "").trim());
+      insertItem.input("Notes", sql.NVarChar(sql.MAX), item.notes);
       await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
           (BOQId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
@@ -7463,8 +8254,8 @@ app.put("/api/boqs/:id", async (req, res) => {
     items = [],
   } = req.body ?? {};
 
-  const safeItems = Array.isArray(items) ? items : [];
-  const hasValidItem = safeItems.some((item) => Number(item.quantity ?? 0) > 0);
+  const normalizedItems = normalizeBoqItemsInput(items);
+  const hasValidItem = normalizedItems.length > 0;
   if (!projectId) {
     return res.status(400).json({ ok: false, error: "Project is required" });
   }
@@ -7531,36 +8322,152 @@ app.put("/api/boqs/:id", async (req, res) => {
       return res.status(404).json({ ok: false, error: "BOQ not found" });
     }
 
-    const deleteItems = new sql.Request(tx);
-    deleteItems.input("BOQId", sql.Int, id);
-    await deleteItems.query(`DELETE FROM dbo.BOQLineItems WHERE BOQId = @BOQId`);
+    const existingItemsResult = await new sql.Request(tx)
+      .input("BOQId", sql.Int, id)
+      .query(`
+        SELECT *
+        FROM dbo.BOQLineItems
+        WHERE BOQId = @BOQId
+      `);
+    const existingItems = existingItemsResult.recordset ?? [];
+    const existingItemsById = new Map(
+      existingItems
+        .map((row) => [toNullableInt(row.LineItemId), row])
+        .filter(([lineItemId]) => lineItemId !== null)
+    );
+    const retainedItemIds = Array.from(
+      new Set(
+        normalizedItems
+          .map((item) => item.id)
+          .filter((lineItemId) => lineItemId !== null && existingItemsById.has(lineItemId))
+      )
+    );
+    const removedItemRows = existingItems.filter(
+      (row) => !retainedItemIds.includes(toNullableInt(row.LineItemId))
+    );
+    const removedItemIds = removedItemRows
+      .map((row) => toNullableInt(row.LineItemId))
+      .filter((lineItemId) => lineItemId !== null);
+    const consumedTotals = await loadBoqConsumedTotals(tx, [
+      ...retainedItemIds,
+      ...removedItemIds,
+    ]);
+
+    for (const row of removedItemRows) {
+      const lineItemId = toNullableInt(row.LineItemId);
+      const consumedQty = consumedTotals.get(lineItemId) ?? 0;
+      if (consumedQty > 0) {
+        const error = new Error(
+          `Cannot remove ${row.ItemName || "a BOQ item"} because ${consumedQty} quantity has already been consumed.`
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+    }
 
     let total = 0;
-    for (const item of safeItems) {
+    const affectedBoqItemIds = [];
+    for (const item of normalizedItems) {
       const qty = Number(item.quantity ?? 0) || 0;
       const rate = Number(item.rate ?? 0) || 0;
       total += qty * rate;
+      const existingRow =
+        item.id !== null && item.id !== undefined
+          ? existingItemsById.get(item.id) ?? null
+          : null;
+
+      if (existingRow) {
+        const consumedQty =
+          consumedTotals.get(item.id) ?? (Number(existingRow.ConsumedQty ?? 0) || 0);
+        if (qty < consumedQty) {
+          const error = new Error(
+            `Quantity for ${item.name || existingRow.ItemName || "a BOQ item"} cannot be lower than the consumed quantity (${consumedQty}).`
+          );
+          error.statusCode = 400;
+          throw error;
+        }
+
+        await new sql.Request(tx)
+          .input("LineItemId", sql.Int, item.id)
+          .input("ItemName", sql.NVarChar(200), item.name)
+          .input("Description", sql.NVarChar(sql.MAX), item.description)
+          .input("SerialNumber", sql.NVarChar(255), item.serialNumber)
+          .input("Unit", sql.NVarChar(50), item.unit)
+          .input("HSN", sql.NVarChar(50), item.hsn)
+          .input("GST", sql.NVarChar(100), item.gst)
+          .input("Quantity", sql.Decimal(18, 2), qty)
+          .input("Rate", sql.Decimal(18, 2), rate)
+          .input("ConsumedQty", sql.Decimal(18, 2), consumedQty)
+          .input("Notes", sql.NVarChar(sql.MAX), item.notes)
+          .query(`
+            UPDATE dbo.BOQLineItems
+            SET ItemName = @ItemName,
+                Description = @Description,
+                SerialNumber = @SerialNumber,
+                Unit = @Unit,
+                HSN = @HSN,
+                GST = @GST,
+                Quantity = @Quantity,
+                Rate = @Rate,
+                ConsumedQty = @ConsumedQty,
+                AvailableQty = CASE
+                  WHEN @Quantity - @ConsumedQty < 0 THEN 0
+                  ELSE @Quantity - @ConsumedQty
+                END,
+                Notes = @Notes
+            WHERE LineItemId = @LineItemId
+          `);
+        affectedBoqItemIds.push(item.id);
+        continue;
+      }
 
       const insertItem = new sql.Request(tx);
       insertItem.input("BOQId", sql.Int, id);
-      insertItem.input("ItemName", sql.NVarChar(200), String(item.name ?? "").trim());
-      insertItem.input("Description", sql.NVarChar(sql.MAX), String(item.description ?? "").trim());
-      insertItem.input("SerialNumber", sql.NVarChar(255), String(item.serialNumber ?? "").trim());
-      insertItem.input("Unit", sql.NVarChar(50), String(item.unit ?? "").trim());
-      insertItem.input("HSN", sql.NVarChar(50), String(item.hsn ?? "").trim());
-      insertItem.input("GST", sql.NVarChar(100), String(item.gst ?? "").trim());
+      insertItem.input("ItemName", sql.NVarChar(200), item.name);
+      insertItem.input("Description", sql.NVarChar(sql.MAX), item.description);
+      insertItem.input("SerialNumber", sql.NVarChar(255), item.serialNumber);
+      insertItem.input("Unit", sql.NVarChar(50), item.unit);
+      insertItem.input("HSN", sql.NVarChar(50), item.hsn);
+      insertItem.input("GST", sql.NVarChar(100), item.gst);
       insertItem.input("Quantity", sql.Decimal(18, 2), qty);
       insertItem.input("Rate", sql.Decimal(18, 2), rate);
       insertItem.input("ConsumedQty", sql.Decimal(18, 2), 0);
       insertItem.input("AvailableQty", sql.Decimal(18, 2), qty);
-      insertItem.input("Notes", sql.NVarChar(sql.MAX), String(item.notes ?? "").trim());
-      await insertItem.query(`
+      insertItem.input("Notes", sql.NVarChar(sql.MAX), item.notes);
+      const insertResult = await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
           (BOQId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
+        OUTPUT INSERTED.LineItemId
         VALUES
           (@BOQId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
       `);
+      const insertedItemId = toNullableInt(insertResult.recordset?.[0]?.LineItemId);
+      if (insertedItemId !== null) {
+        affectedBoqItemIds.push(insertedItemId);
+      }
     }
+
+    if (removedItemIds.length) {
+      await detachPurchaseOrderItemsFromBoq(tx, removedItemIds);
+
+      const deleteItems = new sql.Request(tx);
+      const removedInClause = buildPurchaseOrderItemInClause(
+        deleteItems,
+        removedItemIds,
+        "RemovedLineItemId"
+      );
+      await deleteItems.query(`
+        DELETE FROM dbo.BOQLineItems
+        WHERE LineItemId IN (${removedInClause})
+      `);
+    }
+
+    await refreshBoqAvailability(tx, affectedBoqItemIds);
+    const syncedPurchaseOrderIds = await syncPurchaseOrderItemsFromBoq(
+      tx,
+      affectedBoqItemIds
+    );
+    await refreshPurchaseOrdersDerivedData(tx, syncedPurchaseOrderIds);
 
     await tx.commit();
 
@@ -7598,6 +8505,18 @@ app.delete("/api/boqs/:id", async (req, res) => {
     const pool = await getPool();
     tx = pool.transaction();
     await tx.begin();
+
+    const existingItemsResult = await new sql.Request(tx)
+      .input("BOQId", sql.Int, id)
+      .query(`
+        SELECT LineItemId
+        FROM dbo.BOQLineItems
+        WHERE BOQId = @BOQId
+      `);
+    const existingItemIds = (existingItemsResult.recordset ?? [])
+      .map((row) => toNullableInt(row.LineItemId))
+      .filter((lineItemId) => lineItemId !== null);
+    await detachPurchaseOrderItemsFromBoq(tx, existingItemIds);
 
     const deleteItems = new sql.Request(tx);
     deleteItems.input("BOQId", sql.Int, id);
@@ -7719,7 +8638,9 @@ app.post("/api/delivery-challans", async (req, res) => {
   const {
     dcNumber,
     projectId,
+    receiveGoodsId = null,
     fromLocationId,
+    toLocationId = null,
     toLocation,
     vehicleNumber = null,
     eWayBillNumber = null,
@@ -7731,7 +8652,9 @@ app.post("/api/delivery-challans", async (req, res) => {
 
   const safeDcNumber = normalizeOptionalString(dcNumber);
   const safeProjectId = toNullableInt(projectId);
+  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
   const safeFromLocationId = toNullableInt(fromLocationId);
+  const safeToLocationId = toNullableInt(toLocationId);
   const safeToLocation = normalizeOptionalString(toLocation);
   const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? null;
   const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? null;
@@ -7748,8 +8671,11 @@ app.post("/api/delivery-challans", async (req, res) => {
   if (!safeFromLocationId) {
     return res.status(400).json({ ok: false, error: "fromLocationId is required" });
   }
-  if (!safeToLocation) {
-    return res.status(400).json({ ok: false, error: "toLocation is required" });
+  if (!safeToLocationId && !safeToLocation) {
+    return res.status(400).json({
+      ok: false,
+      error: "toLocationId or toLocation is required",
+    });
   }
   if (Number.isNaN(parsedIssueDate)) {
     return res.status(400).json({ ok: false, error: "Invalid issueDate" });
@@ -7789,11 +8715,22 @@ app.post("/api/delivery-challans", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
+    const resolvedReceiveGoodsId = await resolveDeliveryChallanReceiveReference(tx, {
+      receiveGoodsId: safeReceiveGoodsId,
+      projectId: safeProjectId,
+    });
+    const destination = await resolveDeliveryChallanDestination(tx, {
+      toLocationId: safeToLocationId,
+      toLocation: safeToLocation,
+    });
+
     const insertHeaderReq = new sql.Request(tx);
     insertHeaderReq.input("DCNumber", sql.NVarChar(100), safeDcNumber);
     insertHeaderReq.input("ProjectId", sql.Int, safeProjectId);
+    insertHeaderReq.input("ReceiveGoodsId", sql.Int, resolvedReceiveGoodsId);
     insertHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
-    insertHeaderReq.input("ToLocation", sql.NVarChar(200), safeToLocation);
+    insertHeaderReq.input("ToLocationId", sql.Int, destination.toLocationId);
+    insertHeaderReq.input("ToLocation", sql.NVarChar(200), destination.toLocation);
     insertHeaderReq.input("VehicleNumber", sql.NVarChar(50), safeVehicleNumber);
     insertHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
     insertHeaderReq.input("IssueDate", sql.Date, parsedIssueDate ?? null);
@@ -7802,10 +8739,10 @@ app.post("/api/delivery-challans", async (req, res) => {
 
     const headerResult = await insertHeaderReq.query(`
       INSERT INTO dbo.DeliveryChallan
-        (DCNumber, ProjectId, FromLocationId, ToLocation, VehicleNumber, EWayBillNumber, IssueDate, Status, Notes)
+        (DCNumber, ProjectId, ReceiveGoodsId, FromLocationId, ToLocationId, ToLocation, VehicleNumber, EWayBillNumber, IssueDate, Status, Notes)
       OUTPUT INSERTED.*
       VALUES
-        (@DCNumber, @ProjectId, @FromLocationId, @ToLocation, @VehicleNumber, @EWayBillNumber, @IssueDate, @Status, @Notes)
+        (@DCNumber, @ProjectId, @ReceiveGoodsId, @FromLocationId, @ToLocationId, @ToLocation, @VehicleNumber, @EWayBillNumber, @IssueDate, @Status, @Notes)
     `);
 
     const headerRow = headerResult.recordset?.[0];
@@ -7867,7 +8804,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
   const {
     dcNumber,
     projectId,
+    receiveGoodsId = null,
     fromLocationId,
+    toLocationId = null,
     toLocation,
     vehicleNumber = null,
     eWayBillNumber = null,
@@ -7879,7 +8818,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
 
   const safeDcNumber = normalizeOptionalString(dcNumber);
   const safeProjectId = toNullableInt(projectId);
+  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
   const safeFromLocationId = toNullableInt(fromLocationId);
+  const safeToLocationId = toNullableInt(toLocationId);
   const safeToLocation = normalizeOptionalString(toLocation);
   const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? null;
   const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? null;
@@ -7896,8 +8837,11 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
   if (!safeFromLocationId) {
     return res.status(400).json({ ok: false, error: "fromLocationId is required" });
   }
-  if (!safeToLocation) {
-    return res.status(400).json({ ok: false, error: "toLocation is required" });
+  if (!safeToLocationId && !safeToLocation) {
+    return res.status(400).json({
+      ok: false,
+      error: "toLocationId or toLocation is required",
+    });
   }
   if (Number.isNaN(parsedIssueDate)) {
     return res.status(400).json({ ok: false, error: "Invalid issueDate" });
@@ -7937,12 +8881,23 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
+    const resolvedReceiveGoodsId = await resolveDeliveryChallanReceiveReference(tx, {
+      receiveGoodsId: safeReceiveGoodsId,
+      projectId: safeProjectId,
+    });
+    const destination = await resolveDeliveryChallanDestination(tx, {
+      toLocationId: safeToLocationId,
+      toLocation: safeToLocation,
+    });
+
     const updateHeaderReq = new sql.Request(tx);
     updateHeaderReq.input("DeliveryChallanId", sql.BigInt, id);
     updateHeaderReq.input("DCNumber", sql.NVarChar(100), safeDcNumber);
     updateHeaderReq.input("ProjectId", sql.Int, safeProjectId);
+    updateHeaderReq.input("ReceiveGoodsId", sql.Int, resolvedReceiveGoodsId);
     updateHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
-    updateHeaderReq.input("ToLocation", sql.NVarChar(200), safeToLocation);
+    updateHeaderReq.input("ToLocationId", sql.Int, destination.toLocationId);
+    updateHeaderReq.input("ToLocation", sql.NVarChar(200), destination.toLocation);
     updateHeaderReq.input("VehicleNumber", sql.NVarChar(50), safeVehicleNumber);
     updateHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
     updateHeaderReq.input("IssueDate", sql.Date, parsedIssueDate ?? null);
@@ -7953,7 +8908,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       UPDATE dbo.DeliveryChallan
       SET DCNumber = @DCNumber,
           ProjectId = @ProjectId,
+          ReceiveGoodsId = @ReceiveGoodsId,
           FromLocationId = @FromLocationId,
+          ToLocationId = @ToLocationId,
           ToLocation = @ToLocation,
           VehicleNumber = @VehicleNumber,
           EWayBillNumber = @EWayBillNumber,
@@ -8160,6 +9117,7 @@ app.post("/api/consumptions", async (req, res) => {
     consumptionNumber,
     projectId,
     locationId,
+    receiveGoodsId = null,
     deliveryChallanId = null,
     deliveryChallanRef = null,
     consumptionDate = null,
@@ -8176,6 +9134,7 @@ app.post("/api/consumptions", async (req, res) => {
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber);
   const safeProjectId = toNullableInt(projectId);
   const safeLocationId = toNullableInt(locationId);
+  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
   const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
   const safeDeliveryChallanRef = normalizeOptionalString(deliveryChallanRef) ?? null;
   const safeIssuedBy = normalizeOptionalString(issuedBy) ?? null;
@@ -8211,8 +9170,12 @@ app.post("/api/consumptions", async (req, res) => {
       const boqItemId = toNullableInt(
         item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId
       );
+      const receiveGoodsItemId = toNullableInt(
+        item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+      );
       return {
         boqItemId,
+        receiveGoodsItemId,
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
@@ -8236,16 +9199,54 @@ app.post("/api/consumptions", async (req, res) => {
   try {
     await ensureConsumptionTables();
     await ensureBoqTables();
+    if (safeReceiveGoodsId) {
+      await ensureReceiveTables();
+    }
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
     tx = pool.transaction();
     await tx.begin();
 
+    const useReceiveSource = safeReceiveGoodsId !== null;
+    const sourceItemIds = useReceiveSource
+      ? uniqueReceiveGoodsItemIds(
+          normalizedItems.map((item) => item.receiveGoodsItemId ?? item.boqItemId)
+        )
+      : uniqueBoqItemIds(normalizedItems.map((item) => item.boqItemId));
+
+    if (useReceiveSource) {
+      const sourceItems = await loadReceiveGoodsItemsForConsumption(tx, {
+        receiveGoodsId: safeReceiveGoodsId,
+        receiveGoodsItemIds: sourceItemIds,
+      });
+      const consumedTotals = await loadReceiveConsumedTotals(tx, sourceItemIds);
+      for (const row of sourceItems) {
+        const sourceId = toNullableInt(row.id);
+        const sourceQty = Number(row.receivedQty ?? 0) || 0;
+        const alreadyConsumed = consumedTotals.get(sourceId) ?? 0;
+        const requestedQty =
+          normalizedItems
+            .find((item) => toNullableInt(item.receiveGoodsItemId ?? item.boqItemId) === sourceId)
+            ?.quantity ?? 0;
+        if (requestedQty > sourceQty - alreadyConsumed) {
+          const error = new Error(
+            `Quantity for ${row.name || "the linked receipt item"} cannot be greater than the available quantity (${Math.max(
+              sourceQty - alreadyConsumed,
+              0
+            )}).`
+          );
+          error.statusCode = 400;
+          throw error;
+        }
+      }
+    }
+
     const insertHeaderReq = new sql.Request(tx);
     insertHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
     insertHeaderReq.input("ProjectId", sql.Int, safeProjectId);
     insertHeaderReq.input("LocationId", sql.Int, safeLocationId);
+    insertHeaderReq.input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId);
     insertHeaderReq.input("DeliveryChallanId", sql.Int, safeDeliveryChallanId);
     insertHeaderReq.input("DeliveryChallanRef", sql.NVarChar(100), safeDeliveryChallanRef);
     insertHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
@@ -8259,10 +9260,10 @@ app.post("/api/consumptions", async (req, res) => {
 
     const headerResult = await insertHeaderReq.query(`
       INSERT INTO dbo.Consumption
-        (ConsumptionNumber, ProjectId, LocationId, DeliveryChallanId, DeliveryChallanRef, ConsumptionDate, IssuedBy, Status, Notes, CompanyAddress, CompanyGstin, CompanyPhone, CompanyEmail)
+        (ConsumptionNumber, ProjectId, LocationId, ReceiveGoodsId, DeliveryChallanId, DeliveryChallanRef, ConsumptionDate, IssuedBy, Status, Notes, CompanyAddress, CompanyGstin, CompanyPhone, CompanyEmail)
       OUTPUT INSERTED.*
       VALUES
-        (@ConsumptionNumber, @ProjectId, @LocationId, @DeliveryChallanId, @DeliveryChallanRef, @ConsumptionDate, @IssuedBy, @Status, @Notes, @CompanyAddress, @CompanyGstin, @CompanyPhone, @CompanyEmail)
+        (@ConsumptionNumber, @ProjectId, @LocationId, @ReceiveGoodsId, @DeliveryChallanId, @DeliveryChallanRef, @ConsumptionDate, @IssuedBy, @Status, @Notes, @CompanyAddress, @CompanyGstin, @CompanyPhone, @CompanyEmail)
     `);
 
     const headerRow = headerResult.recordset?.[0];
@@ -8275,7 +9276,12 @@ app.post("/api/consumptions", async (req, res) => {
     for (const item of normalizedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("ConsumptionId", sql.Int, consumptionId);
-      insertItemReq.input("BoqItemId", sql.Int, item.boqItemId);
+      insertItemReq.input("BoqItemId", sql.Int, useReceiveSource ? null : item.boqItemId);
+      insertItemReq.input(
+        "ReceiveGoodsItemId",
+        sql.Int,
+        useReceiveSource ? (item.receiveGoodsItemId ?? item.boqItemId) : null
+      );
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
@@ -8286,16 +9292,18 @@ app.post("/api/consumptions", async (req, res) => {
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.ConsumptionItems
-          (${fkCol}, BoqItemId, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
+          (${fkCol}, BoqItemId, ReceiveGoodsItemId, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@ConsumptionId, @BoqItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
+          (@ConsumptionId, @BoqItemId, @ReceiveGoodsItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
-    await refreshBoqAvailability(
-      tx,
-      normalizedItems.map((item) => item.boqItemId)
-    );
+    if (!useReceiveSource) {
+      await refreshBoqAvailability(
+        tx,
+        normalizedItems.map((item) => item.boqItemId)
+      );
+    }
 
     await tx.commit();
 
@@ -8332,6 +9340,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
     consumptionNumber,
     projectId,
     locationId,
+    receiveGoodsId = null,
     deliveryChallanId = null,
     deliveryChallanRef = null,
     consumptionDate = null,
@@ -8348,6 +9357,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber);
   const safeProjectId = toNullableInt(projectId);
   const safeLocationId = toNullableInt(locationId);
+  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
   const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
   const safeDeliveryChallanRef = normalizeOptionalString(deliveryChallanRef) ?? null;
   const safeIssuedBy = normalizeOptionalString(issuedBy) ?? null;
@@ -8383,8 +9393,12 @@ app.put("/api/consumptions/:id", async (req, res) => {
       const boqItemId = toNullableInt(
         item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId
       );
+      const receiveGoodsItemId = toNullableInt(
+        item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+      );
       return {
         boqItemId,
+        receiveGoodsItemId,
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
@@ -8408,26 +9422,96 @@ app.put("/api/consumptions/:id", async (req, res) => {
   try {
     await ensureConsumptionTables();
     await ensureBoqTables();
+    if (safeReceiveGoodsId) {
+      await ensureReceiveTables();
+    }
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
     tx = pool.transaction();
     await tx.begin();
 
+    const currentConsumptionResult = await new sql.Request(tx)
+      .input("ConsumptionId", sql.Int, id)
+      .query(`
+        SELECT *
+        FROM dbo.Consumption
+        WHERE ${pkCol} = @ConsumptionId
+      `);
+    const currentConsumptionRow = currentConsumptionResult.recordset?.[0] ?? null;
+
     const existingItemsResult = await new sql.Request(tx)
       .input("ConsumptionId", sql.Int, id)
       .query(`
-        SELECT BoqItemId FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
+        SELECT BoqItemId, ReceiveGoodsItemId, Quantity
+        FROM dbo.ConsumptionItems
+        WHERE ${fkCol} = @ConsumptionId
       `);
-    const existingBoqItemIds = (existingItemsResult.recordset ?? []).map(
-      (row) => row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null
-    );
+    const existingItems = existingItemsResult.recordset ?? [];
+    const existingBoqItemIds = existingItems
+      .map((row) => row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null)
+      .filter((value) => value !== null);
+    const existingReceiveGoodsItemIds = existingItems
+      .map(
+        (row) =>
+          row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? row.ReceiveItemId ?? null
+      )
+      .filter((value) => value !== null);
+
+    const useReceiveSource =
+      safeReceiveGoodsId !== null ||
+      currentConsumptionRow?.ReceiveGoodsId !== null ||
+      normalizedItems.some((item) => item.receiveGoodsItemId !== null);
+
+    if (useReceiveSource) {
+      const sourceReceiptId = safeReceiveGoodsId ?? currentConsumptionRow?.ReceiveGoodsId ?? null;
+      const sourceItemIds = uniqueReceiveGoodsItemIds(
+        normalizedItems.map((item) => item.receiveGoodsItemId ?? item.boqItemId)
+      );
+      const sourceItems = await loadReceiveGoodsItemsForConsumption(tx, {
+        receiveGoodsId: sourceReceiptId,
+        receiveGoodsItemIds: sourceItemIds,
+      });
+      const consumedTotals = await loadReceiveConsumedTotals(tx, sourceItemIds);
+      const existingQtyById = existingItems.reduce((acc, row) => {
+        const sourceId = toNullableInt(
+          row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? row.ReceiveItemId ?? row.BoqItemId
+        );
+        if (sourceId !== null) {
+          acc.set(sourceId, (acc.get(sourceId) ?? 0) + (Number(row.Quantity ?? 0) || 0));
+        }
+        return acc;
+      }, new Map());
+
+      for (const row of sourceItems) {
+        const sourceId = toNullableInt(row.id);
+        const sourceQty = Number(row.receivedQty ?? 0) || 0;
+        const existingQty = existingQtyById.get(sourceId) ?? 0;
+        const consumedOtherThanCurrent = Math.max(
+          (consumedTotals.get(sourceId) ?? 0) - existingQty,
+          0
+        );
+        const requestedQty =
+          normalizedItems
+            .find((item) => toNullableInt(item.receiveGoodsItemId ?? item.boqItemId) === sourceId)
+            ?.quantity ?? 0;
+        const availableQty = Math.max(sourceQty - consumedOtherThanCurrent, 0);
+        if (requestedQty > availableQty) {
+          const error = new Error(
+            `Quantity for ${row.name || "the linked receipt item"} cannot be greater than the available quantity (${availableQty}).`
+          );
+          error.statusCode = 400;
+          throw error;
+        }
+      }
+    }
 
     const updateHeaderReq = new sql.Request(tx);
     updateHeaderReq.input("ConsumptionId", sql.Int, id);
     updateHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
     updateHeaderReq.input("ProjectId", sql.Int, safeProjectId);
     updateHeaderReq.input("LocationId", sql.Int, safeLocationId);
+    updateHeaderReq.input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId);
     updateHeaderReq.input("DeliveryChallanId", sql.Int, safeDeliveryChallanId);
     updateHeaderReq.input("DeliveryChallanRef", sql.NVarChar(100), safeDeliveryChallanRef);
     updateHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
@@ -8444,6 +9528,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
       SET ConsumptionNumber = @ConsumptionNumber,
           ProjectId = @ProjectId,
           LocationId = @LocationId,
+          ReceiveGoodsId = @ReceiveGoodsId,
           DeliveryChallanId = @DeliveryChallanId,
           DeliveryChallanRef = @DeliveryChallanRef,
           ConsumptionDate = @ConsumptionDate,
@@ -8474,7 +9559,12 @@ app.put("/api/consumptions/:id", async (req, res) => {
     for (const item of normalizedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("ConsumptionId", sql.Int, id);
-      insertItemReq.input("BoqItemId", sql.Int, item.boqItemId);
+      insertItemReq.input("BoqItemId", sql.Int, useReceiveSource ? null : item.boqItemId);
+      insertItemReq.input(
+        "ReceiveGoodsItemId",
+        sql.Int,
+        useReceiveSource ? (item.receiveGoodsItemId ?? item.boqItemId) : null
+      );
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
@@ -8485,16 +9575,18 @@ app.put("/api/consumptions/:id", async (req, res) => {
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.ConsumptionItems
-          (${fkCol}, BoqItemId, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
+          (${fkCol}, BoqItemId, ReceiveGoodsItemId, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@ConsumptionId, @BoqItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
+          (@ConsumptionId, @BoqItemId, @ReceiveGoodsItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
-    await refreshBoqAvailability(tx, [
-      ...existingBoqItemIds,
-      ...normalizedItems.map((item) => item.boqItemId),
-    ]);
+    if (!useReceiveSource) {
+      await refreshBoqAvailability(tx, [
+        ...existingBoqItemIds,
+        ...normalizedItems.map((item) => item.boqItemId),
+      ]);
+    }
 
     await tx.commit();
 

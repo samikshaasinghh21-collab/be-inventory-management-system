@@ -3,6 +3,8 @@ import api from "./api";
 const emitBoqChange = () => {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("boqs:changed"));
+    window.dispatchEvent(new Event("purchase-orders:changed"));
+    window.dispatchEvent(new Event("receive-goods:changed"));
   }
 };
 

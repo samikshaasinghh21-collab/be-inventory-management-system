@@ -33,7 +33,13 @@ const normalizeDeliveryChallan = (challan = {}) => ({
   id: challan.id ?? challan.DeliveryChallanId ?? challan.Id ?? null,
   dcNumber: challan.dcNumber ?? challan.DCNumber ?? challan.DcNumber ?? "",
   projectId: challan.projectId ?? challan.ProjectId ?? null,
+  receiveGoodsId:
+    challan.receiveGoodsId ??
+    challan.ReceiveGoodsId ??
+    challan.receivegoodsId ??
+    null,
   fromLocationId: challan.fromLocationId ?? challan.FromLocationId ?? null,
+  toLocationId: challan.toLocationId ?? challan.ToLocationId ?? null,
   toLocation: challan.toLocation ?? challan.ToLocation ?? "",
   vehicleNumber: challan.vehicleNumber ?? challan.VehicleNumber ?? "",
   eWayBillNumber:

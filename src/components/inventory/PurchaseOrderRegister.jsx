@@ -23,6 +23,19 @@ import { getGstTaxMode } from "../../utils/gstUtils";
 import PasswordPromptModal from "../common/PasswordPromptModal";
 import { getClosedPoAuthError, isAdminRole } from "../../utils/closedPoAuth";
 
+const formatAddressLine = (vendor) => {
+  const {
+    address = "",
+    city = "",
+    state = "",
+    pincode = "",
+  } = vendor ?? {};
+
+  return [address, [city, state, pincode].filter(Boolean).join(", ")]
+    .filter(Boolean)
+    .join(", ");
+};
+
 const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   const alignClass = align === "right" ? "text-right" : "text-left";
   return (
@@ -142,6 +155,19 @@ const PurchaseOrderRegister = () => {
   }, []);
 
   useEffect(() => {
+    const refreshOrders = () => {
+      void loadRecords();
+    };
+
+    window.addEventListener("purchase-orders:changed", refreshOrders);
+    window.addEventListener("receive-goods:changed", refreshOrders);
+    return () => {
+      window.removeEventListener("purchase-orders:changed", refreshOrders);
+      window.removeEventListener("receive-goods:changed", refreshOrders);
+    };
+  }, []);
+
+  useEffect(() => {
     const activeIds = new Set(records.map((record) => String(record.id)));
     setUnlockedPoIds((prev) => prev.filter((id) => activeIds.has(id)));
   }, [records]);
@@ -167,8 +193,19 @@ const PurchaseOrderRegister = () => {
     }, {});
   }, [locations]);
 
+  const getRecordTaxMode = (record) => {
+    const vendor = vendorMap[String(record?.vendorId)];
+    return getGstTaxMode({
+      vendorState: vendor?.state,
+      vendorGstin: vendor?.gstNumber,
+      companyState: company.state,
+      companyGstin: company.gstin,
+    });
+  };
+
   const totalValue = records.reduce(
-    (sum, record) => sum + buildGstSummary(record.items || []).total,
+    (sum, record) =>
+      sum + buildGstSummary(record.items || [], { taxMode: getRecordTaxMode(record) }).total,
     0
   );
 
@@ -369,16 +406,6 @@ const PurchaseOrderRegister = () => {
         error?.response?.data?.error || error?.message || "Failed to delete purchase order."
       );
     }
-  };
-
-  const getRecordTaxMode = (record) => {
-    const vendor = vendorMap[String(record?.vendorId)];
-    return getGstTaxMode({
-      vendorState: vendor?.state,
-      vendorGstin: vendor?.gstNumber,
-      companyState: company.state,
-      companyGstin: company.gstin,
-    });
   };
 
   const confirmLockedPoAction = async () => {
@@ -686,6 +713,10 @@ const PurchaseOrderRegister = () => {
                                 <strong>Vendor:</strong> {vendor?.name || "-"}
                               </p>
                               <p>
+                                <strong>Vendor Address:</strong>{" "}
+                                {formatAddressLine(vendor) || "-"}
+                              </p>
+                              <p>
                                 <strong>Location:</strong> {location?.name || "-"}
                               </p>
                               <p>
@@ -699,6 +730,13 @@ const PurchaseOrderRegister = () => {
                                 <strong>Total Value:</strong> {formatCurrency(summary.total)}
                               </p>
                             </div>
+
+                            {record.notes && (
+                              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                                <h4 className="font-semibold text-slate-700 mb-2">Notes</h4>
+                                <p className="text-sm text-slate-600 whitespace-pre-wrap">{record.notes}</p>
+                              </div>
+                            )}
 
                             <div className="rounded-lg border border-slate-200 bg-white p-4">
                               <GstSummaryBlock
@@ -797,6 +835,7 @@ const PurchaseOrderRegister = () => {
             vendor?.name || "-",
             primaryContact?.contactName || vendor?.email || "-",
             primaryContact?.phone || vendor?.phone || "-",
+            formatAddressLine(vendor) || "-",
           ]}
           rightBlockTitle="Project"
           rightBlockLines={[
@@ -831,11 +870,19 @@ const PurchaseOrderRegister = () => {
             };
           })}
           bottomLeftContent={
-            isLockedPurchaseOrder(viewRecord.status) ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">
-                {getPurchaseOrderLockMessage(viewRecord.status)}
-              </div>
-            ) : null
+            <div className="space-y-3 text-left text-xs">
+              {isLockedPurchaseOrder(viewRecord.status) && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  {getPurchaseOrderLockMessage(viewRecord.status)}
+                </div>
+              )}
+              {viewRecord.notes && (
+                <div>
+                  <p className="font-semibold">Notes</p>
+                  <p className="whitespace-pre-wrap text-slate-700">{viewRecord.notes}</p>
+                </div>
+              )}
+            </div>
           }
           bottomRightContent={
             <GstSummaryBlock

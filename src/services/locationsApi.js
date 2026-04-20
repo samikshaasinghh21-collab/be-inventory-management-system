@@ -1,5 +1,11 @@
 import api from "./api";
 
+const emitLocationsChange = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("locations:changed"));
+  }
+};
+
 const normalizeLocation = (location = {}) => ({
   id: location.id ?? location.LocationId ?? null,
   name:
@@ -31,14 +37,19 @@ export const fetchLocations = async () => {
 
 export const createLocation = async (payload) => {
   const response = await api.post("/locations", payload);
-  return normalizeLocation(response.data?.location ?? response.data);
+  const normalized = normalizeLocation(response.data?.location ?? response.data);
+  emitLocationsChange();
+  return normalized;
 };
 
 export const updateLocation = async (id, payload) => {
   const response = await api.put(`/locations/${id}`, payload);
-  return normalizeLocation(response.data?.location ?? response.data);
+  const normalized = normalizeLocation(response.data?.location ?? response.data);
+  emitLocationsChange();
+  return normalized;
 };
 
 export const deleteLocation = async (id) => {
   await api.delete(`/locations/${id}`);
+  emitLocationsChange();
 };

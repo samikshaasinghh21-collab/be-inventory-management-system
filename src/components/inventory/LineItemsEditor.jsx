@@ -1,4 +1,11 @@
+import { useEffect, useMemo, useState } from "react";
 import useSettings from "../../hooks/useSettings";
+import { fetchItems } from "../../services/inventoryApi";
+import { getProducts } from "../../services/productsStore";
+import {
+  formatTaxPercentage,
+  parseTaxPercentage,
+} from "../../utils/taxUtils";
 
 const createEmptyItem = (extraFieldKey = "notes") => {
   const base = {
@@ -19,6 +26,46 @@ const createEmptyItem = (extraFieldKey = "notes") => {
   }
 
   return base;
+};
+
+const normalizeCatalogItem = (item = {}) => {
+  const rate = Number(item.rate ?? item.price ?? item.salesPrice ?? item.unitPrice ?? 0);
+  const taxPercentage = parseTaxPercentage(
+    item.taxPercentage ?? item.gst ?? item.GST ?? 0
+  );
+  return {
+    id: item.id ?? item.ItemId ?? null,
+    itemId: item.itemId ?? item.ItemId ?? item.id ?? null,
+    name: String(item.name ?? item.Name ?? "").trim(),
+    description: item.description ?? item.Description ?? "",
+    unit: item.unit ?? item.Unit ?? "PCS",
+    hsn: item.hsn ?? item.HSN ?? "",
+    gst:
+      String(item.gst ?? item.GST ?? "").trim() ||
+      formatTaxPercentage(taxPercentage),
+    taxPercentage,
+    rate: Number.isFinite(rate) ? rate : 0,
+    serialRequired:
+      item.serialRequired ?? item.SerialRequired ?? item.IsSerialTracked ?? false,
+    serialNumber:
+      item.serialNumber ?? item.SerialNumber ?? item.SerialNumbe ?? "",
+  };
+};
+
+const mergeCatalogItems = (primaryItems = [], secondaryItems = []) => {
+  const merged = new Map();
+  [...primaryItems, ...secondaryItems]
+    .map(normalizeCatalogItem)
+    .filter((item) => item.name)
+    .forEach((item) => {
+      const key = String(item.id ?? item.itemId ?? item.name).toLowerCase();
+      if (!merged.has(key)) {
+        merged.set(key, item);
+      }
+    });
+  return Array.from(merged.values()).sort((left, right) =>
+    left.name.localeCompare(right.name)
+  );
 };
 
 const LineItemsEditor = ({
@@ -43,6 +90,52 @@ const LineItemsEditor = ({
 }) => {
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
+  const [catalogItems, setCatalogItems] = useState(() =>
+    mergeCatalogItems(getProducts(), [])
+  );
+  const catalogListId = useMemo(
+    () =>
+      `line-items-catalog-${String(title)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-") || "default"}`,
+    [title]
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    const syncCatalog = async () => {
+      const storedItems = getProducts();
+      if (active) {
+        setCatalogItems(mergeCatalogItems(storedItems, []));
+      }
+      try {
+        const apiItems = await fetchItems();
+        if (!active) {
+          return;
+        }
+        setCatalogItems(mergeCatalogItems(apiItems, storedItems));
+      } catch {
+        // Keep the locally cached catalog when the API is unavailable.
+      }
+    };
+
+    const handleProductsChanged = () => {
+      setCatalogItems((current) => mergeCatalogItems(getProducts(), current));
+    };
+
+    void syncCatalog();
+    if (typeof window !== "undefined") {
+      window.addEventListener("products:changed", handleProductsChanged);
+    }
+    return () => {
+      active = false;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("products:changed", handleProductsChanged);
+      }
+    };
+  }, []);
 
   const formatCurrency = (value) => {
     const amount = Number(value) || 0;
@@ -72,8 +165,56 @@ const LineItemsEditor = ({
 
   const handleUpdate = (id, field, value) => {
     const next = (items || []).map((item) =>
-      item.id === id ? { ...item, [field]: value } : item
+      item.id === id
+        ? {
+            ...item,
+            [field]: value,
+            ...(field === "gst"
+              ? { taxPercentage: parseTaxPercentage(value) }
+              : {}),
+          }
+        : item
     );
+    onChange(next);
+  };
+
+  const handleNameChange = (id, value) => {
+    const normalizedValue = String(value ?? "").trim().toLowerCase();
+    const matchedCatalogItem =
+      catalogItems.find(
+        (catalogItem) => catalogItem.name.toLowerCase() === normalizedValue
+      ) ?? null;
+
+    const next = (items || []).map((item) => {
+      if (item.id !== id) {
+        return item;
+      }
+      if (!matchedCatalogItem) {
+        return {
+          ...item,
+          name: value,
+        };
+      }
+
+      return {
+        ...item,
+        itemId: matchedCatalogItem.itemId ?? item.itemId ?? null,
+        name: matchedCatalogItem.name,
+        description: matchedCatalogItem.description || item.description,
+        unit: matchedCatalogItem.unit || item.unit,
+        hsn: matchedCatalogItem.hsn || item.hsn,
+        gst: matchedCatalogItem.gst || item.gst,
+        taxPercentage:
+          matchedCatalogItem.taxPercentage ?? item.taxPercentage ?? 0,
+        rate:
+          matchedCatalogItem.rate || matchedCatalogItem.rate === 0
+            ? matchedCatalogItem.rate
+            : item.rate,
+        serialRequired:
+          matchedCatalogItem.serialRequired ?? item.serialRequired ?? false,
+        serialNumber: matchedCatalogItem.serialNumber || item.serialNumber,
+      };
+    });
     onChange(next);
   };
 
@@ -150,9 +291,10 @@ const LineItemsEditor = ({
                     <input
                       type="text"
                       value={item.name}
+                      list={catalogListId}
                       disabled={readOnly}
                       onChange={(event) =>
-                        handleUpdate(item.id, "name", event.target.value)
+                        handleNameChange(item.id, event.target.value)
                       }
                       placeholder="Item name"
                       className="w-full border border-slate-200 rounded-md px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
@@ -280,6 +422,11 @@ const LineItemsEditor = ({
           </tbody>
         </table>
       </div>
+      <datalist id={catalogListId}>
+        {catalogItems.map((catalogItem) => (
+          <option key={catalogItem.id ?? catalogItem.name} value={catalogItem.name} />
+        ))}
+      </datalist>
       <div className="mt-3 flex justify-end text-sm text-slate-600">
         <span className="font-medium text-slate-800 mr-2">Total:</span>
         {formatCurrency(total)}

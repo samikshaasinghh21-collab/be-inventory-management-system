@@ -14,6 +14,7 @@ import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
 import useSettings from "../../hooks/useSettings";
 import { resolveBrandLogo } from "../../utils/branding";
 import { printSection } from "../../utils/printUtils";
+import { formatDateTimeDDMMYYYY } from "../../utils/dateFormat";
 import { fetchVendors } from "../../services/vendorsApi";
 import ReportFilters from "./reports/ReportFilters";
 import ReportTable from "./reports/ReportTable";
@@ -137,6 +138,9 @@ const ReportsPage = () => {
       "delivery-challans:changed",
       "consumptions:changed",
       "projects:changed",
+      "vendors:changed",
+      "locations:changed",
+      "settings:changed",
     ];
 
     eventNames.forEach((eventName) => window.addEventListener(eventName, refreshOnEvent));
@@ -251,13 +255,21 @@ const ReportsPage = () => {
     [filteredRows]
   );
 
-  const vendorCount = useMemo(
+  const totalReceivedQuantity = useMemo(
     () =>
-      new Set(
-        filteredRows
-          .map((row) => row.vendorName)
-          .filter((vendorName) => vendorName && vendorName !== "-")
-      ).size,
+      filteredRows.reduce(
+        (sum, row) => sum + Number(row.receivedQty ?? 0),
+        0
+      ),
+    [filteredRows]
+  );
+
+  const totalAvailableQuantity = useMemo(
+    () =>
+      filteredRows.reduce(
+        (sum, row) => sum + Number(row.availableQty ?? 0),
+        0
+      ),
     [filteredRows]
   );
 
@@ -267,13 +279,7 @@ const ReportsPage = () => {
     if (!lastUpdatedAt) {
       return "Sync pending";
     }
-    return new Intl.DateTimeFormat("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(lastUpdatedAt);
+    return formatDateTimeDDMMYYYY(lastUpdatedAt);
   }, [lastUpdatedAt]);
 
   const handleFilterFieldChange = (field, value) => {
@@ -370,7 +376,15 @@ const ReportsPage = () => {
       metaRows: [
         { label: "Project", value: selectedProject?.name || "-" },
         { label: "Activities", value: filteredRows.length },
-        { label: "Qty", value: totalQuantity.toLocaleString("en-IN") },
+        { label: "Total Qty", value: totalQuantity.toLocaleString("en-IN") },
+        {
+          label: "Received Qty",
+          value: totalReceivedQuantity.toLocaleString("en-IN"),
+        },
+        {
+          label: "Available Qty",
+          value: totalAvailableQuantity.toLocaleString("en-IN"),
+        },
       ],
       logoUrl: companyLogo,
       brandName: companyName,
@@ -390,22 +404,29 @@ const ReportsPage = () => {
       id: "quantity",
       label: "Total Quantity",
       value: totalQuantity.toLocaleString("en-IN"),
-      hint: "Across selected workflow steps",
+      hint: "Movement quantity across selected workflow steps",
       tone: "bg-emerald-50 text-emerald-700 border-emerald-100",
     },
     {
-      id: "vendors",
-      label: "Vendors Involved",
-      value: vendorCount.toLocaleString("en-IN"),
-      hint: "Distinct vendors in current result",
+      id: "received",
+      label: "Received Quantity",
+      value: totalReceivedQuantity.toLocaleString("en-IN"),
+      hint: "Quantity received against the filtered records",
       tone: "bg-amber-50 text-amber-700 border-amber-100",
+    },
+    {
+      id: "available",
+      label: "Available Quantity",
+      value: totalAvailableQuantity.toLocaleString("en-IN"),
+      hint: "Open or currently available quantity in the filtered result",
+      tone: "bg-violet-50 text-violet-700 border-violet-100",
     },
     {
       id: "latest",
       label: "Latest Activity",
       value: latestRow ? latestRow.activityLabel : "No activity",
-      hint: latestRow ? formatReportDate(latestRow.date, { withYear: true }) : "Waiting for records",
-      tone: "bg-violet-50 text-violet-700 border-violet-100",
+      hint: latestRow ? formatReportDate(latestRow.date) : "Waiting for records",
+      tone: "bg-slate-100 text-slate-700 border-slate-200",
     },
   ];
 
@@ -475,7 +496,7 @@ const ReportsPage = () => {
         disabled={loading && !records.projects.length}
       />
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         {summaryCards.map((card) => (
           <article
             key={card.id}

@@ -18,6 +18,7 @@ const DocumentViewPanel = ({
   companyGstin = "",
   companyPhone = "",
   companyEmail = "",
+  hideCompanyGstin = false,
   hideCompanyEmail = false,
   logoUrl = "",
   primaryPairs = [],
@@ -112,7 +113,9 @@ const DocumentViewPanel = ({
           <p className="text-[11px] whitespace-pre-line">
             {toDisplay(companyAddress)}
           </p>
-          <p className="text-[11px] mt-1">GST No: {toDisplay(companyGstin)}</p>
+          {!hideCompanyGstin ? (
+            <p className="text-[11px] mt-1">GST No: {toDisplay(companyGstin)}</p>
+          ) : null}
           <p className="text-[11px]">Phone: {toDisplay(companyPhone)}</p>
           {shouldShowCompanyEmail ? (
             <p className="text-[11px]">Email: {toDisplay(companyEmail)}</p>
@@ -120,8 +123,8 @@ const DocumentViewPanel = ({
         </div>
         <div className="p-3">
           <div className="grid grid-cols-2 gap-2 text-[11px]">
-            {primaryPairs.map((row) => (
-              <div key={row.label} className="contents">
+            {primaryPairs.map((row, index) => (
+              <div key={`${row.label}-${index}`} className="contents">
                 <p className="text-slate-600">{row.label}:</p>
                 <p className="font-semibold">{toDisplay(row.value)}</p>
               </div>
@@ -177,12 +180,12 @@ const DocumentViewPanel = ({
           )}
           {tableRows.map((row, index) => (
             <tr
-              key={row.id || index}
+              key={`${row.id ?? "row"}-${index}`}
               className="border-b border-slate-200"
             >
               {tableColumns.map((column) => (
                 <td
-                  key={`${row.id || index}-${column.key}`}
+                  key={`${row.id ?? "row"}-${index}-${column.key}`}
                   className={`p-2 ${column.align === "right" ? "text-right" : "text-left"}`}
                 >
                   {toDisplay(row[column.key])}
