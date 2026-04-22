@@ -37,9 +37,16 @@ const WorkflowSummary = ({
                   </p>
                   <p className="mt-1 text-sm text-slate-500">
                     {stage.count > 0
-                      ? `${stage.count} records • ${stage.totalQty.toLocaleString("en-IN")} qty`
+                      ? `${stage.count} records | ${stage.totalQty.toLocaleString("en-IN")} qty`
                       : "No activity yet"}
                   </p>
+                  {stage.count > 0 ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Received {stage.totalReceivedQty.toLocaleString("en-IN")} | Available{" "}
+                      {stage.totalAvailableQty.toLocaleString("en-IN")} | Balance{" "}
+                      {stage.totalBalanceQty.toLocaleString("en-IN")}
+                    </p>
+                  ) : null}
                   {stage.latestRefNo ? (
                     <p className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
                       Latest {stage.latestRefNo}

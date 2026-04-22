@@ -58,23 +58,73 @@ const buildReceiptReferenceLabel = (receipt = {}, projectName = "") => {
     .join(" | ");
 };
 
-const mapReceiptItemsToChallanItems = (receipt = {}) =>
+const getReceiptItemSelectionKey = (item = {}, index = 0) =>
+  String(
+    item.receiveGoodsItemId ??
+      item.ReceiveGoodsItemId ??
+      item.id ??
+      item.poItemId ??
+      item.itemId ??
+      `receipt-item-${index}`
+  );
+
+const getReceiptItemReceivedQty = (item = {}) =>
+  Number(
+    item.receiptReceivedQty ??
+      item.ReceiptReceivedQty ??
+      item.receivedQty ??
+      item.ReceivedQty ??
+      item.quantity ??
+      item.Quantity ??
+      0
+  ) || 0;
+
+const getReceiptItemAvailableQty = (item = {}) =>
+  Number(
+    item.receiptAvailableQty ??
+      item.ReceiptAvailableQty ??
+      item.availableQty ??
+      item.AvailableQty ??
+      item.totalAvailableQty ??
+      item.TotalAvailableQty ??
+      getReceiptItemReceivedQty(item)
+  ) || 0;
+
+const mapReceiptItemsToChallanItems = (receipt = {}, selectedKeys = null) =>
   (receipt.items || [])
     .map((item, index) => {
-      const quantity = Number(item.receivedQty ?? item.quantity ?? item.balanceQty ?? item.orderedQty ?? 0) || 0;
+      const selectionKey = getReceiptItemSelectionKey(item, index);
+      if (selectedKeys instanceof Set && selectedKeys.size && !selectedKeys.has(selectionKey)) {
+        return null;
+      }
+      const quantity = getReceiptItemAvailableQty(item);
       return {
         id: item.id ?? `${Date.now()}-${index}`,
+        receiveGoodsItemId: item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? null,
+        poItemId:
+          item.poItemId ??
+          item.POItemId ??
+          item.purchaseOrderItemId ??
+          item.PurchaseOrderItemId ??
+          null,
+        itemId: item.itemId ?? item.ItemId ?? null,
         name: item.name || "",
         description: item.description || "",
         unit: item.unit || "PCS",
         hsn: item.hsn || "",
         gst: item.gst || "",
+        receivedQty: getReceiptItemReceivedQty(item),
+        availableQty: getReceiptItemAvailableQty(item),
         quantity,
         rate: Number(item.unitPrice ?? item.rate ?? 0) || 0,
         notes: item.notes || "",
       };
     })
+    .filter(Boolean)
     .filter((item) => item.name && Number(item.quantity) > 0);
+
+const fmtQty = (value) =>
+  (Number(value) || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
 const DeliveryChallan = () => {
   const [projects, setProjects] = useState(() => getProjects());
@@ -83,6 +133,7 @@ const DeliveryChallan = () => {
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
   const [items, setItems] = useState([createLineItem()]);
+  const [selectedReceiptItemKeys, setSelectedReceiptItemKeys] = useState([]);
   const [errors, setErrors] = useState({});
   const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [receiptError, setReceiptError] = useState("");
@@ -90,7 +141,7 @@ const DeliveryChallan = () => {
   const [selectedChallan, setSelectedChallan] = useState(null);
   const settings = useSettings();
   const company = settings?.company || {};
-  const companyLogo = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const companyLogo = resolveBrandLogo(company.logo || "");
   const companyName = company.name || "Bangalore Electronics";
 
   const loadRecords = async () => {
@@ -149,11 +200,13 @@ const DeliveryChallan = () => {
     };
 
     window.addEventListener("delivery-challans:changed", refreshRecords);
+    window.addEventListener("consumptions:changed", refreshRecords);
     window.addEventListener("locations:changed", refreshLocations);
     window.addEventListener("projects:changed", refreshProjects);
     window.addEventListener("receive-goods:changed", refreshReceipts);
     return () => {
       window.removeEventListener("delivery-challans:changed", refreshRecords);
+      window.removeEventListener("consumptions:changed", refreshRecords);
       window.removeEventListener("locations:changed", refreshLocations);
       window.removeEventListener("projects:changed", refreshProjects);
       window.removeEventListener("receive-goods:changed", refreshReceipts);
@@ -312,9 +365,27 @@ const DeliveryChallan = () => {
     setForm((prev) => ({ ...prev, receiveGoodsId: "" }));
   }, [form.receiveGoodsId, receiptsForSelection, receiptsLoading]);
 
+  useEffect(() => {
+    if (!selectedReceipt) {
+      setSelectedReceiptItemKeys([]);
+      return;
+    }
+    const allKeys = (selectedReceipt.items || []).map((item, index) =>
+      getReceiptItemSelectionKey(item, index)
+    );
+    setSelectedReceiptItemKeys((prev) => {
+      if (editingId) {
+        const matchingKeys = prev.filter((key) => allKeys.includes(key));
+        return matchingKeys.length ? matchingKeys : allKeys;
+      }
+      return allKeys;
+    });
+  }, [editingId, selectedReceipt]);
+
   const resetForm = () => {
     setForm(createFormState());
     setItems([createLineItem()]);
+    setSelectedReceiptItemKeys([]);
     setErrors({});
     setReceiptError("");
     setEditingId(null);
@@ -403,6 +474,11 @@ const DeliveryChallan = () => {
       notes: record.notes || "",
     });
     setItems(record.items?.length ? record.items : [createLineItem()]);
+    setSelectedReceiptItemKeys(
+      (record.items || [])
+        .map((item, index) => getReceiptItemSelectionKey(item, index))
+        .filter(Boolean)
+    );
     setErrors({});
   };
 
@@ -426,11 +502,18 @@ const DeliveryChallan = () => {
       setReceiptError("No receive receipt found for that reference.");
       return;
     }
+    if (selectedReceiptItemKeys.length === 0) {
+      setReceiptError("Select at least one receipt item to create the challan.");
+      return;
+    }
 
-    const mapped = mapReceiptItemsToChallanItems(receipt);
+    const mapped = mapReceiptItemsToChallanItems(
+      receipt,
+      new Set(selectedReceiptItemKeys)
+    );
 
     if (!mapped.length) {
-      setReceiptError("The selected receipt has no line items.");
+      setReceiptError("Select at least one receipt item to create the challan.");
       return;
     }
 
@@ -481,6 +564,7 @@ const DeliveryChallan = () => {
       toLocationId: preferredLocation ? String(preferredLocation.id) : "",
       toLocation: preferredLocation?.name || "",
     }));
+    setSelectedReceiptItemKeys([]);
     setReceiptError("");
   };
 
@@ -493,6 +577,26 @@ const DeliveryChallan = () => {
       toLocationId: nextLocationId,
       toLocation: selectedLocation?.name || "",
     }));
+  };
+
+  const toggleReceiptItemSelection = (selectionKey) => {
+    setSelectedReceiptItemKeys((prev) =>
+      prev.includes(selectionKey)
+        ? prev.filter((key) => key !== selectionKey)
+        : [...prev, selectionKey]
+    );
+  };
+
+  const toggleAllReceiptItems = () => {
+    if (!selectedReceipt) {
+      return;
+    }
+    const allKeys = (selectedReceipt.items || []).map((item, index) =>
+      getReceiptItemSelectionKey(item, index)
+    );
+    setSelectedReceiptItemKeys((prev) =>
+      prev.length === allKeys.length ? [] : allKeys
+    );
   };
 
   const selectedProject = selectedChallan
@@ -755,6 +859,72 @@ const DeliveryChallan = () => {
                 </p>
               ) : null}
             </div>
+            {selectedReceipt && (
+              <div className="md:col-span-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">
+                      Receipt Item Selection
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Select one or more received items to build the delivery challan.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleAllReceiptItems}
+                    className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
+                  >
+                    {selectedReceiptItemKeys.length === (selectedReceipt.items || []).length
+                      ? "Clear All"
+                      : "Select All"}
+                  </button>
+                </div>
+                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                  <table className="min-w-[900px] text-sm">
+                    <thead className="bg-slate-100 text-slate-600">
+                      <tr>
+                        <th className="p-3 text-left min-w-[80px]">Select</th>
+                        <th className="p-3 text-left min-w-[200px]">Item</th>
+                        <th className="p-3 text-left min-w-[260px]">Description</th>
+                        <th className="p-3 text-left min-w-[100px]">Unit</th>
+                        <th className="p-3 text-left min-w-[120px]">Receipt Qty</th>
+                        <th className="p-3 text-left min-w-[120px]">Available Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedReceipt.items || []).map((item, index) => {
+                        const selectionKey = getReceiptItemSelectionKey(item, index);
+                        const isSelected = selectedReceiptItemKeys.includes(selectionKey);
+                        const receiptQty = getReceiptItemReceivedQty(item);
+                        const availableQty = getReceiptItemAvailableQty(item);
+                        return (
+                          <tr key={selectionKey} className="border-t">
+                            <td className="p-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleReceiptItemSelection(selectionKey)}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                            </td>
+                            <td className="p-3 font-medium text-slate-800">
+                              {item.name || `Item ${index + 1}`}
+                            </td>
+                            <td className="p-3 text-slate-600">
+                              {item.description || "-"}
+                            </td>
+                            <td className="p-3">{item.unit || "-"}</td>
+                            <td className="p-3">{receiptQty}</td>
+                            <td className="p-3">{availableQty}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
             <div className="md:col-span-3">
               <label className="text-sm font-medium text-slate-700">
                 Notes
@@ -824,7 +994,7 @@ const DeliveryChallan = () => {
             Print register
           </button>
         </div>
-        <table className="w-full text-sm">
+        <table className="min-w-[1300px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">DC No</th>
@@ -834,13 +1004,14 @@ const DeliveryChallan = () => {
               <th className="p-3 text-left min-w-[180px]">To</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
+              <th className="p-3 text-right min-w-[140px]">Balance Qty</th>
               <th className="p-3 text-left min-w-[120px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {records.length === 0 && (
               <tr>
-                <td colSpan="8" className="p-6 text-center text-slate-500">
+                <td colSpan="9" className="p-6 text-center text-slate-500">
                   No delivery challans created yet.
                 </td>
               </tr>
@@ -864,6 +1035,9 @@ const DeliveryChallan = () => {
                 </td>
                 <td className="p-3">{record.status || "-"}</td>
                 <td className="p-3">{record.items?.length || 0}</td>
+                <td className="p-3 text-right font-medium text-slate-800">
+                  {fmtQty(record.balanceQty)}
+                </td>
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"

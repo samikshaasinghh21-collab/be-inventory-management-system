@@ -30,7 +30,7 @@ const ReportTable = ({
   const pageNumbers = buildPageNumbers(safePage, totalPages);
 
   return (
-    <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+    <section className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">Project Activity Report</h2>
@@ -46,7 +46,7 @@ const ReportTable = ({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="min-w-[1650px] text-sm">
           <thead className="bg-slate-50 text-slate-700">
             <tr>
               <th className="px-4 py-3 text-left font-semibold min-w-[110px]">Date</th>
@@ -58,6 +58,7 @@ const ReportTable = ({
               <th className="px-4 py-3 text-right font-semibold min-w-[100px]">Total Qty</th>
               <th className="px-4 py-3 text-right font-semibold min-w-[110px]">Received Qty</th>
               <th className="px-4 py-3 text-right font-semibold min-w-[110px]">Available Qty</th>
+              <th className="px-4 py-3 text-right font-semibold min-w-[110px]">Balance Qty</th>
               <th className="px-4 py-3 text-right font-semibold min-w-[90px]">Moved Qty</th>
               <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Location</th>
               <th className="px-4 py-3 text-left font-semibold min-w-[130px]">Status</th>
@@ -66,13 +67,13 @@ const ReportTable = ({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="12" className="px-4 py-10 text-center text-slate-500">
+                <td colSpan="13" className="px-4 py-10 text-center text-slate-500">
                   Loading report data...
                 </td>
               </tr>
             ) : pagedRows.length === 0 ? (
               <tr>
-                <td colSpan="12" className="px-4 py-10 text-center text-slate-500">
+                <td colSpan="13" className="px-4 py-10 text-center text-slate-500">
                   No report rows found for the selected filters.
                 </td>
               </tr>
@@ -109,6 +110,11 @@ const ReportTable = ({
                     {row.availableQty === null
                       ? "-"
                       : Number(row.availableQty || 0).toLocaleString("en-IN")}
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                    {row.balanceQty === null
+                      ? "-"
+                      : Number(row.balanceQty || 0).toLocaleString("en-IN")}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">
                     {Number(row.qty || 0).toLocaleString("en-IN")}

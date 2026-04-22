@@ -99,49 +99,68 @@ const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   );
 };
 
+const getReceiptItemQuantities = (item = {}) => {
+  const ordered = toQuantity(
+    item.orderedQty ?? item.quantity ?? item.OrderedQty
+  );
+  const received = toQuantity(
+    item.totalReceivedQty ?? item.TotalReceivedQty ?? item.receivedQty ?? item.ReceivedQty
+  );
+  const consumed = toQuantity(item.totalConsumedQty ?? item.TotalConsumedQty ?? 0);
+  const rawAvailable =
+    item.totalAvailableQty ?? item.TotalAvailableQty ?? item.availableQty ?? item.AvailableQty;
+  const available =
+    rawAvailable === undefined || rawAvailable === null || rawAvailable === ""
+      ? Math.max(received - consumed, 0)
+      : toQuantity(rawAvailable);
+  const rawPoBalance =
+    item.totalPoBalanceQty ??
+    item.TotalPoBalanceQty ??
+    item.poBalanceQty ??
+    item.PoBalanceQty ??
+    item.balanceQty ??
+    item.BalanceQty;
+  const poBalance =
+    rawPoBalance === undefined || rawPoBalance === null || rawPoBalance === ""
+      ? Math.max(ordered - received, 0)
+      : toQuantity(rawPoBalance);
+  return {
+    ordered,
+    received,
+    consumed,
+    available,
+    poBalance,
+  };
+};
+
 const getReceiptTotals = (receipt) => {
   const lines = Array.isArray(receipt?.items) ? receipt.items : [];
   return lines.reduce(
     (acc, item) => {
-      const ordered = toQuantity(
-        item.orderedQty ?? item.quantity ?? item.OrderedQty
-      );
-      const received = toQuantity(item.receivedQty ?? item.ReceivedQty);
-      const rawBalance = item.balanceQty ?? item.BalanceQty;
-      const balance =
-        rawBalance === undefined || rawBalance === null || rawBalance === ""
-          ? Math.max(ordered - received, 0)
-          : toQuantity(rawBalance);
+      const { ordered, received, available, poBalance } =
+        getReceiptItemQuantities(item);
       return {
         ordered: acc.ordered + ordered,
         received: acc.received + received,
-        balance: acc.balance + balance,
+        available: acc.available + available,
+        poBalance: acc.poBalance + poBalance,
       };
     },
-    { ordered: 0, received: 0, balance: 0 }
+    { ordered: 0, received: 0, available: 0, poBalance: 0 }
   );
 };
-
-const getReceiptItemKey = (item = {}, index = 0) =>
-  String(
-    item.poItemId ??
-      item.PurchaseOrderItemId ??
-      item.itemId ??
-      item.ItemId ??
-      item.id ??
-      item.Id ??
-      index
-  );
 
 const findMatchingPoItem = (purchaseOrder, receiptItem, index) => {
   const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
   if (!poItems.length) return null;
 
-  const receiptPoItemId = receiptItem.poItemId || receiptItem.PurchaseOrderItemId;
+  const receiptPoItemId =
+    receiptItem.poItemId || receiptItem.POItemId || receiptItem.PurchaseOrderItemId;
   if (receiptPoItemId) {
     const exactMatch = poItems.find(
       (poItem) =>
         poItem.id === receiptPoItemId ||
+        poItem.POItemId === receiptPoItemId ||
         poItem.poItemId === receiptPoItemId ||
         poItem.PurchaseOrderItemId === receiptPoItemId
     );
@@ -156,30 +175,13 @@ const findMatchingPoItem = (purchaseOrder, receiptItem, index) => {
     if (itemIdMatch) return itemIdMatch;
   }
 
-  // Try index-based matching first for better accuracy
+  // Index fallback after ID matching (no name matching)
   if (index >= 0 && index < poItems.length) {
-    const indexMatch = poItems[index];
-    // Verify by name if available to avoid mismatches
-    const receiptName = String(receiptItem.name || receiptItem.Name || receiptItem.ItemName || "").trim().toLowerCase();
-    const indexItemName = String(indexMatch.name || indexMatch.Name || indexMatch.ItemName || "").trim().toLowerCase();
-
-    // Use index match if names are similar or both empty
-    if (!receiptName || !indexItemName || receiptName === indexItemName) {
-      return indexMatch;
-    }
-  }
-
-  // Only try name matching if we haven't found a match by index
-  const receiptName = String(receiptItem.name || receiptItem.Name || receiptItem.ItemName || "").trim().toLowerCase();
-  if (receiptName) {
-    const nameMatch = poItems.find(
-      (poItem) =>
-        String(poItem.name || poItem.Name || poItem.ItemName || "").trim().toLowerCase() === receiptName
-    );
-    if (nameMatch) return nameMatch;
+    return poItems[index];
   }
 
   return null;
+
 };
 
 const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
@@ -187,7 +189,9 @@ const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
     .map((item, index) => {
       const poItem = findMatchingPoItem(purchaseOrder, item, index);
       return {
-        quantity: toQuantity(item.receivedQty ?? item.ReceivedQty),
+        quantity: toQuantity(
+          item.receiptReceivedQty ?? item.ReceiptReceivedQty ?? item.receivedQty ?? item.ReceivedQty
+        ),
         unitPrice: toQuantity(poItem?.unitPrice ?? poItem?.rate ?? 0),
         taxPercentage: poItem?.taxPercentage ?? poItem?.gst ?? 0,
         gst: poItem?.gst ?? poItem?.taxPercentage ?? 0,
@@ -218,7 +222,7 @@ const ReceiveGoodsRegister = () => {
   const settings = useSettings();
   const company = settings?.company || {};
   const currency = settings?.preferences?.currency || "INR";
-  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const logoUrl = resolveBrandLogo(company.logo || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
 
@@ -642,7 +646,7 @@ const ReceiveGoodsRegister = () => {
             </select>
           </div>
         </div>
-        <table className="w-full text-sm">
+        <table className="min-w-[1600px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[90px]">Seq No</th>
@@ -655,21 +659,23 @@ const ReceiveGoodsRegister = () => {
               <th className="p-3 text-left min-w-[140px]">Received By</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[110px]">Items</th>
-              <th className="p-3 text-left min-w-[120px]">Balance Qty</th>
+              <th className="p-3 text-left min-w-[120px]">Received Qty</th>
+              <th className="p-3 text-left min-w-[120px]">Available Qty</th>
+              <th className="p-3 text-left min-w-[120px]">PO Balance Qty</th>
               <th className="p-3 text-left min-w-[120px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="12" className="p-6 text-center text-slate-500">
+                <td colSpan="14" className="p-6 text-center text-slate-500">
                   Loading receipts...
                 </td>
               </tr>
             )}
             {!loading && filteredWithSelectors.length === 0 && (
               <tr>
-                <td colSpan="12" className="p-6 text-center text-slate-500">
+                <td colSpan="14" className="p-6 text-center text-slate-500">
                   No receipts found.
                 </td>
               </tr>
@@ -713,7 +719,13 @@ const ReceiveGoodsRegister = () => {
                       </td>
                       <td className="p-3">{receipt.items?.length || 0}</td>
                       <td className="p-3 font-medium text-slate-800">
-                        {totals.balance}
+                        {totals.received}
+                      </td>
+                      <td className="p-3 font-medium text-slate-800">
+                        {totals.available}
+                      </td>
+                      <td className="p-3 font-medium text-slate-800">
+                        {totals.poBalance}
                       </td>
                       <td className="p-3 flex gap-3">
                         <button
@@ -760,7 +772,7 @@ const ReceiveGoodsRegister = () => {
                     </tr>
                     {expandedId === receipt.id && (
                       <tr className="bg-slate-50">
-                        <td colSpan="12" className="p-4">
+                        <td colSpan="14" className="p-4">
                           <div className="space-y-4">
                             <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                               <span>
@@ -801,7 +813,7 @@ const ReceiveGoodsRegister = () => {
                                 Items Received
                               </h4>
                               <div className="overflow-x-auto border rounded-md">
-                                <table className="w-full text-sm">
+                                <table className="min-w-[980px] text-sm">
                                   <thead className="bg-slate-100 text-slate-600">
                                     <tr>
                                       <th className="p-2 text-left">Item</th>
@@ -809,34 +821,27 @@ const ReceiveGoodsRegister = () => {
                                       <th className="p-2 text-left">Unit</th>
                                       <th className="p-2 text-left">Ordered</th>
                                       <th className="p-2 text-left">Received</th>
-                                      <th className="p-2 text-left">Balance</th>
+                                      <th className="p-2 text-left">Available</th>
+                                      <th className="p-2 text-left">PO Balance</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {(receipt.items || []).map((item, idx) => {
-                                      const ordered =
-                                        item.orderedQty ??
-                                        item.quantity ??
-                                        item.OrderedQty ??
-                                        0;
-                                      const received =
-                                        item.receivedQty ??
-                                        item.ReceivedQty ??
-                                        0;
-                                      const balance =
-                                        item.balanceQty ??
-                                        item.BalanceQty ??
-                                        ordered - received;
+                                      const { ordered, received, available, poBalance } =
+                                        getReceiptItemQuantities(item);
                                       const poItem = findMatchingPoItem(po, item, idx) || {};
+                                      // Display saved receipt item name first, then PO item name, then identifier fallback
                                       const displayItemName =
                                         item.name ||
                                         poItem.name ||
                                         item.itemId ||
+                                        item.poItemId ||
                                         `Item ${idx + 1}` ||
                                         "-";
                                       const displayDescription =
                                         item.description || poItem.description || "-";
                                       const displayUnit = item.unit || poItem.unit || "-";
+
                                       return (
                                         <tr
                                           key={`${receipt.id}-${item.id ?? item.itemId ?? "item"}-${idx}`}
@@ -847,7 +852,8 @@ const ReceiveGoodsRegister = () => {
                                           <td className="p-2">{displayUnit}</td>
                                           <td className="p-2">{ordered}</td>
                                           <td className="p-2">{received}</td>
-                                          <td className="p-2">{balance}</td>
+                                          <td className="p-2">{available}</td>
+                                          <td className="p-2">{poBalance}</td>
                                         </tr>
                                       );
                                     })}
@@ -936,31 +942,30 @@ const ReceiveGoodsRegister = () => {
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "ordered", label: "Ordered", align: "right", widthClass: "w-24" },
             { key: "received", label: "Received", align: "right", widthClass: "w-24" },
-            { key: "balance", label: "Balance", align: "right", widthClass: "w-24" },
+            { key: "available", label: "Available", align: "right", widthClass: "w-24" },
+            { key: "balance", label: "PO Balance", align: "right", widthClass: "w-24" },
           ]}
           tableRows={(viewReceipt.items || []).map((item, index) => {
             const po = poMap[String(viewReceipt.purchaseOrderId)];
             const poItem = findMatchingPoItem(po, item, index) || {};
-            const ordered =
-              item.orderedQty ?? item.quantity ?? item.OrderedQty ?? 0;
-            const received = item.receivedQty ?? item.ReceivedQty ?? 0;
-            const balance =
-              item.balanceQty ??
-              item.BalanceQty ??
-              Number(ordered) - Number(received);
+            const { ordered, received, available, poBalance } =
+              getReceiptItemQuantities(item);
             return {
               id: item.id ?? item.itemId ?? index,
               serial: index + 1,
               name:
-                item.name ||
                 poItem.name ||
+                item.name ||
                 item.itemId ||
+                item.poItemId ||
                 `Item ${index + 1}` ||
                 "-",
+
               unit: item.unit || poItem.unit || "-",
               ordered,
               received,
-              balance,
+              available,
+              balance: poBalance,
             };
           })}
           bottomLeftContent={

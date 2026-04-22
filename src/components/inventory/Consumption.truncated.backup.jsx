@@ -257,9 +257,7 @@ const Consumption = () => {
   const navigate = useNavigate();
   const settings = useSettings();
   const company = settings?.company || {};
-  const logoUrl = resolveBrandLogo(
-    company.logo || settings?.profile?.avatar || ""
-  );
+  const logoUrl = resolveBrandLogo(company.logo || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
 

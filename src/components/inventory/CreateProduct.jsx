@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useSettings from "../../hooks/useSettings";
 import { createItem } from "../../services/inventoryApi";
+import { fetchBrands } from "../../services/brandsApi";
 import { addCategory, getCategories } from "../../services/categoryStore";
 import { fetchLocations } from "../../services/locationsApi";
 import { saveProduct } from "../../services/productsStore";
@@ -20,20 +21,8 @@ const UNIT_OPTIONS = [
   "Litre",
 ];
 
-const BRAND_OPTIONS = [
-  "ABB",
-  "Apple",
-  "Cisco",
-  "Dell",
-  "HP",
-  "Honeywell",
-  "Lenovo",
-  "Schneider",
-  "Siemens",
-  "Other",
-];
-
 const STATUS_OPTIONS = ["Valid", "Inactive"];
+const ADD_NEW_BRAND_VALUE = "__add_new_brand__";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -71,6 +60,7 @@ const CreateProduct = () => {
   const defaultUnit = settings?.inventory?.defaultUnit || "Nos";
 
   const [form, setForm] = useState(() => createInitialForm(profileName, defaultUnit));
+  const [brands, setBrands] = useState([]);
   const [categories, setCategories] = useState(() => getCategories());
   const [locations, setLocations] = useState([]);
   const [errors, setErrors] = useState({});
@@ -111,6 +101,30 @@ const CreateProduct = () => {
   }, []);
 
   useEffect(() => {
+    let active = true;
+
+    const loadBrands = async () => {
+      try {
+        const list = await fetchBrands();
+        if (!active) {
+          return;
+        }
+        setBrands(Array.isArray(list) ? list : []);
+      } catch {
+        if (active) {
+          setBrands([]);
+        }
+      }
+    };
+
+    void loadBrands();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!form.locationId) {
       return;
     }
@@ -136,8 +150,25 @@ const CreateProduct = () => {
     }, {});
   }, [locations]);
 
+  const resolvedBrandOptions = useMemo(() => {
+    const optionMap = new Map();
+    brands.forEach((brand) => {
+      const name = String(brand.name || "").trim();
+      if (!name) {
+        return;
+      }
+      const key = name.toLowerCase();
+      if (!optionMap.has(key)) {
+        optionMap.set(key, name);
+      }
+    });
+    return Array.from(optionMap.values()).sort((left, right) =>
+      left.localeCompare(right)
+    );
+  }, [brands]);
+
   const selectedLocation = form.locationId ? locationMap[String(form.locationId)] : null;
-  const selectedBrand = form.brand === "Other"
+  const selectedBrand = form.brand === ADD_NEW_BRAND_VALUE
     ? String(form.customBrand || "").trim()
     : String(form.brand || "").trim();
   const selectedCategory = String(form.category || form.customCategory || "").trim();
@@ -148,7 +179,7 @@ const CreateProduct = () => {
       if (key === "prepBy") {
         next.updatedBy = value;
       }
-      if (key === "brand" && value !== "Other") {
+      if (key === "brand" && value !== ADD_NEW_BRAND_VALUE) {
         next.customBrand = "";
       }
       if (key === "serviceItem" && value) {
@@ -199,7 +230,7 @@ const CreateProduct = () => {
     if (!selectedCategory) {
       nextErrors.category = "Select or add a product grouping.";
     }
-    if (form.brand === "Other" && !selectedBrand) {
+    if (form.brand === ADD_NEW_BRAND_VALUE && !selectedBrand) {
       nextErrors.brand = "Enter a brand name.";
     }
     if (form.price !== "" && (!Number.isFinite(price) || price < 0)) {
@@ -384,16 +415,20 @@ const CreateProduct = () => {
                     className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   >
                     <option value="">Select brand</option>
-                    {BRAND_OPTIONS.map((option) => (
+                    {resolvedBrandOptions.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
                     ))}
+                    <option value={ADD_NEW_BRAND_VALUE}>Add New Brand</option>
                   </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Choose an existing brand or add one on the fly.
+                  </p>
                   {errors.brand && <p className="mt-1 text-sm text-red-600">{errors.brand}</p>}
                 </label>
 
-                {form.brand === "Other" && (
+                {form.brand === ADD_NEW_BRAND_VALUE && (
                   <label>
                     <span className="text-sm font-medium text-slate-700">Custom Brand</span>
                     <input

@@ -53,7 +53,7 @@ const SOURCE_LABELS = [
 const ReportsPage = () => {
   const settings = useSettings();
   const company = settings?.company || {};
-  const companyLogo = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const companyLogo = resolveBrandLogo(company.logo || "");
   const companyName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
 
@@ -273,6 +273,15 @@ const ReportsPage = () => {
     [filteredRows]
   );
 
+  const totalBalanceQuantity = useMemo(
+    () =>
+      filteredRows.reduce(
+        (sum, row) => sum + Number(row.balanceQty ?? 0),
+        0
+      ),
+    [filteredRows]
+  );
+
   const latestRow = filteredRows[filteredRows.length - 1] ?? null;
 
   const lastUpdatedLabel = useMemo(() => {
@@ -385,6 +394,10 @@ const ReportsPage = () => {
           label: "Available Qty",
           value: totalAvailableQuantity.toLocaleString("en-IN"),
         },
+        {
+          label: "Balance Qty",
+          value: totalBalanceQuantity.toLocaleString("en-IN"),
+        },
       ],
       logoUrl: companyLogo,
       brandName: companyName,
@@ -420,6 +433,13 @@ const ReportsPage = () => {
       value: totalAvailableQuantity.toLocaleString("en-IN"),
       hint: "Open or currently available quantity in the filtered result",
       tone: "bg-violet-50 text-violet-700 border-violet-100",
+    },
+    {
+      id: "balance",
+      label: "Balance Quantity",
+      value: totalBalanceQuantity.toLocaleString("en-IN"),
+      hint: "Balance quantity carried through the filtered workflow",
+      tone: "bg-rose-50 text-rose-700 border-rose-100",
     },
     {
       id: "latest",

@@ -29,6 +29,7 @@ import {
   getActiveProjectId,
   setActiveProjectId,
 } from "../../services/projectSelectionStore";
+import { DEFAULT_PURCHASE_ORDER_TERMS } from "../../utils/purchaseOrderTerms";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -56,6 +57,7 @@ const createFormState = () => ({
   orderDate: new Date().toISOString().slice(0, 10),
   expectedDate: "",
   notes: "",
+  termsAndConditions: DEFAULT_PURCHASE_ORDER_TERMS,
 });
 
 const formatAddressLine = (vendor) => {
@@ -110,6 +112,8 @@ const PurchaseOrder = () => {
         orderDate: record.orderDate || new Date().toISOString().slice(0, 10),
         expectedDate: record.expectedDate || "",
         notes: record.notes || "",
+        termsAndConditions:
+          record.termsAndConditions ?? DEFAULT_PURCHASE_ORDER_TERMS,
       });
       const mappedItems = (record.items ?? []).map((item) => ({
         id: item.id ?? Date.now() + Math.random(),
@@ -403,6 +407,7 @@ const PurchaseOrder = () => {
       orderDate: form.orderDate || null,
       expectedDate: form.expectedDate || null,
       notes: form.notes || "",
+      termsAndConditions: form.termsAndConditions,
       allowLockedEdit: isEditingLocked && closedPoOverrideApproved,
       items: cleanedItems.map((item) => {
         const qty = Number(item.quantity) || 0;
@@ -897,6 +902,26 @@ const PurchaseOrder = () => {
                 disabled={isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               />
+            </div>
+            <div className="md:col-span-3">
+              <label className="text-sm font-medium text-slate-700">
+                Terms &amp; Conditions
+              </label>
+              <textarea
+                value={form.termsAndConditions}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    termsAndConditions: event.target.value,
+                  }))
+                }
+                placeholder="Purchase order terms and conditions"
+                disabled={isEditingLockedWithoutOverride}
+                className="mt-1 min-h-[180px] w-full rounded-lg border border-slate-200 px-3 py-3 text-sm leading-6 text-left whitespace-pre-wrap disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Auto-filled by default and editable for PO-specific clauses.
+              </p>
             </div>
           </div>
         </div>

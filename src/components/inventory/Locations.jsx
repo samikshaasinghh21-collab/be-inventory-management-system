@@ -35,7 +35,7 @@ const Locations = () => {
   const company = settings?.company || {};
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
-  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const logoUrl = resolveBrandLogo(company.logo || "");
 
   const loadRecords = async () => {
     try {

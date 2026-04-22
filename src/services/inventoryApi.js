@@ -13,6 +13,8 @@ const normalizeItem = (item = {}) => {
     id: item.id ?? item.ItemId ?? null,
     name: item.name ?? item.Name ?? "",
     category: item.category ?? item.Category ?? "",
+    brandId: item.brandId ?? item.BrandId ?? null,
+    brand: item.brand ?? item.Brand ?? item.BrandName ?? "",
     hsn: item.hsn ?? item.HSN ?? "",
     unit: item.unit ?? item.Unit ?? "PCS",
     stock: Number(item.stock ?? item.Stock ?? 0),

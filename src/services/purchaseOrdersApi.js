@@ -1,4 +1,5 @@
 import api from "./api";
+import { DEFAULT_PURCHASE_ORDER_TERMS } from "../utils/purchaseOrderTerms";
 
 const emitPurchaseOrdersChange = ({
   includeBoqs = false,
@@ -18,11 +19,32 @@ const emitPurchaseOrdersChange = ({
 const normalizePoItem = (item = {}) => {
   const serialRequiredRaw =
     item.serialRequired ?? item.SerialRequired ?? item.IsSerialTracked ?? false;
+  const quantity =
+    Number(
+      item.quantity ?? item.Quantity ?? item.Qty ?? item.orderedQty ?? item.OrderedQty ?? 0
+    ) || 0;
+  const receivedQty = Number(
+    item.receivedQty ?? item.ReceivedQty ?? item.totalReceivedQty ?? item.TotalReceivedQty ?? 0
+  ) || 0;
+  const availableQty = Number(
+    item.availableQty ?? item.AvailableQty ?? item.totalAvailableQty ?? item.TotalAvailableQty ?? receivedQty
+  ) || 0;
+  const poBalanceQty = Math.max(
+    Number(
+      item.poBalanceQty ??
+        item.PoBalanceQty ??
+        item.totalPoBalanceQty ??
+        item.TotalPoBalanceQty ??
+        Math.max(quantity - receivedQty, 0)
+    ) || 0,
+    0
+  );
 
   return {
-    id: item.id ?? item.Id ?? null,
+    id: item.id ?? item.Id ?? item.POItemId ?? null,
     poItemId:
       item.poItemId ??
+      item.POItemId ??
       item.purchaseOrderItemId ??
       item.PurchaseOrderItemId ??
       item.id ??
@@ -43,7 +65,14 @@ const normalizePoItem = (item = {}) => {
     taxPercentage: Number(item.taxPercentage ?? item.TaxPercentage ?? 0),
     location: item.location ?? item.Location ?? item.notes ?? item.Notes ?? "",
     notes: item.notes ?? item.Notes ?? item.location ?? item.Location ?? "",
-    quantity: Number(item.quantity ?? item.Quantity ?? item.Qty ?? 0),
+    quantity,
+    orderedQty: quantity,
+    receivedQty,
+    totalReceivedQty: receivedQty,
+    availableQty,
+    totalAvailableQty: availableQty,
+    poBalanceQty,
+    totalPoBalanceQty: poBalanceQty,
     unitPrice: Number(
       item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0
     ),
@@ -79,6 +108,10 @@ const normalizePurchaseOrder = (order = {}) => ({
     order.ExpectedDate ??
     null,
   notes: order.notes ?? order.Notes ?? "",
+  termsAndConditions:
+    order.termsAndConditions ??
+    order.TermsAndConditions ??
+    DEFAULT_PURCHASE_ORDER_TERMS,
   total: Number(order.total ?? order.Total ?? 0),
   items: Array.isArray(order.items)
     ? order.items.map(normalizePoItem)

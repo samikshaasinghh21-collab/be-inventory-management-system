@@ -70,7 +70,7 @@ const CreateProjects = () => {
       nextErrors.name = "Project name is required.";
     }
     if (!form.customerId) {
-      nextErrors.customerId = "Select a customer.";
+      nextErrors.customerId = "Select a client.";
     }
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       nextErrors.endDate = "End date must be after the start date.";
@@ -100,6 +100,7 @@ const CreateProjects = () => {
         name: form.name.trim(),
         code: form.code.trim() || undefined,
         customerId: form.customerId || null,
+        clientId: form.customerId || null,
         client: getCustomerPrimaryName(selectedCustomer) || undefined,
         companyName: getCustomerSecondaryCompany(selectedCustomer) || undefined,
         address: selectedCustomer?.address || undefined,
@@ -224,7 +225,7 @@ const CreateProjects = () => {
 
                   <div>
                     <label className="text-sm font-medium text-slate-700">
-                      Customer *
+                      Client Name *
                     </label>
                     <select
                       value={form.customerId}
@@ -235,7 +236,7 @@ const CreateProjects = () => {
                     >
                       <option value="">
                         {customers.length
-                          ? "Select customer"
+                          ? "Select client"
                           : "Add a customer first"}
                       </option>
                       {customers.map((customer) => (
@@ -293,13 +294,13 @@ const CreateProjects = () => {
 
                 {!selectedCustomer ? (
                   <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-                    Select a customer to populate the project client details.
+                    Select a client to populate the project client details.
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
                       <span className="text-xs uppercase tracking-wide text-slate-500">
-                        Customer Name
+                        Client Name
                       </span>
                       <p className="mt-1 font-medium text-slate-700">
                         {getCustomerPrimaryName(selectedCustomer) || "-"}

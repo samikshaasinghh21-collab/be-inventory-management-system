@@ -253,7 +253,7 @@ const LineItemsEditor = ({
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="min-w-[1250px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[180px]">Item</th>

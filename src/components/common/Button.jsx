@@ -1,9 +1,15 @@
 import React from 'react';
 
-export default function Button({ children, onClick, className, ...props }) {
+export default function Button({
+  children,
+  className,
+  onClick,
+  variant = 'primary',
+  ...props
+}) {
   return (
     <button 
-      className={`btn ${className || ''}`} 
+      className={`app-btn app-btn-${variant} ${className || ''}`.trim()} 
       onClick={onClick} 
       {...props}
     >

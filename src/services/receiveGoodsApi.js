@@ -51,6 +51,56 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
       ? null
       : toQuantity(rawExplicitBalance);
   const computedBalance = Math.max(orderedQty - receivedQty, 0);
+  const poBalanceQty = Math.max(explicitBalance ?? computedBalance, 0);
+  const rawConsumedQty = item.consumedQty ?? item.ConsumedQty;
+  const consumedQty =
+    rawConsumedQty === undefined || rawConsumedQty === null || rawConsumedQty === ""
+      ? 0
+      : toQuantity(rawConsumedQty);
+  const rawAvailableQty = item.availableQty ?? item.AvailableQty;
+  const availableQty =
+    rawAvailableQty === undefined || rawAvailableQty === null || rawAvailableQty === ""
+      ? Math.max(receivedQty - consumedQty, 0)
+      : toQuantity(rawAvailableQty);
+  const receiptReceivedQty = toQuantity(
+    item.receiptReceivedQty ?? item.ReceiptReceivedQty ?? item.receivedQty ?? item.ReceivedQty ?? 0
+  );
+  const receiptAvailableQty = toQuantity(
+    item.receiptAvailableQty ??
+      item.ReceiptAvailableQty ??
+      item.availableQty ??
+      item.AvailableQty ??
+      Math.max(receiptReceivedQty - consumedQty, 0)
+  );
+  const receiptBalanceQty = toQuantity(
+    item.receiptBalanceQty ??
+      item.ReceiptBalanceQty ??
+      item.balanceQty ??
+      item.BalanceQty ??
+      Math.max(orderedQty - receiptReceivedQty, 0)
+  );
+  const totalReceivedQty = toQuantity(
+    item.totalReceivedQty ?? item.TotalReceivedQty ?? item.receivedQty ?? item.ReceivedQty ?? 0
+  );
+  const totalAvailableQty = toQuantity(
+    item.totalAvailableQty ??
+      item.TotalAvailableQty ??
+      item.availableQty ??
+      item.AvailableQty ??
+      totalReceivedQty
+  );
+  const totalPoBalanceQty = Math.max(
+    toQuantity(
+      item.totalPoBalanceQty ??
+        item.TotalPoBalanceQty ??
+        item.poBalanceQty ??
+        item.PoBalanceQty ??
+        item.balanceQty ??
+        item.BalanceQty ??
+        Math.max(orderedQty - totalReceivedQty, 0)
+    ),
+    0
+  );
   const serialRequiredRaw =
     item.serialRequired ?? item.SerialRequired ?? item.IsSerialTracked ?? false;
   const parseSerialNumbers = (value) => {
@@ -70,7 +120,13 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
     }
   };
   return {
-    id: item.id ?? item.Id ?? null,
+    id:
+      item.id ??
+      item.Id ??
+      item.receiveGoodsItemId ??
+      item.ReceiveGoodsItemId ??
+      item.ReceiveGoodsItemID ??
+      null,
     receiveGoodsId:
       item.receiveGoodsId ??
       item.ReceiveGoodsId ??
@@ -79,6 +135,7 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
     purchaseOrderId: item.purchaseOrderId ?? item.PurchaseOrderId ?? null,
     poItemId:
       item.poItemId ??
+      item.POItemId ??
       item.purchaseOrderItemId ??
       item.PurchaseOrderItemId ??
       null,
@@ -107,7 +164,16 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
     notes: item.notes ?? item.Notes ?? "",
     orderedQty,
     receivedQty,
-    balanceQty: Math.max(explicitBalance ?? computedBalance, 0),
+    balanceQty: poBalanceQty,
+    poBalanceQty,
+    consumedQty,
+    availableQty,
+    receiptReceivedQty,
+    receiptAvailableQty,
+    receiptBalanceQty,
+    totalReceivedQty,
+    totalAvailableQty,
+    totalPoBalanceQty,
     createdAt: item.createdAt ?? item.CreatedAt ?? null,
   };
 };

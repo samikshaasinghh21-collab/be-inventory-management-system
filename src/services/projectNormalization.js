@@ -28,6 +28,12 @@ export const normalizeProjectRecord = (project = {}) => ({
   name: project.name ?? project.ProjectName ?? "",
   code: project.code ?? project.ProjectCode ?? "",
   customerId: project.customerId ?? project.CustomerId ?? null,
+  clientId:
+    project.clientId ??
+    project.ClientId ??
+    project.customerId ??
+    project.CustomerId ??
+    null,
   client: project.client ?? project.Client ?? "",
   companyName:
     project.companyName ??

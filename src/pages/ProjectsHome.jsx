@@ -174,7 +174,7 @@ const ProjectsHome = () => {
       nextErrors.name = "Project name is required.";
     }
     if (!form.customerId) {
-      nextErrors.customerId = "Select a customer.";
+      nextErrors.customerId = "Select a client.";
     }
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       nextErrors.endDate = "End date must be after the start date.";
@@ -194,6 +194,7 @@ const ProjectsHome = () => {
         name: form.name.trim(),
         code: form.code.trim() || undefined,
         customerId: form.customerId || null,
+        clientId: form.customerId || null,
         client: getCustomerPrimaryName(selectedCustomer) || undefined,
         companyName: selectedCustomer?.companyName || undefined,
         address: selectedCustomer?.address || undefined,
@@ -259,7 +260,7 @@ const ProjectsHome = () => {
             </p>
             <h1 className="text-3xl font-semibold text-slate-800">Projects</h1>
             <p className="mt-1 text-sm text-slate-500">
-              Create projects with customer details fetched from the customer
+              Create projects with client details fetched from the customer
               register.
             </p>
           </div>
@@ -267,7 +268,7 @@ const ProjectsHome = () => {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by project, customer, contact, status"
+              placeholder="Search by project, client, contact, status"
               className="hidden rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none md:block"
             />
             <button
@@ -297,11 +298,11 @@ const ProjectsHome = () => {
               )}
             </div>
           </div>
-          <table className="w-full text-sm">
+          <table className="min-w-[900px] text-sm">
             <thead className="bg-slate-100 text-slate-600">
               <tr>
                 <th className="p-3 text-left">Project</th>
-                <th className="p-3 text-left">Customer</th>
+                <th className="p-3 text-left">Client Name</th>
                 <th className="p-3 text-left">Contact</th>
                 <th className="p-3 text-left">Status</th>
                 <th className="p-3 text-left">Timeline</th>
@@ -423,7 +424,7 @@ const ProjectsHome = () => {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-700">
-                    Customer *
+                    Client Name *
                   </label>
                   <select
                     value={form.customerId}
@@ -434,7 +435,7 @@ const ProjectsHome = () => {
                   >
                     <option value="">
                       {customers.length
-                        ? "Select customer"
+                        ? "Select client"
                         : "Add a customer first"}
                     </option>
                     {customers.map((customer) => (
@@ -489,13 +490,13 @@ const ProjectsHome = () => {
                 </div>
                 {!selectedCustomer ? (
                   <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-                    Select a customer to update the linked client details.
+                    Select a client to update the linked client details.
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
                       <span className="text-xs uppercase tracking-wide text-slate-500">
-                        Customer Name
+                        Client Name
                       </span>
                       <p className="mt-1 font-medium text-slate-700">
                         {getCustomerPrimaryName(selectedCustomer) || "-"}

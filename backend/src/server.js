@@ -193,6 +193,14 @@ const roundCurrencyValue = (value) => {
   return Number(parsed.toFixed(2));
 };
 
+const normalizeCurrencyValue = (value, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return roundCurrencyValue(fallback);
+  }
+  return roundCurrencyValue(parsed);
+};
+
 const normalizeSerialNumbers = (value) => {
   const list = Array.isArray(value)
     ? value
@@ -319,6 +327,77 @@ const buildProjectDependencySummary = (counts = {}) => {
   return parts.join(", ");
 };
 
+const DEFAULT_PURCHASE_ORDER_TERMS = `Scope :
+• The scope of supply by the Vendor / OEM for includes design, engineering, manufacture, supply (duly packed), inspection, testing (as applicable) including transport, transit insurance, packing and forwarding till site.
+• Design responsibility will be in scope of the respective OEM only.
+• No deviation is acceptable from Technical / Contractual specification.
+
+Pricing :
+• The Prices quoted are in INR
+• No variations of any nature shall be allowed except for statuary variations in taxes and duties.
+• Prices are valid for entire package as per the Order.
+
+Statutory Levies :
+• GST, Sales Tax , VAT , Service Tax, Octroi & any other statutory levies may be charged extra as applicable at the time of invoicing.
+• Road permit / Way bill or any other entry permit documents, if applicable to be provided by Vendor.
+
+Invoice :
+• Invoice to be raised on : Bangalore Electronics
+• Please mention the Bangalore Electronics PO reference in your invoice – This is mandatory for Invoice acceptance.
+• The vendor shall include the Billing & Shipping addresses, GSTIN, PAN, CIN, Comprehensive contact details in your Invoice.
+• In case of a dispute, the Terms and Conditions (T&C) mentioned in our purchase order will supersede the T&C in your quote / invoice.
+
+Delivery / Billing:
+• Delivery Terms: Upon Readiness Within 2-4 Weeks. Tentatively 5th April, 2026.
+• Incoterms: DAP Site - Bangalore, including packing & forwarding, loading and unloading charges.
+• Vendor to ensure timely submission of documents for customer approval and clearances.
+• Delivery terms given above are based on the standard delivery terms of the Vendor/ OEM/ Technology Partner and the same can vary on a case to case basis.
+• Vendor responsibility is to supply materials / products as per the PO placed by Bangalore Electronics.
+• No extra hidden charges should be levied upon Bangalore Electronics.
+• The goods shall be delivered to the site as specified in the PO conditions.
+
+Billing & Shipping Details :
+Bangalore Electronics
+No. 124, Sadar Patrappa Road,
+Bangalore, India – 560002
+PAN : AAAFB8092P
+GSTIN : 29AAAFB8092P1ZS
+
+Insurance :
+• Vendor shall arrange Transit Insurance covering loss or damage occurring while in transit from the vendor's place until arrival at site.
+
+Test / Inspection :
+• OEM / Vendor at its own expenses shall carry out required tests / Inspection at manufacturer's place as per requirement approved by Bangalore Electronics.
+
+Quality Control :
+• Vendor / OEM shall emphasize extremely on the quality assurance and maintenance aspects as per the standard of industry practice.
+
+Documentation :
+• The expected technical documentation includes technical descriptions, Drawings, Catalogues, Data Sheets , BOQ , circuit diagrams, quality assurance plan , maintenance plan including user manual for preventive and corrective maintenance, commissioning instructions, test certificates, assembly and disassembly instructions etc. Vendor shall provide dispatch documents e.g. Tax Invoice, Challan, LR / AWB / Bill of Lading , Packing List , Insurance Certificate , Factory Test Reports , Certificate of Conformance, Warranty Certificate etc.
+
+Quantity Variation :
+• Additional Quantity variation will be applicable on the purchase order at the same cost.
+
+Payment Terms :
+• For Supply: 100% payment shall be released within 30 days from the date of Goods Receipt at site (GRN) date duly certified by Bangalore Electronics Project Engineer.
+
+Warranty :
+• Warranty & support is applicable, including RMA & DOA, will be as per the terms & conditions of the Tender by the OEM.
+• Warranty Period: 12 months.
+
+Others :
+• General - All other general terms & conditions shall be applicable as per Bangalore Electronics PO.
+• This PO may not be used for reference, advertisement or any similar purposes without expressly stated permission.
+• Changes or additions to the PO are only effective if they have been confirmed by the End Customer in writing.
+• The Customer (or Purchaser) may cancel the PO if the Supplier has not confirmed acceptance of the PO in writing within two weeks of receipt. If the confirmation vary from terms of the PO, the Purchaser is only bound if the Purchaser approves the deviation in writing.
+• The goods / materials / licenses supplied by you against our PO will be treated as our property upon acceptance of invoice & is commercially cleared as per the agreed payment terms.
+
+Important:
+Terms mentioned in the PO are final. Any discussions or sign off w.r.t terms (if any) with anyone else including the OEM/Vendor, shall not be valid until the same captured in the purchase order & the same accepted by us. Terms of the PO cannot be changed or modified or altered at a later stage for any reason. Vendor to honour the PO terms without any
+deviation.
+
+All disputes are subject to Bangalore Jurisdiction only`;
+
 const resolveItemsSchema = async () => {
   const pool = await getPool();
   const [columnsResult, identityResult] = await Promise.all([
@@ -379,6 +458,8 @@ const resolveItemsSchema = async () => {
     "Category",
     "category"
   );
+  const brandIdColumns = findColumns("BrandId", "brandId", "brand_id");
+  const brandColumns = findColumns("Brand", "brand", "BrandName", "brand_name");
   const hsnColumns = findColumns("hsn_code", "HSNCode", "HsnCode", "HSN", "hsn");
   const stockColumns = findColumns(
     "stock_qty",
@@ -455,6 +536,8 @@ const resolveItemsSchema = async () => {
     idColumns,
     nameColumns,
     categoryColumns,
+    brandIdColumns,
+    brandColumns,
     hsnColumns,
     stockColumns,
     priceColumns,
@@ -515,6 +598,14 @@ const normalizeItem = (row = {}) => {
       row.ItemCategory ??
       row.category ??
       row.itemCategory ??
+      "",
+    brandId: row.BrandId ?? row.brandId ?? row.brand_id ?? null,
+    brand:
+      row.Brand ??
+      row.brand ??
+      row.BrandName ??
+      row.brandName ??
+      row.brand_name ??
       "",
     hsn:
       row.hsn_code ??
@@ -606,6 +697,7 @@ const normalizeProject = (row = {}) => ({
   name: row.ProjectName ?? row.name ?? "",
   code: row.ProjectCode ?? row.code ?? "",
   customerId: row.CustomerId ?? row.customerId ?? null,
+  clientId: row.CustomerId ?? row.customerId ?? row.ClientId ?? row.clientId ?? null,
   client: row.Client ?? row.client ?? "",
   companyName:
     row.ClientCompany ??
@@ -774,6 +866,9 @@ const normalizePurchaseOrder = (row = {}) => ({
     null,
   status: row.Status ?? row.status ?? "",
   notes: row.Notes ?? row.notes ?? "",
+  termsAndConditions: normalizePurchaseOrderTerms(
+    row.TermsAndConditions ?? row.termsAndConditions
+  ),
   total: Number(row.Total ?? row.total ?? 0),
 });
 
@@ -783,8 +878,8 @@ const normalizePoItem = (row = {}) => {
     row.UnitPrice ?? row.unitPrice ?? row.Rate ?? row.rate ?? 0
   );
   return {
-    id: row.PurchaseOrderItemId ?? row.Id ?? row.id ?? null,
-    poItemId: row.PurchaseOrderItemId ?? row.Id ?? row.id ?? null,
+    id: row.POItemId ?? row.PurchaseOrderItemId ?? row.Id ?? row.id ?? null,
+    poItemId: row.POItemId ?? row.PurchaseOrderItemId ?? row.Id ?? row.id ?? null,
     purchaseOrderId: row.PurchaseOrderId ?? row.purchaseOrderId ?? null,
     itemId: row.ItemId ?? row.itemId ?? null,
     boqItemId: row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null,
@@ -902,6 +997,9 @@ const normalizeDeliveryChallan = (row = {}) => {
     issueDate: row.IssueDate ?? row.issueDate ?? null,
     status: row.Status ?? row.status ?? "Draft",
     notes: row.Notes ?? row.notes ?? "",
+    deliveredQty: Number(row.DeliveredQty ?? row.deliveredQty ?? 0) || 0,
+    consumedQty: Number(row.ConsumedQty ?? row.consumedQty ?? 0) || 0,
+    balanceQty: Number(row.BalanceQty ?? row.balanceQty ?? 0) || 0,
     createdAt: row.CreatedAt ?? row.createdAt ?? null,
     updatedAt: row.UpdatedAt ?? row.updatedAt ?? null,
   };
@@ -915,6 +1013,15 @@ const normalizeDeliveryChallanItem = (row = {}) => ({
     row.deliveryChallanId ??
     row.ChallanId ??
     null,
+  receiveGoodsItemId:
+    row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? null,
+  poItemId:
+    row.PurchaseOrderItemId ??
+    row.purchaseOrderItemId ??
+    row.POItemId ??
+    row.poItemId ??
+    null,
+  itemId: row.ItemId ?? row.itemId ?? null,
   name: row.ItemName ?? row.itemName ?? row.Name ?? row.name ?? "",
   description: row.Description ?? row.description ?? "",
   unit: row.Unit ?? row.unit ?? "PCS",
@@ -924,6 +1031,140 @@ const normalizeDeliveryChallanItem = (row = {}) => ({
   rate: Number(row.Rate ?? row.rate ?? 0) || 0,
   notes: row.Notes ?? row.notes ?? "",
 });
+
+const normalizeInventoryKeyValue = (value = "") =>
+  String(value ?? "").trim().toLowerCase();
+
+const buildInventoryMaterialKey = (item = {}) => {
+  const normalizedName = normalizeInventoryKeyValue(
+    item.name ?? item.ItemName ?? item.item ?? item.Item ?? ""
+  );
+  if (!normalizedName) {
+    return "";
+  }
+  const normalizedUnit =
+    normalizeInventoryKeyValue(item.unit ?? item.Unit ?? "PCS") || "pcs";
+  return `${normalizedName}::${normalizedUnit}`;
+};
+
+const buildDeliveryChallanMaterialGroups = (items = []) => {
+  const groups = new Map();
+  const receiveGoodsItemIdToMaterialKey = new Map();
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const materialKey = buildInventoryMaterialKey(item);
+    if (!materialKey) {
+      return;
+    }
+
+    const deliveredQty = Number(item.quantity ?? item.Quantity ?? 0) || 0;
+    if (!groups.has(materialKey)) {
+      groups.set(materialKey, {
+        materialKey,
+        name: item.name ?? item.ItemName ?? "Item",
+        unit: item.unit ?? item.Unit ?? "PCS",
+        deliveredQty: 0,
+        consumedQty: 0,
+      });
+    }
+
+    const group = groups.get(materialKey);
+    group.deliveredQty += deliveredQty;
+
+    const receiveGoodsItemId = toNullableInt(
+      item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+    );
+    if (receiveGoodsItemId !== null) {
+      receiveGoodsItemIdToMaterialKey.set(receiveGoodsItemId, materialKey);
+    }
+  });
+
+  return {
+    groups,
+    receiveGoodsItemIdToMaterialKey,
+  };
+};
+
+const resolveDeliveryChallanMaterialKey = (
+  item = {},
+  groups = new Map(),
+  receiveGoodsItemIdToMaterialKey = new Map()
+) => {
+  const receiveGoodsItemId = toNullableInt(
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+  );
+  if (
+    receiveGoodsItemId !== null &&
+    receiveGoodsItemIdToMaterialKey.has(receiveGoodsItemId)
+  ) {
+    return receiveGoodsItemIdToMaterialKey.get(receiveGoodsItemId);
+  }
+
+  const materialKey = buildInventoryMaterialKey(item);
+  return materialKey && groups.has(materialKey) ? materialKey : null;
+};
+
+const isConsumptionLinkedToDeliveryChallan = (consumption = {}, challan = {}) => {
+  const challanId = toNullableInt(challan.id ?? challan.deliveryChallanId);
+  const consumptionChallanId = toNullableInt(consumption.deliveryChallanId);
+  if (challanId !== null && consumptionChallanId === challanId) {
+    return true;
+  }
+
+  const challanRef = normalizeInventoryKeyValue(
+    challan.dcNumber ?? challan.DCNumber ?? ""
+  );
+  const consumptionRef = normalizeInventoryKeyValue(
+    consumption.deliveryChallanRef ?? consumption.DeliveryChallanRef ?? ""
+  );
+
+  return Boolean(challanRef && consumptionRef && challanRef === consumptionRef);
+};
+
+const buildDeliveryChallanMetrics = (
+  challan = {},
+  challanItems = [],
+  consumptions = []
+) => {
+  const { groups, receiveGoodsItemIdToMaterialKey } =
+    buildDeliveryChallanMaterialGroups(challanItems);
+
+  (Array.isArray(consumptions) ? consumptions : []).forEach((consumption) => {
+    if (!isConsumptionLinkedToDeliveryChallan(consumption, challan)) {
+      return;
+    }
+
+    (consumption.items || []).forEach((item) => {
+      const materialKey = resolveDeliveryChallanMaterialKey(
+        item,
+        groups,
+        receiveGoodsItemIdToMaterialKey
+      );
+      if (!materialKey) {
+        return;
+      }
+
+      const group = groups.get(materialKey);
+      group.consumedQty += Number(item.quantity ?? item.Quantity ?? 0) || 0;
+    });
+  });
+
+  let deliveredQty = 0;
+  let consumedQty = 0;
+  let balanceQty = 0;
+
+  groups.forEach((group) => {
+    deliveredQty += group.deliveredQty;
+    consumedQty += group.consumedQty;
+    balanceQty += Math.max(group.deliveredQty - group.consumedQty, 0);
+  });
+
+  return {
+    deliveredQty,
+    consumedQty,
+    balanceQty,
+  };
+};
 
 const normalizeConsumption = (row = {}) => {
   const id = row.ConsumptionId ?? row.consumptionId ?? row.Id ?? row.id ?? null;
@@ -1075,6 +1316,23 @@ const normalizeOptionalString = (value) => {
   }
   const trimmed = String(value ?? "").trim();
   return trimmed.length ? trimmed : null;
+};
+
+const normalizeMultilineString = (value) => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  return String(value).replace(/\r\n/g, "\n").trim();
+};
+
+const normalizePurchaseOrderTerms = (value, fallback = DEFAULT_PURCHASE_ORDER_TERMS) => {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  return normalizeMultilineString(value) ?? "";
 };
 
 const toNullableInt = (value) => {
@@ -1416,6 +1674,19 @@ const normalizeReceiveGoods = (row = {}) => {
 const normalizeReceiveGoodsItem = (row = {}) => {
   const orderedQty = Number(row.OrderedQty ?? row.orderedQty ?? 0) || 0;
   const receivedQty = Number(row.ReceivedQty ?? row.receivedQty ?? 0) || 0;
+  const poBalanceQty =
+    Number(row.BalanceQty ?? row.balanceQty ?? orderedQty - receivedQty) || 0;
+  const rawConsumed = row.ConsumedQty ?? row.consumedQty ?? null;
+  const consumedQty = Number.isFinite(Number(rawConsumed)) ? Number(rawConsumed) : 0;
+  const rawAvailable =
+    row.AvailableQty ??
+    row.availableQty ??
+    row.CurrentAvailableQty ??
+    row.currentAvailableQty ??
+    null;
+  const availableQty = Number.isFinite(Number(rawAvailable))
+    ? Number(rawAvailable)
+    : Math.max(receivedQty - consumedQty, 0);
   const taxPercentage =
     parseTaxPercentageValue(
       row.TaxPercentage ??
@@ -1434,7 +1705,13 @@ const normalizeReceiveGoodsItem = (row = {}) => {
     row.ReceiveId ??
     null;
   return {
-    id: row.Id ?? row.id ?? null,
+    id:
+      row.ReceiveGoodsItemId ??
+      row.receiveGoodsItemId ??
+      row.ReceiveGoodsItemID ??
+      row.Id ??
+      row.id ??
+      null,
     receiveGoodsId: receiveId,
     purchaseOrderId:
       row.PurchaseOrderId ?? row.purchaseOrderId ?? row.PurchaseorderId ?? null,
@@ -1469,8 +1746,10 @@ const normalizeReceiveGoodsItem = (row = {}) => {
     notes: row.ItemNotes ?? row.itemNotes ?? row.Notes ?? row.notes ?? "",
     orderedQty,
     receivedQty,
-    balanceQty:
-      Number(row.BalanceQty ?? row.balanceQty ?? orderedQty - receivedQty) || 0,
+    balanceQty: poBalanceQty,
+    poBalanceQty,
+    consumedQty,
+    availableQty,
     createdAt: row.CreatedAt ?? row.createdAt ?? null,
   };
 };
@@ -1508,8 +1787,11 @@ const sortReceiveRowsChronologically = (rows = [], receivePk = RECEIVE_ID_COL) =
   });
 
 const buildReceivePoItemKey = (row = {}, index = 0) => {
+  // Use canonical line identity: poItemId > itemId > index
+  // Never use name as a fallback key to prevent duplicate item names from collapsing multiple PO lines
   const poItemId =
     row.poItemId ??
+    row.POItemId ??
     row.PurchaseOrderItemId ??
     row.purchaseOrderItemId ??
     row.Id ??
@@ -1522,14 +1804,6 @@ const buildReceivePoItemKey = (row = {}, index = 0) => {
   const itemId = row.itemId ?? row.ItemId ?? null;
   if (Number.isFinite(Number(itemId))) {
     return `item:${Number(itemId)}`;
-  }
-
-  const name =
-    normalizeOptionalString(
-      row.name ?? row.Name ?? row.ItemName ?? row.itemName
-    ) ?? "";
-  if (name) {
-    return `name:${name.toLowerCase()}`;
   }
 
   return `index:${index}`;
@@ -1552,6 +1826,68 @@ const buildReceiveItemSource = (items = []) => {
   return source;
 };
 
+const findMatchingReceiveItemIndex = (
+  purchaseOrderItems = [],
+  receiptItem = {},
+  index = 0
+) => {
+  if (!Array.isArray(purchaseOrderItems) || !purchaseOrderItems.length) {
+    return -1;
+  }
+
+  const receiptPoItemId =
+    receiptItem.poItemId ??
+    receiptItem.POItemId ??
+    receiptItem.PurchaseOrderItemId ??
+    receiptItem.purchaseOrderItemId ??
+    receiptItem.Id ??
+    receiptItem.id ??
+    null;
+  if (Number.isFinite(Number(receiptPoItemId))) {
+    const exactIndex = purchaseOrderItems.findIndex(
+      (poItem) =>
+        Number(poItem.poItemId ?? poItem.POItemId ?? poItem.id ?? poItem.PurchaseOrderItemId ?? NaN) ===
+        Number(receiptPoItemId)
+    );
+    if (exactIndex >= 0) {
+      return exactIndex;
+    }
+  }
+
+  const receiptItemId = receiptItem.itemId ?? receiptItem.ItemId ?? null;
+  if (Number.isFinite(Number(receiptItemId))) {
+    const exactIndex = purchaseOrderItems.findIndex(
+      (poItem) =>
+        Number(poItem.itemId ?? poItem.ItemId ?? NaN) ===
+        Number(receiptItemId)
+    );
+    if (exactIndex >= 0) {
+      return exactIndex;
+    }
+  }
+
+  return index >= 0 && index < purchaseOrderItems.length ? index : -1;
+};
+
+const findReceiveSourceItem = (source, poItem, index = 0) => {
+  const itemKey = buildReceivePoItemKey(poItem, index);
+  const preferred = source.byKey.get(itemKey);
+  if (preferred) {
+    return preferred;
+  }
+
+  const itemId = poItem.itemId ?? poItem.ItemId ?? null;
+  if (Number.isFinite(Number(itemId))) {
+    const itemKeyByItem = `item:${Number(itemId)}`;
+    const fallback = source.byKey.get(itemKeyByItem);
+    if (fallback) {
+      return fallback;
+    }
+  }
+
+  return source.ordered[index] ?? null;
+};
+
 const loadReceivePurchaseOrderItems = async (tx, purchaseOrderId) => {
   const result = await new sql.Request(tx)
     .input("PurchaseOrderId", sql.Int, purchaseOrderId)
@@ -1563,16 +1899,16 @@ const loadReceivePurchaseOrderItems = async (tx, purchaseOrderId) => {
   return [...(result.recordset ?? [])]
     .sort((left, right) => {
       const leftId = Number(
-        left.PurchaseOrderItemId ?? left.Id ?? left.id ?? 0
+        left.POItemId ?? left.PurchaseOrderItemId ?? left.Id ?? left.id ?? 0
       );
       const rightId = Number(
-        right.PurchaseOrderItemId ?? right.Id ?? right.id ?? 0
+        right.POItemId ?? right.PurchaseOrderItemId ?? right.Id ?? right.id ?? 0
       );
       return leftId - rightId;
     })
     .map((row) => ({
       ...normalizePoItem(row),
-      poItemId: row.PurchaseOrderItemId ?? row.Id ?? row.id ?? null,
+      poItemId: row.POItemId ?? row.PurchaseOrderItemId ?? row.Id ?? row.id ?? null,
     }));
 };
 
@@ -1744,8 +2080,8 @@ const recalculateReceiveGoodsChain = async (
         : "intra";
 
     const recalculatedItems = purchaseOrderItems.map((poItem, index) => {
+      const matchedItem = findReceiveSourceItem(source, poItem, index);
       const itemKey = buildReceivePoItemKey(poItem, index);
-      const matchedItem = source.byKey.get(itemKey) ?? source.ordered[index] ?? null;
       const orderedQty = toReceiveQuantity(poItem.quantity ?? poItem.orderedQty);
       const previouslyReceived = toReceiveQuantity(cumulativeByKey.get(itemKey));
       const receivableQty = Math.max(orderedQty - previouslyReceived, 0);
@@ -1848,6 +2184,7 @@ const normalizeReceiveGoodsItemsInput = (items = []) =>
       poItemId:
         toNullableInt(
           item.poItemId ??
+            item.POItemId ??
             item.purchaseOrderItemId ??
             item.PurchaseOrderItemId
         ) ?? null,
@@ -1907,6 +2244,8 @@ const ensureItemsTable = async () => {
         ItemId INT IDENTITY(1,1) PRIMARY KEY,
         Name NVARCHAR(255) NOT NULL,
         Category NVARCHAR(100) NULL,
+        BrandId INT NULL,
+        Brand NVARCHAR(255) NULL,
         HSN NVARCHAR(50) NULL,
         Unit NVARCHAR(50) NULL,
         Stock INT NOT NULL DEFAULT 0,
@@ -1931,6 +2270,16 @@ const ensureItemsTable = async () => {
     IF COL_LENGTH('dbo.Items', 'Category') IS NULL
     BEGIN
       ALTER TABLE dbo.Items ADD Category NVARCHAR(100) NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'BrandId') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD BrandId INT NULL;
+    END;
+
+    IF COL_LENGTH('dbo.Items', 'Brand') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Items ADD Brand NVARCHAR(255) NULL;
     END;
 
     IF COL_LENGTH('dbo.Items', 'HSN') IS NULL
@@ -2001,6 +2350,78 @@ const ensureItemsTable = async () => {
       ALTER TABLE dbo.Items ADD UpdatedAt DATETIME2 NULL;
     END;
   `);
+};
+
+const ensureBrandsTable = async () => {
+  const pool = await getPool();
+  await pool.request().query(`
+    IF OBJECT_ID('dbo.Brands', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.Brands (
+        BrandId INT IDENTITY(1,1) PRIMARY KEY,
+        BrandName NVARCHAR(255) NOT NULL,
+        CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+      )
+    END
+  `);
+
+  await pool.request().query(`
+    IF COL_LENGTH('dbo.Brands', 'BrandName') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Brands ADD BrandName NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.Brands', 'CreatedAt') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Brands ADD CreatedAt DATETIME2 NOT NULL
+        CONSTRAINT DF_Brands_CreatedAt DEFAULT SYSUTCDATETIME();
+    END;
+    IF COL_LENGTH('dbo.Brands', 'UpdatedAt') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Brands ADD UpdatedAt DATETIME2 NOT NULL
+        CONSTRAINT DF_Brands_UpdatedAt DEFAULT SYSUTCDATETIME();
+    END;
+  `);
+};
+
+const normalizeBrand = (row = {}) => ({
+  id: row.BrandId ?? row.brandId ?? row.Id ?? row.id ?? null,
+  name: row.BrandName ?? row.brandName ?? row.Name ?? row.name ?? "",
+  createdAt: row.CreatedAt ?? row.createdAt ?? null,
+  updatedAt: row.UpdatedAt ?? row.updatedAt ?? null,
+});
+
+const resolveOrCreateBrand = async (pool, brandName) => {
+  const safeBrandName = normalizeOptionalString(brandName);
+  if (!safeBrandName) {
+    return null;
+  }
+
+  await ensureBrandsTable();
+
+  const existingResult = await pool
+    .request()
+    .input("BrandName", sql.NVarChar(255), safeBrandName)
+    .query(`
+      SELECT TOP 1 *
+      FROM dbo.Brands
+      WHERE UPPER(LTRIM(RTRIM(BrandName))) = UPPER(LTRIM(RTRIM(@BrandName)))
+      ORDER BY BrandId ASC
+    `);
+  const existing = existingResult.recordset?.[0] ?? null;
+  if (existing) {
+    return normalizeBrand(existing);
+  }
+
+  const createdResult = await pool
+    .request()
+    .input("BrandName", sql.NVarChar(255), safeBrandName)
+    .query(`
+      INSERT INTO dbo.Brands (BrandName)
+      OUTPUT INSERTED.*
+      VALUES (@BrandName)
+    `);
+  return normalizeBrand(createdResult.recordset?.[0] ?? {});
 };
 
 const ensureVendorsTable = async () => {
@@ -2483,7 +2904,8 @@ const ensurePurchaseTables = async () => {
         ExpectedDate DATE NULL,
         ExpectedDeliveryDate DATE NULL,
         Notes NVARCHAR(255) NULL,
-        Total DECIMAL(10,2) NULL,
+        TermsAndConditions NVARCHAR(MAX) NULL,
+        Total DECIMAL(18,2) NULL,
         CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
       )
@@ -2509,6 +2931,20 @@ const ensurePurchaseTables = async () => {
     BEGIN
       ALTER TABLE dbo.PurchaseOrders ADD BOQId INT NULL;
     END;
+    IF COL_LENGTH('dbo.PurchaseOrders', 'TermsAndConditions') IS NULL
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrders ADD TermsAndConditions NVARCHAR(MAX) NULL;
+    END;
+    IF EXISTS (
+      SELECT 1
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.PurchaseOrders')
+        AND name = 'Total'
+        AND ([precision] < 18 OR [scale] <> 2)
+    )
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrders ALTER COLUMN Total DECIMAL(18,2) NULL;
+    END;
   `);
 
   await pool.request().query(`
@@ -2528,9 +2964,9 @@ const ensurePurchaseTables = async () => {
         SerialRequired BIT NOT NULL DEFAULT 0,
         SerialNumber NVARCHAR(255) NULL,
         Quantity INT NOT NULL DEFAULT 0,
-        UnitPrice DECIMAL(10, 2) NULL,
-        Rate DECIMAL(10, 2) NOT NULL DEFAULT 0,
-        TotalPrice DECIMAL(10, 2) NULL,
+        UnitPrice DECIMAL(18, 2) NULL,
+        Rate DECIMAL(18, 2) NOT NULL DEFAULT 0,
+        TotalPrice DECIMAL(18, 2) NULL,
         Notes NVARCHAR(MAX) NULL,
         CONSTRAINT FK_PurchaseOrderItems_Order FOREIGN KEY (PurchaseOrderId)
           REFERENCES dbo.PurchaseOrders(Id) ON DELETE CASCADE
@@ -2569,11 +3005,41 @@ const ensurePurchaseTables = async () => {
     END;
     IF COL_LENGTH('dbo.PurchaseOrderItems', 'UnitPrice') IS NULL
     BEGIN
-      ALTER TABLE dbo.PurchaseOrderItems ADD UnitPrice DECIMAL(10,2) NULL;
+      ALTER TABLE dbo.PurchaseOrderItems ADD UnitPrice DECIMAL(18,2) NULL;
     END;
     IF COL_LENGTH('dbo.PurchaseOrderItems', 'TotalPrice') IS NULL
     BEGIN
-      ALTER TABLE dbo.PurchaseOrderItems ADD TotalPrice DECIMAL(10,2) NULL;
+      ALTER TABLE dbo.PurchaseOrderItems ADD TotalPrice DECIMAL(18,2) NULL;
+    END;
+    IF EXISTS (
+      SELECT 1
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.PurchaseOrderItems')
+        AND name = 'UnitPrice'
+        AND ([precision] < 18 OR [scale] <> 2)
+    )
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrderItems ALTER COLUMN UnitPrice DECIMAL(18,2) NULL;
+    END;
+    IF EXISTS (
+      SELECT 1
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.PurchaseOrderItems')
+        AND name = 'Rate'
+        AND ([precision] < 18 OR [scale] <> 2)
+    )
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrderItems ALTER COLUMN Rate DECIMAL(18,2) NOT NULL;
+    END;
+    IF EXISTS (
+      SELECT 1
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.PurchaseOrderItems')
+        AND name = 'TotalPrice'
+        AND ([precision] < 18 OR [scale] <> 2)
+    )
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrderItems ALTER COLUMN TotalPrice DECIMAL(18,2) NULL;
     END;
   `);
   })();
@@ -2590,9 +3056,12 @@ const ensurePurchaseTables = async () => {
 const normalizePurchaseOrderItemsInput = (items = []) =>
   (Array.isArray(items) ? items : [])
     .map((item) => {
-      const quantity = Number(item.quantity ?? item.qty ?? item.Quantity ?? 0) || 0;
-      const unitPrice =
-        Number(item.unitPrice ?? item.rate ?? item.UnitPrice ?? item.Rate ?? 0) || 0;
+      const quantity = normalizeCurrencyValue(
+        item.quantity ?? item.qty ?? item.Quantity ?? 0
+      );
+      const unitPrice = normalizeCurrencyValue(
+        item.unitPrice ?? item.rate ?? item.UnitPrice ?? item.Rate ?? 0
+      );
       const taxPercentage =
         parseTaxPercentageValue(
           item.taxPercentage ??
@@ -2631,9 +3100,10 @@ const normalizePurchaseOrderItemsInput = (items = []) =>
         taxPercentage,
         quantity,
         unitPrice,
-        totalPrice:
-          Number(item.totalPrice ?? item.TotalPrice ?? quantity * unitPrice) ||
-          quantity * unitPrice,
+        totalPrice: normalizeCurrencyValue(
+          item.totalPrice ?? item.TotalPrice,
+          quantity * unitPrice
+        ),
         notes: notesValue ?? "",
       };
     })
@@ -2717,6 +3187,12 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
 
   let total = 0;
   for (const item of items) {
+    const safeQuantity = normalizeCurrencyValue(item.quantity);
+    const safeUnitPrice = normalizeCurrencyValue(item.unitPrice);
+    const safeTotalPrice = normalizeCurrencyValue(
+      item.totalPrice,
+      safeQuantity * safeUnitPrice
+    );
     const req = new sql.Request(tx);
     req.input("PurchaseOrderId", sql.Int, purchaseOrderId);
     req.input("ItemId", sql.Int, item.itemId ?? null);
@@ -2728,9 +3204,9 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
     req.input("TaxPercentage", sql.Decimal(5, 2), item.taxPercentage ?? 0);
     req.input("SerialNumber", sql.NVarChar(255), item.serialNumber || null);
     req.input("SerialRequired", sql.Bit, normalizeBooleanFlag(item.serialRequired, false));
-    req.input("Qty", sql.Decimal(18, 2), item.quantity);
-    req.input("UnitPrice", sql.Decimal(18, 2), item.unitPrice);
-    req.input("Total", sql.Decimal(18, 2), item.totalPrice);
+    req.input("Qty", sql.Decimal(18, 2), safeQuantity);
+    req.input("UnitPrice", sql.Decimal(18, 2), safeUnitPrice);
+    req.input("Total", sql.Decimal(18, 2), safeTotalPrice);
     req.input("Unit", sql.NVarChar(50), item.unit ?? "PCS");
     req.input("Notes", sql.NVarChar(sql.MAX), item.notes || null);
 
@@ -2777,7 +3253,7 @@ const insertPurchaseOrderItems = async (tx, purchaseOrderId, items = []) => {
         INSERT INTO dbo.PurchaseOrderItems (${colsToUse.join(", ")})
         VALUES (${values.join(", ")})
       `);
-      total += item.totalPrice;
+      total += safeTotalPrice;
     } catch (insertError) {
       console.error(
         "Error inserting purchase order item:",
@@ -3169,6 +3645,8 @@ const refreshPurchaseOrdersDerivedData = async (tx, purchaseOrderIds = []) => {
 
 let receiveGoodsPk = "ReceiveGoodsId";
 let receiveGoodsItemsFk = "ReceiveGoodsId";
+let purchaseOrderItemsPk = "Id";
+let receiveGoodsItemsPk = "Id";
 const ensureSchemaOnRequest =
   String(process.env.DB_ENSURE_SCHEMA_ON_REQUEST ?? "false").toLowerCase() ===
   "true";
@@ -3295,6 +3773,112 @@ const refreshReceiveGoodsItemsFk = async () => {
   return receiveGoodsItemsFk;
 };
 
+const refreshPurchaseOrderItemsPk = async () => {
+  const pool = await getPool();
+  const [colsResult, pkResult, identityResult] = await Promise.all([
+    pool.request().query(`
+      SELECT name AS ColumnName
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.PurchaseOrderItems')
+    `),
+    pool.request().query(`
+      SELECT col.name AS ColumnName
+      FROM sys.key_constraints kc
+      JOIN sys.index_columns ic
+        ON kc.parent_object_id = ic.object_id
+       AND kc.unique_index_id = ic.index_id
+      JOIN sys.columns col
+        ON col.object_id = ic.object_id
+       AND col.column_id = ic.column_id
+      WHERE kc.parent_object_id = OBJECT_ID('dbo.PurchaseOrderItems')
+        AND kc.[type] = 'PK'
+    `),
+    pool.request().query(`
+      SELECT name AS ColumnName
+      FROM sys.identity_columns
+      WHERE object_id = OBJECT_ID('dbo.PurchaseOrderItems')
+    `),
+  ]);
+
+  const cols = new Set((colsResult.recordset ?? []).map((row) => row.ColumnName));
+  const candidates = ["POItemId", "PurchaseOrderItemId", "Id"].filter((column) =>
+    cols.has(column)
+  );
+  const primaryKeyColumn =
+    (pkResult.recordset ?? [])
+      .map((row) => row.ColumnName)
+      .find((column) => candidates.includes(column)) ?? null;
+  const identityColumn =
+    (identityResult.recordset ?? [])
+      .map((row) => row.ColumnName)
+      .find((column) => candidates.includes(column)) ?? null;
+  const populatedColumn = await pickMostPopulatedColumn(
+    pool,
+    "dbo.PurchaseOrderItems",
+    candidates
+  );
+
+  purchaseOrderItemsPk =
+    primaryKeyColumn ??
+    identityColumn ??
+    populatedColumn ??
+    candidates[0] ??
+    "Id";
+  return purchaseOrderItemsPk;
+};
+
+const refreshReceiveGoodsItemsPk = async () => {
+  const pool = await getPool();
+  const [colsResult, pkResult, identityResult] = await Promise.all([
+    pool.request().query(`
+      SELECT name AS ColumnName
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.ReceiveGoodsItems')
+    `),
+    pool.request().query(`
+      SELECT col.name AS ColumnName
+      FROM sys.key_constraints kc
+      JOIN sys.index_columns ic
+        ON kc.parent_object_id = ic.object_id
+       AND kc.unique_index_id = ic.index_id
+      JOIN sys.columns col
+        ON col.object_id = ic.object_id
+       AND col.column_id = ic.column_id
+      WHERE kc.parent_object_id = OBJECT_ID('dbo.ReceiveGoodsItems')
+        AND kc.[type] = 'PK'
+    `),
+    pool.request().query(`
+      SELECT name AS ColumnName
+      FROM sys.identity_columns
+      WHERE object_id = OBJECT_ID('dbo.ReceiveGoodsItems')
+    `),
+  ]);
+
+  const cols = new Set((colsResult.recordset ?? []).map((row) => row.ColumnName));
+  const candidates = ["ReceiveGoodsItemId", "Id"].filter((column) => cols.has(column));
+  const primaryKeyColumn =
+    (pkResult.recordset ?? [])
+      .map((row) => row.ColumnName)
+      .find((column) => candidates.includes(column)) ?? null;
+  const identityColumn =
+    (identityResult.recordset ?? [])
+      .map((row) => row.ColumnName)
+      .find((column) => candidates.includes(column)) ?? null;
+  const populatedColumn = await pickMostPopulatedColumn(
+    pool,
+    "dbo.ReceiveGoodsItems",
+    candidates
+  );
+
+  receiveGoodsItemsPk =
+    primaryKeyColumn ??
+    identityColumn ??
+    populatedColumn ??
+    candidates[0] ??
+    "Id";
+  return receiveGoodsItemsPk;
+};
+
 const findReceiveGoodsRow = async (poolOrTx, id) => {
   const colsResult = await poolOrTx
     .request()
@@ -3410,8 +3994,15 @@ const buildRequestedReceiveTotalsBeforeReceipt = (
 
     const items = groupedItems[receiptId] ?? groupedItems[Number(receiptId)] ?? [];
     items.forEach((item, index) => {
-      const key = buildReceivePoItemKey(item, index);
-      totals.set(key, toReceiveQuantity(totals.get(key)) + toReceiveQuantity(item.receivedQty));
+      const matchedIndex = findMatchingReceiveItemIndex(purchaseOrderItems, item, index);
+      if (matchedIndex < 0) {
+        return;
+      }
+      const key = buildReceivePoItemKey(purchaseOrderItems[matchedIndex], matchedIndex);
+      totals.set(
+        key,
+        toReceiveQuantity(totals.get(key)) + toReceiveQuantity(item.receivedQty)
+      );
     });
   }
 
@@ -4078,6 +4669,269 @@ const uniqueReceiveGoodsItemIds = (values = []) => {
   return Array.from(set);
 };
 
+const uniquePurchaseOrderIds = (values = []) => {
+  const set = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const id = toNullableInt(value);
+    if (id !== null) {
+      set.add(id);
+    }
+  });
+  return Array.from(set);
+};
+
+const buildPurchaseOrderItemMetricKey = (purchaseOrderId, poItemId) => {
+  const normalizedPurchaseOrderId = toNullableInt(purchaseOrderId);
+  const normalizedPoItemId = toNullableInt(poItemId);
+  if (normalizedPurchaseOrderId === null || normalizedPoItemId === null) {
+    return null;
+  }
+  return `${normalizedPurchaseOrderId}:${normalizedPoItemId}`;
+};
+
+const mergePurchaseOrderItemReceiveMetrics = (item = {}, metrics = null) => {
+  const orderedQty = Number(
+    metrics?.orderedQty ?? item.orderedQty ?? item.quantity ?? item.OrderedQty ?? item.Quantity ?? 0
+  ) || 0;
+  const totalReceivedQty = Number(
+    metrics?.totalReceivedQty ?? item.totalReceivedQty ?? item.receivedQty ?? item.ReceivedQty ?? 0
+  ) || 0;
+  const totalAvailableQty = Number(
+    metrics?.totalAvailableQty ?? item.totalAvailableQty ?? item.availableQty ?? item.AvailableQty ?? totalReceivedQty
+  ) || 0;
+  const totalPoBalanceQty = Math.max(
+    Number(
+      metrics?.poBalanceQty ??
+        item.totalPoBalanceQty ??
+        item.poBalanceQty ??
+        item.balanceQty ??
+        item.POBalanceQty ??
+        0
+    ) || Math.max(orderedQty - totalReceivedQty, 0),
+    0
+  );
+
+  return {
+    ...item,
+    orderedQty,
+    receivedQty: totalReceivedQty,
+    totalReceivedQty,
+    availableQty: totalAvailableQty,
+    totalAvailableQty,
+    poBalanceQty: totalPoBalanceQty,
+    totalPoBalanceQty,
+  };
+};
+
+const loadPurchaseOrderItemReceiveMetricsMap = async (db, purchaseOrderIds = []) => {
+  const ids = uniquePurchaseOrderIds(purchaseOrderIds);
+  if (!ids.length) {
+    return new Map();
+  }
+
+  const [poConfig, poItemPkCol, receiveGoodsItemPkCol, receiveGoodsItemColsResult] =
+    await Promise.all([
+      loadPurchaseOrderItemsConfig(db),
+      refreshPurchaseOrderItemsPk(),
+      refreshReceiveGoodsItemsPk(),
+      new sql.Request(db).query(`
+        SELECT name AS ColumnName
+        FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.ReceiveGoodsItems')
+      `),
+    ]);
+
+  const receiveGoodsItemCols = new Set(
+    (receiveGoodsItemColsResult.recordset ?? []).map((row) => row.ColumnName)
+  );
+  const receivePurchaseOrderIdCol = receiveGoodsItemCols.has("PurchaseOrderId")
+    ? "PurchaseOrderId"
+    : null;
+  const receivePoItemIdCol = receiveGoodsItemCols.has("PurchaseOrderItemId")
+    ? "PurchaseOrderItemId"
+    : receiveGoodsItemCols.has("PurchaseorderItemId")
+    ? "PurchaseorderItemId"
+    : null;
+  const receiveItemIdCol = receiveGoodsItemCols.has("ItemId") ? "ItemId" : null;
+  const receiveQtyCol = receiveGoodsItemCols.has("ReceivedQty") ? "ReceivedQty" : null;
+
+  if (!poConfig.hasPoId || !poConfig.qtyCol || !poItemPkCol || !receivePurchaseOrderIdCol || !receiveQtyCol) {
+    return new Map();
+  }
+
+  const poiPurchaseOrderIdExpr = `poi.${toIdentifier("PurchaseOrderId")}`;
+  const poiPoItemIdExpr = `poi.${toIdentifier(poItemPkCol)}`;
+  const poiItemIdExpr = poConfig.itemIdCol
+    ? `poi.${toIdentifier(poConfig.itemIdCol)}`
+    : "CAST(NULL AS INT)";
+  const poiOrderedQtyExpr = `COALESCE(poi.${toIdentifier(poConfig.qtyCol)}, 0)`;
+  const rgiPurchaseOrderIdExpr = `rgi.${toIdentifier(receivePurchaseOrderIdCol)}`;
+  const rgiPoItemIdExpr = receivePoItemIdCol
+    ? `rgi.${toIdentifier(receivePoItemIdCol)}`
+    : "CAST(NULL AS INT)";
+  const rgiItemIdExpr = receiveItemIdCol
+    ? `rgi.${toIdentifier(receiveItemIdCol)}`
+    : "CAST(NULL AS INT)";
+  const rgiReceivedQtyExpr = `rgi.${toIdentifier(receiveQtyCol)}`;
+  const canFallbackByItem = Boolean(poConfig.itemIdCol && receiveItemIdCol);
+  const canJoinConsumptionByReceiveItemId = Boolean(
+    receiveGoodsItemPkCol && receiveGoodsItemCols.has(receiveGoodsItemPkCol)
+  );
+
+  const tableCheck = await new sql.Request(db).query(`
+    SELECT OBJECT_ID('dbo.ConsumptionItems', 'U') AS TableId,
+           COL_LENGTH('dbo.ConsumptionItems', 'ReceiveGoodsItemId') AS ReceiveGoodsItemIdLength
+  `);
+  const hasConsumptionItems =
+    Boolean(tableCheck.recordset?.[0]?.TableId) &&
+    Boolean(tableCheck.recordset?.[0]?.ReceiveGoodsItemIdLength);
+
+  const request = new sql.Request(db);
+  const purchaseOrderIdInClause = buildPurchaseOrderItemInClause(
+    request,
+    ids,
+    "PurchaseOrderId"
+  );
+  const uniquePoItemIdsCte = canFallbackByItem
+    ? `
+      UniquePoItemIds AS (
+        SELECT PurchaseOrderId, ${toIdentifier(poConfig.itemIdCol)} AS ItemId
+        FROM dbo.PurchaseOrderItems
+        WHERE PurchaseOrderId IN (${purchaseOrderIdInClause})
+          AND ${toIdentifier(poConfig.itemIdCol)} IS NOT NULL
+        GROUP BY PurchaseOrderId, ${toIdentifier(poConfig.itemIdCol)}
+        HAVING COUNT(*) = 1
+      )`
+    : `
+      UniquePoItemIds AS (
+        SELECT
+          CAST(NULL AS INT) AS PurchaseOrderId,
+          CAST(NULL AS INT) AS ItemId
+        WHERE 1 = 0
+      )`;
+  const receiveTotalsGroupBy = [
+    rgiPurchaseOrderIdExpr,
+    receivePoItemIdCol ? rgiPoItemIdExpr : null,
+    receiveItemIdCol ? rgiItemIdExpr : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const consumedTotalsCte = hasConsumptionItems && canJoinConsumptionByReceiveItemId
+    ? `
+      ConsumedTotals AS (
+        SELECT
+          ${rgiPurchaseOrderIdExpr} AS PurchaseOrderId,
+          ${receivePoItemIdCol ? rgiPoItemIdExpr : "CAST(NULL AS INT)"} AS PurchaseOrderItemId,
+          ${receiveItemIdCol ? rgiItemIdExpr : "CAST(NULL AS INT)"} AS ItemId,
+          SUM(COALESCE(ci.Quantity, 0)) AS TotalConsumed
+        FROM dbo.ReceiveGoodsItems rgi
+        INNER JOIN dbo.ConsumptionItems ci
+          ON ci.ReceiveGoodsItemId = rgi.${toIdentifier(receiveGoodsItemPkCol)}
+        WHERE ${rgiPurchaseOrderIdExpr} IN (${purchaseOrderIdInClause})
+        GROUP BY ${receiveTotalsGroupBy}
+      )`
+    : `
+      ConsumedTotals AS (
+        SELECT
+          CAST(NULL AS INT) AS PurchaseOrderId,
+          CAST(NULL AS INT) AS PurchaseOrderItemId,
+          CAST(NULL AS INT) AS ItemId,
+          CAST(0 AS DECIMAL(18, 2)) AS TotalConsumed
+        WHERE 1 = 0
+      )`;
+
+  const result = await request.query(
+    withSqlLockTimeout(`
+      WITH ${uniquePoItemIdsCte},
+      ReceiveTotals AS (
+        SELECT
+          ${rgiPurchaseOrderIdExpr} AS PurchaseOrderId,
+          ${receivePoItemIdCol ? rgiPoItemIdExpr : "CAST(NULL AS INT)"} AS PurchaseOrderItemId,
+          ${receiveItemIdCol ? rgiItemIdExpr : "CAST(NULL AS INT)"} AS ItemId,
+          SUM(COALESCE(${rgiReceivedQtyExpr}, 0)) AS TotalReceived
+        FROM dbo.ReceiveGoodsItems rgi
+        WHERE ${rgiPurchaseOrderIdExpr} IN (${purchaseOrderIdInClause})
+        GROUP BY ${receiveTotalsGroupBy}
+      ),
+      ${consumedTotalsCte}
+      SELECT
+        ${poiPurchaseOrderIdExpr} AS PurchaseOrderId,
+        ${poiPoItemIdExpr} AS PurchaseOrderItemId,
+        ${poiItemIdExpr} AS ItemId,
+        ${poiOrderedQtyExpr} AS OrderedQty,
+        ISNULL(
+          CASE
+            WHEN rtByPo.TotalReceived IS NOT NULL THEN rtByPo.TotalReceived
+            WHEN uniqueItemIds.ItemId IS NOT NULL THEN rtByItem.TotalReceived
+            ELSE NULL
+          END,
+          0
+        ) AS TotalReceivedQty,
+        ISNULL(
+          CASE
+            WHEN ctByPo.TotalConsumed IS NOT NULL THEN ctByPo.TotalConsumed
+            WHEN uniqueItemIds.ItemId IS NOT NULL THEN ctByItem.TotalConsumed
+            ELSE NULL
+          END,
+          0
+        ) AS TotalConsumedQty
+      FROM dbo.PurchaseOrderItems poi
+      LEFT JOIN ReceiveTotals rtByPo
+        ON ${receivePoItemIdCol ? `rtByPo.PurchaseOrderId = ${poiPurchaseOrderIdExpr}
+       AND rtByPo.PurchaseOrderItemId = ${poiPoItemIdExpr}` : "1 = 0"}
+      LEFT JOIN UniquePoItemIds uniqueItemIds
+        ON ${canFallbackByItem ? `uniqueItemIds.PurchaseOrderId = ${poiPurchaseOrderIdExpr}
+       AND uniqueItemIds.ItemId = ${poiItemIdExpr}` : "1 = 0"}
+      LEFT JOIN ReceiveTotals rtByItem
+        ON ${
+          canFallbackByItem
+            ? `rtByPo.PurchaseOrderItemId IS NULL
+       AND uniqueItemIds.ItemId IS NOT NULL
+       AND rtByItem.PurchaseOrderId = ${poiPurchaseOrderIdExpr}
+       AND rtByItem.PurchaseOrderItemId IS NULL
+       AND rtByItem.ItemId = ${poiItemIdExpr}`
+            : "1 = 0"
+        }
+      LEFT JOIN ConsumedTotals ctByPo
+        ON ${receivePoItemIdCol ? `ctByPo.PurchaseOrderId = ${poiPurchaseOrderIdExpr}
+       AND ctByPo.PurchaseOrderItemId = ${poiPoItemIdExpr}` : "1 = 0"}
+      LEFT JOIN ConsumedTotals ctByItem
+        ON ${
+          canFallbackByItem
+            ? `ctByPo.PurchaseOrderItemId IS NULL
+       AND uniqueItemIds.ItemId IS NOT NULL
+       AND ctByItem.PurchaseOrderId = ${poiPurchaseOrderIdExpr}
+       AND ctByItem.PurchaseOrderItemId IS NULL
+       AND ctByItem.ItemId = ${poiItemIdExpr}`
+            : "1 = 0"
+        }
+      WHERE ${poiPurchaseOrderIdExpr} IN (${purchaseOrderIdInClause})
+    `)
+  );
+
+  return (result.recordset ?? []).reduce((acc, row) => {
+    const key = buildPurchaseOrderItemMetricKey(
+      row.PurchaseOrderId,
+      row.PurchaseOrderItemId
+    );
+    if (!key) {
+      return acc;
+    }
+
+    const orderedQty = Number(row.OrderedQty ?? 0) || 0;
+    const totalReceivedQty = Number(row.TotalReceivedQty ?? 0) || 0;
+    const totalConsumedQty = Number(row.TotalConsumedQty ?? 0) || 0;
+    acc.set(key, {
+      orderedQty,
+      totalReceivedQty,
+      totalConsumedQty,
+      totalAvailableQty: Math.max(totalReceivedQty - totalConsumedQty, 0),
+      poBalanceQty: Math.max(orderedQty - totalReceivedQty, 0),
+    });
+    return acc;
+  }, new Map());
+};
+
 const loadReceiveConsumedTotals = async (tx, receiveGoodsItemIds = []) => {
   const ids = uniqueReceiveGoodsItemIds(receiveGoodsItemIds);
   if (!ids.length) {
@@ -4113,6 +4967,69 @@ const loadReceiveConsumedTotals = async (tx, receiveGoodsItemIds = []) => {
   }, new Map());
 };
 
+const hydrateReceiveGoodsItemsWithInventoryMetrics = async (
+  db,
+  rows = []
+) => {
+  const normalizedItems = (Array.isArray(rows) ? rows : []).map(
+    normalizeReceiveGoodsItem
+  );
+  if (!normalizedItems.length) {
+    return [];
+  }
+
+  const consumedTotals = await loadReceiveConsumedTotals(
+    db,
+    normalizedItems.map((item) => item.id)
+  );
+  const metricsByPoItem = await loadPurchaseOrderItemReceiveMetricsMap(
+    db,
+    normalizedItems.map((item) => item.purchaseOrderId)
+  );
+
+  return normalizedItems.map((item) => {
+    const itemId = toNullableInt(item.id);
+    const receiptReceivedQty = toReceiveQuantity(item.receivedQty);
+    const receiptConsumedQty =
+      itemId === null
+        ? toReceiveQuantity(item.consumedQty)
+        : toReceiveQuantity(consumedTotals.get(itemId));
+    const receiptAvailableQty = Math.max(receiptReceivedQty - receiptConsumedQty, 0);
+    const receiptBalanceQty = toReceiveQuantity(item.poBalanceQty ?? item.balanceQty);
+    const metrics = metricsByPoItem.get(
+      buildPurchaseOrderItemMetricKey(item.purchaseOrderId, item.poItemId)
+    );
+    const orderedQty =
+      Number(metrics?.orderedQty ?? item.orderedQty ?? item.OrderedQty ?? 0) || 0;
+    const totalReceivedQty =
+      Number(metrics?.totalReceivedQty ?? item.totalReceivedQty ?? receiptReceivedQty) || 0;
+    const totalAvailableQty =
+      Number(metrics?.totalAvailableQty ?? item.totalAvailableQty ?? receiptAvailableQty) || 0;
+    const totalPoBalanceQty =
+      Number(
+        metrics?.poBalanceQty ??
+          item.totalPoBalanceQty ??
+          Math.max(orderedQty - totalReceivedQty, 0)
+      ) || 0;
+
+    return {
+      ...item,
+      orderedQty,
+      balanceQty: receiptBalanceQty,
+      poBalanceQty: receiptBalanceQty,
+      consumedQty: receiptConsumedQty,
+      availableQty: receiptAvailableQty,
+      receiptReceivedQty,
+      receiptAvailableQty,
+      receiptBalanceQty,
+      totalReceivedQty,
+      totalConsumedQty: Number(metrics?.totalConsumedQty ?? 0) || 0,
+      totalAvailableQty,
+      totalPoBalanceQty,
+    };
+  });
+};
+
 const loadReceiveGoodsItemsForConsumption = async (
   tx,
   {
@@ -4127,12 +5044,13 @@ const loadReceiveGoodsItemsForConsumption = async (
 
   await ensureReceiveTables();
   const receivePk = await refreshReceiveGoodsPk();
+  const receiveItemsPk = await refreshReceiveGoodsItemsPk();
   const request = new sql.Request(tx);
   const inClause = buildPurchaseOrderItemInClause(request, ids, "ReceiveGoodsItemId");
   const result = await request.query(`
-    SELECT Id, ReceiveGoodsId, ItemId, ItemName, ReceivedQty, BalanceQty
+    SELECT ${toIdentifier(receiveItemsPk)} AS Id, ReceiveGoodsId, ItemId, ItemName, ReceivedQty, BalanceQty
     FROM dbo.ReceiveGoodsItems
-    WHERE Id IN (${inClause})
+    WHERE ${toIdentifier(receiveItemsPk)} IN (${inClause})
   `);
   const rows = result.recordset ?? [];
 
@@ -4220,45 +5138,6 @@ const resolveDeliveryChallanDestination = async (
         locationRow.Name ?? locationRow.LocationName ?? safeToLocation
       ) ?? "",
   };
-};
-
-const resolveDeliveryChallanReceiveReference = async (
-  tx,
-  {
-    receiveGoodsId = null,
-    projectId = null,
-  } = {}
-) => {
-  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
-  if (!safeReceiveGoodsId) {
-    return null;
-  }
-
-  await ensureReceiveTables();
-  const receivePk = await refreshReceiveGoodsPk();
-  const receiptResult = await new sql.Request(tx)
-    .input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId)
-    .query(`
-      SELECT TOP 1 *
-      FROM dbo.ReceiveGoods
-      WHERE ${receivePk} = @ReceiveGoodsId
-    `);
-  const receiptRow = receiptResult.recordset?.[0] ?? null;
-  if (!receiptRow) {
-    const error = new Error("Receive receipt not found");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const safeProjectId = toNullableInt(projectId);
-  const receiptProjectId = toNullableInt(receiptRow.ProjectId ?? receiptRow.projectId);
-  if (safeProjectId && receiptProjectId && safeProjectId !== receiptProjectId) {
-    const error = new Error("Selected receipt does not belong to the chosen project");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  return safeReceiveGoodsId;
 };
 
 const refreshDeliveryChallanPk = async () => {
@@ -4411,6 +5290,9 @@ const ensureDeliveryChallanTables = async () => {
         CREATE TABLE dbo.DeliveryChallanItems (
           Id BIGINT IDENTITY(1,1) PRIMARY KEY,
           DeliveryChallanId BIGINT NOT NULL,
+          ReceiveGoodsItemId INT NULL,
+          PurchaseOrderItemId INT NULL,
+          ItemId INT NULL,
           ItemName NVARCHAR(200) NULL,
           Description NVARCHAR(500) NULL,
           Unit NVARCHAR(50) NULL,
@@ -4448,6 +5330,18 @@ const ensureDeliveryChallanTables = async () => {
       IF COL_LENGTH('dbo.DeliveryChallanItems', 'ItemName') IS NULL
       BEGIN
         ALTER TABLE dbo.DeliveryChallanItems ADD ItemName NVARCHAR(200) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'ReceiveGoodsItemId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD ReceiveGoodsItemId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'PurchaseOrderItemId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD PurchaseOrderItemId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'ItemId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD ItemId INT NULL;
       END;
       IF COL_LENGTH('dbo.DeliveryChallanItems', 'Description') IS NULL
       BEGIN
@@ -4760,6 +5654,377 @@ const ensureConsumptionTables = async () => {
   }
 };
 
+const validateConsumptionAgainstDeliveryChallan = async (
+  tx,
+  {
+    deliveryChallanId = null,
+    deliveryChallanRef = null,
+    consumptionId = null,
+    items = [],
+  } = {}
+) => {
+  const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
+  const safeDeliveryChallanRef = normalizeOptionalString(deliveryChallanRef);
+  if (safeDeliveryChallanId === null && !safeDeliveryChallanRef) {
+    return;
+  }
+
+  await ensureDeliveryChallanTables();
+  await ensureConsumptionTables();
+  const deliveryPk = await refreshDeliveryChallanPk();
+  const deliveryFk = await refreshDeliveryChallanItemsFk();
+  const consumptionHeaderPk = await refreshConsumptionPk();
+  const consumptionItemFk = await refreshConsumptionItemsFk();
+
+  const challanRequest = new sql.Request(tx);
+  challanRequest.input("DeliveryChallanId", sql.BigInt, safeDeliveryChallanId);
+  challanRequest.input(
+    "DeliveryChallanRef",
+    sql.NVarChar(100),
+    safeDeliveryChallanRef ?? null
+  );
+  const challanResult = await challanRequest.query(`
+    SELECT TOP 1 *
+    FROM dbo.DeliveryChallan
+    WHERE ${toIdentifier(deliveryPk)} = @DeliveryChallanId
+      OR (
+        @DeliveryChallanRef IS NOT NULL
+        AND LTRIM(RTRIM(@DeliveryChallanRef)) <> ''
+        AND LOWER(LTRIM(RTRIM(DCNumber))) = LOWER(LTRIM(RTRIM(@DeliveryChallanRef)))
+      )
+    ORDER BY CASE
+      WHEN ${toIdentifier(deliveryPk)} = @DeliveryChallanId THEN 0
+      ELSE 1
+    END,
+    ${toIdentifier(deliveryPk)} DESC
+  `);
+
+  const challan = normalizeDeliveryChallan(challanResult.recordset?.[0] ?? {});
+  if (!challan.id) {
+    const error = new Error("Selected delivery challan was not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const challanItemsResult = await new sql.Request(tx)
+    .input("DeliveryChallanId", sql.BigInt, challan.id)
+    .query(`
+      SELECT *
+      FROM dbo.DeliveryChallanItems
+      WHERE ${toIdentifier(deliveryFk)} = @DeliveryChallanId
+    `);
+  const challanItems = (challanItemsResult.recordset ?? []).map(
+    normalizeDeliveryChallanItem
+  );
+  const { groups, receiveGoodsItemIdToMaterialKey } =
+    buildDeliveryChallanMaterialGroups(challanItems);
+
+  if (!groups.size) {
+    const error = new Error("The selected delivery challan has no line items.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const linkedItemsResult = await new sql.Request(tx)
+    .input("DeliveryChallanId", sql.Int, toNullableInt(challan.id))
+    .input(
+      "DeliveryChallanRef",
+      sql.NVarChar(100),
+      challan.dcNumber || safeDeliveryChallanRef || null
+    )
+    .input("ConsumptionId", sql.Int, toNullableInt(consumptionId))
+    .query(`
+      SELECT ci.*
+      FROM dbo.ConsumptionItems ci
+      INNER JOIN dbo.Consumption c
+        ON c.${toIdentifier(consumptionHeaderPk)} = ci.${toIdentifier(
+      consumptionItemFk
+    )}
+      WHERE (
+        c.DeliveryChallanId = @DeliveryChallanId
+        OR (
+          @DeliveryChallanRef IS NOT NULL
+          AND LTRIM(RTRIM(@DeliveryChallanRef)) <> ''
+          AND LOWER(LTRIM(RTRIM(c.DeliveryChallanRef))) = LOWER(LTRIM(RTRIM(@DeliveryChallanRef)))
+        )
+      )
+      AND (
+        @ConsumptionId IS NULL
+        OR c.${toIdentifier(consumptionHeaderPk)} <> @ConsumptionId
+      )
+    `);
+
+  const consumedByMaterialKey = new Map();
+  (linkedItemsResult.recordset ?? []).forEach((row) => {
+    const item = normalizeConsumptionItem(row);
+    const materialKey = resolveDeliveryChallanMaterialKey(
+      item,
+      groups,
+      receiveGoodsItemIdToMaterialKey
+    );
+    if (!materialKey) {
+      return;
+    }
+
+    consumedByMaterialKey.set(
+      materialKey,
+      (consumedByMaterialKey.get(materialKey) ?? 0) +
+        (Number(item.quantity ?? item.Quantity ?? 0) || 0)
+    );
+  });
+
+  const requestedByMaterialKey = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const materialKey = resolveDeliveryChallanMaterialKey(
+      item,
+      groups,
+      receiveGoodsItemIdToMaterialKey
+    );
+    if (!materialKey) {
+      const error = new Error(
+        `${item.name || "This material"} is not present in the selected delivery challan.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    requestedByMaterialKey.set(
+      materialKey,
+      (requestedByMaterialKey.get(materialKey) ?? 0) +
+        (Number(item.quantity ?? item.Quantity ?? 0) || 0)
+    );
+  });
+
+  requestedByMaterialKey.forEach((requestedQty, materialKey) => {
+    const group = groups.get(materialKey);
+    const alreadyConsumed = consumedByMaterialKey.get(materialKey) ?? 0;
+    const availableQty = Math.max((group?.deliveredQty ?? 0) - alreadyConsumed, 0);
+
+    if (requestedQty > availableQty) {
+      const error = new Error(
+        `Quantity for ${group?.name || "the selected material"} cannot be greater than the available delivery challan balance (${availableQty}).`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  });
+};
+
+const validateDeliveryChallanAgainstReceivedGoods = async (
+  tx,
+  {
+    deliveryChallanId = null,
+    receiveGoodsId = null,
+    projectId = null,
+    items = [],
+  } = {}
+) => {
+  const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
+  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
+  const requestedItems = Array.isArray(items) ? items : [];
+  const requestedReceiveGoodsItemIds = uniqueReceiveGoodsItemIds(
+    requestedItems.map((item) =>
+      toNullableInt(item.receiveGoodsItemId ?? item.ReceiveGoodsItemId)
+    )
+  );
+
+  if (safeReceiveGoodsId === null && !requestedReceiveGoodsItemIds.length) {
+    return null;
+  }
+
+  await ensureReceiveTables();
+  await ensureDeliveryChallanTables();
+  const receivePk = await refreshReceiveGoodsPk();
+  const deliveryPk = await refreshDeliveryChallanPk();
+  const deliveryFk = await refreshDeliveryChallanItemsFk();
+
+  let receiptItems = [];
+  let effectiveReceiveGoodsId = safeReceiveGoodsId;
+
+  if (safeReceiveGoodsId !== null) {
+    const receiptItemsResult = await new sql.Request(tx)
+      .input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId)
+      .query(`
+        SELECT *
+        FROM dbo.ReceiveGoodsItems
+        WHERE ReceiveGoodsId = @ReceiveGoodsId
+      `);
+    receiptItems = (receiptItemsResult.recordset ?? []).map(normalizeReceiveGoodsItem);
+  } else {
+    receiptItems = await loadReceiveGoodsItemsForConsumption(tx, {
+      receiveGoodsItemIds: requestedReceiveGoodsItemIds,
+    });
+    effectiveReceiveGoodsId =
+      receiptItems.length > 0 ? toNullableInt(receiptItems[0].receiveGoodsId) : null;
+    if (effectiveReceiveGoodsId === null) {
+      const error = new Error(
+        "A receive receipt is required to validate the delivery challan items."
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  if (
+    receiptItems.some(
+      (item) => toNullableInt(item.receiveGoodsId) !== effectiveReceiveGoodsId
+    )
+  ) {
+    const error = new Error(
+      "The selected receipt items must belong to the same receive receipt."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const receiptHeaderResult = await new sql.Request(tx)
+    .input("ReceiveGoodsId", sql.Int, effectiveReceiveGoodsId)
+    .query(`
+      SELECT TOP 1 *
+      FROM dbo.ReceiveGoods
+      WHERE ${toIdentifier(receivePk)} = @ReceiveGoodsId
+    `);
+  const receiptHeader = receiptHeaderResult.recordset?.[0] ?? null;
+  if (!receiptHeader) {
+    const error = new Error("Receive receipt not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const safeProjectId = toNullableInt(projectId);
+  const receiptProjectId = toNullableInt(receiptHeader.ProjectId ?? receiptHeader.projectId);
+  if (safeProjectId && receiptProjectId && safeProjectId !== receiptProjectId) {
+    const error = new Error("Selected receipt does not belong to the chosen project");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const receiptGroups = new Map();
+  const receiveGoodsItemIdToMaterialKey = new Map();
+  const itemIdToMaterialKey = new Map();
+
+  receiptItems.forEach((item) => {
+    const materialKey = buildInventoryMaterialKey(item);
+    if (!materialKey) {
+      return;
+    }
+
+    if (!receiptGroups.has(materialKey)) {
+      receiptGroups.set(materialKey, {
+        materialKey,
+        name: item.name ?? "Item",
+        unit: item.unit ?? "PCS",
+        receivedQty: 0,
+      });
+    }
+
+    receiptGroups.get(materialKey).receivedQty +=
+      Number(item.receivedQty ?? item.ReceivedQty ?? 0) || 0;
+
+    const receiveGoodsItemId = toNullableInt(item.id ?? item.receiveGoodsItemId);
+    if (receiveGoodsItemId !== null) {
+      receiveGoodsItemIdToMaterialKey.set(receiveGoodsItemId, materialKey);
+    }
+
+    const itemId = toNullableInt(item.itemId ?? item.ItemId);
+    if (itemId !== null && !itemIdToMaterialKey.has(itemId)) {
+      itemIdToMaterialKey.set(itemId, materialKey);
+    }
+  });
+
+  const resolveReceiptMaterialKey = (item = {}) => {
+    const receiveGoodsItemId = toNullableInt(
+      item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+    );
+    if (
+      receiveGoodsItemId !== null &&
+      receiveGoodsItemIdToMaterialKey.has(receiveGoodsItemId)
+    ) {
+      return receiveGoodsItemIdToMaterialKey.get(receiveGoodsItemId);
+    }
+
+    const itemId = toNullableInt(item.itemId ?? item.ItemId);
+    if (itemId !== null && itemIdToMaterialKey.has(itemId)) {
+      return itemIdToMaterialKey.get(itemId);
+    }
+
+    const materialKey = buildInventoryMaterialKey(item);
+    return materialKey && receiptGroups.has(materialKey) ? materialKey : null;
+  };
+
+  const deliveredItemsResult = await new sql.Request(tx)
+    .input("ReceiveGoodsId", sql.Int, effectiveReceiveGoodsId)
+    .input("DeliveryChallanId", sql.BigInt, safeDeliveryChallanId)
+    .query(`
+      SELECT dci.*
+      FROM dbo.DeliveryChallanItems dci
+      INNER JOIN dbo.DeliveryChallan dc
+        ON dc.${toIdentifier(deliveryPk)} = dci.${toIdentifier(deliveryFk)}
+      WHERE dc.ReceiveGoodsId = @ReceiveGoodsId
+        AND (
+          @DeliveryChallanId IS NULL
+          OR dc.${toIdentifier(deliveryPk)} <> @DeliveryChallanId
+        )
+    `);
+
+  const deliveredByMaterialKey = new Map();
+  (deliveredItemsResult.recordset ?? []).forEach((row) => {
+    const materialKey = resolveReceiptMaterialKey({
+      receiveGoodsItemId: row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? null,
+      itemId: row.ItemId ?? row.itemId ?? null,
+      name: row.ItemName ?? row.itemName ?? row.name ?? "",
+      unit: row.Unit ?? row.unit ?? "PCS",
+    });
+    if (!materialKey) {
+      const error = new Error(
+        `${row.ItemName || row.name || "This material"} is not present in the selected receipt.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    deliveredByMaterialKey.set(
+      materialKey,
+      (deliveredByMaterialKey.get(materialKey) ?? 0) +
+        (Number(row.Quantity ?? row.quantity ?? 0) || 0)
+    );
+  });
+
+  const requestedByMaterialKey = new Map();
+  requestedItems.forEach((item) => {
+    const materialKey = resolveReceiptMaterialKey(item);
+    if (!materialKey) {
+      const error = new Error(
+        `${item.name || "This material"} is not present in the selected receipt.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    requestedByMaterialKey.set(
+      materialKey,
+      (requestedByMaterialKey.get(materialKey) ?? 0) +
+        (Number(item.quantity ?? item.Quantity ?? 0) || 0)
+    );
+  });
+
+  requestedByMaterialKey.forEach((requestedQty, materialKey) => {
+    const group = receiptGroups.get(materialKey);
+    const alreadyDelivered = deliveredByMaterialKey.get(materialKey) ?? 0;
+    const availableQty = Math.max((group?.receivedQty ?? 0) - alreadyDelivered, 0);
+
+    if (requestedQty > availableQty) {
+      const error = new Error(
+        `Quantity for ${group?.name || "the selected material"} cannot be greater than the available received quantity (${availableQty}).`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  });
+
+  return effectiveReceiveGoodsId;
+};
+
 let reallocateInventoryPk = "Id";
 let reallocateInventoryItemsFk = "TransferId";
 let ensureReallocateInventoryTablesPromise = null;
@@ -4941,6 +6206,8 @@ app.get("/api/items", async (_req, res) => {
         ${buildIdCoalesceExpr(itemSchema.idColumns)} AS [id],
         ${buildTextCoalesceExpr(itemSchema.nameColumns)} AS [name],
         ${buildTextCoalesceExpr(itemSchema.categoryColumns)} AS [category],
+        ${buildNumberCoalesceExpr(itemSchema.brandIdColumns)} AS [brandId],
+        ${buildTextCoalesceExpr(itemSchema.brandColumns)} AS [brand],
         ${buildTextCoalesceExpr(itemSchema.hsnColumns)} AS [hsn],
         ${buildTextCoalesceExpr(itemSchema.unitColumns, "N'PCS'")} AS [unit],
         ${buildNumberCoalesceExpr(itemSchema.stockColumns)} AS [stock],
@@ -4973,10 +6240,12 @@ app.get("/api/items", async (_req, res) => {
 app.post("/api/items", async (req, res) => {
   try {
     await ensureItemsTable();
+    await ensureBrandsTable();
 
     const {
       name,
       category,
+      brand,
       hsn,
       unit,
       stock,
@@ -5008,10 +6277,13 @@ app.post("/api/items", async (req, res) => {
 
     const pool = await getPool();
     const itemSchema = await resolveItemsSchema();
+    const resolvedBrand = await resolveOrCreateBrand(pool, brand);
     const request = pool
       .request()
       .input("Name", sql.NVarChar(255), String(name).trim())
       .input("Category", sql.NVarChar(100), String(category ?? "").trim())
+      .input("BrandId", sql.Int, resolvedBrand?.id ?? null)
+      .input("Brand", sql.NVarChar(255), resolvedBrand?.name ?? null)
       .input("HSN", sql.NVarChar(50), String(hsn ?? "").trim())
       .input("Unit", sql.NVarChar(50), String(unit ?? "PCS").trim() || "PCS")
       .input("Stock", sql.Int, validStock)
@@ -5040,6 +6312,8 @@ app.post("/api/items", async (req, res) => {
 
     addInsertFields(itemSchema.nameColumns, "Name");
     addInsertFields(itemSchema.categoryColumns, "Category");
+    addInsertFields(itemSchema.brandIdColumns, "BrandId");
+    addInsertFields(itemSchema.brandColumns, "Brand");
     addInsertFields(itemSchema.hsnColumns, "HSN");
     addInsertFields(itemSchema.unitColumns, "Unit");
     addInsertFields(itemSchema.stockColumns, "Stock");
@@ -5077,6 +6351,7 @@ app.post("/api/items", async (req, res) => {
 app.put("/api/items/:id", async (req, res) => {
   try {
     await ensureItemsTable();
+    await ensureBrandsTable();
 
     const id = Number.parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) {
@@ -5086,6 +6361,7 @@ app.put("/api/items/:id", async (req, res) => {
     const {
       name,
       category,
+      brand,
       hsn,
       unit,
       stock,
@@ -5115,6 +6391,7 @@ app.put("/api/items/:id", async (req, res) => {
 
     const pool = await getPool();
     const itemSchema = await resolveItemsSchema();
+    const resolvedBrand = await resolveOrCreateBrand(pool, brand);
     if (!itemSchema.idColumn) {
       throw new Error("Items table is missing a primary id column");
     }
@@ -5128,6 +6405,8 @@ app.put("/api/items/:id", async (req, res) => {
 
     addSetClauses(itemSchema.nameColumns, "Name");
     addSetClauses(itemSchema.categoryColumns, "Category");
+    addSetClauses(itemSchema.brandIdColumns, "BrandId");
+    addSetClauses(itemSchema.brandColumns, "Brand");
     addSetClauses(itemSchema.hsnColumns, "HSN");
     addSetClauses(itemSchema.unitColumns, "Unit");
     addSetClauses(itemSchema.stockColumns, "Stock");
@@ -5146,6 +6425,8 @@ app.put("/api/items/:id", async (req, res) => {
       .input("ItemId", sql.BigInt, id)
       .input("Name", sql.NVarChar(255), String(name ?? "").trim())
       .input("Category", sql.NVarChar(100), String(category ?? "").trim())
+      .input("BrandId", sql.Int, resolvedBrand?.id ?? null)
+      .input("Brand", sql.NVarChar(255), resolvedBrand?.name ?? null)
       .input("HSN", sql.NVarChar(50), String(hsn ?? "").trim())
       .input("Unit", sql.NVarChar(50), String(unit ?? "PCS").trim() || "PCS")
       .input("Stock", sql.Int, validStock)
@@ -5263,6 +6544,55 @@ app.delete("/api/items/:id", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to delete item",
+    });
+  }
+});
+
+app.get("/api/brands", async (_req, res) => {
+  try {
+    await ensureBrandsTable();
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT *
+      FROM dbo.Brands
+      ORDER BY BrandName ASC
+    `);
+    const normalizedBrands = new Map();
+    (result.recordset ?? []).map(normalizeBrand).forEach((brand) => {
+      const key = String(brand.name || "").trim().toLowerCase();
+      if (!key || normalizedBrands.has(key)) {
+        return;
+      }
+      normalizedBrands.set(key, brand);
+    });
+    return res.json({
+      ok: true,
+      brands: Array.from(normalizedBrands.values()),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch brands",
+    });
+  }
+});
+
+app.post("/api/brands", async (req, res) => {
+  try {
+    await ensureBrandsTable();
+    const pool = await getPool();
+    const brand = await resolveOrCreateBrand(pool, req.body?.name ?? req.body?.brandName);
+    if (!brand?.name) {
+      return res.status(400).json({
+        ok: false,
+        error: "Brand name is required",
+      });
+    }
+    return res.status(201).json({ ok: true, brand });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to save brand",
     });
   }
 });
@@ -6176,6 +7506,7 @@ app.post("/api/projects", async (req, res) => {
       name,
       code,
       customerId,
+      clientId,
       client,
       companyName,
       address,
@@ -6191,6 +7522,7 @@ app.post("/api/projects", async (req, res) => {
       ProjectName,
       ProjectCode,
       CustomerId,
+      ClientId,
       Client,
       CompanyName,
       Address,
@@ -6213,7 +7545,7 @@ app.post("/api/projects", async (req, res) => {
     const nextCode = normalizeOptionalString(code ?? ProjectCode);
     const nextStatus = normalizeOptionalString(status ?? Status);
     const nextNotes = normalizeOptionalString(notes ?? Notes);
-    const nextCustomerId = toNullableInt(customerId ?? CustomerId);
+    const nextCustomerId = toNullableInt(customerId ?? CustomerId ?? clientId ?? ClientId);
     if (!nextCustomerId) {
       return res
         .status(400)
@@ -6322,6 +7654,7 @@ app.put("/api/projects/:id", async (req, res) => {
       name,
       code,
       customerId,
+      clientId,
       client,
       companyName,
       address,
@@ -6337,6 +7670,7 @@ app.put("/api/projects/:id", async (req, res) => {
       ProjectName,
       ProjectCode,
       CustomerId,
+      ClientId,
       Client,
       CompanyName,
       Address,
@@ -6353,7 +7687,11 @@ app.put("/api/projects/:id", async (req, res) => {
 
     const hasName = name !== undefined || ProjectName !== undefined;
     const hasCode = code !== undefined || ProjectCode !== undefined;
-    const hasCustomerId = customerId !== undefined || CustomerId !== undefined;
+    const hasCustomerId =
+      customerId !== undefined ||
+      CustomerId !== undefined ||
+      clientId !== undefined ||
+      ClientId !== undefined;
     const hasClient = client !== undefined || Client !== undefined;
     const hasCompanyName = companyName !== undefined || CompanyName !== undefined;
     const hasAddress = address !== undefined || Address !== undefined;
@@ -6378,7 +7716,7 @@ app.put("/api/projects/:id", async (req, res) => {
     const nextStatus = hasStatus ? normalizeOptionalString(status ?? Status) : undefined;
     const nextNotes = hasNotes ? normalizeOptionalString(notes ?? Notes) : undefined;
     const nextCustomerId = hasCustomerId
-      ? toNullableInt(customerId ?? CustomerId)
+      ? toNullableInt(customerId ?? CustomerId ?? clientId ?? ClientId)
       : undefined;
 
     const parsedStartDate = hasStartDate
@@ -6795,10 +8133,24 @@ app.get("/api/purchase-orders", async (_req, res) => {
     const itemsResult = await pool.request().query(`
       SELECT * FROM PurchaseOrderItems
     `);
+    const orderIds = uniquePurchaseOrderIds(
+      (ordersResult.recordset ?? []).map((row) => row.Id)
+    );
+    const metricsByPoItem = await loadPurchaseOrderItemReceiveMetricsMap(
+      pool,
+      orderIds
+    );
     const itemsByOrder = itemsResult.recordset.reduce((acc, row) => {
       const key = row.PurchaseOrderId;
       if (!acc[key]) acc[key] = [];
-      acc[key].push(normalizePoItem(row));
+      const normalizedItem = normalizePoItem(row);
+      const metrics = metricsByPoItem.get(
+        buildPurchaseOrderItemMetricKey(
+          row.PurchaseOrderId,
+          normalizedItem.poItemId ?? normalizedItem.id
+        )
+      );
+      acc[key].push(mergePurchaseOrderItemReceiveMetrics(normalizedItem, metrics));
       return acc;
     }, {});
     const data = (ordersResult.recordset ?? []).map((row) => {
@@ -6850,7 +8202,18 @@ app.get("/api/purchase-orders/:id", async (req, res) => {
         SELECT * FROM PurchaseOrderItems WHERE PurchaseOrderId = @PurchaseOrderId
       `);
 
-    const items = (itemsResult.recordset ?? []).map(normalizePoItem);
+    const metricsByPoItem = await loadPurchaseOrderItemReceiveMetricsMap(pool, [id]);
+    const items = (itemsResult.recordset ?? []).map((row) =>
+      mergePurchaseOrderItemReceiveMetrics(
+        normalizePoItem(row),
+        metricsByPoItem.get(
+          buildPurchaseOrderItemMetricKey(
+            row.PurchaseOrderId,
+            row.POItemId ?? row.PurchaseOrderItemId ?? row.Id ?? row.id
+          )
+        )
+      )
+    );
     const total =
       items.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0) ||
       Number(orderRow.Total ?? orderRow.total ?? 0) ||
@@ -6883,6 +8246,8 @@ app.post("/api/purchase-orders", async (req, res) => {
     expectedDate = null,
     expectedDeliveryDate = null,
     notes = null,
+    termsAndConditions = undefined,
+    TermsAndConditions = undefined,
     items = [],
   } = req.body ?? {};
 
@@ -6914,12 +8279,20 @@ app.post("/api/purchase-orders", async (req, res) => {
     insertOrder.input("ExpectedDate", sql.Date, parsedExpected ?? parsedExpectedDelivery ?? null);
     insertOrder.input("ExpectedDeliveryDate", sql.Date, parsedExpectedDelivery ?? null);
     insertOrder.input("Notes", sql.NVarChar(sql.MAX), notes || null);
+    insertOrder.input(
+      "TermsAndConditions",
+      sql.NVarChar(sql.MAX),
+      normalizePurchaseOrderTerms(
+        termsAndConditions ?? TermsAndConditions,
+        DEFAULT_PURCHASE_ORDER_TERMS
+      )
+    );
 
     const orderResult = await insertOrder.query(`
       INSERT INTO PurchaseOrders
-        (PONumber, ProjectId, VendorId, LocationId, BOQId, Status, OrderDate, ExpectedDate, ExpectedDeliveryDate, Notes, Total)
+        (PONumber, ProjectId, VendorId, LocationId, BOQId, Status, OrderDate, ExpectedDate, ExpectedDeliveryDate, Notes, TermsAndConditions, Total)
       OUTPUT INSERTED.*
-      VALUES (@PONumber, @ProjectId, @VendorId, @LocationId, @BOQId, @Status, @OrderDate, @ExpectedDate, @ExpectedDeliveryDate, @Notes, 0)
+      VALUES (@PONumber, @ProjectId, @VendorId, @LocationId, @BOQId, @Status, @OrderDate, @ExpectedDate, @ExpectedDeliveryDate, @Notes, @TermsAndConditions, 0)
     `);
 
     const orderRow = orderResult.recordset?.[0];
@@ -6929,7 +8302,7 @@ app.post("/api/purchase-orders", async (req, res) => {
 
     const totalReq = new sql.Request(tx);
     totalReq.input("Id", sql.Int, orderId);
-    totalReq.input("Total", sql.Decimal(10, 2), total);
+    totalReq.input("Total", sql.Decimal(18, 2), roundCurrencyValue(total));
     await totalReq.query(`
       UPDATE PurchaseOrders
       SET Total = @Total,
@@ -6963,7 +8336,18 @@ app.post("/api/purchase-orders", async (req, res) => {
       .query(`
         SELECT * FROM PurchaseOrderItems WHERE PurchaseOrderId = @PurchaseOrderId
       `);
-    const items = (itemsResult.recordset ?? []).map(normalizePoItem);
+    const metricsByPoItem = await loadPurchaseOrderItemReceiveMetricsMap(pool, [orderId]);
+    const items = (itemsResult.recordset ?? []).map((row) =>
+      mergePurchaseOrderItemReceiveMetrics(
+        normalizePoItem(row),
+        metricsByPoItem.get(
+          buildPurchaseOrderItemMetricKey(
+            row.PurchaseOrderId,
+            row.POItemId ?? row.PurchaseOrderItemId ?? row.Id ?? row.id
+          )
+        )
+      )
+    );
     const refreshedOrderRow = refreshedOrderResult.recordset?.[0] ?? orderRow;
     const refreshedTotal =
       items.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0) ||
@@ -7006,6 +8390,8 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
     expectedDate = null,
     expectedDeliveryDate = null,
     notes = null,
+    termsAndConditions = undefined,
+    TermsAndConditions = undefined,
     items = [],
   } = req.body ?? {};
 
@@ -7060,6 +8446,14 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
     updateOrder.input("ExpectedDate", sql.Date, parsedExpected ?? parsedExpectedDelivery ?? null);
     updateOrder.input("ExpectedDeliveryDate", sql.Date, parsedExpectedDelivery ?? null);
     updateOrder.input("Notes", sql.NVarChar(sql.MAX), notes || null);
+    updateOrder.input(
+      "TermsAndConditions",
+      sql.NVarChar(sql.MAX),
+      normalizePurchaseOrderTerms(
+        termsAndConditions ?? TermsAndConditions,
+        existingOrder.TermsAndConditions ?? DEFAULT_PURCHASE_ORDER_TERMS
+      )
+    );
 
     const orderResult = await updateOrder.query(`
       UPDATE PurchaseOrders
@@ -7073,6 +8467,7 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
           ExpectedDate = @ExpectedDate,
           ExpectedDeliveryDate = @ExpectedDeliveryDate,
           Notes = @Notes,
+          TermsAndConditions = @TermsAndConditions,
           UpdatedAt = SYSUTCDATETIME()
       OUTPUT INSERTED.*
       WHERE Id = @Id
@@ -7094,7 +8489,7 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
 
     const totalReq = new sql.Request(tx);
     totalReq.input("Id", sql.Int, id);
-    totalReq.input("Total", sql.Decimal(10, 2), total);
+    totalReq.input("Total", sql.Decimal(18, 2), roundCurrencyValue(total));
     await totalReq.query(`
       UPDATE PurchaseOrders
       SET Total = @Total,
@@ -7128,7 +8523,18 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
       .query(`
         SELECT * FROM PurchaseOrderItems WHERE PurchaseOrderId = @PurchaseOrderId
       `);
-    const itemsResultRows = (itemsResult.recordset ?? []).map(normalizePoItem);
+    const metricsByPoItem = await loadPurchaseOrderItemReceiveMetricsMap(pool, [id]);
+    const itemsResultRows = (itemsResult.recordset ?? []).map((row) =>
+      mergePurchaseOrderItemReceiveMetrics(
+        normalizePoItem(row),
+        metricsByPoItem.get(
+          buildPurchaseOrderItemMetricKey(
+            row.PurchaseOrderId,
+            row.POItemId ?? row.PurchaseOrderItemId ?? row.Id ?? row.id
+          )
+        )
+      )
+    );
     const refreshedOrderRow = refreshedOrderResult.recordset?.[0] ?? orderRow;
     const refreshedTotal =
       itemsResultRows.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0) ||
@@ -7227,7 +8633,18 @@ app.patch("/api/purchase-orders/:id/status", async (req, res) => {
       .query(`
         SELECT * FROM PurchaseOrderItems WHERE PurchaseOrderId = @PurchaseOrderId
       `);
-    const items = (itemsResult.recordset ?? []).map(normalizePoItem);
+    const metricsByPoItem = await loadPurchaseOrderItemReceiveMetricsMap(pool, [id]);
+    const items = (itemsResult.recordset ?? []).map((row) =>
+      mergePurchaseOrderItemReceiveMetrics(
+        normalizePoItem(row),
+        metricsByPoItem.get(
+          buildPurchaseOrderItemMetricKey(
+            row.PurchaseOrderId,
+            row.POItemId ?? row.PurchaseOrderItemId ?? row.Id ?? row.id
+          )
+        )
+      )
+    );
     const total =
       items.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0) ||
       Number(updatedOrder.Total ?? updatedOrder.total ?? 0) ||
@@ -7347,16 +8764,20 @@ app.get("/api/receive-goods", async (req, res) => {
       )
     );
 
-    const itemsByReceipt = (itemsResult.recordset ?? []).reduce(
+    const normalizedItems = await hydrateReceiveGoodsItemsWithInventoryMetrics(
+      pool,
+      itemsResult.recordset ?? []
+    );
+
+    const itemsByReceipt = normalizedItems.reduce(
       (acc, row) => {
-        const normalized = normalizeReceiveGoodsItem(row);
-        if (!normalized.receiveGoodsId) {
+        if (!row.receiveGoodsId) {
           return acc;
         }
-        if (!acc[normalized.receiveGoodsId]) {
-          acc[normalized.receiveGoodsId] = [];
+        if (!acc[row.receiveGoodsId]) {
+          acc[row.receiveGoodsId] = [];
         }
-        acc[normalized.receiveGoodsId].push(normalized);
+        acc[row.receiveGoodsId].push(row);
         return acc;
       },
       {}
@@ -7407,11 +8828,16 @@ app.get("/api/receive-goods/:id", async (req, res) => {
         SELECT * FROM dbo.ReceiveGoodsItems WHERE ${fkCol} = @ReceiptId
       `));
 
+    const normalizedItems = await hydrateReceiveGoodsItemsWithInventoryMetrics(
+      pool,
+      itemsResult.recordset ?? []
+    );
+
     return res.json({
       ok: true,
       receipt: {
         ...normalizeReceiveGoods(receiptRow),
-        items: (itemsResult.recordset ?? []).map(normalizeReceiveGoodsItem),
+        items: normalizedItems,
       },
     });
   } catch (error) {
@@ -7618,11 +9044,16 @@ app.post("/api/receive-goods", async (req, res) => {
         SELECT * FROM dbo.ReceiveGoods WHERE ${receivePk} = @ReceiptId
       `));
 
+    const responseItems = await hydrateReceiveGoodsItemsWithInventoryMetrics(
+      pool,
+      itemsResult.recordset ?? []
+    );
+
     return res.status(201).json({
       ok: true,
       receipt: {
         ...normalizeReceiveGoods(refreshedReceiptResult.recordset?.[0] ?? receiptRow),
-        items: (itemsResult.recordset ?? []).map(normalizeReceiveGoodsItem),
+        items: responseItems,
       },
     });
   } catch (error) {
@@ -7877,11 +9308,16 @@ app.put("/api/receive-goods/:id", async (req, res) => {
         SELECT * FROM dbo.ReceiveGoodsItems WHERE ${fkCol} = @ReceiptId
       `));
 
+    const responseItems = await hydrateReceiveGoodsItemsWithInventoryMetrics(
+      pool,
+      itemsResult.recordset ?? []
+    );
+
     return res.json({
       ok: true,
       receipt: {
         ...normalizeReceiveGoods(updatedReceiptResult.recordset?.[0] ?? {}),
-        items: (itemsResult.recordset ?? []).map(normalizeReceiveGoodsItem),
+        items: responseItems,
       },
     });
   } catch (error) {
@@ -8547,16 +9983,35 @@ app.delete("/api/boqs/:id", async (req, res) => {
 app.get("/api/delivery-challans", async (_req, res) => {
   try {
     await ensureDeliveryChallanTables();
+    await ensureConsumptionTables();
     const pkCol = await refreshDeliveryChallanPk();
     await refreshDeliveryChallanItemsFk();
+    const consumptionHeaderPk = await refreshConsumptionPk();
+    await refreshConsumptionItemsFk();
     const pool = await getPool();
 
-    const challansResult = await pool.request().query(`
-      SELECT * FROM dbo.DeliveryChallan ORDER BY ${pkCol} DESC
-    `);
-    const itemsResult = await pool.request().query(`
-      SELECT * FROM dbo.DeliveryChallanItems
-    `);
+    const [challansResult, itemsResult, consumptionsResult, consumptionItemsResult] =
+      await Promise.all([
+        pool.request().query(`
+          SELECT * FROM dbo.DeliveryChallan ORDER BY ${pkCol} DESC
+        `),
+        pool.request().query(`
+          SELECT * FROM dbo.DeliveryChallanItems
+        `),
+        pool.request().query(`
+          SELECT *
+          FROM dbo.Consumption
+          WHERE DeliveryChallanId IS NOT NULL
+            OR (
+              DeliveryChallanRef IS NOT NULL
+              AND LTRIM(RTRIM(DeliveryChallanRef)) <> ''
+            )
+          ORDER BY ${toIdentifier(consumptionHeaderPk)} DESC
+        `),
+        pool.request().query(`
+          SELECT * FROM dbo.ConsumptionItems
+        `),
+      ]);
 
     const itemsByChallan = (itemsResult.recordset ?? []).reduce((acc, row) => {
       const item = normalizeDeliveryChallanItem(row);
@@ -8571,11 +10026,38 @@ app.get("/api/delivery-challans", async (_req, res) => {
       return acc;
     }, {});
 
+    const itemsByConsumption = (consumptionItemsResult.recordset ?? []).reduce(
+      (acc, row) => {
+        const item = normalizeConsumptionItem(row);
+        const parentId = item.consumptionId;
+        if (parentId === null || parentId === undefined) {
+          return acc;
+        }
+        if (!acc[parentId]) {
+          acc[parentId] = [];
+        }
+        acc[parentId].push(item);
+        return acc;
+      },
+      {}
+    );
+
+    const consumptions = (consumptionsResult.recordset ?? []).map((row) => {
+      const consumption = normalizeConsumption(row);
+      return {
+        ...consumption,
+        items: itemsByConsumption[consumption.id] ?? [],
+      };
+    });
+
     const data = (challansResult.recordset ?? []).map((row) => {
       const challan = normalizeDeliveryChallan(row);
+      const challanItems = itemsByChallan[challan.id] ?? [];
+      const metrics = buildDeliveryChallanMetrics(challan, challanItems, consumptions);
       return {
         ...challan,
-        items: itemsByChallan[challan.id] ?? [],
+        ...metrics,
+        items: challanItems,
       };
     });
 
@@ -8596,8 +10078,11 @@ app.get("/api/delivery-challans/:id", async (req, res) => {
 
   try {
     await ensureDeliveryChallanTables();
+    await ensureConsumptionTables();
     const pkCol = await refreshDeliveryChallanPk();
     const fkCol = await refreshDeliveryChallanItemsFk();
+    const consumptionHeaderPk = await refreshConsumptionPk();
+    const consumptionItemFk = await refreshConsumptionItemsFk();
     const pool = await getPool();
 
     const challanResult = await pool
@@ -8619,11 +10104,78 @@ app.get("/api/delivery-challans/:id", async (req, res) => {
         SELECT * FROM dbo.DeliveryChallanItems WHERE ${fkCol} = @DeliveryChallanId
       `);
 
+    const normalizedChallan = normalizeDeliveryChallan(challanRow);
+    const normalizedItems = (itemsResult.recordset ?? []).map(
+      normalizeDeliveryChallanItem
+    );
+    const linkedConsumptionsResult = await pool
+      .request()
+      .input("DeliveryChallanId", sql.Int, toNullableInt(normalizedChallan.id))
+      .input("DeliveryChallanRef", sql.NVarChar(100), normalizedChallan.dcNumber || null)
+      .query(`
+        SELECT *
+        FROM dbo.Consumption
+        WHERE DeliveryChallanId = @DeliveryChallanId
+          OR (
+            @DeliveryChallanRef IS NOT NULL
+            AND LTRIM(RTRIM(@DeliveryChallanRef)) <> ''
+            AND LOWER(LTRIM(RTRIM(DeliveryChallanRef))) = LOWER(LTRIM(RTRIM(@DeliveryChallanRef)))
+          )
+        ORDER BY ${toIdentifier(consumptionHeaderPk)} DESC
+      `);
+    const linkedConsumptionIds = (linkedConsumptionsResult.recordset ?? [])
+      .map((row) => toNullableInt(row[consumptionHeaderPk] ?? row.Id ?? row.ConsumptionId))
+      .filter((value) => value !== null);
+
+    let consumptionItemsByConsumption = {};
+    if (linkedConsumptionIds.length) {
+      const request = pool.request();
+      const inClause = buildPurchaseOrderItemInClause(
+        request,
+        linkedConsumptionIds,
+        "LinkedConsumptionId"
+      );
+      const linkedItemsResult = await request.query(`
+        SELECT *
+        FROM dbo.ConsumptionItems
+        WHERE ${toIdentifier(consumptionItemFk)} IN (${inClause})
+      `);
+      consumptionItemsByConsumption = (linkedItemsResult.recordset ?? []).reduce(
+        (acc, row) => {
+          const item = normalizeConsumptionItem(row);
+          const parentId = item.consumptionId;
+          if (parentId === null || parentId === undefined) {
+            return acc;
+          }
+          if (!acc[parentId]) {
+            acc[parentId] = [];
+          }
+          acc[parentId].push(item);
+          return acc;
+        },
+        {}
+      );
+    }
+
+    const linkedConsumptions = (linkedConsumptionsResult.recordset ?? []).map((row) => {
+      const consumption = normalizeConsumption(row);
+      return {
+        ...consumption,
+        items: consumptionItemsByConsumption[consumption.id] ?? [],
+      };
+    });
+    const metrics = buildDeliveryChallanMetrics(
+      normalizedChallan,
+      normalizedItems,
+      linkedConsumptions
+    );
+
     return res.json({
       ok: true,
       deliveryChallan: {
-        ...normalizeDeliveryChallan(challanRow),
-        items: (itemsResult.recordset ?? []).map(normalizeDeliveryChallanItem),
+        ...normalizedChallan,
+        ...metrics,
+        items: normalizedItems,
       },
     });
   } catch (error) {
@@ -8687,6 +10239,16 @@ app.post("/api/delivery-challans", async (req, res) => {
       const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
       return {
+        receiveGoodsItemId: toNullableInt(
+          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+        ),
+        purchaseOrderItemId: toNullableInt(
+          item.poItemId ??
+            item.POItemId ??
+            item.purchaseOrderItemId ??
+            item.PurchaseOrderItemId
+        ),
+        itemId: toNullableInt(item.itemId ?? item.ItemId),
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
@@ -8715,13 +10277,15 @@ app.post("/api/delivery-challans", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
-    const resolvedReceiveGoodsId = await resolveDeliveryChallanReceiveReference(tx, {
-      receiveGoodsId: safeReceiveGoodsId,
-      projectId: safeProjectId,
-    });
     const destination = await resolveDeliveryChallanDestination(tx, {
       toLocationId: safeToLocationId,
       toLocation: safeToLocation,
+    });
+    const resolvedReceiveGoodsId = await validateDeliveryChallanAgainstReceivedGoods(tx, {
+      deliveryChallanId: null,
+      receiveGoodsId: safeReceiveGoodsId,
+      projectId: safeProjectId,
+      items: normalizedItems,
     });
 
     const insertHeaderReq = new sql.Request(tx);
@@ -8754,6 +10318,9 @@ app.post("/api/delivery-challans", async (req, res) => {
     for (const item of normalizedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("DeliveryChallanId", sql.BigInt, challanId);
+      insertItemReq.input("ReceiveGoodsItemId", sql.Int, item.receiveGoodsItemId);
+      insertItemReq.input("PurchaseOrderItemId", sql.Int, item.purchaseOrderItemId);
+      insertItemReq.input("ItemId", sql.Int, item.itemId);
       insertItemReq.input("ItemName", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(50), item.unit);
@@ -8764,9 +10331,9 @@ app.post("/api/delivery-challans", async (req, res) => {
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.DeliveryChallanItems
-          (${fkCol}, ItemName, Description, Unit, HSN, GST, Quantity, Rate, Notes)
+          (${fkCol}, ReceiveGoodsItemId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@DeliveryChallanId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
+          (@DeliveryChallanId, @ReceiveGoodsItemId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
@@ -8853,6 +10420,16 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
       return {
+        receiveGoodsItemId: toNullableInt(
+          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+        ),
+        purchaseOrderItemId: toNullableInt(
+          item.poItemId ??
+            item.POItemId ??
+            item.purchaseOrderItemId ??
+            item.PurchaseOrderItemId
+        ),
+        itemId: toNullableInt(item.itemId ?? item.ItemId),
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
@@ -8881,13 +10458,15 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
-    const resolvedReceiveGoodsId = await resolveDeliveryChallanReceiveReference(tx, {
-      receiveGoodsId: safeReceiveGoodsId,
-      projectId: safeProjectId,
-    });
     const destination = await resolveDeliveryChallanDestination(tx, {
       toLocationId: safeToLocationId,
       toLocation: safeToLocation,
+    });
+    const resolvedReceiveGoodsId = await validateDeliveryChallanAgainstReceivedGoods(tx, {
+      deliveryChallanId: id,
+      receiveGoodsId: safeReceiveGoodsId,
+      projectId: safeProjectId,
+      items: normalizedItems,
     });
 
     const updateHeaderReq = new sql.Request(tx);
@@ -8937,6 +10516,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     for (const item of normalizedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("DeliveryChallanId", sql.BigInt, id);
+      insertItemReq.input("ReceiveGoodsItemId", sql.Int, item.receiveGoodsItemId);
+      insertItemReq.input("PurchaseOrderItemId", sql.Int, item.purchaseOrderItemId);
+      insertItemReq.input("ItemId", sql.Int, item.itemId);
       insertItemReq.input("ItemName", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
@@ -8947,9 +10529,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.DeliveryChallanItems
-          (${fkCol}, ItemName, Description, Unit, HSN, GST, Quantity, Rate, Notes)
+          (${fkCol}, ReceiveGoodsItemId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@DeliveryChallanId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
+          (@DeliveryChallanId, @ReceiveGoodsItemId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
@@ -9208,10 +10790,14 @@ app.post("/api/consumptions", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
-    const useReceiveSource = safeReceiveGoodsId !== null;
+    const useReceiveSource =
+      safeReceiveGoodsId !== null ||
+      safeDeliveryChallanId !== null ||
+      safeDeliveryChallanRef !== null ||
+      normalizedItems.some((item) => item.receiveGoodsItemId !== null);
     const sourceItemIds = useReceiveSource
       ? uniqueReceiveGoodsItemIds(
-          normalizedItems.map((item) => item.receiveGoodsItemId ?? item.boqItemId)
+          normalizedItems.map((item) => item.receiveGoodsItemId ?? null)
         )
       : uniqueBoqItemIds(normalizedItems.map((item) => item.boqItemId));
 
@@ -9227,7 +10813,7 @@ app.post("/api/consumptions", async (req, res) => {
         const alreadyConsumed = consumedTotals.get(sourceId) ?? 0;
         const requestedQty =
           normalizedItems
-            .find((item) => toNullableInt(item.receiveGoodsItemId ?? item.boqItemId) === sourceId)
+            .find((item) => toNullableInt(item.receiveGoodsItemId ?? null) === sourceId)
             ?.quantity ?? 0;
         if (requestedQty > sourceQty - alreadyConsumed) {
           const error = new Error(
@@ -9241,6 +10827,12 @@ app.post("/api/consumptions", async (req, res) => {
         }
       }
     }
+
+    await validateConsumptionAgainstDeliveryChallan(tx, {
+      deliveryChallanId: safeDeliveryChallanId,
+      deliveryChallanRef: safeDeliveryChallanRef,
+      items: normalizedItems,
+    });
 
     const insertHeaderReq = new sql.Request(tx);
     insertHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
@@ -9461,12 +11053,16 @@ app.put("/api/consumptions/:id", async (req, res) => {
     const useReceiveSource =
       safeReceiveGoodsId !== null ||
       currentConsumptionRow?.ReceiveGoodsId !== null ||
+      safeDeliveryChallanId !== null ||
+      safeDeliveryChallanRef !== null ||
+      currentConsumptionRow?.DeliveryChallanId !== null ||
+      currentConsumptionRow?.DeliveryChallanRef !== null ||
       normalizedItems.some((item) => item.receiveGoodsItemId !== null);
 
     if (useReceiveSource) {
       const sourceReceiptId = safeReceiveGoodsId ?? currentConsumptionRow?.ReceiveGoodsId ?? null;
       const sourceItemIds = uniqueReceiveGoodsItemIds(
-        normalizedItems.map((item) => item.receiveGoodsItemId ?? item.boqItemId)
+        normalizedItems.map((item) => item.receiveGoodsItemId ?? null)
       );
       const sourceItems = await loadReceiveGoodsItemsForConsumption(tx, {
         receiveGoodsId: sourceReceiptId,
@@ -9493,7 +11089,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
         );
         const requestedQty =
           normalizedItems
-            .find((item) => toNullableInt(item.receiveGoodsItemId ?? item.boqItemId) === sourceId)
+            .find((item) => toNullableInt(item.receiveGoodsItemId ?? null) === sourceId)
             ?.quantity ?? 0;
         const availableQty = Math.max(sourceQty - consumedOtherThanCurrent, 0);
         if (requestedQty > availableQty) {
@@ -9505,6 +11101,16 @@ app.put("/api/consumptions/:id", async (req, res) => {
         }
       }
     }
+
+    await validateConsumptionAgainstDeliveryChallan(tx, {
+      deliveryChallanId: safeDeliveryChallanId ?? currentConsumptionRow?.DeliveryChallanId,
+      deliveryChallanRef:
+        safeDeliveryChallanRef ??
+        normalizeOptionalString(currentConsumptionRow?.DeliveryChallanRef) ??
+        null,
+      consumptionId: id,
+      items: normalizedItems,
+    });
 
     const updateHeaderReq = new sql.Request(tx);
     updateHeaderReq.input("ConsumptionId", sql.Int, id);
@@ -10175,6 +11781,7 @@ app.use((err, _req, res, _next) => {
 const warmupSchema = async () => {
   try {
     await Promise.all([
+      ensureBrandsTable(),
       ensureItemsTable(),
       ensureVendorsTable(),
       ensureCustomersTable(),

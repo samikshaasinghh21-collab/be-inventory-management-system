@@ -1,0 +1,67 @@
+.app-content .overflow-x-auto,
+.app-content .overflow-auto {
+  scrollbar-color: rgba(97, 96, 97, 0.36) transparent;
+}
+
+.app-content table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.app-content thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--text-secondary);
+  background: linear-gradient(180deg, var(--background-muted) 0%, var(--background-muted-strong) 100%);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.77rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-content tbody td {
+  color: var(--text-primary);
+  border-bottom: 1px solid rgba(229, 231, 238, 0.92);
+  vertical-align: middle;
+}
+
+.app-content tbody tr:nth-child(even) {
+  background: rgba(247, 248, 251, 0.88);
+}
+
+.app-content tbody tr:hover {
+  background: rgba(54, 197, 240, 0.08) !important;
+}
+
+.app-content tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.app-content table :is(th, td) {
+  transition: background-color 0.2s ease;
+}
+
+.app-content .app-table-shell {
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--background-card);
+}
+
+.app-content .app-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+@media (max-width: 767px) {
+  .app-content thead th {
+    position: static;
+  }
+}

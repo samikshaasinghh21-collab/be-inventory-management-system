@@ -19,12 +19,23 @@ const normalizeDeliveryChallanItem = (item = {}) => ({
     item.DeliveryChallanID ??
     item.ChallanId ??
     null,
+  receiveGoodsItemId:
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? null,
+  poItemId:
+    item.poItemId ??
+    item.POItemId ??
+    item.purchaseOrderItemId ??
+    item.PurchaseOrderItemId ??
+    null,
+  itemId: item.itemId ?? item.ItemId ?? null,
   name: item.name ?? item.ItemName ?? item.itemName ?? "",
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",
   hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
   gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
   quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+  consumedQty: Number(item.consumedQty ?? item.ConsumedQty ?? 0) || 0,
+  balanceQty: Number(item.balanceQty ?? item.BalanceQty ?? 0) || 0,
   rate: Number(item.rate ?? item.Rate ?? 0) || 0,
   notes: item.notes ?? item.Notes ?? "",
 });
@@ -50,6 +61,9 @@ const normalizeDeliveryChallan = (challan = {}) => ({
   issueDate: challan.issueDate ?? challan.IssueDate ?? null,
   status: challan.status ?? challan.Status ?? "Draft",
   notes: challan.notes ?? challan.Notes ?? "",
+  deliveredQty: Number(challan.deliveredQty ?? challan.DeliveredQty ?? 0) || 0,
+  consumedQty: Number(challan.consumedQty ?? challan.ConsumedQty ?? 0) || 0,
+  balanceQty: Number(challan.balanceQty ?? challan.BalanceQty ?? 0) || 0,
   createdAt: challan.createdAt ?? challan.CreatedAt ?? null,
   updatedAt: challan.updatedAt ?? challan.UpdatedAt ?? null,
   items: Array.isArray(challan.items)

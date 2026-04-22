@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Navigate, Routes, Route } from "react-router-dom";
 import Layout from "../components/layout/Layout";
 import MainLayout from "../layouts/MainLayout";
 import Dashboard from "../pages/Dashboard";
@@ -41,7 +41,6 @@ import PurchaseOrderRegister from "../components/inventory/PurchaseOrderRegister
 import Invoice from "../components/inventory/Invoice";
 import ReceiveGoodsRegister from "../components/inventory/ReceiveGoodsRegister";
 import Consumption from "../components/inventory/Consumption";
-import ReturnDc from "../components/inventory/ReturnDc";
 import BoqDetail from "../components/inventory/BoqDetail";
 import ReportsPage from "../components/inventory/ReportsPage";
 
@@ -115,7 +114,7 @@ const AppRoutes = () => {
         />
         <Route path="/inventory/invoice" element={<Invoice />} />
         <Route path="/inventory/consumption" element={<Consumption />} />
-        <Route path="/inventory/return-dc" element={<ReturnDc />} />
+        <Route path="/inventory/return-dc" element={<Navigate replace to="/inventory" />} />
         <Route path="/inventory/reports" element={<ReportsPage />} />
 
         <Route path="/inventory/cart" element={<Cart />} />

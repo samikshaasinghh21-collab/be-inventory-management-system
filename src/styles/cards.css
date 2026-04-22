@@ -1,0 +1,44 @@
+.app-card,
+.app-panel,
+.app-surface {
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--background-card-elevated);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(16px);
+}
+
+.app-card {
+  padding: 1.25rem;
+}
+
+.app-panel {
+  overflow: hidden;
+}
+
+.app-stat-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.app-stat-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -2.5rem -3rem auto;
+  width: 8rem;
+  height: 8rem;
+  border-radius: 999px;
+  background: rgba(54, 197, 240, 0.08);
+  filter: blur(12px);
+}
+
+.app-content .bg-white {
+  background: var(--background-card-elevated);
+}
+
+.app-content .shadow-sm,
+.app-content .shadow,
+.app-content .shadow-xl,
+.app-content .shadow-2xl {
+  box-shadow: var(--shadow-card);
+}

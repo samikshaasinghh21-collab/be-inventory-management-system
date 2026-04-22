@@ -189,6 +189,7 @@ const createRow = ({
   totalQty = null,
   receivedQty = null,
   availableQty = null,
+  balanceQty = null,
   location,
   status,
 }) => {
@@ -199,6 +200,8 @@ const createRow = ({
     receivedQty !== null && receivedQty !== undefined && receivedQty !== "";
   const hasAvailableQty =
     availableQty !== null && availableQty !== undefined && availableQty !== "";
+  const hasBalanceQty =
+    balanceQty !== null && balanceQty !== undefined && balanceQty !== "";
   return {
     id: `${activityKey}-${documentId ?? "record"}-${lineId ?? "line"}`,
     activityKey,
@@ -220,9 +223,237 @@ const createRow = ({
     totalQty: hasTotalQty ? toNumber(totalQty) : null,
     receivedQty: hasReceivedQty ? toNumber(receivedQty) : null,
     availableQty: hasAvailableQty ? toNumber(availableQty) : null,
+    balanceQty: hasBalanceQty ? toNumber(balanceQty) : null,
     location: location || DASH_PLACEHOLDER,
     status: status || DASH_PLACEHOLDER,
   };
+};
+
+const createReceiveItemLookup = (receiveGoods = []) => {
+  const lookup = new Map();
+  receiveGoods.forEach((receipt) => {
+    (receipt.items || []).forEach((item) => {
+      const itemId = item.id ?? item.receiveGoodsItemId ?? item.ItemId ?? null;
+      if (itemId === null || itemId === undefined || itemId === "") {
+        return;
+      }
+      lookup.set(String(itemId), { receipt, item });
+    });
+  });
+  return lookup;
+};
+
+const getConsumptionMetricKey = (consumption, item, index) =>
+  `${consumption.id ?? consumption.consumptionId ?? "record"}::${
+    item.id ?? item.receiveGoodsItemId ?? index
+  }`;
+
+const buildConsumptionReceiptMetrics = (consumptions = [], receiveGoods = []) => {
+  const receiptItemLookup = createReceiveItemLookup(receiveGoods);
+  const consumptionTracker = new Map();
+  const metrics = new Map();
+
+  const orderedConsumptions = [...(Array.isArray(consumptions) ? consumptions : [])].sort(
+    (left, right) => {
+      const leftTime = getTimeValue(left.consumptionDate || left.createdAt);
+      const rightTime = getTimeValue(right.consumptionDate || right.createdAt);
+      if (leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+      return toNumber(left.id ?? left.consumptionId) - toNumber(right.id ?? right.consumptionId);
+    }
+  );
+
+  orderedConsumptions.forEach((consumption) => {
+    (consumption.items || []).forEach((item, index) => {
+      const receiptItemId = item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? null;
+      if (receiptItemId === null || receiptItemId === undefined || receiptItemId === "") {
+        return;
+      }
+
+      const source = receiptItemLookup.get(String(receiptItemId));
+      if (!source) {
+        return;
+      }
+
+      const sourceReceivedQty = toNumber(source.item.receivedQty ?? source.item.ReceivedQty);
+      const sourceConsumedQty = toNumber(consumptionTracker.get(String(receiptItemId)));
+      const availableQty = Math.max(sourceReceivedQty - sourceConsumedQty, 0);
+      const movementQty = toNumber(item.quantity);
+
+      metrics.set(getConsumptionMetricKey(consumption, item, index), {
+        receivedQty: sourceReceivedQty,
+        availableQty,
+        balanceQty: Math.max(availableQty - movementQty, 0),
+      });
+
+      consumptionTracker.set(
+        String(receiptItemId),
+        sourceConsumedQty + movementQty
+      );
+    });
+  });
+
+  return metrics;
+};
+
+const buildDeliveryChallanMaterialKey = (item = {}) => {
+  const normalizedName = normalizeLookupText(
+    item.name ?? item.ItemName ?? item.item ?? item.Item ?? ""
+  );
+  if (!normalizedName) {
+    return "";
+  }
+  const normalizedUnit =
+    normalizeLookupText(item.unit ?? item.Unit ?? "PCS") || "pcs";
+  return `${normalizedName}::${normalizedUnit}`;
+};
+
+const buildDeliveryChallanGroups = (items = []) => {
+  const groups = new Map();
+  const receiveGoodsItemIdToMaterialKey = new Map();
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const materialKey = buildDeliveryChallanMaterialKey(item);
+    if (!materialKey) {
+      return;
+    }
+
+    if (!groups.has(materialKey)) {
+      groups.set(materialKey, {
+        materialKey,
+        name: item.name ?? item.ItemName ?? "Item",
+        unit: item.unit ?? item.Unit ?? "PCS",
+        deliveredQty: 0,
+        consumedQty: 0,
+      });
+    }
+
+    groups.get(materialKey).deliveredQty += toNumber(item.quantity ?? item.Quantity);
+
+    const receiveGoodsItemId = toNumber(
+      item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? item.Id
+    );
+    if (Number.isFinite(receiveGoodsItemId) && receiveGoodsItemId > 0) {
+      receiveGoodsItemIdToMaterialKey.set(receiveGoodsItemId, materialKey);
+    }
+  });
+
+  return {
+    groups,
+    receiveGoodsItemIdToMaterialKey,
+  };
+};
+
+const resolveDeliveryChallanMaterialKey = (
+  item = {},
+  groups = new Map(),
+  receiveGoodsItemIdToMaterialKey = new Map()
+) => {
+  const receiveGoodsItemId = toNumber(
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+  );
+  if (
+    Number.isFinite(receiveGoodsItemId) &&
+    receiveGoodsItemId > 0 &&
+    receiveGoodsItemIdToMaterialKey.has(receiveGoodsItemId)
+  ) {
+    return receiveGoodsItemIdToMaterialKey.get(receiveGoodsItemId);
+  }
+
+  const materialKey = buildDeliveryChallanMaterialKey(item);
+  return materialKey && groups.has(materialKey) ? materialKey : null;
+};
+
+const isConsumptionLinkedToDeliveryChallan = (consumption = {}, challan = {}) => {
+  const challanId = toNumber(challan.id ?? challan.deliveryChallanId);
+  const consumptionChallanId = toNumber(
+    consumption.deliveryChallanId ?? consumption.DeliveryChallanId
+  );
+  if (challanId > 0 && consumptionChallanId > 0 && challanId === consumptionChallanId) {
+    return true;
+  }
+
+  const challanRef = normalizeLookupText(challan.dcNumber ?? challan.DCNumber ?? "");
+  const consumptionRef = normalizeLookupText(
+    consumption.deliveryChallanRef ?? consumption.DeliveryChallanRef ?? ""
+  );
+  return Boolean(challanRef && consumptionRef && challanRef === consumptionRef);
+};
+
+const buildConsumptionDeliveryMetrics = (consumptions = [], deliveryChallans = []) => {
+  const challanLookup = new Map();
+  (Array.isArray(deliveryChallans) ? deliveryChallans : []).forEach((challan) => {
+    const challanKey = String(challan.id ?? challan.deliveryChallanId ?? "").trim();
+    if (!challanKey) {
+      return;
+    }
+    challanLookup.set(challanKey, {
+      challan,
+      ...buildDeliveryChallanGroups(challan.items || []),
+    });
+  });
+
+  const metrics = new Map();
+  const trackerByChallanKey = new Map();
+  const orderedConsumptions = [...(Array.isArray(consumptions) ? consumptions : [])].sort(
+    (left, right) => {
+      const leftTime = getTimeValue(left.consumptionDate || left.createdAt);
+      const rightTime = getTimeValue(right.consumptionDate || right.createdAt);
+      if (leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+      return toNumber(left.id ?? left.consumptionId) - toNumber(right.id ?? right.consumptionId);
+    }
+  );
+
+  orderedConsumptions.forEach((consumption) => {
+    const linkedChallan =
+      challanLookup.get(
+        String(consumption.deliveryChallanId ?? consumption.DeliveryChallanId ?? "").trim()
+      ) ??
+      Array.from(challanLookup.values()).find((entry) =>
+        isConsumptionLinkedToDeliveryChallan(consumption, entry.challan)
+      ) ??
+      null;
+
+    if (!linkedChallan) {
+      return;
+    }
+
+    const trackerKey = String(
+      linkedChallan.challan.id ?? linkedChallan.challan.deliveryChallanId ?? ""
+    ).trim();
+    const tracker = trackerByChallanKey.get(trackerKey) ?? new Map();
+
+    (consumption.items || []).forEach((item, index) => {
+      const materialKey = resolveDeliveryChallanMaterialKey(
+        item,
+        linkedChallan.groups,
+        linkedChallan.receiveGoodsItemIdToMaterialKey
+      );
+      if (!materialKey) {
+        return;
+      }
+
+      const group = linkedChallan.groups.get(materialKey);
+      const consumedBefore = toNumber(tracker.get(materialKey));
+      const movementQty = toNumber(item.quantity);
+      const totalConsumed = consumedBefore + movementQty;
+
+      metrics.set(getConsumptionMetricKey(consumption, item, index), {
+        receivedQty: group?.deliveredQty ?? 0,
+        availableQty: Math.max((group?.deliveredQty ?? 0) - consumedBefore, 0),
+        balanceQty: Math.max((group?.deliveredQty ?? 0) - totalConsumed, 0),
+      });
+
+      tracker.set(materialKey, totalConsumed);
+    });
+
+    trackerByChallanKey.set(trackerKey, tracker);
+  });
+
+  return metrics;
 };
 
 export const buildReportRows = ({
@@ -243,6 +474,14 @@ export const buildReportRows = ({
   const receivedTotalsByBoqItemId = buildReceivedTotalsByBoqItemId(
     purchaseOrders,
     receivedTotalsByOrderItemKey
+  );
+  const consumptionDeliveryMetrics = buildConsumptionDeliveryMetrics(
+    consumptions,
+    deliveryChallans
+  );
+  const consumptionReceiptMetrics = buildConsumptionReceiptMetrics(
+    consumptions,
+    receiveGoods
   );
   const rows = [];
 
@@ -272,6 +511,9 @@ export const buildReportRows = ({
           availableQty: hasAvailableQty
             ? item.availableQty
             : Math.max(toNumber(item.quantity) - toNumber(item.consumedQty), 0),
+          balanceQty: hasAvailableQty
+            ? item.availableQty
+            : Math.max(toNumber(item.quantity) - toNumber(item.consumedQty), 0),
           status: boq.status || "Draft",
         })
       );
@@ -283,10 +525,27 @@ export const buildReportRows = ({
     const vendor = vendorMap[String(order.vendorId)];
     const location = locationMap[String(order.locationId)];
     (order.items || []).forEach((item, index) => {
-      const receivedQty = resolveQtyByKeys(
-        receivedTotalsByOrderItemKey,
-        createOrderItemKeys(order.id, item, index)
+      const orderedQty = toNumber(
+        item.orderedQty ?? item.quantity ?? item.Quantity ?? item.Qty
       );
+      const receivedQty = toNumber(
+        item.totalReceivedQty ?? item.receivedQty ?? item.ReceivedQty
+      );
+      const rawAvailableQty =
+        item.totalAvailableQty ?? item.availableQty ?? item.AvailableQty;
+      const availableQty =
+        rawAvailableQty === null || rawAvailableQty === undefined || rawAvailableQty === ""
+          ? receivedQty
+          : toNumber(rawAvailableQty);
+      const rawBalanceQty =
+        item.totalPoBalanceQty ??
+        item.poBalanceQty ??
+        item.balanceQty ??
+        item.BalanceQty;
+      const balanceQty =
+        rawBalanceQty === null || rawBalanceQty === undefined || rawBalanceQty === ""
+          ? Math.max(orderedQty - receivedQty, 0)
+          : toNumber(rawBalanceQty);
       rows.push(
         createRow({
           activityKey: "purchase-order",
@@ -300,9 +559,10 @@ export const buildReportRows = ({
           vendorId: order.vendorId,
           vendorName: vendor?.name,
           qty: item.quantity,
-          totalQty: item.quantity,
+          totalQty: orderedQty,
           receivedQty,
-          availableQty: Math.max(toNumber(item.quantity) - receivedQty, 0),
+          availableQty,
+          balanceQty,
           location: location?.name,
           status: order.status || "Draft",
         })
@@ -320,6 +580,20 @@ export const buildReportRows = ({
     const location = locationMap[String(locationId)];
     (receipt.items || []).forEach((item, index) => {
       const orderedQty = item.orderedQty ?? item.quantity ?? null;
+      const movementQty = item.receiptReceivedQty ?? item.receivedQty;
+      const receivedQty = item.totalReceivedQty ?? item.receivedQty;
+      const availableQty =
+        item.totalAvailableQty ??
+        item.availableQty ??
+        item.receiptAvailableQty ??
+        item.receivedQty;
+      const balanceQty =
+        item.totalPoBalanceQty ??
+        item.poBalanceQty ??
+        item.balanceQty ??
+        (orderedQty === null
+          ? null
+          : Math.max(toNumber(orderedQty) - toNumber(receivedQty), 0));
       rows.push(
         createRow({
           activityKey: "receive-goods",
@@ -332,17 +606,11 @@ export const buildReportRows = ({
           product: item.name,
           vendorId,
           vendorName: vendor?.name,
-          qty: item.receivedQty,
+          qty: movementQty,
           totalQty: orderedQty,
-          receivedQty: item.receivedQty,
-          availableQty:
-            item.balanceQty !== null &&
-            item.balanceQty !== undefined &&
-            item.balanceQty !== ""
-              ? item.balanceQty
-              : orderedQty === null
-              ? null
-              : Math.max(toNumber(orderedQty) - toNumber(item.receivedQty), 0),
+          receivedQty,
+          availableQty,
+          balanceQty,
           location: location?.name,
           status: receipt.status || order?.status || "Received",
         })
@@ -378,6 +646,13 @@ export const buildReportRows = ({
     const project = projectMap[String(consumption.projectId)];
     const location = locationMap[String(consumption.locationId)];
     (consumption.items || []).forEach((item, index) => {
+      const deliveryMetric = consumptionDeliveryMetrics.get(
+        getConsumptionMetricKey(consumption, item, index)
+      );
+      const receiptMetric = consumptionReceiptMetrics.get(
+        getConsumptionMetricKey(consumption, item, index)
+      );
+      const metric = deliveryMetric ?? receiptMetric ?? null;
       rows.push(
         createRow({
           activityKey: "consumption",
@@ -392,6 +667,9 @@ export const buildReportRows = ({
           product: item.name,
           qty: item.quantity,
           totalQty: item.quantity,
+          receivedQty: metric?.receivedQty ?? null,
+          availableQty: metric?.availableQty ?? null,
+          balanceQty: metric?.balanceQty ?? null,
           location: location?.name,
           status: consumption.status || "Logged",
         })
@@ -416,11 +694,26 @@ export const buildWorkflowStages = (rows = [], selectedActivityKeys = []) => {
     (activity) => {
       const stageRows = rows.filter((row) => row.activityKey === activity.key);
       const totalQty = stageRows.reduce((sum, row) => sum + toNumber(row.qty), 0);
+      const totalReceivedQty = stageRows.reduce(
+        (sum, row) => sum + toNumber(row.receivedQty),
+        0
+      );
+      const totalAvailableQty = stageRows.reduce(
+        (sum, row) => sum + toNumber(row.availableQty),
+        0
+      );
+      const totalBalanceQty = stageRows.reduce(
+        (sum, row) => sum + toNumber(row.balanceQty),
+        0
+      );
       const latestRow = stageRows[stageRows.length - 1] ?? null;
       return {
         ...activity,
         count: stageRows.length,
         totalQty,
+        totalReceivedQty,
+        totalAvailableQty,
+        totalBalanceQty,
         latestLabel: latestRow ? formatReportDate(latestRow.date) : "Pending",
         latestRefNo: latestRow?.refNo || "",
         isActive: stageRows.length > 0,
@@ -471,6 +764,7 @@ export const buildExcelRows = (rows = []) =>
     "Total Qty": row.totalQty ?? DASH_PLACEHOLDER,
     "Received Qty": row.receivedQty ?? DASH_PLACEHOLDER,
     "Available Qty": row.availableQty ?? DASH_PLACEHOLDER,
+    "Balance Qty": row.balanceQty ?? DASH_PLACEHOLDER,
     Location: row.location,
     Status: row.status,
   }));

@@ -146,7 +146,7 @@ const Boq = () => {
   const [viewRecord, setViewRecord] = useState(null);
   const navigate = useNavigate();
   const company = settings?.company || {};
-  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const logoUrl = resolveBrandLogo(company.logo || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
 

@@ -49,6 +49,11 @@ const keyOf = (it = {}) =>
     .toLowerCase()}::${String(it.unit || "PCS")
     .trim()
     .toUpperCase()}`;
+const hasTrackedQtySource = (item = {}) =>
+  item.receiveGoodsItemId !== null ||
+  item.boqItemId !== null ||
+  qty(item.receivedQty) > 0 ||
+  qty(item.availableQty) > 0;
 const lineItem = (o = {}) => ({
   id: o.id ?? rowId(),
   boqItemId: o.boqItemId ?? null,
@@ -57,6 +62,7 @@ const lineItem = (o = {}) => ({
   unit: o.unit ?? "PCS",
   hsn: o.hsn ?? "",
   receivedQty: qty(o.receivedQty ?? 0),
+  availableQty: qty(o.availableQty ?? o.receivedQty ?? 0),
   quantity: o.quantity === "" ? "" : o.quantity ?? "",
   notes: o.notes ?? "",
 });
@@ -113,20 +119,57 @@ const pickBoq = (projectId, boqs = []) => {
 const boqItems = (projectId, boqs = []) => {
   const boq = pickBoq(projectId, boqs);
   const mapped = (boq?.items || []).map((it) =>
-    lineItem({
-      boqItemId: it.id ?? it.LineItemId ?? keyOf(it),
-      receiveGoodsItemId: it.id ?? it.LineItemId ?? keyOf(it),
+    (() => {
+      const receivedQty = Number.isFinite(Number(it.receivedQty))
+        ? qty(it.receivedQty)
+        : qty(it.quantity);
+      const availableQty = Number.isFinite(Number(it.availableQty ?? it.balanceQty))
+        ? qty(it.availableQty ?? it.balanceQty)
+        : receivedQty;
+      return lineItem({
+        boqItemId: it.id ?? it.LineItemId ?? keyOf(it),
+        receiveGoodsItemId: it.id ?? it.LineItemId ?? keyOf(it),
+        name: it.name ?? "",
+        unit: it.unit ?? "PCS",
+        hsn: it.hsn ?? "",
+        gst: it.gst ?? "",
+        receivedQty,
+        availableQty,
+        quantity: "",
+        notes: it.notes ?? "",
+      });
+    })()
+  );
+  return mapped.length ? mapped : [lineItem()];
+};
+const receiptItems = (projectId, receipt = null, boqs = []) => {
+  if (!receipt) return boqItems(projectId, boqs);
+  const mapped = (receipt.items || []).map((it) => {
+    const matchedBoqItem = findMatchingBoqItem(
+      projectId,
+      boqs,
+      it,
+      it.boqItemId ?? it.id ?? it.LineItemId ?? null
+    );
+    return lineItem({
+      id: it.id ?? it.ItemId ?? rowId(),
+      boqItemId:
+        matchedBoqItem?.id ??
+        matchedBoqItem?.LineItemId ??
+        matchedBoqItem?.boqItemId ??
+        it.boqItemId ??
+        null,
+      receiveGoodsItemId: it.id ?? it.ItemId ?? it.receiveGoodsItemId ?? null,
       name: it.name ?? "",
       unit: it.unit ?? "PCS",
       hsn: it.hsn ?? "",
       gst: it.gst ?? "",
-      receivedQty: Number.isFinite(Number(it.availableQty ?? it.receivedQty ?? it.balanceQty))
-        ? qty(it.availableQty ?? it.receivedQty ?? it.balanceQty)
-        : qty(it.quantity),
+      receivedQty: qty(it.receivedQty ?? it.orderedQty ?? 0),
+      availableQty: qty(it.availableQty ?? it.receivedQty ?? it.orderedQty ?? 0),
       quantity: "",
       notes: it.notes ?? "",
-    })
-  );
+    });
+  });
   return mapped.length ? mapped : [lineItem()];
 };
 const mergeEdit = (projectId, boqs = [], saved = []) => {
@@ -143,6 +186,10 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
             hsn: it.hsn ?? "",
             gst: it.gst ?? "",
             receivedQty: Math.max(qty(it.receivedQty), qty(it.quantity)),
+            availableQty: Math.max(
+              qty(it.availableQty ?? it.receivedQty),
+              qty(it.quantity)
+            ),
             quantity: it.quantity ?? "",
             notes: it.notes ?? "",
           })
@@ -166,7 +213,12 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
       : Number.isFinite(Number(bi.receivedQty))
       ? qty(bi.receivedQty)
       : qty(bi.quantity);
-    const receivedQty = hasAvailable ? baseAvailable + qty(found?.quantity) : baseAvailable;
+    const availableQty = hasAvailable
+      ? baseAvailable + qty(found?.quantity)
+      : baseAvailable;
+    const receivedQty = Number.isFinite(Number(bi.receivedQty))
+      ? qty(bi.receivedQty)
+      : qty(bi.quantity);
     return lineItem({
       id: found?.id ?? rowId(),
       boqItemId: bi.id ?? bi.LineItemId ?? k,
@@ -176,6 +228,7 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
       hsn: found?.hsn ?? bi.hsn ?? "",
       gst: found?.gst ?? bi.gst ?? "",
       receivedQty,
+      availableQty,
       quantity: found?.quantity ?? "",
       notes: found?.notes ?? bi.notes ?? "",
     });
@@ -183,15 +236,71 @@ const mergeEdit = (projectId, boqs = [], saved = []) => {
   const extra = Array.from(byKey.values())
     .flat()
     .map((it) =>
-        lineItem({
-          id: it.id ?? rowId(),
-          boqItemId: it.boqItemId ?? it.id ?? null,
-          receiveGoodsItemId: it.receiveGoodsItemId ?? it.boqItemId ?? it.id ?? null,
-          name: it.name ?? "",
-          unit: it.unit ?? "PCS",
-          hsn: it.hsn ?? "",
-          gst: it.gst ?? "",
+      lineItem({
+        id: it.id ?? rowId(),
+        boqItemId: it.boqItemId ?? it.id ?? null,
+        receiveGoodsItemId: it.receiveGoodsItemId ?? it.boqItemId ?? it.id ?? null,
+        name: it.name ?? "",
+        unit: it.unit ?? "PCS",
+        hsn: it.hsn ?? "",
+        gst: it.gst ?? "",
         receivedQty: Math.max(qty(it.receivedQty), qty(it.quantity)),
+        availableQty: Math.max(
+          qty(it.availableQty ?? it.receivedQty),
+          qty(it.quantity)
+        ),
+        quantity: it.quantity ?? "",
+        notes: it.notes ?? "",
+      })
+    );
+  return [...mapped, ...extra].length ? [...mapped, ...extra] : [lineItem()];
+};
+const mergeReceiptEdit = (projectId, receipt = null, boqs = [], saved = []) => {
+  const available = receiptItems(projectId, receipt, boqs);
+  if (!receipt) {
+    return mergeEdit(projectId, boqs, saved);
+  }
+  const byKey = new Map();
+  saved.forEach((it) => {
+    const k = keyOf(it);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(it);
+  });
+  const mapped = available.map((ri) => {
+    const k = keyOf(ri);
+    const m = byKey.get(k) || [];
+    const found = m.shift() ?? null;
+    if (!m.length) byKey.delete(k);
+    return lineItem({
+      id: found?.id ?? ri.id,
+      boqItemId: found?.boqItemId ?? ri.boqItemId,
+      receiveGoodsItemId: found?.receiveGoodsItemId ?? ri.receiveGoodsItemId,
+      name: ri.name,
+      unit: ri.unit,
+      hsn: found?.hsn ?? ri.hsn ?? "",
+      gst: found?.gst ?? ri.gst ?? "",
+      receivedQty: ri.receivedQty,
+      availableQty: qty(ri.availableQty) + qty(found?.quantity),
+      quantity: found?.quantity ?? "",
+      notes: found?.notes ?? ri.notes ?? "",
+    });
+  });
+  const extra = Array.from(byKey.values())
+    .flat()
+    .map((it) =>
+      lineItem({
+        id: it.id ?? rowId(),
+        boqItemId: it.boqItemId ?? it.id ?? null,
+        receiveGoodsItemId: it.receiveGoodsItemId ?? it.boqItemId ?? it.id ?? null,
+        name: it.name ?? "",
+        unit: it.unit ?? "PCS",
+        hsn: it.hsn ?? "",
+        gst: it.gst ?? "",
+        receivedQty: Math.max(qty(it.receivedQty), qty(it.quantity)),
+        availableQty: Math.max(
+          qty(it.availableQty ?? it.receivedQty),
+          qty(it.quantity)
+        ),
         quantity: it.quantity ?? "",
         notes: it.notes ?? "",
       })
@@ -258,6 +367,121 @@ const findMatchingBoqItem = (projectId, boqs = [], item = {}, preferredBoqItemId
   );
 };
 
+const normalizeLookupText = (value = "") => String(value ?? "").trim().toLowerCase();
+
+const getConsumptionMetricKey = (consumption = {}, item = {}, index = 0) =>
+  `${String(consumption.id ?? consumption.consumptionId ?? "record")}::${
+    item.id ?? item.receiveGoodsItemId ?? index
+  }`;
+
+const isConsumptionLinkedToDeliveryChallan = (consumption = {}, challan = {}) => {
+  const sourceConsumption = consumption ?? {};
+  const sourceChallan = challan ?? {};
+  const challanId = qty(sourceChallan.id ?? sourceChallan.deliveryChallanId);
+  const consumptionChallanId = qty(
+    sourceConsumption.deliveryChallanId ?? sourceConsumption.DeliveryChallanId
+  );
+  if (challanId && consumptionChallanId && challanId === consumptionChallanId) {
+    return true;
+  }
+
+  const challanRef = normalizeLookupText(
+    sourceChallan.dcNumber ?? sourceChallan.DCNumber ?? ""
+  );
+  const consumptionRef = normalizeLookupText(
+    sourceConsumption.deliveryChallanRef ?? sourceConsumption.DeliveryChallanRef ?? ""
+  );
+  return Boolean(challanRef && consumptionRef && challanRef === consumptionRef);
+};
+
+const findDeliveryChallanForConsumption = (consumption = {}, deliveryChallans = []) => {
+  const sourceConsumption = consumption ?? {};
+  const challans = Array.isArray(deliveryChallans) ? deliveryChallans : [];
+  const directId = qty(
+    sourceConsumption.deliveryChallanId ?? sourceConsumption.DeliveryChallanId
+  );
+  if (directId) {
+    const directMatch = challans.find(
+      (challan) => qty(challan.id ?? challan.deliveryChallanId) === directId
+    );
+    if (directMatch) {
+      return directMatch;
+    }
+  }
+
+  const reference = normalizeLookupText(
+    sourceConsumption.deliveryChallanRef ?? sourceConsumption.DeliveryChallanRef ?? ""
+  );
+  if (!reference) {
+    return null;
+  }
+
+  return (
+    challans.find(
+      (challan) =>
+        normalizeLookupText(challan.dcNumber ?? challan.DCNumber ?? "") === reference
+    ) ?? null
+  );
+};
+
+const buildConsumptionDeliveryMetrics = ({
+  deliveryChallan = null,
+  consumptions = [],
+}) => {
+  if (!deliveryChallan) {
+    return new Map();
+  }
+
+  const groups = new Map();
+  (deliveryChallan.items || []).forEach((item) => {
+    const materialKey = keyOf(item);
+    if (!materialKey) {
+      return;
+    }
+    if (!groups.has(materialKey)) {
+      groups.set(materialKey, {
+        dcQty: 0,
+        consumedQty: 0,
+      });
+    }
+    groups.get(materialKey).dcQty += qty(item.quantity);
+  });
+
+  const metrics = new Map();
+  const orderedConsumptions = [...(Array.isArray(consumptions) ? consumptions : [])]
+    .filter((consumption) => isConsumptionLinkedToDeliveryChallan(consumption, deliveryChallan))
+    .sort((left, right) => {
+      const leftTime = sortValue(left);
+      const rightTime = sortValue(right);
+      if (leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+      return qty(left.id ?? left.consumptionId) - qty(right.id ?? right.consumptionId);
+    });
+
+  orderedConsumptions.forEach((consumption) => {
+    (consumption.items || []).forEach((item, index) => {
+      const materialKey = keyOf(item);
+      const group = groups.get(materialKey);
+      if (!group) {
+        return;
+      }
+
+      const movementQty = qty(item.quantity);
+      const consumedBefore = qty(group.consumedQty);
+      const totalConsumed = consumedBefore + movementQty;
+      metrics.set(getConsumptionMetricKey(consumption, item, index), {
+        dcQty: group.dcQty,
+        totalConsumed,
+        balanceQty: Math.max(group.dcQty - totalConsumed, 0),
+      });
+      group.consumedQty = totalConsumed;
+    });
+  });
+
+  return metrics;
+};
+
 const deliveryChallanItems = ({
   deliveryChallanId,
   projectId,
@@ -276,11 +500,16 @@ const deliveryChallanItems = ({
           lineItem({
             id: item.id ?? rowId(),
             boqItemId: item.boqItemId ?? null,
+            receiveGoodsItemId: item.receiveGoodsItemId ?? null,
             name: item.name ?? "",
             unit: item.unit ?? "PCS",
             hsn: item.hsn ?? "",
             gst: item.gst ?? "",
             receivedQty: Math.max(qty(item.receivedQty), qty(item.quantity)),
+            availableQty: Math.max(
+              qty(item.availableQty ?? item.receivedQty),
+              qty(item.quantity)
+            ),
             quantity: item.quantity ?? "",
             notes: item.notes ?? "",
           })
@@ -338,11 +567,14 @@ const deliveryChallanItems = ({
         matchedBoqItem?.LineItemId ??
         matchedBoqItem?.boqItemId ??
         null,
+      receiveGoodsItemId:
+        found?.receiveGoodsItemId ?? item.receiveGoodsItemId ?? null,
       name: item.name ?? "",
       unit: item.unit ?? "PCS",
       hsn: found?.hsn ?? item.hsn ?? "",
       gst: found?.gst ?? item.gst ?? "",
-      receivedQty: found ? availableQty + qty(found.quantity) : availableQty,
+      receivedQty: qty(item.quantity),
+      availableQty: found ? availableQty + qty(found.quantity) : availableQty,
       quantity: found?.quantity ?? "",
       notes: found?.notes ?? item.notes ?? "",
     });
@@ -354,11 +586,16 @@ const deliveryChallanItems = ({
       lineItem({
         id: item.id ?? rowId(),
         boqItemId: item.boqItemId ?? null,
+        receiveGoodsItemId: item.receiveGoodsItemId ?? null,
         name: item.name ?? "",
         unit: item.unit ?? "PCS",
         hsn: item.hsn ?? "",
         gst: item.gst ?? "",
         receivedQty: Math.max(qty(item.receivedQty), qty(item.quantity)),
+        availableQty: Math.max(
+          qty(item.availableQty ?? item.receivedQty),
+          qty(item.quantity)
+        ),
         quantity: item.quantity ?? "",
         notes: item.notes ?? "",
       })
@@ -371,7 +608,7 @@ const Consumption = () => {
   const navigate = useNavigate();
   const settings = useSettings();
   const company = settings?.company || {};
-  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const logoUrl = resolveBrandLogo(company.logo || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
   const companyDefaults = {
@@ -402,30 +639,6 @@ const Consumption = () => {
     () => [...records].sort((a, b) => sortValue(b) - sortValue(a)),
     [records]
   );
-  const receiptItemMap = useMemo(() => {
-    const map = new Map();
-    (receipts || []).forEach((receipt) => {
-      (receipt.items || []).forEach((item) => {
-        const key = item.id ?? item.ItemId ?? item.receiveGoodsItemId ?? null;
-        if (key !== null && key !== undefined) {
-          map.set(String(key), item);
-        }
-      });
-    });
-    return map;
-  }, [receipts]);
-  const boqItemMap = useMemo(() => {
-    const map = new Map();
-    (boqs || []).forEach((boq) => {
-      (boq.items || []).forEach((item) => {
-        const key = item.id ?? item.LineItemId ?? item.boqItemId ?? null;
-        if (key !== null && key !== undefined) {
-          map.set(String(key), item);
-        }
-      });
-    });
-    return map;
-  }, [boqs]);
   const projectMap = useMemo(
     () =>
       projects.reduce((acc, p) => {
@@ -466,19 +679,28 @@ const Consumption = () => {
     () => deliveryChallansByProject(form.projectId, deliveryChallans),
     [form.projectId, deliveryChallans]
   );
-  const selectedReceipt = useMemo(() => {
-    if (form.receiveGoodsId) {
-      return receiptMap[String(form.receiveGoodsId)] ?? null;
-    }
-    return pickBoq(form.projectId, receipts);
-  }, [form.projectId, form.receiveGoodsId, receiptMap, receipts]);
-  const selectedBoq = useMemo(() => pickBoq(form.projectId, boqs), [form.projectId, boqs]);
-  const selectedDeliveryChallan = useMemo(
+  const filteredReceipts = useMemo(
     () =>
-      deliveryChallans.find(
-        (challan) => String(challan.id) === String(form.deliveryChallanId)
-      ) ?? null,
-    [deliveryChallans, form.deliveryChallanId]
+      form.projectId
+        ? receipts.filter((receipt) => String(receipt.projectId) === String(form.projectId))
+        : receipts,
+    [form.projectId, receipts]
+  );
+  const selectedReceipt = useMemo(() => {
+    if (!form.receiveGoodsId) return null;
+    return receiptMap[String(form.receiveGoodsId)] ?? null;
+  }, [form.receiveGoodsId, receiptMap]);
+  const selectedBoq = useMemo(() => pickBoq(form.projectId, boqs), [form.projectId, boqs]);
+  const selectedViewChallan = useMemo(() => {
+    return findDeliveryChallanForConsumption(viewRecord, deliveryChallans);
+  }, [deliveryChallans, viewRecord]);
+  const consumptionDetailMetricsByKey = useMemo(
+    () =>
+      buildConsumptionDeliveryMetrics({
+        deliveryChallan: selectedViewChallan,
+        consumptions: records,
+      }),
+    [records, selectedViewChallan]
   );
   const totalQty = useMemo(
     () =>
@@ -495,20 +717,6 @@ const Consumption = () => {
     const projectName = projectMap[String(selectedReceipt.projectId)]?.name || "";
     return buildReceiptReferenceLabel(selectedReceipt, projectName);
   }, [projectMap, selectedReceipt]);
-  const formatReceiptReference = (value) => {
-    if (value === null || value === undefined || value === "") {
-      return "-";
-    }
-    const receipt = receiptMap[String(value)] ?? null;
-    if (receipt) {
-      return buildReceiptReferenceLabel(
-        receipt,
-        projectMap[String(receipt.projectId)]?.name || ""
-      );
-    }
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? `RG-${String(numeric).padStart(3, "0")}` : String(value);
-  };
   const visibleRecords = useMemo(() => {
     const q = query.trim().toLowerCase();
     return sortedRecords.filter((r) => {
@@ -691,7 +899,7 @@ const Consumption = () => {
     if (!form.receiveGoodsId) {
       return;
     }
-    const activeReceipt = receipts.find((receipt) => String(receipt.id) === String(form.receiveGoodsId));
+    const activeReceipt = receiptMap[String(form.receiveGoodsId)];
     if (activeReceipt) {
       return;
     }
@@ -700,9 +908,9 @@ const Consumption = () => {
       receiveGoodsId: "",
     }));
     if (!editingId) {
-      setItems(receipts.length ? boqItems(form.projectId, receipts) : boqItems(form.projectId, boqs));
+      setItems(boqItems(form.projectId, boqs));
     }
-  }, [boqs, editingId, form.projectId, form.receiveGoodsId, receipts]);
+  }, [boqs, editingId, form.projectId, form.receiveGoodsId, receiptMap]);
 
   useEffect(() => {
     if (!viewRecord?.id) return;
@@ -740,7 +948,7 @@ const Consumption = () => {
         ? p.locationId
         : "",
     }));
-    setItems(receipts.length ? boqItems(projectId, receipts) : boqItems(projectId, boqs));
+    setItems(boqItems(projectId, boqs));
     clearErr("projectId");
     clearErr("locationId");
     clearErr("items");
@@ -758,6 +966,8 @@ const Consumption = () => {
     setForm((prev) => ({
       ...prev,
       receiveGoodsId,
+      deliveryChallanId: "",
+      deliveryChallanRef: "",
       projectId: receiptProjectId,
       locationId: selectedReceiptRecord?.locationId
         ? String(selectedReceiptRecord.locationId)
@@ -765,9 +975,7 @@ const Consumption = () => {
     }));
     setItems(
       receiveGoodsId && selectedReceiptRecord
-        ? boqItems(receiptProjectId, [selectedReceiptRecord])
-        : receipts.length
-        ? boqItems(form.projectId, receipts)
+        ? receiptItems(receiptProjectId, selectedReceiptRecord, boqs)
         : boqItems(form.projectId, boqs)
     );
     clearErr("items");
@@ -780,6 +988,7 @@ const Consumption = () => {
       ) ?? null;
     setForm((prev) => ({
       ...prev,
+      receiveGoodsId: "",
       deliveryChallanId,
       deliveryChallanRef: selectedChallan?.dcNumber || "",
     }));
@@ -791,6 +1000,7 @@ const Consumption = () => {
             deliveryChallans,
             consumptions: records,
             boqs,
+            editingId,
           })
         : boqItems(form.projectId, boqs)
     );
@@ -802,9 +1012,17 @@ const Consumption = () => {
       prev.map((it) => {
         if (it.id !== id) return it;
         if (fieldName === "quantity") {
-          const r = qty(it.receivedQty);
+          const available = qty(it.availableQty);
           const q = value === "" ? "" : Math.max(qty(value), 0);
-          return { ...it, quantity: q === "" ? "" : r > 0 ? Math.min(q, r) : q };
+          return {
+            ...it,
+            quantity:
+              q === ""
+                ? ""
+                : hasTrackedQtySource(it)
+                ? Math.min(q, available)
+                : q,
+          };
         }
         return { ...it, [fieldName]: value };
       })
@@ -826,8 +1044,13 @@ const Consumption = () => {
     if (!form.locationId) next.locationId = "Select a location.";
     const valid = items.filter((it) => String(it.name || "").trim() && qty(it.quantity) > 0);
     if (!valid.length) next.items = "Add at least one material with consumed quantity.";
-    const over = items.find((it) => String(it.name || "").trim() && qty(it.receivedQty) > 0 && qty(it.quantity) > qty(it.receivedQty));
-    if (over) next.items = "Consumed qty cannot exceed received qty.";
+    const over = items.find(
+      (it) =>
+        String(it.name || "").trim() &&
+        hasTrackedQtySource(it) &&
+        qty(it.quantity) > qty(it.availableQty)
+    );
+    if (over) next.items = "Consumed qty cannot exceed available qty.";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -839,6 +1062,7 @@ const Consumption = () => {
       consumptionNumber: String(form.consumptionNumber || "").trim(),
       projectId: Number(form.projectId) || form.projectId,
       locationId: Number(form.locationId) || form.locationId,
+      receiveGoodsId: Number(form.receiveGoodsId) || form.receiveGoodsId || null,
       deliveryChallanId:
         Number(form.deliveryChallanId) || form.deliveryChallanId || null,
       deliveryChallanRef: String(form.deliveryChallanRef || "").trim() || null,
@@ -852,6 +1076,7 @@ const Consumption = () => {
       items: items
         .map((it) => ({
           boqItemId: it.boqItemId ?? null,
+          receiveGoodsItemId: it.receiveGoodsItemId ?? null,
           name: String(it.name || "").trim(),
           description: null,
           unit: String(it.unit || "PCS").trim() || "PCS",
@@ -885,10 +1110,14 @@ const Consumption = () => {
     setEditingId(r.id);
     setErrors({});
     setErrorMessage("");
+    const selectedReceiptForEdit = receipts.find(
+      (receipt) => String(receipt.id) === String(r.receiveGoodsId)
+    );
     setForm({
       consumptionNumber: r.consumptionNumber || "",
       projectId: r.projectId ? String(r.projectId) : "",
       locationId: r.locationId ? String(r.locationId) : "",
+      receiveGoodsId: r.receiveGoodsId ? String(r.receiveGoodsId) : "",
       deliveryChallanId: r.deliveryChallanId ? String(r.deliveryChallanId) : "",
       deliveryChallanRef: r.deliveryChallanRef || "",
       consumptionDate: r.consumptionDate || new Date().toISOString().slice(0, 10),
@@ -910,6 +1139,8 @@ const Consumption = () => {
             editingId: r.id,
             savedItems: r.items || [],
           })
+        : selectedReceiptForEdit
+        ? mergeReceiptEdit(r.projectId, selectedReceiptForEdit, boqs, r.items || [])
         : mergeEdit(r.projectId, boqs, r.items || [])
     );
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1128,6 +1359,41 @@ const Consumption = () => {
 
               <label>
                 <span className="text-sm font-semibold text-slate-700">
+                  Receipt Register
+                </span>
+                <select
+                  className={field}
+                  value={form.receiveGoodsId}
+                  onChange={(e) => onReceiveGoodsChange(e.target.value)}
+                >
+                  <option value="">
+                    {filteredReceipts.length
+                      ? "Select receipt register"
+                      : form.projectId
+                      ? "No receipts for selected project"
+                      : "Choose project to load receipts"}
+                  </option>
+                  {filteredReceipts.map((receipt) => (
+                    <option key={receipt.id} value={receipt.id}>
+                      {buildReceiptReferenceLabel(
+                        receipt,
+                        projectMap[String(receipt.projectId)]?.name || ""
+                      )}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {form.receiveGoodsId && selectedReceipt && (
+                <div className="md:col-span-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                  Receipt selected: <span className="font-semibold">
+                    {selectedReceiptLabel}
+                  </span>. Items are loaded from receipt register and consumption qty is limited to receipt available balance.
+                </div>
+              )}
+
+              <label>
+                <span className="text-sm font-semibold text-slate-700">
                   Delivery Challan
                 </span>
                 <select
@@ -1147,6 +1413,16 @@ const Consumption = () => {
                   ))}
                 </select>
               </label>
+
+              {form.deliveryChallanId && selectedViewChallan && (
+                <div className="md:col-span-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                  Delivery Challan selected:{" "}
+                  <span className="font-semibold">
+                    {selectedViewChallan.dcNumber || `DC-${selectedViewChallan.id}`}
+                  </span>
+                  . Consumption items will be capped by the delivered balance for this challan.
+                </div>
+              )}
 
               <label>
                 <span className="text-sm font-semibold text-slate-700">
@@ -1281,7 +1557,8 @@ const Consumption = () => {
                   <th className="px-3 py-3 text-left font-semibold min-w-[220px]">Material</th>
                   <th className="px-3 py-3 text-left font-semibold min-w-[110px]">HSN</th>
                   <th className="px-3 py-3 text-left font-semibold min-w-[100px]">Unit</th>
-                  <th className="px-3 py-3 text-right font-semibold min-w-[130px]">Received Qty</th>
+                  <th className="px-3 py-3 text-right font-semibold min-w-[130px]">DC Qty</th>
+                  <th className="px-3 py-3 text-right font-semibold min-w-[130px]">Available Qty</th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[130px]">Consumed Qty</th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[130px]">Balance Qty</th>
                   <th className="px-3 py-3 text-left font-semibold min-w-[170px]">Notes</th>
@@ -1290,13 +1567,14 @@ const Consumption = () => {
               </thead>
               <tbody>
                 {items.map((it) => {
-                  const bal = Math.max(qty(it.receivedQty) - qty(it.quantity), 0);
+                  const bal = Math.max(qty(it.availableQty) - qty(it.quantity), 0);
                   return (
                     <tr key={it.id} className="border-b border-slate-200 bg-white">
                       <td className="px-3 py-2"><input value={it.name} onChange={(e) => onItemChange(it.id, "name", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
                       <td className="px-3 py-2"><input value={it.hsn} onChange={(e) => onItemChange(it.id, "hsn", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
                       <td className="px-3 py-2"><input value={it.unit} onChange={(e) => onItemChange(it.id, "unit", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
                       <td className="px-3 py-2"><input readOnly value={fmtQty(it.receivedQty)} className="w-full rounded-md border border-slate-300 bg-slate-50 px-2.5 py-2 text-right text-sm font-medium text-slate-700" /></td>
+                      <td className="px-3 py-2"><input readOnly value={fmtQty(it.availableQty)} className="w-full rounded-md border border-slate-300 bg-slate-50 px-2.5 py-2 text-right text-sm font-medium text-slate-700" /></td>
                       <td className="px-3 py-2"><input type="number" min="0" step="0.01" value={it.quantity} onChange={(e) => onItemChange(it.id, "quantity", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-right text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
                       <td className="px-3 py-2"><input readOnly value={fmtQty(bal)} className="w-full rounded-md border border-slate-300 bg-slate-50 px-2.5 py-2 text-right text-sm font-medium text-slate-700" /></td>
                       <td className="px-3 py-2"><input value={it.notes} onChange={(e) => onItemChange(it.id, "notes", e.target.value)} className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></td>
@@ -1310,9 +1588,16 @@ const Consumption = () => {
           {errors.items && <p className="px-4 pb-2 text-xs text-red-600">{errors.items}</p>}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
             <p className="text-sm text-slate-500">
-              Showing 1 to {items.length} of ({items.length}) entries | BOQ Qty:{" "}
-              {fmtQty(items.reduce((s, i) => s + qty(i.receivedQty), 0))} |
-              Consumed: {fmtQty(items.reduce((s, i) => s + qty(i.quantity), 0))}
+              Showing 1 to {items.length} of ({items.length}) entries | Received:{" "}
+              {fmtQty(items.reduce((s, i) => s + qty(i.receivedQty), 0))} | Available:{" "}
+              {fmtQty(items.reduce((s, i) => s + qty(i.availableQty), 0))} | Consumed:{" "}
+              {fmtQty(items.reduce((s, i) => s + qty(i.quantity), 0))} | Balance:{" "}
+              {fmtQty(
+                items.reduce(
+                  (s, i) => s + Math.max(qty(i.availableQty) - qty(i.quantity), 0),
+                  0
+                )
+              )}
             </p>
             <div className="flex gap-2">
               <button type="button" onClick={() => reset()} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-slate-400">Cancel</button>
@@ -1394,7 +1679,7 @@ const Consumption = () => {
             { label: "Date", value: formatDate(viewRecord.consumptionDate || viewRecord.createdAt) },
             { label: "Status", value: viewRecord.status || "Logged" },
             { label: "Issued By", value: viewRecord.issuedBy || "-" },
-            { label: "DC Ref", value: deliveryChallanMap[String(viewRecord.deliveryChallanId)]?.dcNumber || viewRecord.deliveryChallanRef || "-" },
+            { label: "DC Ref", value: selectedViewChallan?.dcNumber || viewRecord.deliveryChallanRef || "-" },
           ]}
           leftBlockTitle="Project"
           leftBlockLines={[projectMap[String(viewRecord.projectId)]?.name || "-"]}
@@ -1402,29 +1687,17 @@ const Consumption = () => {
           rightBlockLines={[locationMap[String(viewRecord.locationId)]?.name || "-", viewRecord.notes || "-"]}
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
-            { key: "name", label: "Material" },
+            { key: "name", label: "Product" },
             { key: "hsn", label: "HSN", widthClass: "w-20" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
-            { key: "boqQty", label: "BOQ Qty", align: "right", widthClass: "w-24" },
-            { key: "boqConsumed", label: "Total Consumed", align: "right", widthClass: "w-28" },
-            { key: "boqAvailable", label: "Balance", align: "right", widthClass: "w-24" },
+            { key: "dcQty", label: "DC Qty", align: "right", widthClass: "w-24" },
+            { key: "totalConsumed", label: "Total Consumed", align: "right", widthClass: "w-28" },
+            { key: "balanceQty", label: "Balance", align: "right", widthClass: "w-24" },
           ]}
           tableRows={(viewRecord.items || []).map((it, idx) => {
-            const boqItemId = it.boqItemId ?? null;
-            const boqItem = boqItemId ? boqItemMap.get(String(boqItemId)) : null;
-            const rawBoqQty = Number(boqItem?.quantity);
-            const rawAvailable = Number(boqItem?.availableQty);
-            const rawConsumed = Number(boqItem?.consumedQty);
-            const resolvedAvailable = Number.isFinite(rawAvailable)
-              ? rawAvailable
-              : Number.isFinite(rawBoqQty) && Number.isFinite(rawConsumed)
-              ? Math.max(rawBoqQty - rawConsumed, 0)
-              : NaN;
-            const resolvedConsumed = Number.isFinite(rawConsumed)
-              ? rawConsumed
-              : Number.isFinite(rawBoqQty) && Number.isFinite(rawAvailable)
-              ? Math.max(rawBoqQty - rawAvailable, 0)
-              : NaN;
+            const metrics = consumptionDetailMetricsByKey.get(
+              getConsumptionMetricKey(viewRecord, it, idx)
+            ) || null;
 
             return {
               id: it.id || idx,
@@ -1432,9 +1705,9 @@ const Consumption = () => {
               name: it.name || "-",
               hsn: it.hsn || "-",
               unit: it.unit || "PCS",
-              boqQty: Number.isFinite(rawBoqQty) ? fmtQty(rawBoqQty) : "-",
-              boqConsumed: Number.isFinite(resolvedConsumed) ? fmtQty(resolvedConsumed) : "-",
-              boqAvailable: Number.isFinite(resolvedAvailable) ? fmtQty(resolvedAvailable) : "-",
+              dcQty: metrics ? fmtQty(metrics.dcQty) : "-",
+              totalConsumed: metrics ? fmtQty(metrics.totalConsumed) : "-",
+              balanceQty: metrics ? fmtQty(metrics.balanceQty) : "-",
             };
           })}
           bottomLeftTitle="Total Items"

@@ -315,7 +315,7 @@ const CreateItems = () => {
 
                   <div>
                     <label className="text-sm font-medium text-slate-700">
-                      Opening Stock
+                      Opening Stocks       
                     </label>
                     <input
                       value={stock}

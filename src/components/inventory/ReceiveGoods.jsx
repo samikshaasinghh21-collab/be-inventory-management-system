@@ -79,6 +79,7 @@ const formatAddressLine = (vendor) => {
 const getItemKey = (item = {}, index = 0) =>
   String(
     item.poItemId ??
+      item.POItemId ??
       item.PurchaseOrderItemId ??
       item.itemId ??
       item.ItemId ??
@@ -86,6 +87,91 @@ const getItemKey = (item = {}, index = 0) =>
       item.Id ??
       index
   );
+
+const findMatchingReceiptItem = (
+  purchaseOrder,
+  receiptItems = [],
+  poItem = {},
+  index = 0
+) => {
+  const receiptPoItemId =
+    poItem.poItemId ??
+    poItem.POItemId ??
+    poItem.PurchaseOrderItemId ??
+    poItem.purchaseOrderItemId ??
+    poItem.Id ??
+    poItem.id ??
+    null;
+  if (Number.isFinite(Number(receiptPoItemId))) {
+    const match = receiptItems.find(
+      (item) =>
+        Number(
+          item.poItemId ??
+            item.POItemId ??
+            item.PurchaseOrderItemId ??
+            item.purchaseOrderItemId ??
+            item.Id ??
+            item.id ??
+            NaN
+        ) === Number(receiptPoItemId)
+    );
+    if (match) {
+      return match;
+    }
+  }
+
+  const receiptItemId = poItem.itemId ?? poItem.ItemId ?? null;
+  if (Number.isFinite(Number(receiptItemId))) {
+    const match = receiptItems.find(
+      (item) =>
+        Number(item.itemId ?? item.ItemId ?? NaN) === Number(receiptItemId)
+    );
+    if (match) {
+      return match;
+    }
+  }
+
+  return receiptItems[index] ?? null;
+};
+
+const findMatchingPoItemIndex = (purchaseOrder, receiptItem = {}, index = 0) => {
+  const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
+  if (!poItems.length) {
+    return -1;
+  }
+
+  const receiptPoItemId =
+    receiptItem.poItemId ??
+    receiptItem.POItemId ??
+    receiptItem.PurchaseOrderItemId ??
+    receiptItem.purchaseOrderItemId ??
+    receiptItem.Id ??
+    receiptItem.id ??
+    null;
+  if (Number.isFinite(Number(receiptPoItemId))) {
+    const exactIndex = poItems.findIndex(
+      (poItem) =>
+        Number(poItem.poItemId ?? poItem.POItemId ?? poItem.id ?? poItem.PurchaseOrderItemId ?? NaN) ===
+        Number(receiptPoItemId)
+    );
+    if (exactIndex >= 0) {
+      return exactIndex;
+    }
+  }
+
+  const receiptItemId = receiptItem.itemId ?? receiptItem.ItemId ?? null;
+  if (Number.isFinite(Number(receiptItemId))) {
+    const exactIndex = poItems.findIndex(
+      (poItem) => Number(poItem.itemId ?? poItem.ItemId ?? NaN) === Number(receiptItemId)
+    );
+    if (exactIndex >= 0) {
+      return exactIndex;
+    }
+  }
+
+  return index >= 0 && index < poItems.length ? index : -1;
+};
+
 const SERIAL_HEADER_PATTERN = /^(serial(\s*(no|number|#))?|s\/n|sn)$/i;
 const SERIAL_SPLIT_PATTERN = /[\r\n,;]+/g;
 
@@ -178,9 +264,14 @@ const compareReceiptChronologyAsc = (left = {}, right = {}) => {
   return toNumber(left.receiveGoodsId ?? left.id) - toNumber(right.receiveGoodsId ?? right.id);
 };
 
-const buildReceivedTotalsBeforeReceipt = (receiptHistory = [], targetReceiptId = "") => {
+const buildReceivedTotalsBeforeReceipt = (
+  purchaseOrder,
+  receiptHistory = [],
+  targetReceiptId = ""
+) => {
   const totals = {};
   const targetId = String(targetReceiptId || "");
+  const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
 
   [...(Array.isArray(receiptHistory) ? receiptHistory : [])]
     .sort(compareReceiptChronologyAsc)
@@ -188,9 +279,19 @@ const buildReceivedTotalsBeforeReceipt = (receiptHistory = [], targetReceiptId =
       if (targetId && String(receipt.id) === targetId) {
         return true;
       }
-      (receipt.items || []).forEach((item, index) => {
-        const key = getItemKey(item, index);
-        totals[key] = (totals[key] || 0) + toNumber(item.receivedQty);
+      (receipt.items || []).forEach((receiptItem, index) => {
+        const matchedIndex = findMatchingPoItemIndex(purchaseOrder, receiptItem, index);
+        if (matchedIndex < 0) {
+          return;
+        }
+        const key = getItemKey(poItems[matchedIndex], matchedIndex);
+        totals[key] =
+          (totals[key] || 0) +
+          toNumber(
+            receiptItem.receiptReceivedQty ??
+              receiptItem.ReceiptReceivedQty ??
+              receiptItem.receivedQty
+          );
       });
       return false;
     });
@@ -198,17 +299,32 @@ const buildReceivedTotalsBeforeReceipt = (receiptHistory = [], targetReceiptId =
   return totals;
 };
 
-const buildReceivedTotalsExcludingReceipt = (receiptHistory = [], excludeReceiptId = "") => {
+const buildReceivedTotalsExcludingReceipt = (
+  purchaseOrder,
+  receiptHistory = [],
+  excludeReceiptId = ""
+) => {
   const totals = {};
   const excludeId = String(excludeReceiptId || "");
+  const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
 
   (Array.isArray(receiptHistory) ? receiptHistory : []).forEach((receipt) => {
     if (excludeId && String(receipt.id) === excludeId) {
       return;
     }
-    (receipt.items || []).forEach((item, index) => {
-      const key = getItemKey(item, index);
-      totals[key] = (totals[key] || 0) + toNumber(item.receivedQty);
+    (receipt.items || []).forEach((receiptItem, index) => {
+      const matchedIndex = findMatchingPoItemIndex(purchaseOrder, receiptItem, index);
+      if (matchedIndex < 0) {
+        return;
+      }
+      const key = getItemKey(poItems[matchedIndex], matchedIndex);
+      totals[key] =
+        (totals[key] || 0) +
+        toNumber(
+          receiptItem.receiptReceivedQty ??
+            receiptItem.ReceiptReceivedQty ??
+            receiptItem.receivedQty
+        );
     });
   });
 
@@ -228,6 +344,7 @@ const computeReceiveStatus = (
   }
 
   const receivedTotals = buildReceivedTotalsExcludingReceipt(
+    purchaseOrder,
     receiptHistory,
     editingReceiptId
   );
@@ -260,18 +377,24 @@ const buildReceiveItems = (purchaseOrder, receiptHistory = [], receipt = null) =
   const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
   const receiptItems = Array.isArray(receipt?.items) ? receipt.items : [];
   const priorTotals = receipt
-    ? buildReceivedTotalsBeforeReceipt(receiptHistory, receipt.id)
-    : buildReceivedTotalsExcludingReceipt(receiptHistory);
-  const receiptMap = receiptItems.reduce((acc, item, index) => {
-    acc[getItemKey(item, index)] = item;
-    return acc;
-  }, {});
+    ? buildReceivedTotalsBeforeReceipt(purchaseOrder, receiptHistory, receipt.id)
+    : buildReceivedTotalsExcludingReceipt(purchaseOrder, receiptHistory);
 
   return poItems.map((item, index) => {
-    const matched = receiptMap[getItemKey(item, index)] ?? receiptItems[index] ?? null;
+    const matched = findMatchingReceiptItem(purchaseOrder, receiptItems, item, index);
     const orderedQty = toNumber(item.quantity ?? item.orderedQty);
-    const pendingQty = Math.max(orderedQty - toNumber(priorTotals[getItemKey(item, index)]), 0);
-    const receivedQty = Math.min(toNumber(matched?.receivedQty), pendingQty);
+    const pendingQty = Math.max(
+      orderedQty - toNumber(priorTotals[getItemKey(item, index)]),
+      0
+    );
+    const receivedQty = Math.min(
+      toNumber(
+        matched?.receiptReceivedQty ??
+          matched?.ReceiptReceivedQty ??
+          matched?.receivedQty
+      ),
+      pendingQty
+    );
     const savedSerialNumbers = normalizeSerialNumbers(matched?.serialNumbers);
     const defaultSerialNumbers =
       receipt || savedSerialNumbers.length
@@ -328,41 +451,37 @@ const createReceiveForm = (
 
 const findMatchingPoItem = (purchaseOrder, receiptItem, index) => {
   const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
-  if (!poItems.length) return null;
+  const receiptItemKey = getItemKey(receiptItem, index);
 
-  const receiptPoItemId = receiptItem.poItemId || receiptItem.PurchaseOrderItemId;
-  if (receiptPoItemId) {
-    const exactMatch = poItems.find(
-      (poItem) =>
-        poItem.id === receiptPoItemId ||
-        poItem.poItemId === receiptPoItemId ||
-        poItem.PurchaseOrderItemId === receiptPoItemId
+  const matchByItemId = receiptItem.itemId ?? receiptItem.ItemId ?? receiptItem.itemID ?? receiptItem.ItemID; // VERIFIED
+  if (matchByItemId !== null && matchByItemId !== undefined && matchByItemId !== "") {
+    const itemMatch = poItems.find((poItem) =>
+      String(poItem.itemId ?? poItem.ItemId ?? poItem.id ?? poItem.Id) === String(matchByItemId)
     );
-    if (exactMatch) return exactMatch;
+    if (itemMatch) return itemMatch;
   }
 
-  const receiptItemId = receiptItem.itemId || receiptItem.ItemId;
-  if (receiptItemId) {
-    const itemIdMatch = poItems.find(
-      (poItem) => poItem.itemId === receiptItemId || poItem.ItemId === receiptItemId
+  const matchByPoItemId =
+    receiptItem.poItemId ??
+    receiptItem.POItemId ??
+    receiptItem.PurchaseOrderItemId ??
+    receiptItem.poItemID ??
+    receiptItem.PurchaseOrderItemId;
+  if (matchByPoItemId !== null && matchByPoItemId !== undefined && matchByPoItemId !== "") {
+    const poMatch = poItems.find((poItem) =>
+      String(poItem.poItemId ?? poItem.POItemId ?? poItem.PurchaseOrderItemId ?? poItem.id ?? poItem.Id) === String(matchByPoItemId)
     );
-    if (itemIdMatch) return itemIdMatch;
+    if (poMatch) return poMatch;
   }
 
-  const receiptName = String(receiptItem.name || receiptItem.Name || receiptItem.ItemName || "").trim().toLowerCase();
-  if (receiptName) {
-    const nameMatch = poItems.find(
-      (poItem) =>
-        String(poItem.name || poItem.Name || poItem.ItemName || "").trim().toLowerCase() === receiptName
-    );
-    if (nameMatch) return nameMatch;
-  }
-
-  if (index >= 0 && index < poItems.length) {
-    return poItems[index];
-  }
-
-  return null;
+  return (
+    poItems.find(
+      (poItem, poIndex) =>
+        getItemKey(poItem, poIndex) === receiptItemKey
+    ) ??
+    poItems[index] ??
+    null
+  );
 };
 
 const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
@@ -370,7 +489,9 @@ const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
     .map((item, index) => {
       const poItem = findMatchingPoItem(purchaseOrder, item, index);
       return {
-        quantity: toNumber(item.receivedQty),
+        quantity: toNumber(
+          item.receiptReceivedQty ?? item.ReceiptReceivedQty ?? item.receivedQty
+        ),
         unitPrice: toNumber(poItem?.unitPrice ?? poItem?.rate ?? 0),
         taxPercentage: poItem?.taxPercentage ?? poItem?.gst ?? 0,
         gst: poItem?.gst ?? poItem?.taxPercentage ?? 0,
@@ -378,13 +499,63 @@ const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
     })
     .filter((item) => item.quantity > 0);
 
+const getReceiptDisplayQuantities = (item = {}) => {
+  const ordered = toNumber(item.orderedQty ?? item.quantity ?? item.OrderedQty);
+  const received = toNumber(
+    item.totalReceivedQty ?? item.TotalReceivedQty ?? item.receivedQty ?? item.ReceivedQty
+  );
+  const available = toNumber(
+    item.totalAvailableQty ??
+      item.TotalAvailableQty ??
+      item.availableQty ??
+      item.AvailableQty ??
+      received
+  );
+  const balance = Math.max(
+    toNumber(
+      item.totalPoBalanceQty ??
+        item.TotalPoBalanceQty ??
+        item.poBalanceQty ??
+        item.PoBalanceQty ??
+        item.balanceQty ??
+        item.BalanceQty ??
+        Math.max(ordered - received, 0)
+    ),
+    0
+  );
+
+  return {
+    ordered,
+    received,
+    available,
+    balance,
+  };
+};
+
+const getReceiptHistoryTotals = (receipt = {}) =>
+  (receipt.items || []).reduce(
+    (acc, item) => {
+      const display = getReceiptDisplayQuantities(item);
+      const movementQty = toNumber(
+        item.receiptReceivedQty ?? item.ReceiptReceivedQty ?? item.receivedQty
+      );
+      return {
+        movementQty: acc.movementQty + movementQty,
+        received: acc.received + display.received,
+        available: acc.available + display.available,
+        balance: acc.balance + display.balance,
+      };
+    },
+    { movementQty: 0, received: 0, available: 0, balance: 0 }
+  );
+
 const ReceiveGoods = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const settings = useSettings();
   const company = settings?.company || {};
-  const logoUrl = resolveBrandLogo(company.logo || settings?.profile?.avatar || "");
+  const logoUrl = resolveBrandLogo(company.logo || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
   const currency = settings?.preferences?.currency || "INR";
@@ -573,6 +744,14 @@ const ReceiveGoods = () => {
               (receipt) => String(receipt.id) === String(receiptIdFromSearch)
             ) ?? null
           : null;
+        
+        // Handle stale receiptId: if receiptId was in search params but not found, clear it
+        if (receiptIdFromSearch && !nextEditingReceipt) {
+          const nextSearchParams = new URLSearchParams(searchParams);
+          nextSearchParams.delete("receiptId");
+          setSearchParams(nextSearchParams, { replace: true });
+        }
+        
         setReceiptHistory(safeReceiptList);
         setSelectedReceipt(nextReceipt);
         setEditingReceipt(nextEditingReceipt);
@@ -876,10 +1055,12 @@ const ReceiveGoods = () => {
           name: item.name || "",
           description: item.description || "",
           unit: item.unit || "PCS",
+          orderedQty: toNumber(item.orderedQty),
+          receivedQty: toNumber(item.receivedQty),
+          balanceQty: Math.max(toNumber(item.pendingQty ?? item.orderedQty) - toNumber(item.receivedQty), 0),
           serialRequired: false,
           serialNumbers:
             toNumber(item.receivedQty) > 0 ? getItemSerialNumbers(item) : [],
-          receivedQty: toNumber(item.receivedQty),
         })),
         allowLockedEdit: isSelectedPurchaseOrderClosed && canEditClosedReceipt,
         auditBy: settings?.profile?.fullName || null,
@@ -979,7 +1160,7 @@ const ReceiveGoods = () => {
           </p>
           <h1 className="text-3xl font-semibold text-slate-800">Receive Goods</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Open a PO, fetch its saved receipt if one exists, and update the receiving
+            Open a PO, review all saved receipts, and update the receiving
             details from one workflow.
           </p>
         </div>
@@ -1052,7 +1233,7 @@ const ReceiveGoods = () => {
               className="w-80 max-w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
           </div>
-          <table className="w-full text-sm">
+          <table className="min-w-[1180px] text-sm">
             <thead className="bg-slate-100 text-slate-600">
               <tr>
                 <th className="p-3 text-left min-w-[140px]">PO No</th>
@@ -1151,7 +1332,7 @@ const ReceiveGoods = () => {
                         : editingReceipt
                         ? "Editing the selected receive entry."
                         : selectedReceipt
-                        ? "Create a new receive entry from the latest balance."
+                        ? "Create a new receive entry from the latest cumulative balance."
                         : "No saved receipt found yet."}
                     </p>
                   </div>
@@ -1176,7 +1357,7 @@ const ReceiveGoods = () => {
                       disabled={!selectedReceipt}
                       className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        View Saved Receipt
+                      View Latest Receipt
                       </button>
                     {!isSelectedPurchaseOrderClosed ? (
                       <button
@@ -1259,6 +1440,111 @@ const ReceiveGoods = () => {
                   </div>
                 </div>
               </div>
+
+              {receiptHistory.length > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-800">
+                        Receipt History
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Every saved receipt for this PO is listed below with movement and cumulative quantities.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                      {receiptHistory.length} receipt{receiptHistory.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {receiptHistory.map((receipt) => {
+                      const historyTotals = getReceiptHistoryTotals(receipt);
+                      const isEditingThisReceipt =
+                        editingReceipt && String(editingReceipt.id) === String(receipt.id);
+                      return (
+                        <div
+                          key={receipt.id}
+                          className={`rounded-xl border p-4 transition ${
+                            isEditingThisReceipt
+                              ? "border-indigo-300 bg-indigo-50/60"
+                              : "border-slate-200 bg-slate-50/70"
+                          }`}
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                                Receipt
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-slate-900">
+                                {formatDate(receipt.receivedDate) || "-"}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                Invoice: {receipt.invoiceNumber || "-"} | Received by:{" "}
+                                {receipt.receivedBy || "-"}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPurchaseOrderPreview(null);
+                                  setViewReceipt(receipt);
+                                }}
+                                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700"
+                              >
+                                View
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  syncSelectedPurchaseOrder(selectedPurchaseOrder.id, receipt.id)
+                                }
+                                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700"
+                              >
+                                {isEditingThisReceipt ? "Editing" : "Edit"}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-700 sm:grid-cols-4">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                                Receipt Qty
+                              </p>
+                              <p className="mt-1 font-semibold text-slate-900">
+                                {historyTotals.movementQty}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                                Cumulative
+                              </p>
+                              <p className="mt-1 font-semibold text-slate-900">
+                                {historyTotals.received}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                                Available
+                              </p>
+                              <p className="mt-1 font-semibold text-slate-900">
+                                {historyTotals.available}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                                PO Balance
+                              </p>
+                              <p className="mt-1 font-semibold text-slate-900">
+                                {historyTotals.balance}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {isSelectedPurchaseOrderClosed && !editingReceipt ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 shadow-sm">
@@ -1473,14 +1759,14 @@ const ReceiveGoods = () => {
                   </div>
 
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="min-w-[1320px] text-sm">
                       <thead className="bg-slate-100 text-slate-600">
                         <tr>
                           <th className="p-3 text-left min-w-[160px]">Item</th>
                           <th className="p-3 text-left min-w-[90px]">Unit</th>
                           <th className="p-3 text-left min-w-[100px]">Pending</th>
                           <th className="p-3 text-left min-w-[110px]">Receive Now</th>
-                          <th className="p-3 text-left min-w-[100px]">Balance</th>
+                          <th className="p-3 text-left min-w-[100px]">PO Balance</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1618,7 +1904,7 @@ const ReceiveGoods = () => {
                     <div className="flex flex-wrap gap-4">
                       <span>Pending: {totals.pending}</span>
                       <span>Received: {totals.received}</span>
-                      <span>Balance: {totals.balance}</span>
+                      <span>PO Balance: {totals.balance}</span>
                     </div>
                       <button
                         type="submit"
@@ -1745,15 +2031,15 @@ const ReceiveGoods = () => {
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "ordered", label: "Ordered", align: "right", widthClass: "w-24" },
             { key: "received", label: "Received", align: "right", widthClass: "w-24" },
-            { key: "balance", label: "Balance", align: "right", widthClass: "w-24" },
+            { key: "available", label: "Available", align: "right", widthClass: "w-24" },
+            { key: "balance", label: "PO Balance", align: "right", widthClass: "w-24" },
           ]}
           tableRows={(viewReceipt.items || []).map((item, index) => {
-            const ordered = toNumber(item.orderedQty);
-            const received = toNumber(item.receivedQty);
-            const rawBalance = item.balanceQty ?? item.BalanceQty;
             const receiptSerialNumbers = normalizeSerialNumbers(
               item.serialNumbers ?? item.SerialNumbers
             );
+            const { ordered, received, available, balance } =
+              getReceiptDisplayQuantities(item);
             return {
               id: item.id ?? item.itemId ?? index,
               serial: index + 1,
@@ -1764,10 +2050,8 @@ const ReceiveGoods = () => {
               unit: item.unit || "-",
               ordered,
               received,
-              balance:
-                rawBalance === undefined || rawBalance === null || rawBalance === ""
-                  ? Math.max(ordered - received, 0)
-                  : toNumber(rawBalance),
+              available,
+              balance,
             };
           })}
           bottomLeftContent={
