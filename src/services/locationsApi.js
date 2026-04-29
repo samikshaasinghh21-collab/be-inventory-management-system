@@ -25,8 +25,12 @@ const normalizeLocation = (location = {}) => ({
   updatedAt: location.updatedAt ?? location.UpdatedAt ?? null,
 });
 
-export const fetchLocations = async () => {
-  const response = await api.get("/locations");
+export const fetchLocations = async (projectId = null) => {
+  const parsedProjectId = Number.parseInt(projectId, 10);
+  const hasProjectFilter = Number.isFinite(parsedProjectId);
+  const response = await api.get("/locations", {
+    params: hasProjectFilter ? { projectId: parsedProjectId } : undefined,
+  });
   const list = Array.isArray(response.data?.locations)
     ? response.data.locations
     : Array.isArray(response.data)

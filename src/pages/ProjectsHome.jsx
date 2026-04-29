@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useNotifications } from "../context/NotificationContext";
+import useMrpPlanning from "../hooks/useMrpPlanning";
 import {
   deleteProject as deleteProjectLocal,
   getProjects,
@@ -58,6 +60,13 @@ const ProjectsHome = () => {
   const [apiError, setApiError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [expandedProjectId, setExpandedProjectId] = useState(null);
+  const { notifications } = useNotifications();
+  const {
+    snapshot: mrpSnapshot,
+    loading: mrpLoading,
+    error: mrpError,
+  } = useMrpPlanning();
 
   const loadProjects = async () => {
     try {
@@ -139,6 +148,49 @@ const ProjectsHome = () => {
   const selectedCustomer =
     customers.find((customer) => String(customer.id) === String(form.customerId)) ||
     null;
+  const projectAlerts = useMemo(() => {
+    return notifications.reduce((acc, notification) => {
+      if (!["warning", "critical"].includes(String(notification.severity))) {
+        return acc;
+      }
+
+      const projectId =
+        notification.data?.projectId ??
+        (String(notification.entityId || "").startsWith("project:")
+          ? String(notification.entityId).split(":")[1]
+          : "");
+
+      if (!projectId) {
+        return acc;
+      }
+
+      if (!acc[projectId]) {
+        acc[projectId] = [];
+      }
+      acc[projectId].push(notification);
+      return acc;
+    }, {});
+  }, [notifications]);
+
+  const projectPlanMap = useMemo(() => {
+    return mrpSnapshot.shortageResults.projects.reduce((acc, project) => {
+      acc[String(project.projectId)] = project;
+      return acc;
+    }, {});
+  }, [mrpSnapshot.shortageResults.projects]);
+
+  const recommendationLookup = useMemo(() => {
+    return mrpSnapshot.recommendations.reduce((acc, recommendation) => {
+      acc[`${recommendation.projectId}::${recommendation.materialKey}`] =
+        recommendation;
+      return acc;
+    }, {});
+  }, [mrpSnapshot.recommendations]);
+
+  const formatQuantity = (value) =>
+    Number(value || 0).toLocaleString("en-IN", {
+      maximumFractionDigits: 2,
+    });
 
   const beginEdit = (project) => {
     setEditing(project);
@@ -318,58 +370,220 @@ const ProjectsHome = () => {
                 </tr>
               )}
               {filteredProjects.map((project) => (
-                <tr key={project.id} className="border-t hover:bg-slate-50">
-                  <td className="p-3">
-                    <div className="font-semibold text-slate-800">
-                      {project.name || "-"}
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      {project.code || "No code"}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="font-medium text-slate-700">
-                      {project.client || "-"}
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      {project.companyName || "No company"}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="font-medium text-slate-700">
-                      {project.contactPerson || "-"}
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      {project.email || project.phone || "No contact details"}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                      {project.status || "Planned"}
-                    </span>
-                  </td>
-                  <td className="p-3 text-sm text-slate-600">
-                    {formatTimelineRange(project.startDate, project.endDate)}
-                  </td>
-                  <td className="p-3">
-                    <div className="flex gap-3 text-sm">
-                      <button
-                        type="button"
-                        onClick={() => beginEdit(project)}
-                        className="text-indigo-600 hover:text-indigo-800"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(project)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                (() => {
+                  const alertCount =
+                    projectAlerts[String(project.id)]?.length || 0;
+                  const projectPlan =
+                    projectPlanMap[String(project.id)] || null;
+
+                  return (
+                    <Fragment key={project.id}>
+                      <tr key={project.id} className="border-t hover:bg-slate-50">
+                        <td className="p-3">
+                          <div className="font-semibold text-slate-800">
+                            {project.name || "-"}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {project.code || "No code"}
+                          </div>
+                          {alertCount > 0 && (
+                            <span className="mt-2 inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700">
+                              {alertCount} warning{alertCount === 1 ? "" : "s"}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <div className="font-medium text-slate-700">
+                            {project.client || "-"}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {project.companyName || "No company"}
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          <div className="font-medium text-slate-700">
+                            {project.contactPerson || "-"}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {project.email || project.phone || "No contact details"}
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                            {project.status || "Planned"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-sm text-slate-600">
+                          {formatTimelineRange(project.startDate, project.endDate)}
+                        </td>
+                        <td className="p-3">
+                          <div className="flex flex-wrap gap-3 text-sm">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedProjectId((current) =>
+                                  String(current) === String(project.id)
+                                    ? null
+                                    : project.id
+                                )
+                              }
+                              className="text-slate-700 hover:text-slate-900"
+                            >
+                              {String(expandedProjectId) === String(project.id)
+                                ? "Hide Materials"
+                                : "Materials"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => beginEdit(project)}
+                              className="text-indigo-600 hover:text-indigo-800"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(project)}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {String(expandedProjectId) === String(project.id) && (
+                        <tr className="border-t bg-slate-50/70">
+                          <td colSpan="6" className="p-4">
+                            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                              <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
+                                <div>
+                                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                                    Project Materials
+                                  </p>
+                                  <h4 className="mt-1 text-lg font-semibold text-slate-900">
+                                    {project.name || "Project"} material plan
+                                  </h4>
+                                </div>
+                              </div>
+
+                              {mrpError && (
+                                <p className="mt-3 text-sm text-amber-700">{mrpError}</p>
+                              )}
+
+                              {mrpLoading ? (
+                                <p className="mt-4 text-sm text-slate-500">
+                                  Loading project material plan...
+                                </p>
+                              ) : !projectPlan || projectPlan.materials.length === 0 ? (
+                                <p className="mt-4 text-sm text-slate-500">
+                                  No BOQ-driven material requirements are available for this project yet.
+                                </p>
+                              ) : (
+                                <div className="mt-4 overflow-x-auto">
+                                  <table className="min-w-full text-sm">
+                                    <thead className="bg-slate-50 text-slate-700">
+                                      <tr>
+                                        <th className="px-3 py-2 text-left font-semibold">
+                                          Material
+                                        </th>
+                                        <th className="px-3 py-2 text-right font-semibold">
+                                          Required
+                                        </th>
+                                        <th className="px-3 py-2 text-right font-semibold">
+                                          Available
+                                        </th>
+                                        <th className="px-3 py-2 text-right font-semibold">
+                                          Shortage
+                                        </th>
+                                        <th className="px-3 py-2 text-left font-semibold">
+                                          Status
+                                        </th>
+                                        <th className="px-3 py-2 text-left font-semibold">
+                                          Action
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {projectPlan.materials.map((material) => {
+                                        const recommendation =
+                                          recommendationLookup[
+                                            `${project.id}::${material.materialKey}`
+                                          ] || null;
+                                        const badgeClass =
+                                          material.status === "shortage"
+                                            ? "bg-red-100 text-red-700"
+                                            : material.status === "low"
+                                            ? "bg-amber-100 text-amber-700"
+                                            : "bg-emerald-100 text-emerald-700";
+
+                                        return (
+                                          <tr
+                                            key={material.id}
+                                            className="border-t border-slate-100"
+                                          >
+                                            <td className="px-3 py-2">
+                                              <p className="font-medium text-slate-900">
+                                                {material.productName}
+                                              </p>
+                                              <p className="mt-1 text-xs text-slate-500">
+                                                Planned {formatQuantity(material.plannedQuantity)} |
+                                                Consumed {formatQuantity(material.consumedQuantity)}
+                                              </p>
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-medium text-slate-900">
+                                              {formatQuantity(material.required)}
+                                            </td>
+                                            <td className="px-3 py-2 text-right text-slate-700">
+                                              {formatQuantity(material.available)}
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-semibold text-red-600">
+                                              {formatQuantity(material.shortage)}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              <span
+                                                className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${badgeClass}`}
+                                              >
+                                                {material.status === "shortage"
+                                                  ? "Shortage"
+                                                  : material.status === "low"
+                                                  ? "Watch"
+                                                  : "OK"}
+                                              </span>
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              {recommendation ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    navigate("/inventory/purchase-order", {
+                                                      state: {
+                                                        mrpRecommendation: recommendation,
+                                                      },
+                                                    })
+                                                  }
+                                                  className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                                                >
+                                                  Create Purchase Order
+                                                </button>
+                                              ) : (
+                                                <span className="text-xs text-slate-500">
+                                                  No action needed
+                                                </span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })()
               ))}
             </tbody>
           </table>

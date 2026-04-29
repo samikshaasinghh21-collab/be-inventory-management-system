@@ -1589,7 +1589,7 @@ const ReceiveGoods = () => {
                             billTo: buildReceiveBillToText(selectedProject),
                             shipTo: buildReceiveShipToText(selectedLocation),
                             showProjectDetails: true,
-                            }
+                   }
                           )
                         );
                         setHasStatusOverride(false);

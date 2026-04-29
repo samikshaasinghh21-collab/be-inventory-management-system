@@ -49,6 +49,11 @@ const normalizeDeliveryChallan = (challan = {}) => ({
     challan.ReceiveGoodsId ??
     challan.receivegoodsId ??
     null,
+  receiveGoodsIds: Array.isArray(challan.receiveGoodsIds)
+    ? challan.receiveGoodsIds
+    : Array.isArray(challan.ReceiveGoodsIds)
+    ? challan.ReceiveGoodsIds
+    : [],
   fromLocationId: challan.fromLocationId ?? challan.FromLocationId ?? null,
   toLocationId: challan.toLocationId ?? challan.ToLocationId ?? null,
   toLocation: challan.toLocation ?? challan.ToLocation ?? "",

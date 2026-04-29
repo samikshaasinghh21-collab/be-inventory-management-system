@@ -4,6 +4,7 @@ import { getSettings } from "../../services/settingsStore";
 import AppHeader from "./AppHeader";
 import Sidebar from "./Sidebar";
 import { getRouteMeta } from "./navigation";
+import NotificationPanel from "../notifications/NotificationPanel";
 
 const SIDEBAR_COLLAPSE_KEY = "app-shell:sidebar-collapsed";
 
@@ -79,7 +80,11 @@ const AppShell = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    setIsMobileSidebarOpen(false);
+    const timeoutId = window.setTimeout(() => {
+      setIsMobileSidebarOpen(false);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -143,6 +148,7 @@ const AppShell = ({ children }) => {
           routeMeta={routeMeta}
           settings={settings}
         />
+        <NotificationPanel />
 
         <main className="app-content">
           <div className="app-content-inner">

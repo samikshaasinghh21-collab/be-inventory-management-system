@@ -48,6 +48,24 @@ const createLineItem = () => ({
   location: "",
 });
 
+const createRecommendationLineItem = (recommendation = {}) => ({
+  id: Date.now() + Math.random(),
+  itemId: recommendation.productId ?? null,
+  boqItemId: recommendation.boqItemId ?? null,
+  name: recommendation.productName ?? "",
+  description: recommendation.message ?? "",
+  unit: recommendation.unit ?? "PCS",
+  hsn: recommendation.hsn ?? "",
+  gst: recommendation.gst ?? "",
+  serialNumber: "",
+  serialRequired: false,
+  taxPercentage: recommendation.taxPercentage ?? 0,
+  quantity: recommendation.recommendedOrder ?? recommendation.shortage ?? 0,
+  rate: recommendation.unitPrice ?? 0,
+  notes: recommendation.notes ?? "",
+  location: recommendation.locationName ?? "",
+});
+
 const createFormState = () => ({
   poNumber: "",
   projectId: "",
@@ -139,6 +157,42 @@ const PurchaseOrder = () => {
       // Clear navigation state so we don't re-apply on re-render
       window.history.replaceState({}, document.title);
     }
+  }, [location.state, editingId]);
+
+  useEffect(() => {
+    const recommendation = location.state?.mrpRecommendation;
+    if (
+      !recommendation ||
+      editingId ||
+      location.state?.purchaseOrder
+    ) {
+      return;
+    }
+
+    setClosedPoOverrideApproved(false);
+    setEditingStatus("");
+    setSelectedBoqId("");
+    setForm((prev) => ({
+      ...createFormState(),
+      poNumber: prev.poNumber,
+      orderDate: prev.orderDate,
+      projectId: recommendation.projectId
+        ? String(recommendation.projectId)
+        : "",
+      vendorId: recommendation.vendorId ? String(recommendation.vendorId) : "",
+      locationId: recommendation.locationId
+        ? String(recommendation.locationId)
+        : "",
+      expectedDate: recommendation.deadline || "",
+      notes: recommendation.message || recommendation.notes || "",
+      termsAndConditions: DEFAULT_PURCHASE_ORDER_TERMS,
+    }));
+    setItems([createRecommendationLineItem(recommendation)]);
+    setErrors({});
+    setApiError("");
+    setAdminPassword("");
+    setAdminPasswordError("");
+    window.history.replaceState({}, document.title);
   }, [location.state, editingId]);
 
   const formatCurrency = (value) => {

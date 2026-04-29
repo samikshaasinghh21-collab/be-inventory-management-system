@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useNotifications } from "../context/NotificationContext";
 import {
   deleteItemApi,
   fetchItems,
@@ -43,6 +44,7 @@ const formatNumber = (value) => new Intl.NumberFormat("en-US").format(value);
 const InventoryHome = () => {
   const navigate = useNavigate();
   const settings = useSettings();
+  const { notifications } = useNotifications();
 
   const [items, setItems] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -59,6 +61,29 @@ const InventoryHome = () => {
   const currency = settings?.preferences?.currency || "INR";
   const lowStockThreshold = Number(settings?.inventory?.lowStockThreshold ?? 0);
   const unitLabel = settings?.inventory?.defaultUnit || "PCS";
+  const itemAlerts = useMemo(() => {
+    return notifications.reduce((acc, notification) => {
+      if (!["warning", "critical"].includes(String(notification.severity))) {
+        return acc;
+      }
+
+      const productId =
+        notification.data?.productId ??
+        (String(notification.entityId || "").startsWith("item:")
+          ? String(notification.entityId).split(":")[1]
+          : "");
+
+      if (!productId) {
+        return acc;
+      }
+
+      if (!acc[productId]) {
+        acc[productId] = [];
+      }
+      acc[productId].push(notification);
+      return acc;
+    }, {});
+  }, [notifications]);
 
   const formatCurrency = (value) => {
     try {
@@ -541,6 +566,10 @@ const InventoryHome = () => {
                 pagedRows.map((item) => {
                   const isBusy = rowActionId === item.id;
                   const status = STATUS_META[item.stockStatus];
+                  const alertCount = itemAlerts[String(item.id)]?.length || 0;
+                  const hasCriticalAlert = (itemAlerts[String(item.id)] || []).some(
+                    (notification) => notification.severity === "critical"
+                  );
 
                   return (
                     <tr key={item.id ?? item.name} className="border-t border-slate-100 hover:bg-slate-50/60">
@@ -549,6 +578,17 @@ const InventoryHome = () => {
                         <p className="mt-0.5 text-xs text-slate-500 truncate max-w-[260px]">
                           {item.description || "No description"}
                         </p>
+                        {alertCount > 0 && (
+                          <span
+                            className={`mt-2 inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                              hasCriticalAlert
+                                ? "bg-red-100 text-red-700"
+                                : "bg-amber-100 text-amber-700"
+                            }`}
+                          >
+                            {alertCount} alert{alertCount === 1 ? "" : "s"}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-slate-700">{item.category || "-"}</td>
                       <td className="px-4 py-3 text-slate-700">{item.hsn || "-"}</td>

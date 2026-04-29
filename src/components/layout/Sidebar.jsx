@@ -30,7 +30,6 @@ const Sidebar = ({
   isDesktop,
   isMobileOpen,
   onCloseMobile,
-  onToggleCollapse,
   settings,
 }) => {
   const location = useLocation();
@@ -40,9 +39,6 @@ const Sidebar = ({
   );
 
   const profile = settings?.profile || {};
-  const company = settings?.company || {};
-  const workspaceName = company.name || "Inventory Workspace";
-  const workspaceSubtitle = company.city || profile.role || "Operations Hub";
   const profileName = profile.fullName || "Demo Account";
   const profileInitials = buildInitials(profileName);
 
@@ -181,54 +177,6 @@ const Sidebar = ({
   return (
     <>
       <aside className="app-sidebar" aria-hidden={!isDesktop && !isMobileOpen}>
-        <div className="sidebar-brand-row">
-          <button
-            type="button"
-            className="sidebar-brand-button"
-            onClick={() => {
-              navigate("/");
-              closeSidebarOnMobile();
-            }}
-            title={workspaceName}
-          >
-            <span className="sidebar-brand-mark" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-              <span />
-            </span>
-            {!isCollapsed && (
-              <span className="sidebar-brand-copy">
-                <strong>{workspaceName}</strong>
-                <small>{workspaceSubtitle}</small>
-              </span>
-            )}
-          </button>
-
-          {isDesktop ? (
-            <button
-              type="button"
-              className="sidebar-collapse-button"
-              onClick={onToggleCollapse}
-              aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              <AppIcon
-                name={isCollapsed ? "chevron-right" : "chevron-left"}
-                className="h-4 w-4"
-              />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="sidebar-collapse-button"
-              onClick={onCloseMobile}
-              aria-label="Close navigation"
-            >
-              <AppIcon name="x" className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-
         <div className="sidebar-workspace-card">
           {profile.avatar ? (
             <img

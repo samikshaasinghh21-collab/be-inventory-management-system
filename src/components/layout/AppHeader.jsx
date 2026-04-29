@@ -2,24 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import AppIcon from "./AppIcon";
 import { FLAT_NAVIGATION_ITEMS, HEADER_QUICK_ACTIONS } from "./navigation";
-
-const NOTIFICATIONS = [
-  {
-    id: "realtime-balances",
-    title: "Realtime inventory balances enabled",
-    detail: "Delivery challan and consumption totals stay aligned across registers.",
-  },
-  {
-    id: "reports-ready",
-    title: "Reports are ready to review",
-    detail: "Use the reports workspace for daily movement summaries and exports.",
-  },
-  {
-    id: "workspace-sync",
-    title: "Workspace sync complete",
-    detail: "Profile, settings, and project-aware navigation are up to date.",
-  },
-];
+import NotificationBell from "../notifications/NotificationBell";
 
 const buildInitials = (name = "Workspace") =>
   String(name)
@@ -89,28 +72,29 @@ const AppHeader = ({
   const navigate = useNavigate();
   const location = useLocation();
   const searchRef = useRef(null);
-  const notificationsRef = useRef(null);
   const profileRef = useRef(null);
 
   const [query, setQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const profile = settings?.profile || {};
   const company = settings?.company || {};
   const workspaceName = company.name || "Inventory Workspace";
-  const searchableItems = useMemo(buildSearchableItems, []);
+  const searchableItems = useMemo(() => buildSearchableItems(), []);
   const searchResults = useMemo(
     () => searchNavigation(searchableItems, query),
     [query, searchableItems]
   );
 
   useEffect(() => {
-    setQuery("");
-    setIsSearchOpen(false);
-    setIsNotificationsOpen(false);
-    setIsProfileOpen(false);
+    const timeoutId = window.setTimeout(() => {
+      setQuery("");
+      setIsSearchOpen(false);
+      setIsProfileOpen(false);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -118,12 +102,6 @@ const AppHeader = ({
       const target = event.target;
       if (searchRef.current && !searchRef.current.contains(target)) {
         setIsSearchOpen(false);
-      }
-      if (
-        notificationsRef.current &&
-        !notificationsRef.current.contains(target)
-      ) {
-        setIsNotificationsOpen(false);
       }
       if (profileRef.current && !profileRef.current.contains(target)) {
         setIsProfileOpen(false);
@@ -148,6 +126,10 @@ const AppHeader = ({
   };
 
   const handleLogout = () => {
+    const shouldLogout = window.confirm("Are you sure you want to logout?");
+    if (!shouldLogout) {
+      return;
+    }
     navigate("/login");
   };
 
@@ -263,40 +245,7 @@ const AppHeader = ({
               ))}
             </div>
 
-            <div ref={notificationsRef} className="header-menu-container">
-              <button
-                type="button"
-                className="header-icon-button has-indicator"
-                onClick={() =>
-                  setIsNotificationsOpen((current) => !current)
-                }
-                aria-label="Open notifications"
-              >
-                <AppIcon name="bell" />
-                <span className="header-indicator" />
-              </button>
-              {isNotificationsOpen && (
-                <div className="header-menu">
-                  <div className="header-menu-title">Notifications</div>
-                  <div className="header-menu-list">
-                    {NOTIFICATIONS.map((notification) => (
-                      <div
-                        key={notification.id}
-                        className="header-menu-item static"
-                      >
-                        <span className="header-menu-item-icon">
-                          <AppIcon name="spark" className="h-4 w-4" />
-                        </span>
-                        <span className="header-menu-item-copy">
-                          <strong>{notification.title}</strong>
-                          <small>{notification.detail}</small>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <NotificationBell />
 
             <div ref={profileRef} className="header-menu-container">
               <button

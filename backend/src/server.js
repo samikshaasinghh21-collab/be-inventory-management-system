@@ -983,6 +983,11 @@ const normalizeDeliveryChallan = (row = {}) => {
     dcNumber: row.DCNumber ?? row.DcNumber ?? row.dcNumber ?? "",
     projectId: row.ProjectId ?? row.projectId ?? null,
     receiveGoodsId: row.ReceiveGoodsId ?? row.receiveGoodsId ?? null,
+    receiveGoodsIds: Array.isArray(row.receiveGoodsIds)
+      ? row.receiveGoodsIds
+      : Array.isArray(row.ReceiveGoodsIds)
+      ? row.ReceiveGoodsIds
+      : [],
     fromLocationId: row.FromLocationId ?? row.fromLocationId ?? null,
     toLocationId: row.ToLocationId ?? row.toLocationId ?? null,
     toLocation: row.ToLocation ?? row.toLocation ?? "",
@@ -1031,6 +1036,30 @@ const normalizeDeliveryChallanItem = (row = {}) => ({
   rate: Number(row.Rate ?? row.rate ?? 0) || 0,
   notes: row.Notes ?? row.notes ?? "",
 });
+
+const deriveDeliveryChallanReceiveGoodsIds = (
+  challan = {},
+  challanItems = [],
+  receiveGoodsIdByItemId = new Map()
+) => {
+  const derivedIds = uniqueReceiveGoodsIds(
+    (Array.isArray(challanItems) ? challanItems : []).map((item) => {
+      const receiveGoodsItemId = toNullableInt(
+        item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+      );
+      if (receiveGoodsItemId === null) {
+        return null;
+      }
+      return toNullableInt(receiveGoodsIdByItemId.get(receiveGoodsItemId));
+    })
+  );
+
+  if (derivedIds.length) {
+    return derivedIds;
+  }
+  const fallbackId = toNullableInt(challan.receiveGoodsId ?? challan.ReceiveGoodsId);
+  return fallbackId === null ? [] : [fallbackId];
+};
 
 const normalizeInventoryKeyValue = (value = "") =>
   String(value ?? "").trim().toLowerCase();
@@ -4669,6 +4698,76 @@ const uniqueReceiveGoodsItemIds = (values = []) => {
   return Array.from(set);
 };
 
+const uniqueReceiveGoodsIds = (values = []) => {
+  const set = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const id = toNullableInt(value);
+    if (id) {
+      set.add(id);
+    }
+  });
+  return Array.from(set);
+};
+
+const resolveReceiveGoodsSelectionId = (value) => {
+  const directId = toNullableInt(value);
+  if (directId) {
+    return directId;
+  }
+
+  let candidate = value;
+  if (candidate && typeof candidate === "object") {
+    const nestedId = toNullableInt(
+      candidate.receiveGoodsId ??
+        candidate.ReceiveGoodsId ??
+        candidate.id ??
+        candidate.Id ??
+        candidate.value ??
+        null
+    );
+    if (nestedId) {
+      return nestedId;
+    }
+    candidate =
+      candidate.receiveReceiptReference ??
+      candidate.receiveGoodsReference ??
+      candidate.reference ??
+      candidate.label ??
+      candidate.text ??
+      "";
+  }
+
+  const text = String(candidate ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  const normalizedText = text.toLowerCase();
+  const rgMatch = /^rg(?:[\s\-_]*ref(?:erence)?)?[\s\-_]*0*(\d+)$/i.exec(
+    normalizedText
+  );
+  if (rgMatch) {
+    return toNullableInt(rgMatch[1]);
+  }
+  const rrMatch = /^rr(?:[\s\-_]*ref(?:erence)?)?[\s\-_]*0*(\d+)$/i.exec(
+    normalizedText
+  );
+  if (rrMatch) {
+    return toNullableInt(rrMatch[1]);
+  }
+  return null;
+};
+
+const uniqueReceiveGoodsIdsFromSelections = (values = []) => {
+  const set = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const id = resolveReceiveGoodsSelectionId(value);
+    if (id) {
+      set.add(id);
+    }
+  });
+  return Array.from(set);
+};
+
 const uniquePurchaseOrderIds = (values = []) => {
   const set = new Set();
   (Array.isArray(values) ? values : []).forEach((value) => {
@@ -5034,6 +5133,7 @@ const loadReceiveGoodsItemsForConsumption = async (
   tx,
   {
     receiveGoodsId = null,
+    receiveGoodsIds = [],
     receiveGoodsItemIds = [],
   } = {}
 ) => {
@@ -5060,29 +5160,49 @@ const loadReceiveGoodsItemsForConsumption = async (
     throw error;
   }
 
-  const normalizedReceiveGoodsId = toNullableInt(receiveGoodsId);
+  const normalizedReceiveGoodsIds = uniqueReceiveGoodsIdsFromSelections([
+    ...(Array.isArray(receiveGoodsIds) ? receiveGoodsIds : []),
+    receiveGoodsId,
+  ]);
   if (
-    normalizedReceiveGoodsId !== null &&
-    rows.some((row) => toNullableInt(row.ReceiveGoodsId) !== normalizedReceiveGoodsId)
+    normalizedReceiveGoodsIds.length &&
+    rows.some((row) => {
+      const linkedReceiveGoodsId = toNullableInt(row.ReceiveGoodsId);
+      return (
+        linkedReceiveGoodsId === null ||
+        !normalizedReceiveGoodsIds.includes(linkedReceiveGoodsId)
+      );
+    })
   ) {
-    const error = new Error("The selected receipt does not match the linked receipt items.");
+    const error = new Error(
+      "The selected receive receipt references do not match the linked receipt items."
+    );
     error.statusCode = 400;
     throw error;
   }
 
-  const receiptRow = normalizedReceiveGoodsId === null
-    ? null
-    : await new sql.Request(tx)
-        .input("ReceiveGoodsId", sql.Int, normalizedReceiveGoodsId)
-        .query(`
-          SELECT TOP 1 *
-          FROM dbo.ReceiveGoods
-          WHERE ${receivePk} = @ReceiveGoodsId
-        `);
-  if (normalizedReceiveGoodsId !== null && !receiptRow?.recordset?.[0]) {
-    const error = new Error("Receive receipt not found");
-    error.statusCode = 400;
-    throw error;
+  if (normalizedReceiveGoodsIds.length) {
+    const receiptRequest = new sql.Request(tx);
+    const selectedReceiptIdsClause = buildPurchaseOrderItemInClause(
+      receiptRequest,
+      normalizedReceiveGoodsIds,
+      "SelectedReceiveGoodsId"
+    );
+    const selectedReceiptsResult = await receiptRequest.query(`
+      SELECT ${toIdentifier(receivePk)} AS ReceiveGoodsId
+      FROM dbo.ReceiveGoods
+      WHERE ${toIdentifier(receivePk)} IN (${selectedReceiptIdsClause})
+    `);
+    const existingReceiptIds = uniqueReceiveGoodsIds(
+      (selectedReceiptsResult.recordset ?? []).map((row) => row.ReceiveGoodsId)
+    );
+    if (existingReceiptIds.length !== normalizedReceiveGoodsIds.length) {
+      const error = new Error(
+        "One or more selected receive receipt references were not found."
+      );
+      error.statusCode = 400;
+      throw error;
+    }
   }
 
   return rows.map((row) => ({
@@ -5815,12 +5935,17 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
   {
     deliveryChallanId = null,
     receiveGoodsId = null,
+    receiveGoodsIds = [],
     projectId = null,
     items = [],
   } = {}
 ) => {
   const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
-  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
+  const safeReceiveGoodsId = resolveReceiveGoodsSelectionId(receiveGoodsId);
+  const safeReceiveGoodsIds = uniqueReceiveGoodsIdsFromSelections([
+    ...(Array.isArray(receiveGoodsIds) ? receiveGoodsIds : []),
+    safeReceiveGoodsId,
+  ]);
   const requestedItems = Array.isArray(items) ? items : [];
   const requestedReceiveGoodsItemIds = uniqueReceiveGoodsItemIds(
     requestedItems.map((item) =>
@@ -5828,20 +5953,39 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
     )
   );
 
-  if (safeReceiveGoodsId === null && !requestedReceiveGoodsItemIds.length) {
+  if (!safeReceiveGoodsIds.length && !requestedReceiveGoodsItemIds.length) {
     return null;
   }
 
   await ensureReceiveTables();
   await ensureDeliveryChallanTables();
   const receivePk = await refreshReceiveGoodsPk();
+  const receiveItemsPk = await refreshReceiveGoodsItemsPk();
   const deliveryPk = await refreshDeliveryChallanPk();
   const deliveryFk = await refreshDeliveryChallanItemsFk();
 
   let receiptItems = [];
-  let effectiveReceiveGoodsId = safeReceiveGoodsId;
 
-  if (safeReceiveGoodsId !== null) {
+  if (requestedReceiveGoodsItemIds.length) {
+    receiptItems = await loadReceiveGoodsItemsForConsumption(tx, {
+      receiveGoodsId: safeReceiveGoodsId,
+      receiveGoodsIds: safeReceiveGoodsIds,
+      receiveGoodsItemIds: requestedReceiveGoodsItemIds,
+    });
+  } else if (safeReceiveGoodsIds.length) {
+    const receiptItemsReq = new sql.Request(tx);
+    const receiptIdsClause = buildPurchaseOrderItemInClause(
+      receiptItemsReq,
+      safeReceiveGoodsIds,
+      "ReceiveGoodsId"
+    );
+    const receiptItemsResult = await receiptItemsReq.query(`
+      SELECT *
+      FROM dbo.ReceiveGoodsItems
+      WHERE ReceiveGoodsId IN (${receiptIdsClause})
+    `);
+    receiptItems = (receiptItemsResult.recordset ?? []).map(normalizeReceiveGoodsItem);
+  } else if (safeReceiveGoodsId !== null) {
     const receiptItemsResult = await new sql.Request(tx)
       .input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId)
       .query(`
@@ -5850,50 +5994,77 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
         WHERE ReceiveGoodsId = @ReceiveGoodsId
       `);
     receiptItems = (receiptItemsResult.recordset ?? []).map(normalizeReceiveGoodsItem);
-  } else {
-    receiptItems = await loadReceiveGoodsItemsForConsumption(tx, {
-      receiveGoodsItemIds: requestedReceiveGoodsItemIds,
-    });
-    effectiveReceiveGoodsId =
-      receiptItems.length > 0 ? toNullableInt(receiptItems[0].receiveGoodsId) : null;
-    if (effectiveReceiveGoodsId === null) {
-      const error = new Error(
-        "A receive receipt is required to validate the delivery challan items."
-      );
-      error.statusCode = 400;
-      throw error;
-    }
   }
 
-  if (
-    receiptItems.some(
-      (item) => toNullableInt(item.receiveGoodsId) !== effectiveReceiveGoodsId
-    )
-  ) {
+  if (!receiptItems.length) {
     const error = new Error(
-      "The selected receipt items must belong to the same receive receipt."
+      "A receive receipt is required to validate the delivery challan items."
     );
     error.statusCode = 400;
     throw error;
   }
 
-  const receiptHeaderResult = await new sql.Request(tx)
-    .input("ReceiveGoodsId", sql.Int, effectiveReceiveGoodsId)
-    .query(`
-      SELECT TOP 1 *
-      FROM dbo.ReceiveGoods
-      WHERE ${toIdentifier(receivePk)} = @ReceiveGoodsId
-    `);
-  const receiptHeader = receiptHeaderResult.recordset?.[0] ?? null;
-  if (!receiptHeader) {
+  const effectiveReceiveGoodsIds = uniqueReceiveGoodsIds(
+    receiptItems.map((item) => toNullableInt(item.receiveGoodsId))
+  );
+  if (!effectiveReceiveGoodsIds.length) {
+    const error = new Error(
+      "The selected receipt items are missing the linked receive receipt reference."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (
+    safeReceiveGoodsIds.length &&
+    effectiveReceiveGoodsIds.some((id) => !safeReceiveGoodsIds.includes(id))
+  ) {
+    const error = new Error(
+      "The selected receipt items must belong to the selected receive receipts."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const receiptHeaderReq = new sql.Request(tx);
+  const receiptIdsClause = buildPurchaseOrderItemInClause(
+    receiptHeaderReq,
+    effectiveReceiveGoodsIds,
+    "ReceiveGoodsId"
+  );
+  const receiptHeaderResult = await receiptHeaderReq.query(`
+    SELECT *
+    FROM dbo.ReceiveGoods
+    WHERE ${toIdentifier(receivePk)} IN (${receiptIdsClause})
+  `);
+  const receiptHeaders = receiptHeaderResult.recordset ?? [];
+  if (receiptHeaders.length !== effectiveReceiveGoodsIds.length) {
     const error = new Error("Receive receipt not found.");
     error.statusCode = 400;
     throw error;
   }
 
+  const receiptPurchaseOrderIds = uniquePurchaseOrderIds(
+    receiptHeaders.map((row) => row.PurchaseOrderId ?? row.purchaseOrderId)
+  );
+  if (receiptPurchaseOrderIds.length > 1) {
+    const error = new Error(
+      "The selected receipts must belong to the same purchase order."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
   const safeProjectId = toNullableInt(projectId);
-  const receiptProjectId = toNullableInt(receiptHeader.ProjectId ?? receiptHeader.projectId);
-  if (safeProjectId && receiptProjectId && safeProjectId !== receiptProjectId) {
+  if (
+    safeProjectId &&
+    receiptHeaders.some((receiptHeader) => {
+      const receiptProjectId = toNullableInt(
+        receiptHeader.ProjectId ?? receiptHeader.projectId
+      );
+      return receiptProjectId !== null && receiptProjectId !== safeProjectId;
+    })
+  ) {
     const error = new Error("Selected receipt does not belong to the chosen project");
     error.statusCode = 400;
     throw error;
@@ -5901,6 +6072,7 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
 
   const receiptGroups = new Map();
   const receiveGoodsItemIdToMaterialKey = new Map();
+  const purchaseOrderItemIdToMaterialKey = new Map();
   const itemIdToMaterialKey = new Map();
 
   receiptItems.forEach((item) => {
@@ -5926,6 +6098,16 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
       receiveGoodsItemIdToMaterialKey.set(receiveGoodsItemId, materialKey);
     }
 
+    const purchaseOrderItemId = toNullableInt(
+      item.poItemId ?? item.POItemId ?? item.purchaseOrderItemId ?? item.PurchaseOrderItemId
+    );
+    if (
+      purchaseOrderItemId !== null &&
+      !purchaseOrderItemIdToMaterialKey.has(purchaseOrderItemId)
+    ) {
+      purchaseOrderItemIdToMaterialKey.set(purchaseOrderItemId, materialKey);
+    }
+
     const itemId = toNullableInt(item.itemId ?? item.ItemId);
     if (itemId !== null && !itemIdToMaterialKey.has(itemId)) {
       itemIdToMaterialKey.set(itemId, materialKey);
@@ -5943,6 +6125,16 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
       return receiveGoodsItemIdToMaterialKey.get(receiveGoodsItemId);
     }
 
+    const purchaseOrderItemId = toNullableInt(
+      item.poItemId ?? item.POItemId ?? item.purchaseOrderItemId ?? item.PurchaseOrderItemId
+    );
+    if (
+      purchaseOrderItemId !== null &&
+      purchaseOrderItemIdToMaterialKey.has(purchaseOrderItemId)
+    ) {
+      return purchaseOrderItemIdToMaterialKey.get(purchaseOrderItemId);
+    }
+
     const itemId = toNullableInt(item.itemId ?? item.ItemId);
     if (itemId !== null && itemIdToMaterialKey.has(itemId)) {
       return itemIdToMaterialKey.get(itemId);
@@ -5952,15 +6144,28 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
     return materialKey && receiptGroups.has(materialKey) ? materialKey : null;
   };
 
-  const deliveredItemsResult = await new sql.Request(tx)
-    .input("ReceiveGoodsId", sql.Int, effectiveReceiveGoodsId)
+  const deliveredItemsRequest = new sql.Request(tx);
+  const deliveredReceiptIdsClause = buildPurchaseOrderItemInClause(
+    deliveredItemsRequest,
+    effectiveReceiveGoodsIds,
+    "ReceiveGoodsId"
+  );
+  const deliveredItemsResult = await deliveredItemsRequest
     .input("DeliveryChallanId", sql.BigInt, safeDeliveryChallanId)
     .query(`
       SELECT dci.*
       FROM dbo.DeliveryChallanItems dci
       INNER JOIN dbo.DeliveryChallan dc
         ON dc.${toIdentifier(deliveryPk)} = dci.${toIdentifier(deliveryFk)}
-      WHERE dc.ReceiveGoodsId = @ReceiveGoodsId
+      LEFT JOIN dbo.ReceiveGoodsItems rgi
+        ON rgi.${toIdentifier(receiveItemsPk)} = dci.ReceiveGoodsItemId
+      WHERE (
+          rgi.ReceiveGoodsId IN (${deliveredReceiptIdsClause})
+          OR (
+            dci.ReceiveGoodsItemId IS NULL
+            AND dc.ReceiveGoodsId IN (${deliveredReceiptIdsClause})
+          )
+        )
         AND (
           @DeliveryChallanId IS NULL
           OR dc.${toIdentifier(deliveryPk)} <> @DeliveryChallanId
@@ -5976,11 +6181,9 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
       unit: row.Unit ?? row.unit ?? "PCS",
     });
     if (!materialKey) {
-      const error = new Error(
-        `${row.ItemName || row.name || "This material"} is not present in the selected receipt.`
-      );
-      error.statusCode = 400;
-      throw error;
+      // Historical/manual lines without a resolvable receipt mapping should not
+      // block creating new challans from the same receipt.
+      return;
     }
 
     deliveredByMaterialKey.set(
@@ -5994,6 +6197,19 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
   requestedItems.forEach((item) => {
     const materialKey = resolveReceiptMaterialKey(item);
     if (!materialKey) {
+      const hasLinkedReceiptIdentity =
+        toNullableInt(item.receiveGoodsItemId ?? item.ReceiveGoodsItemId) !== null ||
+        toNullableInt(
+          item.poItemId ??
+            item.POItemId ??
+            item.purchaseOrderItemId ??
+            item.PurchaseOrderItemId
+        ) !== null;
+      if (!hasLinkedReceiptIdentity) {
+        // Allow manually added non-receipt lines; receipt validations apply
+        // only to lines linked back to selected receipt items/PO items.
+        return;
+      }
       const error = new Error(
         `${item.name || "This material"} is not present in the selected receipt.`
       );
@@ -6022,7 +6238,7 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
     }
   });
 
-  return effectiveReceiveGoodsId;
+  return effectiveReceiveGoodsIds[0] ?? null;
 };
 
 let reallocateInventoryPk = "Id";
@@ -7898,15 +8114,33 @@ app.delete("/api/projects/:id", async (req, res) => {
   }
 });
 
-app.get("/api/locations", async (_req, res) => {
+app.get("/api/locations", async (req, res) => {
   try {
     await ensureLocationsTable();
     const pool = await getPool();
-    const result = await pool.request().query(`
+    const requestedProjectId = toNullableInt(req.query?.projectId);
+    const hasProjectFilter = requestedProjectId !== null;
+    const locationsRequest = pool.request();
+
+    if (hasProjectFilter) {
+      locationsRequest.input("ProjectId", sql.Int, requestedProjectId);
+    }
+
+    const result = await locationsRequest.query(
+      hasProjectFilter
+        ? `
+      SELECT *
+      FROM dbo.Locations
+      WHERE ProjectId = @ProjectId
+         OR ProjectId IS NULL
+      ORDER BY LocationId DESC
+    `
+        : `
       SELECT *
       FROM dbo.Locations
       ORDER BY LocationId DESC
-    `);
+    `
+    );
     return res.json({
       ok: true,
       locations: (result.recordset ?? []).map(normalizeLocation),
@@ -9983,9 +10217,11 @@ app.delete("/api/boqs/:id", async (req, res) => {
 app.get("/api/delivery-challans", async (_req, res) => {
   try {
     await ensureDeliveryChallanTables();
+    await ensureReceiveTables();
     await ensureConsumptionTables();
     const pkCol = await refreshDeliveryChallanPk();
     await refreshDeliveryChallanItemsFk();
+    const receiveItemsPk = await refreshReceiveGoodsItemsPk();
     const consumptionHeaderPk = await refreshConsumptionPk();
     await refreshConsumptionItemsFk();
     const pool = await getPool();
@@ -10026,6 +10262,32 @@ app.get("/api/delivery-challans", async (_req, res) => {
       return acc;
     }, {});
 
+    const linkedReceiveGoodsItemIds = uniqueReceiveGoodsItemIds(
+      (itemsResult.recordset ?? []).map((row) =>
+        toNullableInt(row.ReceiveGoodsItemId ?? row.receiveGoodsItemId)
+      )
+    );
+    let receiveGoodsIdByItemId = new Map();
+    if (linkedReceiveGoodsItemIds.length) {
+      const receiveItemsRequest = pool.request();
+      const inClause = buildPurchaseOrderItemInClause(
+        receiveItemsRequest,
+        linkedReceiveGoodsItemIds,
+        "ReceiveGoodsItemId"
+      );
+      const receiveGoodsItemsResult = await receiveItemsRequest.query(`
+        SELECT ${toIdentifier(receiveItemsPk)} AS ReceiveGoodsItemId, ReceiveGoodsId
+        FROM dbo.ReceiveGoodsItems
+        WHERE ${toIdentifier(receiveItemsPk)} IN (${inClause})
+      `);
+      receiveGoodsIdByItemId = new Map(
+        (receiveGoodsItemsResult.recordset ?? []).map((row) => [
+          toNullableInt(row.ReceiveGoodsItemId),
+          toNullableInt(row.ReceiveGoodsId),
+        ])
+      );
+    }
+
     const itemsByConsumption = (consumptionItemsResult.recordset ?? []).reduce(
       (acc, row) => {
         const item = normalizeConsumptionItem(row);
@@ -10054,8 +10316,17 @@ app.get("/api/delivery-challans", async (_req, res) => {
       const challan = normalizeDeliveryChallan(row);
       const challanItems = itemsByChallan[challan.id] ?? [];
       const metrics = buildDeliveryChallanMetrics(challan, challanItems, consumptions);
+      const receiveGoodsIds = deriveDeliveryChallanReceiveGoodsIds(
+        challan,
+        challanItems,
+        receiveGoodsIdByItemId
+      );
       return {
         ...challan,
+        receiveGoodsIds,
+        receiveGoodsId:
+          toNullableInt(challan.receiveGoodsId) ??
+          (receiveGoodsIds.length ? receiveGoodsIds[0] : null),
         ...metrics,
         items: challanItems,
       };
@@ -10078,9 +10349,11 @@ app.get("/api/delivery-challans/:id", async (req, res) => {
 
   try {
     await ensureDeliveryChallanTables();
+    await ensureReceiveTables();
     await ensureConsumptionTables();
     const pkCol = await refreshDeliveryChallanPk();
     const fkCol = await refreshDeliveryChallanItemsFk();
+    const receiveItemsPk = await refreshReceiveGoodsItemsPk();
     const consumptionHeaderPk = await refreshConsumptionPk();
     const consumptionItemFk = await refreshConsumptionItemsFk();
     const pool = await getPool();
@@ -10108,6 +10381,31 @@ app.get("/api/delivery-challans/:id", async (req, res) => {
     const normalizedItems = (itemsResult.recordset ?? []).map(
       normalizeDeliveryChallanItem
     );
+    const linkedReceiveGoodsItemIds = uniqueReceiveGoodsItemIds(
+      normalizedItems.map((item) =>
+        toNullableInt(item.receiveGoodsItemId ?? item.ReceiveGoodsItemId)
+      )
+    );
+    let receiveGoodsIdByItemId = new Map();
+    if (linkedReceiveGoodsItemIds.length) {
+      const receiveItemsRequest = pool.request();
+      const inClause = buildPurchaseOrderItemInClause(
+        receiveItemsRequest,
+        linkedReceiveGoodsItemIds,
+        "ReceiveGoodsItemId"
+      );
+      const receiveItemsResult = await receiveItemsRequest.query(`
+        SELECT ${toIdentifier(receiveItemsPk)} AS ReceiveGoodsItemId, ReceiveGoodsId
+        FROM dbo.ReceiveGoodsItems
+        WHERE ${toIdentifier(receiveItemsPk)} IN (${inClause})
+      `);
+      receiveGoodsIdByItemId = new Map(
+        (receiveItemsResult.recordset ?? []).map((row) => [
+          toNullableInt(row.ReceiveGoodsItemId),
+          toNullableInt(row.ReceiveGoodsId),
+        ])
+      );
+    }
     const linkedConsumptionsResult = await pool
       .request()
       .input("DeliveryChallanId", sql.Int, toNullableInt(normalizedChallan.id))
@@ -10169,11 +10467,20 @@ app.get("/api/delivery-challans/:id", async (req, res) => {
       normalizedItems,
       linkedConsumptions
     );
+    const receiveGoodsIds = deriveDeliveryChallanReceiveGoodsIds(
+      normalizedChallan,
+      normalizedItems,
+      receiveGoodsIdByItemId
+    );
 
     return res.json({
       ok: true,
       deliveryChallan: {
         ...normalizedChallan,
+        receiveGoodsIds,
+        receiveGoodsId:
+          toNullableInt(normalizedChallan.receiveGoodsId) ??
+          (receiveGoodsIds.length ? receiveGoodsIds[0] : null),
         ...metrics,
         items: normalizedItems,
       },
@@ -10191,6 +10498,9 @@ app.post("/api/delivery-challans", async (req, res) => {
     dcNumber,
     projectId,
     receiveGoodsId = null,
+    receiveGoodsIds = [],
+    receiveGoodsReferences = [],
+    receiveReceiptReferences = [],
     fromLocationId,
     toLocationId = null,
     toLocation,
@@ -10204,7 +10514,13 @@ app.post("/api/delivery-challans", async (req, res) => {
 
   const safeDcNumber = normalizeOptionalString(dcNumber);
   const safeProjectId = toNullableInt(projectId);
-  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
+  const safeReceiveGoodsId = resolveReceiveGoodsSelectionId(receiveGoodsId);
+  const safeReceiveGoodsIds = uniqueReceiveGoodsIdsFromSelections([
+    ...(Array.isArray(receiveGoodsIds) ? receiveGoodsIds : []),
+    ...(Array.isArray(receiveGoodsReferences) ? receiveGoodsReferences : []),
+    ...(Array.isArray(receiveReceiptReferences) ? receiveReceiptReferences : []),
+    safeReceiveGoodsId,
+  ]);
   const safeFromLocationId = toNullableInt(fromLocationId);
   const safeToLocationId = toNullableInt(toLocationId);
   const safeToLocation = normalizeOptionalString(toLocation);
@@ -10284,6 +10600,7 @@ app.post("/api/delivery-challans", async (req, res) => {
     const resolvedReceiveGoodsId = await validateDeliveryChallanAgainstReceivedGoods(tx, {
       deliveryChallanId: null,
       receiveGoodsId: safeReceiveGoodsId,
+      receiveGoodsIds: safeReceiveGoodsIds,
       projectId: safeProjectId,
       items: normalizedItems,
     });
@@ -10350,12 +10667,17 @@ app.post("/api/delivery-challans", async (req, res) => {
       ok: true,
       deliveryChallan: {
         ...normalizeDeliveryChallan(headerRow),
+        receiveGoodsIds: safeReceiveGoodsIds.length
+          ? safeReceiveGoodsIds
+          : resolvedReceiveGoodsId
+          ? [resolvedReceiveGoodsId]
+          : [],
         items: (itemsResult.recordset ?? []).map(normalizeDeliveryChallanItem),
       },
     });
   } catch (error) {
     await rollbackTx(tx);
-    return res.status(500).json({
+    return res.status(error?.statusCode ?? 500).json({
       ok: false,
       error: error?.message ?? "Failed to create delivery challan",
     });
@@ -10372,6 +10694,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     dcNumber,
     projectId,
     receiveGoodsId = null,
+    receiveGoodsIds = [],
+    receiveGoodsReferences = [],
+    receiveReceiptReferences = [],
     fromLocationId,
     toLocationId = null,
     toLocation,
@@ -10385,7 +10710,13 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
 
   const safeDcNumber = normalizeOptionalString(dcNumber);
   const safeProjectId = toNullableInt(projectId);
-  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
+  const safeReceiveGoodsId = resolveReceiveGoodsSelectionId(receiveGoodsId);
+  const safeReceiveGoodsIds = uniqueReceiveGoodsIdsFromSelections([
+    ...(Array.isArray(receiveGoodsIds) ? receiveGoodsIds : []),
+    ...(Array.isArray(receiveGoodsReferences) ? receiveGoodsReferences : []),
+    ...(Array.isArray(receiveReceiptReferences) ? receiveReceiptReferences : []),
+    safeReceiveGoodsId,
+  ]);
   const safeFromLocationId = toNullableInt(fromLocationId);
   const safeToLocationId = toNullableInt(toLocationId);
   const safeToLocation = normalizeOptionalString(toLocation);
@@ -10465,6 +10796,7 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     const resolvedReceiveGoodsId = await validateDeliveryChallanAgainstReceivedGoods(tx, {
       deliveryChallanId: id,
       receiveGoodsId: safeReceiveGoodsId,
+      receiveGoodsIds: safeReceiveGoodsIds,
       projectId: safeProjectId,
       items: normalizedItems,
     });
@@ -10548,12 +10880,17 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       ok: true,
       deliveryChallan: {
         ...normalizeDeliveryChallan(headerRow),
+        receiveGoodsIds: safeReceiveGoodsIds.length
+          ? safeReceiveGoodsIds
+          : resolvedReceiveGoodsId
+          ? [resolvedReceiveGoodsId]
+          : [],
         items: (itemsResult.recordset ?? []).map(normalizeDeliveryChallanItem),
       },
     });
   } catch (error) {
     await rollbackTx(tx);
-    return res.status(500).json({
+    return res.status(error?.statusCode ?? 500).json({
       ok: false,
       error: error?.message ?? "Failed to update delivery challan",
     });
@@ -10694,6 +11031,166 @@ app.get("/api/consumptions/:id", async (req, res) => {
   }
 });
 
+const loadDeliveryChallanSourceForConsumption = async (
+  tx,
+  {
+    deliveryChallanId = null,
+    deliveryChallanRef = null,
+  } = {}
+) => {
+  const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
+  const safeDeliveryChallanRef = normalizeOptionalString(deliveryChallanRef);
+  if (safeDeliveryChallanId === null && !safeDeliveryChallanRef) {
+    const error = new Error("deliveryChallanId is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  await ensureDeliveryChallanTables();
+  const deliveryPk = await refreshDeliveryChallanPk();
+  const deliveryFk = await refreshDeliveryChallanItemsFk();
+
+  const challanRequest = new sql.Request(tx);
+  challanRequest.input("DeliveryChallanId", sql.BigInt, safeDeliveryChallanId);
+  challanRequest.input(
+    "DeliveryChallanRef",
+    sql.NVarChar(100),
+    safeDeliveryChallanRef ?? null
+  );
+  const challanResult = await challanRequest.query(`
+    SELECT TOP 1 *
+    FROM dbo.DeliveryChallan
+    WHERE ${toIdentifier(deliveryPk)} = @DeliveryChallanId
+      OR (
+        @DeliveryChallanRef IS NOT NULL
+        AND LTRIM(RTRIM(@DeliveryChallanRef)) <> ''
+        AND LOWER(LTRIM(RTRIM(DCNumber))) = LOWER(LTRIM(RTRIM(@DeliveryChallanRef)))
+      )
+    ORDER BY CASE
+      WHEN ${toIdentifier(deliveryPk)} = @DeliveryChallanId THEN 0
+      ELSE 1
+    END,
+    ${toIdentifier(deliveryPk)} DESC
+  `);
+  const challanRow = challanResult.recordset?.[0] ?? null;
+  if (!challanRow) {
+    const error = new Error("Selected delivery challan was not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const challan = normalizeDeliveryChallan(challanRow);
+  const itemsResult = await new sql.Request(tx)
+    .input("DeliveryChallanId", sql.BigInt, toNullableInt(challan.id))
+    .query(`
+      SELECT *
+      FROM dbo.DeliveryChallanItems
+      WHERE ${toIdentifier(deliveryFk)} = @DeliveryChallanId
+    `);
+  const challanItems = (itemsResult.recordset ?? []).map(normalizeDeliveryChallanItem);
+  if (!challanItems.length) {
+    const error = new Error("The selected delivery challan has no line items.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return { challan, challanItems };
+};
+
+const mapConsumptionItemsFromDeliveryChallan = (
+  requestedItems = [],
+  challanItems = []
+) => {
+  const byReceiveGoodsItemId = new Map();
+  const byMaterialKey = new Map();
+
+  (Array.isArray(challanItems) ? challanItems : []).forEach((item) => {
+    const receiveGoodsItemId = toNullableInt(
+      item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+    );
+    if (receiveGoodsItemId !== null) {
+      byReceiveGoodsItemId.set(receiveGoodsItemId, item);
+    }
+    const materialKey = buildInventoryMaterialKey(item);
+    if (!materialKey) {
+      return;
+    }
+    if (!byMaterialKey.has(materialKey)) {
+      byMaterialKey.set(materialKey, []);
+    }
+    byMaterialKey.get(materialKey).push(item);
+  });
+
+  const materialKeyCursor = new Map();
+
+  return (Array.isArray(requestedItems) ? requestedItems : []).map((item) => {
+    const receiveGoodsItemId = toNullableInt(
+      item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+    );
+    let matchedSourceItem =
+      receiveGoodsItemId !== null
+        ? byReceiveGoodsItemId.get(receiveGoodsItemId) ?? null
+        : null;
+
+    if (!matchedSourceItem) {
+      const materialKey = buildInventoryMaterialKey(item);
+      if (materialKey) {
+        const options = byMaterialKey.get(materialKey) ?? [];
+        const cursor = materialKeyCursor.get(materialKey) ?? 0;
+        matchedSourceItem = options[cursor] ?? options[0] ?? null;
+        materialKeyCursor.set(materialKey, cursor + 1);
+      }
+    }
+
+    if (!matchedSourceItem) {
+      const error = new Error(
+        `${item.name || "This material"} is not present in the selected delivery challan.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return {
+      ...item,
+      boqItemId:
+        toNullableInt(
+          item.boqItemId ??
+            matchedSourceItem.itemId ??
+            matchedSourceItem.ItemId ??
+            null
+        ) ?? null,
+      receiveGoodsItemId:
+        toNullableInt(
+          item.receiveGoodsItemId ??
+            matchedSourceItem.receiveGoodsItemId ??
+            matchedSourceItem.ReceiveGoodsItemId ??
+            null
+        ) ?? null,
+      name: normalizeOptionalString(item.name) ?? matchedSourceItem.name ?? "Item",
+      description:
+        normalizeOptionalString(item.description ?? item.Description) ??
+        matchedSourceItem.description ??
+        null,
+      unit:
+        normalizeOptionalString(item.unit ?? item.Unit) ??
+        matchedSourceItem.unit ??
+        "PCS",
+      hsn:
+        normalizeOptionalString(item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode) ??
+        matchedSourceItem.hsn ??
+        null,
+      gst:
+        normalizeOptionalString(item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate) ??
+        matchedSourceItem.gst ??
+        null,
+      notes:
+        normalizeOptionalString(item.notes ?? item.Notes) ??
+        matchedSourceItem.notes ??
+        null,
+    };
+  });
+};
+
 app.post("/api/consumptions", async (req, res) => {
   const {
     consumptionNumber,
@@ -10740,6 +11237,12 @@ app.post("/api/consumptions", async (req, res) => {
   if (!safeLocationId) {
     return res.status(400).json({ ok: false, error: "locationId is required" });
   }
+  if (safeDeliveryChallanId === null && !safeDeliveryChallanRef) {
+    return res.status(400).json({
+      ok: false,
+      error: "deliveryChallanId is required",
+    });
+  }
   if (Number.isNaN(parsedConsumptionDate)) {
     return res.status(400).json({ ok: false, error: "Invalid consumptionDate" });
   }
@@ -10780,41 +11283,45 @@ app.post("/api/consumptions", async (req, res) => {
   let tx;
   try {
     await ensureConsumptionTables();
-    await ensureBoqTables();
-    if (safeReceiveGoodsId) {
-      await ensureReceiveTables();
-    }
+    await ensureReceiveTables();
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
     tx = pool.transaction();
     await tx.begin();
 
-    const useReceiveSource =
-      safeReceiveGoodsId !== null ||
-      safeDeliveryChallanId !== null ||
-      safeDeliveryChallanRef !== null ||
-      normalizedItems.some((item) => item.receiveGoodsItemId !== null);
-    const sourceItemIds = useReceiveSource
-      ? uniqueReceiveGoodsItemIds(
-          normalizedItems.map((item) => item.receiveGoodsItemId ?? null)
-        )
-      : uniqueBoqItemIds(normalizedItems.map((item) => item.boqItemId));
+    const { challan: resolvedDeliveryChallan, challanItems } =
+      await loadDeliveryChallanSourceForConsumption(tx, {
+        deliveryChallanId: safeDeliveryChallanId,
+        deliveryChallanRef: safeDeliveryChallanRef,
+      });
+    const mappedItems = mapConsumptionItemsFromDeliveryChallan(
+      normalizedItems,
+      challanItems
+    );
 
-    if (useReceiveSource) {
+    const sourceItemIds = uniqueReceiveGoodsItemIds(
+      mappedItems.map((item) => item.receiveGoodsItemId ?? null)
+    );
+    if (sourceItemIds.length) {
       const sourceItems = await loadReceiveGoodsItemsForConsumption(tx, {
-        receiveGoodsId: safeReceiveGoodsId,
+        receiveGoodsId: null,
         receiveGoodsItemIds: sourceItemIds,
       });
       const consumedTotals = await loadReceiveConsumedTotals(tx, sourceItemIds);
+      const requestedQtyBySourceId = mappedItems.reduce((acc, item) => {
+        const sourceId = toNullableInt(item.receiveGoodsItemId ?? null);
+        if (sourceId === null) {
+          return acc;
+        }
+        acc.set(sourceId, (acc.get(sourceId) ?? 0) + (Number(item.quantity) || 0));
+        return acc;
+      }, new Map());
       for (const row of sourceItems) {
         const sourceId = toNullableInt(row.id);
         const sourceQty = Number(row.receivedQty ?? 0) || 0;
         const alreadyConsumed = consumedTotals.get(sourceId) ?? 0;
-        const requestedQty =
-          normalizedItems
-            .find((item) => toNullableInt(item.receiveGoodsItemId ?? null) === sourceId)
-            ?.quantity ?? 0;
+        const requestedQty = requestedQtyBySourceId.get(sourceId) ?? 0;
         if (requestedQty > sourceQty - alreadyConsumed) {
           const error = new Error(
             `Quantity for ${row.name || "the linked receipt item"} cannot be greater than the available quantity (${Math.max(
@@ -10829,18 +11336,28 @@ app.post("/api/consumptions", async (req, res) => {
     }
 
     await validateConsumptionAgainstDeliveryChallan(tx, {
-      deliveryChallanId: safeDeliveryChallanId,
-      deliveryChallanRef: safeDeliveryChallanRef,
-      items: normalizedItems,
+      deliveryChallanId: resolvedDeliveryChallan.id,
+      deliveryChallanRef: resolvedDeliveryChallan.dcNumber,
+      items: mappedItems,
     });
 
+    const resolvedReceiveGoodsId =
+      toNullableInt(resolvedDeliveryChallan.receiveGoodsId) ?? safeReceiveGoodsId;
     const insertHeaderReq = new sql.Request(tx);
     insertHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
     insertHeaderReq.input("ProjectId", sql.Int, safeProjectId);
     insertHeaderReq.input("LocationId", sql.Int, safeLocationId);
-    insertHeaderReq.input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId);
-    insertHeaderReq.input("DeliveryChallanId", sql.Int, safeDeliveryChallanId);
-    insertHeaderReq.input("DeliveryChallanRef", sql.NVarChar(100), safeDeliveryChallanRef);
+    insertHeaderReq.input("ReceiveGoodsId", sql.Int, resolvedReceiveGoodsId);
+    insertHeaderReq.input(
+      "DeliveryChallanId",
+      sql.Int,
+      toNullableInt(resolvedDeliveryChallan.id)
+    );
+    insertHeaderReq.input(
+      "DeliveryChallanRef",
+      sql.NVarChar(100),
+      normalizeOptionalString(resolvedDeliveryChallan.dcNumber) ?? null
+    );
     insertHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
     insertHeaderReq.input("IssuedBy", sql.NVarChar(200), safeIssuedBy);
     insertHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
@@ -10865,14 +11382,14 @@ app.post("/api/consumptions", async (req, res) => {
       throw new Error("Failed to create consumption entry");
     }
 
-    for (const item of normalizedItems) {
+    for (const item of mappedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("ConsumptionId", sql.Int, consumptionId);
-      insertItemReq.input("BoqItemId", sql.Int, useReceiveSource ? null : item.boqItemId);
+      insertItemReq.input("BoqItemId", sql.Int, item.boqItemId ?? null);
       insertItemReq.input(
         "ReceiveGoodsItemId",
         sql.Int,
-        useReceiveSource ? (item.receiveGoodsItemId ?? item.boqItemId) : null
+        item.receiveGoodsItemId ?? null
       );
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
@@ -10888,13 +11405,6 @@ app.post("/api/consumptions", async (req, res) => {
         VALUES
           (@ConsumptionId, @BoqItemId, @ReceiveGoodsItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
-    }
-
-    if (!useReceiveSource) {
-      await refreshBoqAvailability(
-        tx,
-        normalizedItems.map((item) => item.boqItemId)
-      );
     }
 
     await tx.commit();
@@ -10915,7 +11425,7 @@ app.post("/api/consumptions", async (req, res) => {
     });
   } catch (error) {
     await rollbackTx(tx);
-    return res.status(500).json({
+    return res.status(error?.statusCode ?? 500).json({
       ok: false,
       error: error?.message ?? "Failed to create consumption",
     });
@@ -11013,10 +11523,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
   let tx;
   try {
     await ensureConsumptionTables();
-    await ensureBoqTables();
-    if (safeReceiveGoodsId) {
-      await ensureReceiveTables();
-    }
+    await ensureReceiveTables();
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
@@ -11031,6 +11538,10 @@ app.put("/api/consumptions/:id", async (req, res) => {
         WHERE ${pkCol} = @ConsumptionId
       `);
     const currentConsumptionRow = currentConsumptionResult.recordset?.[0] ?? null;
+    if (!currentConsumptionRow) {
+      await tx.rollback();
+      return res.status(404).json({ ok: false, error: "Consumption not found" });
+    }
 
     const existingItemsResult = await new sql.Request(tx)
       .input("ConsumptionId", sql.Int, id)
@@ -11040,32 +11551,35 @@ app.put("/api/consumptions/:id", async (req, res) => {
         WHERE ${fkCol} = @ConsumptionId
       `);
     const existingItems = existingItemsResult.recordset ?? [];
-    const existingBoqItemIds = existingItems
-      .map((row) => row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null)
-      .filter((value) => value !== null);
-    const existingReceiveGoodsItemIds = existingItems
-      .map(
-        (row) =>
-          row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? row.ReceiveItemId ?? null
-      )
-      .filter((value) => value !== null);
 
-    const useReceiveSource =
-      safeReceiveGoodsId !== null ||
-      currentConsumptionRow?.ReceiveGoodsId !== null ||
-      safeDeliveryChallanId !== null ||
-      safeDeliveryChallanRef !== null ||
-      currentConsumptionRow?.DeliveryChallanId !== null ||
-      currentConsumptionRow?.DeliveryChallanRef !== null ||
-      normalizedItems.some((item) => item.receiveGoodsItemId !== null);
+    const requestedDeliveryChallanId =
+      safeDeliveryChallanId ?? toNullableInt(currentConsumptionRow?.DeliveryChallanId);
+    const requestedDeliveryChallanRef =
+      safeDeliveryChallanRef ??
+      normalizeOptionalString(currentConsumptionRow?.DeliveryChallanRef) ??
+      null;
+    if (requestedDeliveryChallanId === null && !requestedDeliveryChallanRef) {
+      const error = new Error("deliveryChallanId is required");
+      error.statusCode = 400;
+      throw error;
+    }
 
-    if (useReceiveSource) {
-      const sourceReceiptId = safeReceiveGoodsId ?? currentConsumptionRow?.ReceiveGoodsId ?? null;
-      const sourceItemIds = uniqueReceiveGoodsItemIds(
-        normalizedItems.map((item) => item.receiveGoodsItemId ?? null)
-      );
+    const { challan: resolvedDeliveryChallan, challanItems } =
+      await loadDeliveryChallanSourceForConsumption(tx, {
+        deliveryChallanId: requestedDeliveryChallanId,
+        deliveryChallanRef: requestedDeliveryChallanRef,
+      });
+    const mappedItems = mapConsumptionItemsFromDeliveryChallan(
+      normalizedItems,
+      challanItems
+    );
+
+    const sourceItemIds = uniqueReceiveGoodsItemIds(
+      mappedItems.map((item) => item.receiveGoodsItemId ?? null)
+    );
+    if (sourceItemIds.length) {
       const sourceItems = await loadReceiveGoodsItemsForConsumption(tx, {
-        receiveGoodsId: sourceReceiptId,
+        receiveGoodsId: null,
         receiveGoodsItemIds: sourceItemIds,
       });
       const consumedTotals = await loadReceiveConsumedTotals(tx, sourceItemIds);
@@ -11078,6 +11592,14 @@ app.put("/api/consumptions/:id", async (req, res) => {
         }
         return acc;
       }, new Map());
+      const requestedQtyBySourceId = mappedItems.reduce((acc, item) => {
+        const sourceId = toNullableInt(item.receiveGoodsItemId ?? null);
+        if (sourceId === null) {
+          return acc;
+        }
+        acc.set(sourceId, (acc.get(sourceId) ?? 0) + (Number(item.quantity) || 0));
+        return acc;
+      }, new Map());
 
       for (const row of sourceItems) {
         const sourceId = toNullableInt(row.id);
@@ -11087,10 +11609,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
           (consumedTotals.get(sourceId) ?? 0) - existingQty,
           0
         );
-        const requestedQty =
-          normalizedItems
-            .find((item) => toNullableInt(item.receiveGoodsItemId ?? null) === sourceId)
-            ?.quantity ?? 0;
+        const requestedQty = requestedQtyBySourceId.get(sourceId) ?? 0;
         const availableQty = Math.max(sourceQty - consumedOtherThanCurrent, 0);
         if (requestedQty > availableQty) {
           const error = new Error(
@@ -11103,23 +11622,32 @@ app.put("/api/consumptions/:id", async (req, res) => {
     }
 
     await validateConsumptionAgainstDeliveryChallan(tx, {
-      deliveryChallanId: safeDeliveryChallanId ?? currentConsumptionRow?.DeliveryChallanId,
-      deliveryChallanRef:
-        safeDeliveryChallanRef ??
-        normalizeOptionalString(currentConsumptionRow?.DeliveryChallanRef) ??
-        null,
+      deliveryChallanId: resolvedDeliveryChallan.id,
+      deliveryChallanRef: resolvedDeliveryChallan.dcNumber,
       consumptionId: id,
-      items: normalizedItems,
+      items: mappedItems,
     });
 
+    const resolvedReceiveGoodsId =
+      toNullableInt(resolvedDeliveryChallan.receiveGoodsId) ??
+      safeReceiveGoodsId ??
+      toNullableInt(currentConsumptionRow?.ReceiveGoodsId);
     const updateHeaderReq = new sql.Request(tx);
     updateHeaderReq.input("ConsumptionId", sql.Int, id);
     updateHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
     updateHeaderReq.input("ProjectId", sql.Int, safeProjectId);
     updateHeaderReq.input("LocationId", sql.Int, safeLocationId);
-    updateHeaderReq.input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId);
-    updateHeaderReq.input("DeliveryChallanId", sql.Int, safeDeliveryChallanId);
-    updateHeaderReq.input("DeliveryChallanRef", sql.NVarChar(100), safeDeliveryChallanRef);
+    updateHeaderReq.input("ReceiveGoodsId", sql.Int, resolvedReceiveGoodsId);
+    updateHeaderReq.input(
+      "DeliveryChallanId",
+      sql.Int,
+      toNullableInt(resolvedDeliveryChallan.id)
+    );
+    updateHeaderReq.input(
+      "DeliveryChallanRef",
+      sql.NVarChar(100),
+      normalizeOptionalString(resolvedDeliveryChallan.dcNumber) ?? null
+    );
     updateHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
     updateHeaderReq.input("IssuedBy", sql.NVarChar(200), safeIssuedBy);
     updateHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
@@ -11162,14 +11690,14 @@ app.put("/api/consumptions/:id", async (req, res) => {
       DELETE FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
     `);
 
-    for (const item of normalizedItems) {
+    for (const item of mappedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("ConsumptionId", sql.Int, id);
-      insertItemReq.input("BoqItemId", sql.Int, useReceiveSource ? null : item.boqItemId);
+      insertItemReq.input("BoqItemId", sql.Int, item.boqItemId ?? null);
       insertItemReq.input(
         "ReceiveGoodsItemId",
         sql.Int,
-        useReceiveSource ? (item.receiveGoodsItemId ?? item.boqItemId) : null
+        item.receiveGoodsItemId ?? null
       );
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
@@ -11185,13 +11713,6 @@ app.put("/api/consumptions/:id", async (req, res) => {
         VALUES
           (@ConsumptionId, @BoqItemId, @ReceiveGoodsItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
-    }
-
-    if (!useReceiveSource) {
-      await refreshBoqAvailability(tx, [
-        ...existingBoqItemIds,
-        ...normalizedItems.map((item) => item.boqItemId),
-      ]);
     }
 
     await tx.commit();
@@ -11212,7 +11733,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
     });
   } catch (error) {
     await rollbackTx(tx);
-    return res.status(500).json({
+    return res.status(error?.statusCode ?? 500).json({
       ok: false,
       error: error?.message ?? "Failed to update consumption",
     });

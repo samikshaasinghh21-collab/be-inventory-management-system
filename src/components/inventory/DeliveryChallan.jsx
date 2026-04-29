@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import useSettings from "../../hooks/useSettings";
 import { getProjects } from "../../services/projectsStore";
 import { fetchLocations } from "../../services/locationsApi";
 import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
+import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import {
   createDeliveryChallan,
   deleteDeliveryChallan,
@@ -45,8 +47,11 @@ const createFormState = () => ({
   notes: "",
 });
 
+const getReceiptReference = (receipt = {}) =>
+  `RG-${String(receipt.receiveGoodsId ?? receipt.id ?? "").padStart(3, "0")}`;
+
 const buildReceiptReferenceLabel = (receipt = {}, projectName = "") => {
-  const receiptNumber = `RG-${String(receipt.receiveGoodsId ?? receipt.id ?? "").padStart(3, "0")}`;
+  const receiptNumber = getReceiptReference(receipt);
   const invoiceDateText = formatDate(receipt.invoiceDate ?? receipt.receivedDate ?? receipt.createdAt);
   return [
     receiptNumber,
@@ -57,16 +62,6 @@ const buildReceiptReferenceLabel = (receipt = {}, projectName = "") => {
     .filter(Boolean)
     .join(" | ");
 };
-
-const getReceiptItemSelectionKey = (item = {}, index = 0) =>
-  String(
-    item.receiveGoodsItemId ??
-      item.ReceiveGoodsItemId ??
-      item.id ??
-      item.poItemId ??
-      item.itemId ??
-      `receipt-item-${index}`
-  );
 
 const getReceiptItemReceivedQty = (item = {}) =>
   Number(
@@ -90,14 +85,14 @@ const getReceiptItemAvailableQty = (item = {}) =>
       getReceiptItemReceivedQty(item)
   ) || 0;
 
-const mapReceiptItemsToChallanItems = (receipt = {}, selectedKeys = null) =>
+const mapReceiptItemsToChallanItems = (
+  receipt = {},
+  resolveAvailableQty = getReceiptItemAvailableQty
+) =>
   (receipt.items || [])
     .map((item, index) => {
-      const selectionKey = getReceiptItemSelectionKey(item, index);
-      if (selectedKeys instanceof Set && selectedKeys.size && !selectedKeys.has(selectionKey)) {
-        return null;
-      }
-      const quantity = getReceiptItemAvailableQty(item);
+      const availableQty = Math.max(Number(resolveAvailableQty(item)) || 0, 0);
+      const quantity = availableQty;
       return {
         id: item.id ?? `${Date.now()}-${index}`,
         receiveGoodsItemId: item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? null,
@@ -114,7 +109,7 @@ const mapReceiptItemsToChallanItems = (receipt = {}, selectedKeys = null) =>
         hsn: item.hsn || "",
         gst: item.gst || "",
         receivedQty: getReceiptItemReceivedQty(item),
-        availableQty: getReceiptItemAvailableQty(item),
+        availableQty,
         quantity,
         rate: Number(item.unitPrice ?? item.rate ?? 0) || 0,
         notes: item.notes || "",
@@ -126,14 +121,30 @@ const mapReceiptItemsToChallanItems = (receipt = {}, selectedKeys = null) =>
 const fmtQty = (value) =>
   (Number(value) || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
+const normalizeLookupText = (value = "") => String(value ?? "").trim().toLowerCase();
+const normalizePreselectedReceiptIds = (value = []) =>
+  Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .map((entry) => String(entry ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+
 const DeliveryChallan = () => {
+  const location = useLocation();
+  const prefillSignatureRef = useRef("");
   const [projects, setProjects] = useState(() => getProjects());
   const [locations, setLocations] = useState([]);
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [receipts, setReceipts] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
   const [items, setItems] = useState([createLineItem()]);
-  const [selectedReceiptItemKeys, setSelectedReceiptItemKeys] = useState([]);
+  const [receiptFilters, setReceiptFilters] = useState({
+    search: "",
+  });
+  const [selectedReceiptIds, setSelectedReceiptIds] = useState([]);
   const [errors, setErrors] = useState({});
   const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [receiptError, setReceiptError] = useState("");
@@ -161,11 +172,33 @@ const DeliveryChallan = () => {
       setLocations([]);
     }
   };
-  const loadReceipts = async () => {
+  const loadPurchaseOrders = async () => {
+    try {
+      const list = await fetchPurchaseOrders();
+      setPurchaseOrders(Array.isArray(list) ? list : []);
+    } catch {
+      setPurchaseOrders([]);
+    }
+  };
+  const loadReceipts = async (projectId = null) => {
+    if (!projectId) {
+      setReceipts([]);
+      setReceiptError("");
+      setReceiptsLoading(false);
+      return;
+    }
     try {
       setReceiptsLoading(true);
-      const list = await fetchReceiveGoods();
-      setReceipts(Array.isArray(list) ? list : []);
+      // Fetch all POs for the project, then fetch receipts for each
+      const projectPOs = purchaseOrders.filter(
+        (po) => String(po.projectId) === String(projectId)
+      );
+      const allReceipts = [];
+      for (const po of projectPOs) {
+        const list = await fetchReceiveGoods(po.id);
+        allReceipts.push(...(Array.isArray(list) ? list : []));
+      }
+      setReceipts(allReceipts);
       setReceiptError("");
     } catch (error) {
       setReceipts([]);
@@ -182,8 +215,12 @@ const DeliveryChallan = () => {
   useEffect(() => {
     void loadRecords();
     void loadLocations();
-    void loadReceipts();
+    void loadPurchaseOrders();
   }, []);
+
+  useEffect(() => {
+    void loadReceipts(form.projectId || null);
+  }, [form.projectId, purchaseOrders]);
 
   useEffect(() => {
     const refreshRecords = () => {
@@ -195,23 +232,28 @@ const DeliveryChallan = () => {
     const refreshProjects = () => {
       setProjects(getProjects());
     };
+    const refreshPurchaseOrders = () => {
+      void loadPurchaseOrders();
+    };
     const refreshReceipts = () => {
-      void loadReceipts();
+      void loadReceipts(form.projectId || null);
     };
 
     window.addEventListener("delivery-challans:changed", refreshRecords);
     window.addEventListener("consumptions:changed", refreshRecords);
     window.addEventListener("locations:changed", refreshLocations);
     window.addEventListener("projects:changed", refreshProjects);
+    window.addEventListener("purchase-orders:changed", refreshPurchaseOrders);
     window.addEventListener("receive-goods:changed", refreshReceipts);
     return () => {
       window.removeEventListener("delivery-challans:changed", refreshRecords);
       window.removeEventListener("consumptions:changed", refreshRecords);
       window.removeEventListener("locations:changed", refreshLocations);
       window.removeEventListener("projects:changed", refreshProjects);
+      window.removeEventListener("purchase-orders:changed", refreshPurchaseOrders);
       window.removeEventListener("receive-goods:changed", refreshReceipts);
     };
-  }, []);
+  }, [form.projectId, purchaseOrders]);
 
   useEffect(() => {
     if (editingId || form.projectId || !projects.length) {
@@ -294,6 +336,21 @@ const DeliveryChallan = () => {
     }, {});
   }, [receipts]);
 
+  const receiptItemToReceiptIdMap = useMemo(() => {
+    return receipts.reduce((acc, receipt) => {
+      (receipt.items || []).forEach((item) => {
+        const itemId = String(
+          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? ""
+        );
+        if (!itemId) {
+          return;
+        }
+        acc[itemId] = String(receipt.id);
+      });
+      return acc;
+    }, {});
+  }, [receipts]);
+
   const destinationLocations = useMemo(() => {
     if (!form.projectId) {
       return locations;
@@ -320,22 +377,128 @@ const DeliveryChallan = () => {
     );
   }, [receipts, form.projectId]);
 
-  const selectedReceipt = useMemo(() => {
-    if (!form.receiveGoodsId) {
-      return null;
-    }
-    return receiptMap[String(form.receiveGoodsId)] ?? null;
-  }, [form.receiveGoodsId, receiptMap]);
+  const filteredReceiptsForSelection = useMemo(() => {
+    const filterPoId = String(receiptFilters.purchaseOrderId || "");
+    const searchText = normalizeLookupText(receiptFilters.search);
 
-  const selectedReceiptLabel = useMemo(() => {
-    if (!selectedReceipt) {
-      return "";
+    return receiptsForSelection.filter((receipt) => {
+      if (filterPoId && String(receipt.purchaseOrderId) !== filterPoId) {
+        return false;
+      }
+      if (searchText) {
+        const reference = normalizeLookupText(getReceiptReference(receipt));
+        if (!reference.includes(searchText)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [receiptFilters, receiptsForSelection]);
+
+  const selectedReceipts = useMemo(
+    () =>
+      selectedReceiptIds
+        .map((receiptId) => receiptMap[String(receiptId)])
+        .filter(Boolean),
+    [receiptMap, selectedReceiptIds]
+  );
+
+  const selectedReceiptPurchaseOrderIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          selectedReceipts
+            .map((receipt) => String(receipt.purchaseOrderId || ""))
+            .filter(Boolean)
+        )
+      ),
+    [selectedReceipts]
+  );
+
+  const selectedReceiptPurchaseOrderId =
+    selectedReceiptPurchaseOrderIds.length === 1
+      ? selectedReceiptPurchaseOrderIds[0]
+      : "";
+
+  const selectableFilteredReceiptIds = useMemo(() => {
+    if (selectedReceiptPurchaseOrderId) {
+      return filteredReceiptsForSelection
+        .filter(
+          (receipt) =>
+            String(receipt.purchaseOrderId || "") === selectedReceiptPurchaseOrderId
+        )
+        .map((receipt) => String(receipt.id));
     }
-    const projectName = projectMap[String(selectedReceipt.projectId)]?.name || "";
-    return buildReceiptReferenceLabel(selectedReceipt, projectName);
-  }, [projectMap, selectedReceipt]);
+    const visiblePurchaseOrderIds = Array.from(
+      new Set(
+        filteredReceiptsForSelection
+          .map((receipt) => String(receipt.purchaseOrderId || ""))
+          .filter(Boolean)
+      )
+    );
+    if (visiblePurchaseOrderIds.length === 1) {
+      return filteredReceiptsForSelection.map((receipt) => String(receipt.id));
+    }
+    return [];
+  }, [filteredReceiptsForSelection, selectedReceiptPurchaseOrderId]);
+
+  const deliveredQtyByReceiptItem = useMemo(() => {
+    return records.reduce((acc, record) => {
+      if (editingId && String(record.id) === String(editingId)) {
+        return acc;
+      }
+      (record.items || []).forEach((item) => {
+        const receiptItemId = Number.parseInt(
+          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? "",
+          10
+        );
+        if (!Number.isFinite(receiptItemId) || receiptItemId <= 0) {
+          return;
+        }
+        const deliveredQty = Number(item.quantity ?? item.Quantity ?? 0) || 0;
+        if (deliveredQty <= 0) {
+          return;
+        }
+        acc.set(receiptItemId, (acc.get(receiptItemId) ?? 0) + deliveredQty);
+      });
+      return acc;
+    }, new Map());
+  }, [editingId, records]);
+
+  const getRemainingReceiptItemQty = useCallback((item = {}) => {
+    const receiptQty = getReceiptItemReceivedQty(item);
+    const hintedAvailableQty = getReceiptItemAvailableQty(item);
+    const receiptItemId = Number.parseInt(
+      item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? "",
+      10
+    );
+    const alreadyDelivered =
+      Number.isFinite(receiptItemId) && receiptItemId > 0
+        ? deliveredQtyByReceiptItem.get(receiptItemId) ?? 0
+        : 0;
+    const remainingFromHistory = Math.max(receiptQty - alreadyDelivered, 0);
+    return Math.max(0, Math.min(hintedAvailableQty, remainingFromHistory));
+  }, [deliveredQtyByReceiptItem]);
+
+  const selectedReceiptItems = useMemo(() => {
+    return selectedReceipts.flatMap((receipt) =>
+      mapReceiptItemsToChallanItems(receipt, (item) => getRemainingReceiptItemQty(item))
+    );
+  }, [getRemainingReceiptItemQty, selectedReceipts]);
 
   const formatReceiptReference = (value) => {
+    if (Array.isArray(value)) {
+      const refs = value
+        .map((entry) => formatReceiptReference(entry))
+        .filter((entry) => entry && entry !== "-");
+      if (!refs.length) {
+        return "-";
+      }
+      if (refs.length <= 2) {
+        return refs.join(", ");
+      }
+      return `${refs.slice(0, 2).join(", ")} +${refs.length - 2} more`;
+    }
     if (value === null || value === undefined || value === "") {
       return "-";
     }
@@ -353,43 +516,85 @@ const DeliveryChallan = () => {
   };
 
   useEffect(() => {
-    if (receiptsLoading || !form.receiveGoodsId) {
+    if (!receipts.length) {
       return;
     }
-    const activeReceipt = receiptsForSelection.find(
-      (receipt) => String(receipt.id) === String(form.receiveGoodsId)
+    setSelectedReceiptIds((prev) =>
+      prev.filter((receiptId) => Boolean(receiptMap[String(receiptId)]))
     );
-    if (activeReceipt) {
-      return;
-    }
-    setForm((prev) => ({ ...prev, receiveGoodsId: "" }));
-  }, [form.receiveGoodsId, receiptsForSelection, receiptsLoading]);
+  }, [receiptMap, receipts.length]);
 
   useEffect(() => {
-    if (!selectedReceipt) {
-      setSelectedReceiptItemKeys([]);
+    if (editingId) {
       return;
     }
-    const allKeys = (selectedReceipt.items || []).map((item, index) =>
-      getReceiptItemSelectionKey(item, index)
+    if (!selectedReceipts.length) {
+      setItems([createLineItem()]);
+      setForm((prev) => ({ ...prev, receiveGoodsId: "" }));
+      return;
+    }
+    const nextItems = selectedReceiptItems.length
+      ? selectedReceiptItems
+      : [createLineItem()];
+    const primaryReceipt = selectedReceipts[0];
+    setItems(nextItems);
+    setForm((prev) => ({
+      ...prev,
+      receiveGoodsId: primaryReceipt?.id ? String(primaryReceipt.id) : "",
+      projectId: primaryReceipt?.projectId
+        ? String(primaryReceipt.projectId)
+        : prev.projectId,
+      fromLocationId: primaryReceipt?.locationId
+        ? String(primaryReceipt.locationId)
+        : prev.fromLocationId,
+    }));
+    setReceiptError(
+      selectedReceiptItems.length
+        ? ""
+        : "Selected receipts do not have items with available quantity."
     );
-    setSelectedReceiptItemKeys((prev) => {
-      if (editingId) {
-        const matchingKeys = prev.filter((key) => allKeys.includes(key));
-        return matchingKeys.length ? matchingKeys : allKeys;
-      }
-      return allKeys;
-    });
-  }, [editingId, selectedReceipt]);
+  }, [editingId, selectedReceiptItems, selectedReceipts]);
 
   const resetForm = () => {
     setForm(createFormState());
     setItems([createLineItem()]);
-    setSelectedReceiptItemKeys([]);
+    setReceiptFilters({
+      purchaseOrderId: "",
+      search: "",
+    });
+    setSelectedReceiptIds([]);
     setErrors({});
     setReceiptError("");
     setEditingId(null);
   };
+
+  useEffect(() => {
+    const preselectedIds = normalizePreselectedReceiptIds(
+      location.state?.preselectedReceiveGoodsIds
+    );
+    const preselectedPurchaseOrderId = String(
+      location.state?.preselectedPurchaseOrderId ?? ""
+    ).trim();
+
+    if (!preselectedIds.length || !preselectedPurchaseOrderId) {
+      return;
+    }
+
+    const signature = `${location.key}:${preselectedPurchaseOrderId}:${preselectedIds.join(",")}`;
+    if (prefillSignatureRef.current === signature) {
+      return;
+    }
+    prefillSignatureRef.current = signature;
+
+    setEditingId(null);
+    setErrors({});
+    setReceiptError("");
+    setReceiptFilters({
+      purchaseOrderId: preselectedPurchaseOrderId,
+      search: "",
+    });
+    setSelectedReceiptIds(preselectedIds);
+  }, [location.key, location.state]);
 
   const validate = () => {
     const nextErrors = {};
@@ -418,6 +623,13 @@ const DeliveryChallan = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    setReceiptError("");
+    if (selectedReceiptPurchaseOrderIds.length > 1) {
+      setReceiptError(
+        "Only receipts from the same purchase order can be fetched into one delivery challan."
+      );
+      return;
+    }
     if (!validate()) {
       return;
     }
@@ -434,6 +646,9 @@ const DeliveryChallan = () => {
     const payload = {
       ...form,
       receiveGoodsId: form.receiveGoodsId ? Number(form.receiveGoodsId) : null,
+      receiveGoodsIds: selectedReceiptIds
+        .map((receiptId) => Number(receiptId))
+        .filter((receiptId) => Number.isFinite(receiptId) && receiptId > 0),
       items: cleanedItems,
     };
 
@@ -446,6 +661,12 @@ const DeliveryChallan = () => {
       await loadRecords();
       resetForm();
     } catch (error) {
+      const apiErrorMessage =
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to save delivery challan.";
+      setReceiptError(apiErrorMessage);
       console.error("Failed to save delivery challan:", error);
     }
   };
@@ -474,12 +695,29 @@ const DeliveryChallan = () => {
       notes: record.notes || "",
     });
     setItems(record.items?.length ? record.items : [createLineItem()]);
-    setSelectedReceiptItemKeys(
-      (record.items || [])
-        .map((item, index) => getReceiptItemSelectionKey(item, index))
-        .filter(Boolean)
-    );
+    const recordReceiptIds = Array.from(
+      new Set([
+        ...(Array.isArray(record.receiveGoodsIds) ? record.receiveGoodsIds : []),
+        ...(record.receiveGoodsId ? [record.receiveGoodsId] : []),
+        ...(record.items || [])
+          .map((item) => {
+            const linkedItemId = String(
+              item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? ""
+            );
+            return linkedItemId ? receiptItemToReceiptIdMap[linkedItemId] : null;
+          })
+          .filter(Boolean),
+      ])
+    ).map((value) => String(value));
+    setSelectedReceiptIds(recordReceiptIds);
     setErrors({});
+    setReceiptFilters((prev) => ({
+      ...prev,
+      purchaseOrderId:
+        recordReceiptIds.length > 0
+          ? String(receiptMap[recordReceiptIds[0]]?.purchaseOrderId || "")
+          : "",
+    }));
   };
 
   const handleDelete = async (id) => {
@@ -489,41 +727,6 @@ const DeliveryChallan = () => {
     } catch (error) {
       console.error("Failed to delete delivery challan:", error);
     }
-  };
-
-  const handlePickFromReceipt = () => {
-    if (!form.receiveGoodsId) {
-      setReceiptError("Select a receipt reference first.");
-      return;
-    }
-
-    const receipt = receiptMap[String(form.receiveGoodsId)];
-    if (!receipt) {
-      setReceiptError("No receive receipt found for that reference.");
-      return;
-    }
-    if (selectedReceiptItemKeys.length === 0) {
-      setReceiptError("Select at least one receipt item to create the challan.");
-      return;
-    }
-
-    const mapped = mapReceiptItemsToChallanItems(
-      receipt,
-      new Set(selectedReceiptItemKeys)
-    );
-
-    if (!mapped.length) {
-      setReceiptError("Select at least one receipt item to create the challan.");
-      return;
-    }
-
-    setItems(mapped);
-    setForm((prev) => ({
-      ...prev,
-      projectId: receipt.projectId ? String(receipt.projectId) : prev.projectId,
-      fromLocationId: receipt.locationId ? String(receipt.locationId) : prev.fromLocationId,
-    }));
-    setReceiptError("");
   };
 
   const challanMetaRows = useMemo(() => {
@@ -564,7 +767,12 @@ const DeliveryChallan = () => {
       toLocationId: preferredLocation ? String(preferredLocation.id) : "",
       toLocation: preferredLocation?.name || "",
     }));
-    setSelectedReceiptItemKeys([]);
+    setReceiptFilters((prev) => ({
+      ...prev,
+      purchaseOrderId: "",
+      search: "",
+    }));
+    setSelectedReceiptIds([]);
     setReceiptError("");
   };
 
@@ -579,25 +787,91 @@ const DeliveryChallan = () => {
     }));
   };
 
-  const toggleReceiptItemSelection = (selectionKey) => {
-    setSelectedReceiptItemKeys((prev) =>
-      prev.includes(selectionKey)
-        ? prev.filter((key) => key !== selectionKey)
-        : [...prev, selectionKey]
+  const handleReceiptFilterChange = (field, value) => {
+    setReceiptFilters((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+    if (field === "purchaseOrderId") {
+      setSelectedReceiptIds([]);
+      setReceiptError("");
+    }
+  };
+
+  const toggleReceiptSelection = (receiptId) => {
+    const receipt = receiptMap[String(receiptId)];
+    if (!receipt) {
+      return;
+    }
+    if (
+      receiptFilters.purchaseOrderId &&
+      String(receipt.purchaseOrderId) !== String(receiptFilters.purchaseOrderId)
+    ) {
+      return;
+    }
+    if (
+      selectedReceiptPurchaseOrderId &&
+      String(receipt.purchaseOrderId || "") !== selectedReceiptPurchaseOrderId &&
+      !selectedReceiptIds.includes(String(receiptId))
+    ) {
+      setReceiptError(
+        "Only receipts from the same purchase order can be selected for one delivery challan."
+      );
+      return;
+    }
+    if (selectedReceiptPurchaseOrderIds.length > 1) {
+      setReceiptError(
+        "Only receipts from the same purchase order can be selected for one delivery challan."
+      );
+      return;
+    }
+    setReceiptError("");
+    setSelectedReceiptIds((prev) =>
+      prev.includes(String(receiptId))
+        ? prev.filter((id) => id !== String(receiptId))
+        : [...prev, String(receiptId)]
     );
   };
 
-  const toggleAllReceiptItems = () => {
-    if (!selectedReceipt) {
+  const toggleAllFilteredReceipts = () => {
+    if (selectedReceiptPurchaseOrderIds.length > 1) {
+      setReceiptError(
+        "Only receipts from the same purchase order can be selected for one delivery challan."
+      );
       return;
     }
-    const allKeys = (selectedReceipt.items || []).map((item, index) =>
-      getReceiptItemSelectionKey(item, index)
+    const visiblePurchaseOrderIds = Array.from(
+      new Set(
+        filteredReceiptsForSelection
+          .map((receipt) => String(receipt.purchaseOrderId || ""))
+          .filter(Boolean)
+      )
     );
-    setSelectedReceiptItemKeys((prev) =>
-      prev.length === allKeys.length ? [] : allKeys
-    );
+    if (!selectedReceiptPurchaseOrderId && visiblePurchaseOrderIds.length > 1) {
+      setReceiptError(
+        "Select receipts from one purchase order at a time. Apply a purchase order filter before bulk select."
+      );
+      return;
+    }
+    const selectableReceiptIds = selectableFilteredReceiptIds;
+    if (!selectableReceiptIds.length) {
+      return;
+    }
+    setReceiptError("");
+    setSelectedReceiptIds((prev) => {
+      const allSelected = selectableReceiptIds.every((id) => prev.includes(id));
+      if (allSelected) {
+        return prev.filter((id) => !selectableReceiptIds.includes(id));
+      }
+      return Array.from(new Set([...prev, ...selectableReceiptIds]));
+    });
   };
+
+  const allFilteredReceiptsSelected =
+    selectableFilteredReceiptIds.length > 0 &&
+    selectableFilteredReceiptIds.every((receiptId) =>
+      selectedReceiptIds.includes(receiptId)
+    );
 
   const selectedProject = selectedChallan
     ? projectMap[String(selectedChallan.projectId)] || {}
@@ -829,102 +1103,117 @@ const DeliveryChallan = () => {
               <label className="text-sm font-medium text-slate-700">
                 Receive Receipt Reference (optional)
               </label>
-              <select
-                value={form.receiveGoodsId}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, receiveGoodsId: event.target.value }))
-                }
-                disabled={receiptsLoading}
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:bg-slate-100"
-              >
-                <option value="">
-                  {receiptsLoading
-                    ? "Loading receipts..."
-                    : receiptsForSelection.length
-                    ? "Select receipt reference"
-                    : "No receive receipts available"}
-                </option>
-                {receiptsForSelection.map((receipt) => (
-                  <option key={receipt.id} value={receipt.id}>
-                    {buildReceiptReferenceLabel(
-                      receipt,
-                      projectMap[String(receipt.projectId)]?.name || ""
-                    )}
-                  </option>
-                ))}
-              </select>
-              {selectedReceiptLabel ? (
-                <p className="mt-1 text-xs text-slate-500">
-                  Receipt selected: {selectedReceiptLabel}
-                </p>
-              ) : null}
-            </div>
-            {selectedReceipt && (
-              <div className="md:col-span-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="mt-1 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div>
-                    <p className="text-sm font-medium text-slate-700">
-                      Receipt Item Selection
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Select one or more received items to build the delivery challan.
-                    </p>
+                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Purchase Order
+                    </label>
+                    <select
+                      value={receiptFilters.purchaseOrderId}
+                      onChange={(event) =>
+                        handleReceiptFilterChange("purchaseOrderId", event.target.value)
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                    >
+                      <option value="">Select purchase order</option>
+                      {purchaseOrders.map((po) => (
+                        <option key={po.id} value={po.id}>
+                          {po.poNumber || `PO-${po.id}`}
+                        </option>
+                      ))}
+                    </select>
                   </div>
+                  <div>
+                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Receive Receipt Reference
+                    </label>
+                    <input
+                      type="text"
+                      value={receiptFilters.search}
+                      onChange={(event) =>
+                        handleReceiptFilterChange("search", event.target.value)
+                      }
+                      placeholder="Search reference (e.g. RG-001)"
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                    />
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-slate-500">
+                    Showing {filteredReceiptsForSelection.length} of {receiptsForSelection.length}{" "}
+                    receipts | Selected {selectedReceiptIds.length}
+                  </p>
                   <button
                     type="button"
-                    onClick={toggleAllReceiptItems}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
+                    onClick={toggleAllFilteredReceipts}
+                    disabled={!filteredReceiptsForSelection.length}
+                    className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {selectedReceiptItemKeys.length === (selectedReceipt.items || []).length
-                      ? "Clear All"
-                      : "Select All"}
+                    {allFilteredReceiptsSelected ? "Clear Visible" : "Select Visible"}
                   </button>
                 </div>
-                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                  <table className="min-w-[900px] text-sm">
-                    <thead className="bg-slate-100 text-slate-600">
-                      <tr>
-                        <th className="p-3 text-left min-w-[80px]">Select</th>
-                        <th className="p-3 text-left min-w-[200px]">Item</th>
-                        <th className="p-3 text-left min-w-[260px]">Description</th>
-                        <th className="p-3 text-left min-w-[100px]">Unit</th>
-                        <th className="p-3 text-left min-w-[120px]">Receipt Qty</th>
-                        <th className="p-3 text-left min-w-[120px]">Available Qty</th>
+              </div>
+              <div className="mt-3 max-h-[320px] overflow-auto rounded-lg border border-slate-200 bg-white">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-100 text-slate-600">
+                    <tr>
+                      <th className="p-3 text-left min-w-[80px]">Select</th>
+                      <th className="p-3 text-left min-w-[220px]">
+                        Receive Receipt Reference (optional)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receiptsLoading ? (
+                      <tr className="border-t">
+                        <td colSpan={2} className="p-4 text-center text-sm text-slate-500">
+                          Loading receipts...
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {(selectedReceipt.items || []).map((item, index) => {
-                        const selectionKey = getReceiptItemSelectionKey(item, index);
-                        const isSelected = selectedReceiptItemKeys.includes(selectionKey);
-                        const receiptQty = getReceiptItemReceivedQty(item);
-                        const availableQty = getReceiptItemAvailableQty(item);
+                    ) : !receiptFilters.purchaseOrderId ? (
+                      <tr className="border-t">
+                        <td colSpan={2} className="p-4 text-center text-sm text-slate-500">
+                          Select a purchase order to load related receipts.
+                        </td>
+                      </tr>
+                    ) : filteredReceiptsForSelection.length === 0 ? (
+                      <tr className="border-t">
+                        <td colSpan={2} className="p-4 text-center text-sm text-slate-500">
+                          No receipts match the current filters.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredReceiptsForSelection.map((receipt) => {
+                        const isSelected = selectedReceiptIds.includes(String(receipt.id));
+                        const isSelectable =
+                          selectedReceiptPurchaseOrderIds.length <= 1 &&
+                          (!selectedReceiptPurchaseOrderId ||
+                            isSelected ||
+                            String(receipt.purchaseOrderId || "") ===
+                              selectedReceiptPurchaseOrderId);
                         return (
-                          <tr key={selectionKey} className="border-t">
+                          <tr key={receipt.id} className="border-t">
                             <td className="p-3">
                               <input
                                 type="checkbox"
                                 checked={isSelected}
-                                onChange={() => toggleReceiptItemSelection(selectionKey)}
-                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                disabled={!isSelectable}
+                                onChange={() => toggleReceiptSelection(receipt.id)}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                               />
                             </td>
                             <td className="p-3 font-medium text-slate-800">
-                              {item.name || `Item ${index + 1}`}
+                              {getReceiptReference(receipt)}
                             </td>
-                            <td className="p-3 text-slate-600">
-                              {item.description || "-"}
-                            </td>
-                            <td className="p-3">{item.unit || "-"}</td>
-                            <td className="p-3">{receiptQty}</td>
-                            <td className="p-3">{availableQty}</td>
                           </tr>
                         );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
-            )}
+            </div>
             <div className="md:col-span-3">
               <label className="text-sm font-medium text-slate-700">
                 Notes
@@ -944,8 +1233,6 @@ const DeliveryChallan = () => {
         <LineItemsEditor
           items={items}
           onChange={setItems}
-          onPickFromProducts={handlePickFromReceipt}
-          pickLabel="Fetch Receipt Items"
           showHsnGst
         />
         {receiptError && <p className="text-xs text-red-600">{receiptError}</p>}
@@ -1022,7 +1309,11 @@ const DeliveryChallan = () => {
                   {record.dcNumber || "-"}
                 </td>
                 <td className="p-3 text-slate-700">
-                  {formatReceiptReference(record.receiveGoodsId)}
+                  {formatReceiptReference(
+                    Array.isArray(record.receiveGoodsIds) && record.receiveGoodsIds.length
+                      ? record.receiveGoodsIds
+                      : record.receiveGoodsId
+                  )}
                 </td>
                 <td className="p-3">
                   {projectMap[String(record.projectId)]?.name || "-"}
@@ -1122,7 +1413,12 @@ const DeliveryChallan = () => {
                   <p className="font-semibold">{selectedChallan.dcNumber || "-"}</p>
                   <p className="text-slate-600">Receipt Ref:</p>
                   <p className="font-semibold">
-                    {formatReceiptReference(selectedChallan.receiveGoodsId)}
+                    {formatReceiptReference(
+                      Array.isArray(selectedChallan.receiveGoodsIds) &&
+                        selectedChallan.receiveGoodsIds.length
+                        ? selectedChallan.receiveGoodsIds
+                        : selectedChallan.receiveGoodsId
+                    )}
                   </p>
                   <p className="text-slate-600">Date:</p>
                   <p className="font-semibold">{formatDate(selectedChallan.issueDate)}</p>

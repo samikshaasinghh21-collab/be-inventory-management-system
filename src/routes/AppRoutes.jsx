@@ -56,6 +56,10 @@ const AppRoutes = () => {
 
       <Route element={<MainLayout />}>
         <Route path="/inventory" element={<InventoryHome />} />
+        <Route
+          path="/inventory/material-planning"
+          element={<Navigate replace to="/inventory" />}
+        />
         <Route path="/inventory/tools" element={<ToolsHome />} />
         <Route path="/inventory/tools/list" element={<ToolsHome />} />
         <Route path="/inventory/tools/new" element={<ToolsAddTool />} />

@@ -1,5 +1,11 @@
 import api from "./api";
 
+const emitInventoryChange = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("products:changed"));
+  }
+};
+
 const normalizeItem = (item = {}) => {
   const taxPercentage = Number(item.taxPercentage ?? item.TaxPercentage ?? 0);
   const gst =
@@ -18,9 +24,20 @@ const normalizeItem = (item = {}) => {
     hsn: item.hsn ?? item.HSN ?? "",
     unit: item.unit ?? item.Unit ?? "PCS",
     stock: Number(item.stock ?? item.Stock ?? 0),
+    currentStock: Number(item.currentStock ?? item.stock ?? item.Stock ?? 0),
     price: Number(item.price ?? item.Price ?? 0),
     taxPercentage: Number.isFinite(taxPercentage) ? taxPercentage : 0,
     gst,
+    reOrderLevel: Number(
+      item.reOrderLevel ?? item.reorderLevel ?? item.ReOrderLevel ?? 0
+    ),
+    locationId: item.locationId ?? item.LocationId ?? null,
+    locationName:
+      item.locationName ??
+      item.LocationName ??
+      item.location ??
+      item.Location ??
+      "",
     serialRequired: !["0", "false", "no"].includes(
       String(serialRequiredRaw).trim().toLowerCase()
     ),
@@ -41,21 +58,28 @@ export const fetchItems = async () => {
 
 export const createItem = async (item) => {
   const response = await api.post("/items", item);
-  return normalizeItem(response.data?.item ?? response.data);
+  const normalized = normalizeItem(response.data?.item ?? response.data);
+  emitInventoryChange();
+  return normalized;
 };
 
 export const updateItemApi = async (id, item) => {
   const response = await api.put(`/items/${id}`, item);
-  return normalizeItem(response.data?.item ?? response.data);
+  const normalized = normalizeItem(response.data?.item ?? response.data);
+  emitInventoryChange();
+  return normalized;
 };
 
 export const deleteItemApi = async (id) => {
   await api.delete(`/items/${id}`);
+  emitInventoryChange();
 };
 
 export const updateQuantityApi = async (id, quantity) => {
   const response = await api.patch(`/items/${id}/quantity`, { stock: quantity });
-  return normalizeItem(response.data?.item ?? response.data);
+  const normalized = normalizeItem(response.data?.item ?? response.data);
+  emitInventoryChange();
+  return normalized;
 };
 
 export const itemInfoApi = async (id, name, quantity) => {

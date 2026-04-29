@@ -215,6 +215,8 @@ const ReceiveGoodsRegister = () => {
   const [filterProject, setFilterProject] = useState("");
   const [filterVendor, setFilterVendor] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [selectedReceiptIds, setSelectedReceiptIds] = useState([]);
+  const [selectionError, setSelectionError] = useState("");
   const [closedPoPromptReceipt, setClosedPoPromptReceipt] = useState(null);
   const [deleteLockedReceipt, setDeleteLockedReceipt] = useState(null);
   const [adminPassword, setAdminPassword] = useState("");
@@ -331,6 +333,13 @@ const ReceiveGoodsRegister = () => {
     }, {});
   }, [locations]);
 
+  const receiptMap = useMemo(() => {
+    return orderedReceipts.reduce((acc, receipt) => {
+      acc[String(receipt.id)] = receipt;
+      return acc;
+    }, {});
+  }, [orderedReceipts]);
+
   const filteredReceipts = orderedReceipts.filter((receipt) => {
     const query = search.trim().toLowerCase();
     if (!query) return true;
@@ -361,6 +370,68 @@ const ReceiveGoodsRegister = () => {
         .toLowerCase() === filterStatus.toLowerCase();
     return matchesProject && matchesVendor && matchesStatus;
   });
+
+  const selectedReceipts = useMemo(
+    () =>
+      selectedReceiptIds
+        .map((receiptId) => receiptMap[String(receiptId)])
+        .filter(Boolean),
+    [receiptMap, selectedReceiptIds]
+  );
+
+  const selectedPurchaseOrderIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          selectedReceipts
+            .map((receipt) => String(receipt.purchaseOrderId || ""))
+            .filter(Boolean)
+        )
+      ),
+    [selectedReceipts]
+  );
+
+  const selectedPurchaseOrderId =
+    selectedPurchaseOrderIds.length === 1 ? selectedPurchaseOrderIds[0] : "";
+
+  const visiblePurchaseOrderIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          filteredWithSelectors
+            .map((receipt) => String(receipt.purchaseOrderId || ""))
+            .filter(Boolean)
+        )
+      ),
+    [filteredWithSelectors]
+  );
+
+  const selectableVisibleReceiptIds = useMemo(() => {
+    if (selectedPurchaseOrderId) {
+      return filteredWithSelectors
+        .filter(
+          (receipt) =>
+            String(receipt.purchaseOrderId || "") === selectedPurchaseOrderId
+        )
+        .map((receipt) => String(receipt.id));
+    }
+    if (visiblePurchaseOrderIds.length === 1) {
+      return filteredWithSelectors.map((receipt) => String(receipt.id));
+    }
+    return [];
+  }, [filteredWithSelectors, selectedPurchaseOrderId, visiblePurchaseOrderIds]);
+
+  const allSelectableVisibleSelected =
+    selectableVisibleReceiptIds.length > 0 &&
+    selectableVisibleReceiptIds.every((receiptId) =>
+      selectedReceiptIds.includes(receiptId)
+    );
+
+  useEffect(() => {
+    setSelectedReceiptIds((prev) =>
+      prev.filter((receiptId) => Boolean(receiptMap[String(receiptId)]))
+    );
+  }, [receiptMap]);
 
   const totalReceivedLines = useMemo(
     () => receipts.reduce((sum, rec) => sum + (rec.items?.length || 0), 0),
@@ -520,6 +591,95 @@ const ReceiveGoodsRegister = () => {
     setAdminPasswordError("");
   };
 
+  const toggleReceiptSelection = (receipt) => {
+    if (!receipt?.id) {
+      return;
+    }
+    const receiptId = String(receipt.id);
+    const receiptPoId = String(receipt.purchaseOrderId || "");
+    const alreadySelected = selectedReceiptIds.includes(receiptId);
+
+    if (
+      !alreadySelected &&
+      selectedPurchaseOrderId &&
+      receiptPoId !== selectedPurchaseOrderId
+    ) {
+      setSelectionError(
+        "Only receipts from the same purchase order can be selected for one delivery challan."
+      );
+      return;
+    }
+
+    setSelectionError("");
+    setSelectedReceiptIds((prev) =>
+      prev.includes(receiptId)
+        ? prev.filter((id) => id !== receiptId)
+        : [...prev, receiptId]
+    );
+  };
+
+  const toggleVisibleReceiptSelection = () => {
+    if (!filteredWithSelectors.length) {
+      return;
+    }
+
+    if (!selectedPurchaseOrderId && visiblePurchaseOrderIds.length > 1) {
+      setSelectionError(
+        "Select receipts from one purchase order at a time. Apply a PO filter before bulk select."
+      );
+      return;
+    }
+
+    if (!selectableVisibleReceiptIds.length) {
+      setSelectionError(
+        "No receipts are selectable. Choose receipts from a single purchase order."
+      );
+      return;
+    }
+
+    setSelectionError("");
+    setSelectedReceiptIds((prev) => {
+      const allSelected = selectableVisibleReceiptIds.every((id) =>
+        prev.includes(id)
+      );
+      if (allSelected) {
+        return prev.filter((id) => !selectableVisibleReceiptIds.includes(id));
+      }
+      return Array.from(new Set([...prev, ...selectableVisibleReceiptIds]));
+    });
+  };
+
+  const handleFetchSelectedToDeliveryChallan = () => {
+    const selected = selectedReceiptIds
+      .map((receiptId) => receiptMap[String(receiptId)])
+      .filter(Boolean);
+
+    if (!selected.length) {
+      setSelectionError("Select at least one receipt to fetch into delivery challan.");
+      return;
+    }
+
+    const uniquePoIds = Array.from(
+      new Set(selected.map((receipt) => String(receipt.purchaseOrderId || "")).filter(Boolean))
+    );
+    if (uniquePoIds.length !== 1) {
+      setSelectionError(
+        "Selected receipts must belong to the same purchase order to fetch into one delivery challan."
+      );
+      return;
+    }
+
+    setSelectionError("");
+    navigate("/inventory/delivery-challan", {
+      state: {
+        preselectedReceiveGoodsIds: selected
+          .map((receipt) => String(receipt.id ?? "").trim())
+          .filter(Boolean),
+        preselectedPurchaseOrderId: uniquePoIds[0],
+      },
+    });
+  };
+
   const getReceiptTaxMode = (receipt) => {
     if (String(receipt?.taxMode || "").trim().toLowerCase() === "inter") {
       return "inter";
@@ -592,6 +752,11 @@ const ReceiveGoodsRegister = () => {
           {apiError}
         </div>
       )}
+      {selectionError && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          {selectionError}
+        </div>
+      )}
 
       <div
         id="receipts-register"
@@ -600,14 +765,30 @@ const ReceiveGoodsRegister = () => {
         <div className="px-4 py-3 border-b space-y-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <h3 className="text-lg font-semibold text-slate-800">Receipts</h3>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search PO, project, vendor, received by..."
-              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 max-w-full"
-            />
-          </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search PO, project, vendor, received by..."
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 max-w-full"
+              />
+              <button
+                type="button"
+                onClick={toggleVisibleReceiptSelection}
+                disabled={!filteredWithSelectors.length}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {allSelectableVisibleSelected ? "Clear Visible" : "Select Visible"}
+              </button>
+              <button
+                type="button"
+                onClick={handleFetchSelectedToDeliveryChallan}
+                disabled={!selectedReceiptIds.length}
+                className="px-3 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Fetch Selected to DC ({selectedReceiptIds.length})
+              </button>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <select
@@ -644,11 +825,18 @@ const ReceiveGoodsRegister = () => {
               <option value="Partially Received">Partially Received</option>
               <option value="Draft">Draft</option>
             </select>
+            <p className="self-center text-xs text-slate-500">
+              Selected: {selectedReceiptIds.length}
+              {selectedPurchaseOrderId
+                ? ` | PO ${poMap[selectedPurchaseOrderId]?.poNumber || selectedPurchaseOrderId}`
+                : ""}
+            </p>
           </div>
         </div>
         <table className="min-w-[1600px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
+              <th className="p-3 text-left min-w-[80px]">Select</th>
               <th className="p-3 text-left min-w-[90px]">Seq No</th>
               <th className="p-3 text-left min-w-[140px]">PO No</th>
               <th className="p-3 text-left min-w-[160px]">Project</th>
@@ -668,14 +856,14 @@ const ReceiveGoodsRegister = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="14" className="p-6 text-center text-slate-500">
+                <td colSpan="15" className="p-6 text-center text-slate-500">
                   Loading receipts...
                 </td>
               </tr>
             )}
             {!loading && filteredWithSelectors.length === 0 && (
               <tr>
-                <td colSpan="14" className="p-6 text-center text-slate-500">
+                <td colSpan="15" className="p-6 text-center text-slate-500">
                   No receipts found.
                 </td>
               </tr>
@@ -687,12 +875,28 @@ const ReceiveGoodsRegister = () => {
                 const vendor = vendorMap[String(receipt.vendorId || po?.vendorId)];
                 const location = locationMap[String(receipt.locationId || po?.locationId)];
                 const totals = getReceiptTotals(receipt);
+                const isSelected = selectedReceiptIds.includes(String(receipt.id));
+                const isSelectable =
+                  !selectedPurchaseOrderId ||
+                  String(receipt.purchaseOrderId || "") === selectedPurchaseOrderId;
                 return (
                   <Fragment key={`${receipt.id ?? "receipt"}-${index}`}>
                     <tr
                       className="border-t hover:bg-slate-50 cursor-pointer"
                       onClick={() => toggleRow(receipt.id)}
                     >
+                      <td
+                        className="p-3"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          disabled={!isSelectable}
+                          onChange={() => toggleReceiptSelection(receipt)}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </td>
                       <td className="p-3 font-medium text-slate-700">
                         {receiptSequenceMap[String(receipt.id)] || "-"}
                       </td>
@@ -772,7 +976,7 @@ const ReceiveGoodsRegister = () => {
                     </tr>
                     {expandedId === receipt.id && (
                       <tr className="bg-slate-50">
-                        <td colSpan="14" className="p-4">
+                        <td colSpan="15" className="p-4">
                           <div className="space-y-4">
                             <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                               <span>

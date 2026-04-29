@@ -14,12 +14,15 @@ import "./styles/cards.css";
 import "./styles/utilities.css";
 import App from './App.jsx'
 import { InventoryProvider } from './context/InventoryContext'
+import { NotificationProvider } from './context/NotificationContext'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
       <InventoryProvider>
-        <App />
+        <NotificationProvider>
+          <App />
+        </NotificationProvider>
       </InventoryProvider>
     </BrowserRouter>
   </StrictMode>,
