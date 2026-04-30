@@ -15,7 +15,7 @@ import { formatDate } from "../../utils/dateFormat";
 import { resolveBrandLogo } from "../../utils/branding";
 import { buildGstSummary } from "../../utils/taxUtils";
 import {
-  buildReceiveBillToText,
+  buildReceiveBillFromText,
   buildReceiveProjectDetailLines,
   buildReceiveShipToText,
   isReceiveProjectDetailsVisible,
@@ -431,7 +431,12 @@ const createReceiveForm = (
     receivedBy: receipt?.receivedBy || "",
     invoiceNumber: receipt?.invoiceNumber || "",
     invoiceDate: receipt?.invoiceDate || "",
-    billTo: receipt?.billTo ?? defaults.billTo ?? "",
+    billFrom:
+      receipt?.billFrom ??
+      receipt?.billTo ??
+      defaults.billFrom ??
+      defaults.billTo ??
+      "",
     shipTo: receipt?.shipTo ?? defaults.shipTo ?? "",
     showProjectDetails:
       receipt?.showProjectDetails ?? defaults.showProjectDetails ?? true,
@@ -764,7 +769,7 @@ const ReceiveGoods = () => {
             safeReceiptList,
             nextEditingReceipt,
             {
-            billTo: buildReceiveBillToText(selectedProject),
+            billFrom: buildReceiveBillFromText(selectedProject),
             shipTo: buildReceiveShipToText(selectedLocation),
             showProjectDetails: true,
             }
@@ -784,7 +789,7 @@ const ReceiveGoods = () => {
         setClosedPoOverrideApproved(false);
         setReceiveForm(
           createReceiveForm(selectedPurchaseOrder, [], null, {
-            billTo: buildReceiveBillToText(selectedProject),
+            billFrom: buildReceiveBillFromText(selectedProject),
             shipTo: buildReceiveShipToText(selectedLocation),
             showProjectDetails: true,
           })
@@ -1043,7 +1048,7 @@ const ReceiveGoods = () => {
         receivedBy: receiveForm.receivedBy.trim() || null,
         invoiceNumber: receiveForm.invoiceNumber.trim() || null,
         invoiceDate: receiveForm.invoiceDate || null,
-        billTo: receiveForm.billTo.trim() || null,
+        billFrom: receiveForm.billFrom?.trim() || null,
         shipTo: receiveForm.shipTo.trim() || null,
         showProjectDetails: receiveForm.showProjectDetails !== false,
         notes: receiveForm.notes.trim() || null,
@@ -1129,8 +1134,8 @@ const ReceiveGoods = () => {
     buildReceiptSummaryItems(viewReceipt, viewPurchaseOrder),
     { taxMode: viewReceipt?.taxMode || getPurchaseOrderTaxMode(viewPurchaseOrder) }
   );
-  const viewBillTo = splitDocumentText(
-    viewReceipt?.billTo || buildReceiveBillToText(viewProject)
+  const viewBillFrom = splitDocumentText(
+    viewReceipt?.billFrom || viewReceipt?.billTo || buildReceiveBillFromText(viewProject)
   );
   const viewShipTo = splitDocumentText(
     viewReceipt?.shipTo || buildReceiveShipToText(viewLocation)
@@ -1586,7 +1591,7 @@ const ReceiveGoods = () => {
                             receiptHistory,
                             editingReceipt,
                             {
-                            billTo: buildReceiveBillToText(selectedProject),
+                            billFrom: buildReceiveBillFromText(selectedProject),
                             shipTo: buildReceiveShipToText(selectedLocation),
                             showProjectDetails: true,
                    }
@@ -1678,11 +1683,11 @@ const ReceiveGoods = () => {
                       />
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-slate-700">Bill To</label>
+                      <label className="text-sm font-medium text-slate-700">Bill From</label>
                       <textarea
-                        value={receiveForm.billTo}
+                        value={receiveForm.billFrom}
                         onChange={(event) =>
-                          handleReceiveFieldChange("billTo", event.target.value)
+                          handleReceiveFieldChange("billFrom", event.target.value)
                         }
                         disabled={isReceiveReadOnly}
                         className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -2020,8 +2025,8 @@ const ReceiveGoods = () => {
             { label: "Status", value: viewReceipt.status || viewPurchaseOrder?.status || "Draft" },
             { label: "Received By", value: viewReceipt.receivedBy || "-" },
           ]}
-          leftBlockTitle="Bill To"
-          leftBlockLines={viewBillTo}
+          leftBlockTitle="Bill From"
+          leftBlockLines={viewBillFrom}
           rightBlockTitle="Ship To"
           rightBlockLines={viewShipTo}
           tableColumns={[

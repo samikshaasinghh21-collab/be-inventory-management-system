@@ -573,7 +573,7 @@ const PurchaseOrderRegister = () => {
               <th className="p-3 text-left min-w-[150px]">PO No</th>
               <th className="p-3 text-left min-w-[180px]">Vendor</th>
               <th className="p-3 text-left min-w-[180px]">Project</th>
-              <th className="p-3 text-left min-w-[160px]">Location</th>
+              <th className="p-3 text-left min-w-[160px]">Ship To</th>
               <th className="p-3 text-left min-w-[140px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
               <th className="p-3 text-left min-w-[130px]">Received Qty</th>
@@ -778,7 +778,7 @@ const PurchaseOrderRegister = () => {
                                 {formatAddressLine(vendor) || "-"}
                               </p>
                               <p>
-                                <strong>Location:</strong> {location?.name || "-"}
+                                <strong>Ship To:</strong> {location?.name || "-"}
                               </p>
                               <p>
                                 <strong>Order Date:</strong> {formatDate(record.orderDate) || "-"}

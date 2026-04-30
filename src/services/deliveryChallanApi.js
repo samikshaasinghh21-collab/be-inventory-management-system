@@ -88,6 +88,16 @@ export const fetchDeliveryChallans = async () => {
   return list.map(normalizeDeliveryChallan);
 };
 
+export const fetchNextDeliveryChallanNumber = async () => {
+  const response = await api.get("/delivery-challans/next-number");
+  return (
+    response.data?.dcNumber ??
+    response.data?.nextNumber ??
+    response.data?.deliveryChallanNumber ??
+    ""
+  );
+};
+
 export const createDeliveryChallan = async (payload) => {
   const response = await api.post("/delivery-challans", payload, {
     timeout: 60000,

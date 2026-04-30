@@ -203,7 +203,18 @@ export const normalizeReceiveGoods = (receipt = {}) => {
     receivedBy: receipt.receivedBy ?? receipt.ReceivedBy ?? "",
     invoiceNumber: receipt.invoiceNumber ?? receipt.InvoiceNumber ?? "",
     invoiceDate: receipt.invoiceDate ?? receipt.InvoiceDate ?? null,
-    billTo: receipt.billTo ?? receipt.BillTo ?? "",
+    billFrom:
+      receipt.billFrom ??
+      receipt.BillFrom ??
+      receipt.billTo ??
+      receipt.BillTo ??
+      "",
+    billTo:
+      receipt.billFrom ??
+      receipt.BillFrom ??
+      receipt.billTo ??
+      receipt.BillTo ??
+      "",
     shipTo: receipt.shipTo ?? receipt.ShipTo ?? "",
     showProjectDetails:
       rawShowProjectDetails === null || rawShowProjectDetails === undefined
@@ -223,9 +234,17 @@ export const normalizeReceiveGoods = (receipt = {}) => {
   };
 };
 
-export const fetchReceiveGoods = async (purchaseOrderId) => {
+export const fetchReceiveGoods = async (purchaseOrderIdOrFilters = null) => {
+  const params =
+    purchaseOrderIdOrFilters &&
+    typeof purchaseOrderIdOrFilters === "object" &&
+    !Array.isArray(purchaseOrderIdOrFilters)
+      ? purchaseOrderIdOrFilters
+      : purchaseOrderIdOrFilters
+      ? { purchaseOrderId: purchaseOrderIdOrFilters }
+      : undefined;
   const response = await api.get("/receive-goods", {
-    params: purchaseOrderId ? { purchaseOrderId } : undefined,
+    params,
   });
   const list = Array.isArray(response.data?.receipts)
     ? response.data.receipts

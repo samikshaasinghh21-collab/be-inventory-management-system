@@ -9,6 +9,7 @@ import {
 import { fetchVendors } from "../../services/vendorsApi";
 import { fetchBoqs } from "../../services/boqApi";
 import { fetchLocations } from "../../services/locationsApi";
+import { fetchConsumptions } from "../../services/consumptionApi";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
 import DateInput from "../common/DateInput";
@@ -70,7 +71,7 @@ const createFormState = () => ({
   poNumber: "",
   projectId: "",
   vendorId: "",
-  locationId: "",
+  shipToLocationId: "",
   status: "Draft",
   orderDate: new Date().toISOString().slice(0, 10),
   expectedDate: "",
@@ -100,6 +101,7 @@ const PurchaseOrder = () => {
   const [vendors, setVendors] = useState([]);
   const [locations, setLocations] = useState([]);
   const [records, setRecords] = useState([]);
+  const [consumptions, setConsumptions] = useState([]);
   const [form, setForm] = useState(createFormState);
   const [items, setItems] = useState([createLineItem()]);
   const [errors, setErrors] = useState({});
@@ -125,7 +127,7 @@ const PurchaseOrder = () => {
         poNumber: record.poNumber || "",
         projectId: record.projectId || "",
         vendorId: record.vendorId || "",
-        locationId: record.locationId || "",
+        shipToLocationId: record.shipToLocationId || record.locationId || "",
         status: record.status || "Draft",
         orderDate: record.orderDate || new Date().toISOString().slice(0, 10),
         expectedDate: record.expectedDate || "",
@@ -180,7 +182,7 @@ const PurchaseOrder = () => {
         ? String(recommendation.projectId)
         : "",
       vendorId: recommendation.vendorId ? String(recommendation.vendorId) : "",
-      locationId: recommendation.locationId
+      shipToLocationId: recommendation.locationId
         ? String(recommendation.locationId)
         : "",
       expectedDate: recommendation.deadline || "",
@@ -232,6 +234,14 @@ const PurchaseOrder = () => {
       setRecords([]);
     }
   };
+  const loadConsumptions = async () => {
+    try {
+      const list = await fetchConsumptions();
+      setConsumptions(Array.isArray(list) ? list : []);
+    } catch {
+      setConsumptions([]);
+    }
+  };
   const loadBoqs = async () => {
     try {
       setBoqsLoading(true);
@@ -256,19 +266,23 @@ const PurchaseOrder = () => {
     void loadLocations();
     void loadVendors();
     void loadBoqs();
+    void loadConsumptions();
   }, []);
 
   useEffect(() => {
     const refreshLinkedData = () => {
       void loadRecords();
       void loadBoqs();
+      void loadConsumptions();
     };
 
     window.addEventListener("purchase-orders:changed", refreshLinkedData);
     window.addEventListener("boqs:changed", refreshLinkedData);
+    window.addEventListener("consumptions:changed", refreshLinkedData);
     return () => {
       window.removeEventListener("purchase-orders:changed", refreshLinkedData);
       window.removeEventListener("boqs:changed", refreshLinkedData);
+      window.removeEventListener("consumptions:changed", refreshLinkedData);
     };
   }, []);
 
@@ -404,6 +418,119 @@ const PurchaseOrder = () => {
     });
   };
 
+  const blockedItemIds = useMemo(() => {
+    const next = new Set();
+    records.forEach((record) => {
+      if (editingId && String(record.id) === String(editingId)) {
+        return;
+      }
+      (record.items || []).forEach((item) => {
+        const itemId = Number.parseInt(item.itemId ?? item.ItemId ?? "", 10);
+        if (Number.isFinite(itemId) && itemId > 0) {
+          next.add(itemId);
+        }
+      });
+    });
+    consumptions.forEach((consumption) => {
+      (consumption.items || []).forEach((item) => {
+        const itemId = Number.parseInt(item.itemId ?? item.ItemId ?? "", 10);
+        if (Number.isFinite(itemId) && itemId > 0) {
+          next.add(itemId);
+        }
+      });
+    });
+    return next;
+  }, [consumptions, editingId, records]);
+
+  const blockedItemNames = useMemo(() => {
+    const next = new Set();
+    records.forEach((record) => {
+      if (editingId && String(record.id) === String(editingId)) {
+        return;
+      }
+      (record.items || []).forEach((item) => {
+        const normalized = String(item.name ?? "").trim().toLowerCase();
+        if (normalized) {
+          next.add(normalized);
+        }
+      });
+    });
+    consumptions.forEach((consumption) => {
+      (consumption.items || []).forEach((item) => {
+        const normalized = String(item.name ?? "").trim().toLowerCase();
+        if (normalized) {
+          next.add(normalized);
+        }
+      });
+    });
+    return next;
+  }, [consumptions, editingId, records]);
+
+  const editingRecord = useMemo(
+    () =>
+      editingId
+        ? records.find((record) => String(record.id) === String(editingId)) ?? null
+        : null,
+    [editingId, records]
+  );
+
+  const editingRecordItemIds = useMemo(
+    () =>
+      new Set(
+        (editingRecord?.items || [])
+          .map((item) => Number.parseInt(item.itemId ?? item.ItemId ?? "", 10))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      ),
+    [editingRecord]
+  );
+
+  const editingRecordItemNames = useMemo(
+    () =>
+      new Set(
+        (editingRecord?.items || [])
+          .map((item) => String(item.name ?? "").trim().toLowerCase())
+          .filter(Boolean)
+      ),
+    [editingRecord]
+  );
+
+  const activeFormItemIds = useMemo(
+    () =>
+      new Set(
+        items
+          .map((item) => Number.parseInt(item.itemId ?? item.ItemId ?? "", 10))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      ),
+    [items]
+  );
+
+  const hiddenCatalogItemIds = useMemo(
+    () =>
+      Array.from(blockedItemIds).filter(
+        (itemId) =>
+          !activeFormItemIds.has(itemId) && !editingRecordItemIds.has(itemId)
+      ),
+    [activeFormItemIds, blockedItemIds, editingRecordItemIds]
+  );
+
+  const activeFormItemNames = useMemo(
+    () =>
+      new Set(
+        items
+          .map((item) => String(item.name ?? "").trim().toLowerCase())
+          .filter(Boolean)
+      ),
+    [items]
+  );
+
+  const hiddenCatalogItemNames = useMemo(
+    () =>
+      Array.from(blockedItemNames).filter(
+        (name) => !activeFormItemNames.has(name) && !editingRecordItemNames.has(name)
+      ),
+    [activeFormItemNames, blockedItemNames, editingRecordItemNames]
+  );
+
   const isEditingLocked = Boolean(editingId) && isLockedPurchaseOrder(editingStatus);
   const isEditingLockedWithoutOverride = isEditingLocked && !closedPoOverrideApproved;
 
@@ -433,6 +560,45 @@ const PurchaseOrder = () => {
     );
     if (!hasValidItem) {
       nextErrors.items = "Add at least one line item.";
+    } else {
+      const seen = new Set();
+      for (const item of items) {
+        const name = String(item.name ?? "").trim();
+        const qty = Number(item.quantity) || 0;
+        if (!name || qty <= 0) {
+          continue;
+        }
+        const itemId = Number.parseInt(item.itemId ?? item.ItemId ?? "", 10);
+        const normalizedName = name.toLowerCase();
+        const normalizedUnit = String(item.unit ?? "PCS").trim().toUpperCase() || "PCS";
+        const identityKey = Number.isFinite(itemId) && itemId > 0
+          ? `id:${itemId}`
+          : `name:${normalizedName}::${normalizedUnit}`;
+        if (seen.has(identityKey)) {
+          nextErrors.items = `${name} is duplicated in line items.`;
+          break;
+        }
+        seen.add(identityKey);
+
+        if (
+          Number.isFinite(itemId) &&
+          itemId > 0 &&
+          blockedItemIds.has(itemId) &&
+          !editingRecordItemIds.has(itemId)
+        ) {
+          nextErrors.items = `${name} is already used in previous transactions and cannot be added again.`;
+          break;
+        }
+
+        if (
+          (!Number.isFinite(itemId) || itemId <= 0) &&
+          blockedItemNames.has(normalizedName) &&
+          !editingRecordItemNames.has(normalizedName)
+        ) {
+          nextErrors.items = `${name} is already used in previous transactions and cannot be added again.`;
+          break;
+        }
+      }
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -455,7 +621,8 @@ const PurchaseOrder = () => {
       poNumber: form.poNumber.trim(),
       projectId: form.projectId || null,
       vendorId: form.vendorId || null,
-      locationId: form.locationId || null,
+      locationId: form.shipToLocationId || null,
+      shipToLocationId: form.shipToLocationId || null,
       boqId: selectedBoqId || null,
       status: form.status,
       orderDate: form.orderDate || null,
@@ -739,20 +906,20 @@ const PurchaseOrder = () => {
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Location
+                Ship To
               </label>
               <select
-                value={form.locationId}
+                value={form.shipToLocationId}
                 onChange={(event) =>
                   setForm((prev) => ({
                     ...prev,
-                    locationId: event.target.value,
+                    shipToLocationId: event.target.value,
                   }))
                 }
                 disabled={isEditingLockedWithoutOverride}
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
               >
-                <option value="">Select location</option>
+                <option value="">Select ship-to location</option>
                 {locations.map((location) => (
                   <option key={location.id} value={location.id}>
                     {location.name}
@@ -989,8 +1156,11 @@ const PurchaseOrder = () => {
           showSerialNumber
           priceLabel="Unit Price"
           extraFieldKey="location"
-          extraFieldLabel="Location"
-          extraFieldPlaceholder="Site/store location"
+          extraFieldLabel="Ship To"
+          extraFieldPlaceholder="Ship-to note"
+          hiddenCatalogItemIds={hiddenCatalogItemIds}
+          hiddenCatalogItemNames={hiddenCatalogItemNames}
+          hideSelectedCatalogItems
           readOnly={isEditingLockedWithoutOverride}
         />
         {errors.items && (

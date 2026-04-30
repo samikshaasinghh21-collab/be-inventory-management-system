@@ -6,12 +6,28 @@ const emitConsumptionChange = () => {
   }
 };
 
+const parseIdList = (value) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 const normalizeConsumptionItem = (item = {}) => ({
   id: item.id ?? item.Id ?? null,
   consumptionId:
     item.consumptionId ?? item.ConsumptionId ?? item.ConsumptionID ?? null,
   boqItemId:
     item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId ?? null,
+  itemId: item.itemId ?? item.ItemId ?? item.BoqItemId ?? item.BOQItemId ?? null,
   receiveGoodsItemId:
     item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId ?? null,
   name: item.name ?? item.Item ?? item.item ?? item.Name ?? "",
@@ -20,6 +36,7 @@ const normalizeConsumptionItem = (item = {}) => ({
   hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
   gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
   quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+  consumeQty: Number(item.consumeQty ?? item.ConsumeQty ?? item.quantity ?? item.Quantity ?? 0) || 0,
   rate: Number(item.rate ?? item.Rate ?? 0) || 0,
   notes: item.notes ?? item.Notes ?? "",
 });
@@ -42,6 +59,11 @@ const normalizeConsumption = (consumption = {}) => ({
     consumption.DeliveryChallanId ??
     consumption.DeliverychallanId ??
     null,
+  deliveryChallanIds: parseIdList(
+    consumption.deliveryChallanIds ??
+      consumption.DeliveryChallanIds ??
+      consumption.DeliveryChallanIdsJson
+  ),
   deliveryChallanRef:
     consumption.deliveryChallanRef ??
     consumption.DeliveryChallanRef ??

@@ -4,7 +4,7 @@ const joinLines = (values = []) =>
     .filter(Boolean)
     .join("\n");
 
-export const buildReceiveBillToText = (project = null) =>
+export const buildReceiveBillFromText = (project = null) =>
   joinLines([
     project?.companyName || project?.name,
     project?.client ? `Client: ${project.client}` : "",
@@ -12,6 +12,8 @@ export const buildReceiveBillToText = (project = null) =>
     project?.gstNumber ? `GST: ${project.gstNumber}` : "",
     project?.phone ? `Phone: ${project.phone}` : "",
   ]);
+
+export const buildReceiveBillToText = buildReceiveBillFromText;
 
 export const buildReceiveShipToText = (location = null) =>
   joinLines([

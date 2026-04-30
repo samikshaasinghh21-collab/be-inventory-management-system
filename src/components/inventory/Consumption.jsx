@@ -199,6 +199,7 @@ const buildRowsFromSelectedChallan = ({
   challan,
   consumptions,
   editingConsumption,
+  autoSelectAvailable = false,
 }) => {
   if (!challan || !Array.isArray(challan.items) || !challan.items.length) {
     return [];
@@ -255,6 +256,13 @@ const buildRowsFromSelectedChallan = ({
     const availableQuantity = Math.max(dcQuantity - previouslyConsumed, 0);
     const existingItem = takeExistingItem({ sourceId, key, existingLookup });
     const existingQuantity = Math.max(toNumber(existingItem?.quantity), 0);
+    const shouldSelect = existingQuantity > 0 || (autoSelectAvailable && availableQuantity > 0);
+    const selectedQuantity =
+      existingQuantity > 0
+        ? Math.min(existingQuantity, availableQuantity || existingQuantity)
+        : autoSelectAvailable
+        ? availableQuantity
+        : 0;
 
     return {
       rowId: `${(sourceId ?? key) || "line"}-${index}`,
@@ -279,11 +287,8 @@ const buildRowsFromSelectedChallan = ({
       dcQty: dcQuantity,
       previouslyConsumed,
       availableQty: availableQuantity,
-      selected: existingQuantity > 0,
-      consumeQty:
-        existingQuantity > 0
-          ? String(Math.min(existingQuantity, availableQuantity || existingQuantity))
-          : "",
+      selected: shouldSelect,
+      consumeQty: selectedQuantity > 0 ? formatQuantityInputText(selectedQuantity) : "",
     };
   });
 };
@@ -326,6 +331,9 @@ const Consumption = () => {
 
   const [form, setForm] = useState(() => createEmptyForm({ company }));
   const [itemRows, setItemRows] = useState([]);
+  const [selectedDeliveryChallanIds, setSelectedDeliveryChallanIds] = useState([]);
+  const [loadedDeliveryChallanIds, setLoadedDeliveryChallanIds] = useState([]);
+  const [deliveryChallanFilter, setDeliveryChallanFilter] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editingConsumption, setEditingConsumption] = useState(null);
 
@@ -398,6 +406,9 @@ const Consumption = () => {
       setErrors({});
       setFeedback({ type: "", message: "" });
       setItemRows([]);
+      setSelectedDeliveryChallanIds([]);
+      setLoadedDeliveryChallanIds([]);
+      setDeliveryChallanFilter("");
       setForm(() => createEmptyForm({ records: nextRecords, company }));
     },
     [company, consumptions]
@@ -482,6 +493,62 @@ const Consumption = () => {
     [deliveryChallans, form.deliveryChallanId]
   );
 
+  const filteredDeliveryChallansForSelection = useMemo(() => {
+    const keyword = normalizeText(deliveryChallanFilter);
+    return availableChallans.filter((challan) => {
+      if (!keyword) {
+        return true;
+      }
+      const fromLocation =
+        locationMap[String(challan.fromLocationId)]?.name ||
+        challan.fromLocation ||
+        "";
+      const toLocation =
+        locationMap[String(challan.toLocationId)]?.name ||
+        challan.toLocation ||
+        "";
+      return [
+        challan.dcNumber,
+        fromLocation,
+        toLocation,
+        challan.status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(keyword);
+    });
+  }, [availableChallans, deliveryChallanFilter, locationMap]);
+
+  const selectedDeliveryChallans = useMemo(
+    () =>
+      selectedDeliveryChallanIds
+        .map((challanId) => deliveryChallanMap[String(challanId)])
+        .filter(Boolean),
+    [deliveryChallanMap, selectedDeliveryChallanIds]
+  );
+
+  const loadedDeliveryChallans = useMemo(
+    () =>
+      loadedDeliveryChallanIds
+        .map((challanId) => deliveryChallanMap[String(challanId)])
+        .filter(Boolean),
+    [deliveryChallanMap, loadedDeliveryChallanIds]
+  );
+
+  const selectableFilteredDeliveryChallanIds = useMemo(
+    () => filteredDeliveryChallansForSelection.map((challan) => String(challan.id)),
+    [filteredDeliveryChallansForSelection]
+  );
+
+  const allFilteredDeliveryChallansSelected = useMemo(() => {
+    if (!selectableFilteredDeliveryChallanIds.length) {
+      return false;
+    }
+    return selectableFilteredDeliveryChallanIds.every((challanId) =>
+      selectedDeliveryChallanIds.includes(challanId)
+    );
+  }, [selectableFilteredDeliveryChallanIds, selectedDeliveryChallanIds]);
+
   const allSelectableRows = useMemo(
     () => itemRows.filter((row) => row.availableQty > 0),
     [itemRows]
@@ -508,6 +575,56 @@ const Consumption = () => {
   const totalDcQuantity = useMemo(
     () => itemRows.reduce((sum, row) => sum + Math.max(toNumber(row.dcQty), 0), 0),
     [itemRows]
+  );
+
+  const getChallanItemCount = (challan = {}) =>
+    Array.isArray(challan.items) ? challan.items.length : 0;
+
+  const getChallanTotalQuantity = (challan = {}) =>
+    (Array.isArray(challan.items) ? challan.items : []).reduce(
+      (sum, item) => sum + Math.max(toNumber(item.quantity ?? item.Quantity), 0),
+      0
+    );
+
+  const getChallanAvailableQuantity = (challan = {}) =>
+    buildRowsFromSelectedChallan({
+      challan,
+      consumptions,
+      editingConsumption:
+        editingConsumption && isConsumptionLinkedToChallan(editingConsumption, challan)
+          ? editingConsumption
+          : null,
+    }).reduce((sum, row) => sum + Math.max(toNumber(row.availableQty), 0), 0);
+
+  const getChallanLocationLabel = (challan = {}, type = "to") => {
+    const id =
+      type === "from"
+        ? challan.fromLocationId ?? challan.FromLocationId
+        : challan.toLocationId ?? challan.ToLocationId;
+    const fallback =
+      type === "from"
+        ? challan.fromLocation ?? challan.FromLocation
+        : challan.toLocation ?? challan.ToLocation;
+    return locationMap[String(id)]?.name || fallback || "-";
+  };
+
+  const selectedDeliveryChallansSummary = useMemo(
+    () => ({
+      challans: selectedDeliveryChallans.length,
+      items: selectedDeliveryChallans.reduce(
+        (sum, challan) => sum + getChallanItemCount(challan),
+        0
+      ),
+      quantity: selectedDeliveryChallans.reduce(
+        (sum, challan) => sum + getChallanTotalQuantity(challan),
+        0
+      ),
+      availableQuantity: selectedDeliveryChallans.reduce(
+        (sum, challan) => sum + getChallanAvailableQuantity(challan),
+        0
+      ),
+    }),
+    [consumptions, editingConsumption, selectedDeliveryChallans]
   );
 
   const totalEntries = consumptions.length;
@@ -638,7 +755,11 @@ const Consumption = () => {
       deliveryChallanRef: "",
     }));
     setItemRows([]);
+    setSelectedDeliveryChallanIds([]);
+    setLoadedDeliveryChallanIds([]);
+    setDeliveryChallanFilter("");
     clearError("projectId");
+    clearError("locationId");
     clearError("deliveryChallanId");
   };
 
@@ -687,6 +808,7 @@ const Consumption = () => {
       challan: selected,
       consumptions,
       editingConsumption: shouldUseExistingItems ? editingConsumption : null,
+      autoSelectAvailable: !shouldUseExistingItems,
     });
 
     const locationId = resolveLocationIdFromChallan(selected);
@@ -700,6 +822,94 @@ const Consumption = () => {
     }));
 
     setItemRows(rows);
+    clearError("deliveryChallanId");
+    clearError("items");
+  };
+
+  const toggleDeliveryChallanSelection = (deliveryChallanId) => {
+    const id = String(deliveryChallanId);
+    if (!deliveryChallanMap[id]) {
+      return;
+    }
+    setSelectedDeliveryChallanIds((prev) =>
+      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
+    );
+    clearError("deliveryChallanId");
+  };
+
+  const toggleAllFilteredDeliveryChallans = () => {
+    if (!selectableFilteredDeliveryChallanIds.length) {
+      return;
+    }
+    setSelectedDeliveryChallanIds((prev) => {
+      const allSelected = selectableFilteredDeliveryChallanIds.every((id) =>
+        prev.includes(id)
+      );
+      if (allSelected) {
+        return prev.filter((id) => !selectableFilteredDeliveryChallanIds.includes(id));
+      }
+      return Array.from(new Set([...prev, ...selectableFilteredDeliveryChallanIds]));
+    });
+    clearError("deliveryChallanId");
+  };
+
+  const handleLoadSelectedDeliveryChallans = () => {
+    if (!selectedDeliveryChallans.length) {
+      setItemRows([]);
+      setLoadedDeliveryChallanIds([]);
+      setForm((prev) => ({
+        ...prev,
+        locationId: "",
+        deliveryChallanId: "",
+        deliveryChallanRef: "",
+      }));
+      return;
+    }
+
+    const loadedIds = selectedDeliveryChallans.map((challan) => String(challan.id));
+    const nextRows = selectedDeliveryChallans.flatMap((challan, challanIndex) => {
+      const shouldUseExistingItems =
+        editingConsumption && isConsumptionLinkedToChallan(editingConsumption, challan);
+      return buildRowsFromSelectedChallan({
+        challan,
+        consumptions,
+        editingConsumption: shouldUseExistingItems ? editingConsumption : null,
+        autoSelectAvailable: !shouldUseExistingItems,
+      }).map((row) => ({
+        ...row,
+        rowId: `${challan.id}-${row.rowId}`,
+        deliveryChallanId: toNullableInt(challan.id),
+        deliveryChallanRef: challan.dcNumber || "",
+        sourceDcNumber: challan.dcNumber || `DC ${challanIndex + 1}`,
+      }));
+    });
+
+    if (!nextRows.length || !nextRows.some((row) => row.availableQty > 0)) {
+      setErrors((prev) => ({
+        ...prev,
+        items: "Selected delivery challans do not have items with available quantity.",
+      }));
+      return;
+    }
+
+    const primaryChallan = selectedDeliveryChallans[0];
+    const locationId = resolveLocationIdFromChallan(primaryChallan);
+    const fallbackLocationId = selectedProjectLocations[0]?.id
+      ? String(selectedProjectLocations[0].id)
+      : "";
+    setLoadedDeliveryChallanIds(loadedIds);
+    setItemRows(nextRows);
+    setForm((prev) => ({
+      ...prev,
+      projectId: primaryChallan.projectId ? String(primaryChallan.projectId) : prev.projectId,
+      locationId: locationId || prev.locationId || fallbackLocationId,
+      deliveryChallanId: primaryChallan.id ? String(primaryChallan.id) : "",
+      deliveryChallanRef: selectedDeliveryChallans
+        .map((challan) => challan.dcNumber)
+        .filter(Boolean)
+        .join(", "),
+    }));
+    clearError("locationId");
     clearError("deliveryChallanId");
     clearError("items");
   };
@@ -769,10 +979,11 @@ const Consumption = () => {
         }
 
         const numeric = Math.max(toNumber(nextValue), 0);
+        const clamped = Math.min(numeric, Math.max(toNumber(row.availableQty), 0));
         return {
           ...row,
-          consumeQty: nextValue,
-          selected: numeric > 0,
+          consumeQty: clamped > 0 ? formatQuantityInputText(clamped) : "",
+          selected: clamped > 0,
         };
       })
     );
@@ -788,7 +999,10 @@ const Consumption = () => {
 
         const step = 1;
         const current = Math.max(toNumber(row.consumeQty), 0);
-        const next = Math.max(current + direction * step, 0);
+        const next = Math.min(
+          Math.max(current + direction * step, 0),
+          Math.max(toNumber(row.availableQty), 0)
+        );
         return {
           ...row,
           consumeQty: next > 0 ? formatQuantityInputText(next) : "",
@@ -825,8 +1039,8 @@ const Consumption = () => {
     if (!String(form.locationId || "").trim()) {
       nextErrors.locationId = "Location is required.";
     }
-    if (!String(form.deliveryChallanId || "").trim()) {
-      nextErrors.deliveryChallanId = "Delivery challan is required.";
+    if (!loadedDeliveryChallanIds.length) {
+      nextErrors.deliveryChallanId = "Select and load at least one delivery challan.";
     }
     if (!String(form.consumptionDate || "").trim()) {
       nextErrors.consumptionDate = "Consumption date is required.";
@@ -861,6 +1075,13 @@ const Consumption = () => {
           toNullableInt(row.boqItemId) ??
           toNullableInt(row.itemId) ??
           null,
+        itemId:
+          toNullableInt(row.itemId) ??
+          toNullableInt(row.boqItemId) ??
+          toNullableInt(row.receiveGoodsItemId) ??
+          null,
+        deliveryChallanId: toNullableInt(row.deliveryChallanId),
+        deliveryChallanRef: row.deliveryChallanRef || "",
         receiveGoodsItemId: toNullableInt(row.receiveGoodsItemId),
         name: row.name,
         description: row.description || "",
@@ -868,6 +1089,7 @@ const Consumption = () => {
         hsn: row.hsn || "",
         gst: row.gst || "",
         quantity: Math.max(toNumber(row.consumeQty), 0),
+        consumeQty: Math.max(toNumber(row.consumeQty), 0),
         rate: Math.max(toNumber(row.rate), 0),
         notes: row.notes || "",
       }))
@@ -878,8 +1100,13 @@ const Consumption = () => {
       projectId: toNullableInt(form.projectId),
       locationId: toNullableInt(form.locationId),
       deliveryChallanId: toNullableInt(form.deliveryChallanId),
+      deliveryChallanIds: loadedDeliveryChallanIds
+        .map((id) => toNullableInt(id))
+        .filter((id) => id !== null),
       deliveryChallanRef:
-        selectedChallan?.dcNumber || String(form.deliveryChallanRef || "").trim(),
+        loadedDeliveryChallans.length
+          ? loadedDeliveryChallans.map((challan) => challan.dcNumber).filter(Boolean).join(", ")
+          : selectedChallan?.dcNumber || String(form.deliveryChallanRef || "").trim(),
       consumptionDate: form.consumptionDate || null,
       issuedBy: String(form.issuedBy || "").trim(),
       status: String(form.status || "Logged").trim() || "Logged",
@@ -933,15 +1160,21 @@ const Consumption = () => {
   };
 
   const onEdit = (record) => {
-    const linkedChallan =
-      deliveryChallans.find(
-        (challan) => String(challan.id) === String(record.deliveryChallanId)
-      ) ||
-      deliveryChallans.find(
-        (challan) =>
-          normalizeText(challan.dcNumber) === normalizeText(record.deliveryChallanRef)
-      ) ||
-      null;
+    const recordChallanIds = Array.isArray(record.deliveryChallanIds)
+      ? record.deliveryChallanIds.map((id) => String(id))
+      : record.deliveryChallanId
+      ? [String(record.deliveryChallanId)]
+      : [];
+    const recordChallanRefs = String(record.deliveryChallanRef || "")
+      .split(",")
+      .map((value) => normalizeText(value))
+      .filter(Boolean);
+    const linkedChallans = deliveryChallans.filter((challan) => {
+      const id = String(challan.id);
+      const ref = normalizeText(challan.dcNumber);
+      return recordChallanIds.includes(id) || recordChallanRefs.includes(ref);
+    });
+    const linkedChallan = linkedChallans[0] ?? null;
 
     setEditingId(record.id);
     setEditingConsumption(record);
@@ -963,7 +1196,9 @@ const Consumption = () => {
       locationId: nextLocationId ? String(nextLocationId) : "",
       deliveryChallanId: linkedChallan ? String(linkedChallan.id) : "",
       deliveryChallanRef:
-        linkedChallan?.dcNumber || record.deliveryChallanRef || prev.deliveryChallanRef,
+        linkedChallans.length
+          ? linkedChallans.map((challan) => challan.dcNumber).filter(Boolean).join(", ")
+          : record.deliveryChallanRef || prev.deliveryChallanRef,
       consumptionDate:
         String(record.consumptionDate || "").slice(0, 10) || prev.consumptionDate,
       issuedBy: record.issuedBy || prev.issuedBy,
@@ -977,15 +1212,29 @@ const Consumption = () => {
       companyEmail: record.companyEmail || prev.companyEmail || company.email || "",
     }));
 
-    if (linkedChallan) {
-      const rows = buildRowsFromSelectedChallan({
-        challan: linkedChallan,
-        consumptions,
-        editingConsumption: record,
-      });
+    if (linkedChallans.length) {
+      const ids = linkedChallans.map((challan) => String(challan.id));
+      setSelectedDeliveryChallanIds(ids);
+      setLoadedDeliveryChallanIds(ids);
+      const rows = linkedChallans.flatMap((challan, challanIndex) =>
+        buildRowsFromSelectedChallan({
+          challan,
+          consumptions,
+          editingConsumption: record,
+        }).map((row) => ({
+          ...row,
+          rowId: `${challan.id}-${row.rowId}`,
+          deliveryChallanId: toNullableInt(challan.id),
+          deliveryChallanRef: challan.dcNumber || "",
+          sourceDcNumber: challan.dcNumber || `DC ${challanIndex + 1}`,
+        }))
+      );
       setItemRows(rows);
       return;
     }
+
+    setSelectedDeliveryChallanIds([]);
+    setLoadedDeliveryChallanIds([]);
 
     const fallbackRows = (record.items || []).map((item, index) => {
       const consumed = Math.max(toNumber(item.quantity), 0);
@@ -1125,68 +1374,6 @@ const Consumption = () => {
 
             <label>
               <span className="text-sm font-semibold text-slate-700">
-                Location <span className="text-red-600">*</span>
-              </span>
-              <select
-                className={field}
-                value={form.locationId}
-                onChange={(event) => {
-                  setForm((prev) => ({ ...prev, locationId: event.target.value }));
-                  clearError("locationId");
-                }}
-              >
-                <option value="">Select location</option>
-                {selectedProjectLocations.map((location) => (
-                  <option key={location.id} value={location.id}>
-                    {location.name}
-                  </option>
-                ))}
-              </select>
-              {errors.locationId && (
-                <p className="mt-1 text-xs text-red-600">{errors.locationId}</p>
-              )}
-            </label>
-
-            <label className="md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">
-                Delivery Challan <span className="text-red-600">*</span>
-              </span>
-              <select
-                className={field}
-                value={form.deliveryChallanId}
-                onChange={(event) => onDeliveryChallanChange(event.target.value)}
-              >
-                <option value="">Select delivery challan</option>
-                {availableChallans.map((challan) => {
-                  const projectName = projectMap[String(challan.projectId)]?.name || "";
-                  return (
-                    <option key={challan.id} value={challan.id}>
-                      {challan.dcNumber}
-                      {projectName ? ` | ${projectName}` : ""}
-                    </option>
-                  );
-                })}
-              </select>
-              {errors.deliveryChallanId && (
-                <p className="mt-1 text-xs text-red-600">{errors.deliveryChallanId}</p>
-              )}
-            </label>
-
-            <div className="flex items-end">
-              <div className="w-full rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-800">
-                <span className="font-semibold">DC Date:</span>{" "}
-                {selectedChallan ? formatDate(selectedChallan.issueDate) : "-"}
-                <span className="mx-2 text-violet-300">|</span>
-                <span className="font-semibold">Total Items:</span>{" "}
-                {itemRows.length}
-                <span className="mx-2 text-violet-300">|</span>
-                <span className="font-semibold">Total Qty:</span>{" "}
-                {formatQty(totalDcQuantity)}
-              </div>
-            </div>
-
-            <label>
-              <span className="text-sm font-semibold text-slate-700">
                 Consumption Date <span className="text-red-600">*</span>
               </span>
               <DateInput
@@ -1241,6 +1428,8 @@ const Consumption = () => {
                 ))}
               </select>
             </label>
+
+            <input type="hidden" value={form.locationId} readOnly />
           </div>
 
           <div className="grid grid-cols-1 gap-4 border-t border-slate-200 px-6 py-5 md:grid-cols-2">
@@ -1309,13 +1498,221 @@ const Consumption = () => {
         </section>
 
         <section className={panel}>
-          <div className="border-b border-slate-200 px-6 py-4">
-            <h3 className="text-2xl font-semibold text-violet-800">
-              Items from Delivery Challan
-            </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Select items and provide consumption quantity. Available quantity is based on delivery challan balance.
-            </p>
+          <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h3 className="text-2xl font-semibold text-violet-800">
+                Select Delivery Challans (All under selected Project)
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                All delivery challans from the selected project are listed below. Select one or more to load items.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                type="search"
+                value={deliveryChallanFilter}
+                onChange={(event) => setDeliveryChallanFilter(event.target.value)}
+                placeholder="Search DC number or location..."
+                className="w-full min-w-[260px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
+              />
+              <button
+                type="button"
+                onClick={() => void loadAll()}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 px-4 py-4 xl:grid-cols-[1fr_260px]">
+            <div className="overflow-hidden rounded-lg border border-slate-200">
+              <div className="max-h-[330px] overflow-auto">
+                <table className="min-w-[980px] w-full text-sm">
+                  <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
+                    <tr>
+                      <th className="w-12 px-3 py-3 text-left">
+                        <input
+                          type="checkbox"
+                          checked={allFilteredDeliveryChallansSelected}
+                          onChange={toggleAllFilteredDeliveryChallans}
+                          disabled={!filteredDeliveryChallansForSelection.length}
+                        />
+                      </th>
+                      <th className="px-3 py-3 text-left">DC Number</th>
+                      <th className="px-3 py-3 text-left">DC Date</th>
+                      <th className="px-3 py-3 text-left">From</th>
+                      <th className="px-3 py-3 text-left">To</th>
+                      <th className="px-3 py-3 text-right">Item Count</th>
+                      <th className="px-3 py-3 text-right">Total Quantity</th>
+                      <th className="px-3 py-3 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!form.projectId ? (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
+                          Select a project to load delivery challans.
+                        </td>
+                      </tr>
+                    ) : filteredDeliveryChallansForSelection.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
+                          No delivery challans found for this project.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredDeliveryChallansForSelection.map((challan) => {
+                        const id = String(challan.id);
+                        const isSelected = selectedDeliveryChallanIds.includes(id);
+                        return (
+                          <tr
+                            key={id}
+                            className="border-t border-slate-200 bg-white hover:bg-violet-50/40"
+                          >
+                            <td className="px-3 py-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleDeliveryChallanSelection(id)}
+                              />
+                            </td>
+                            <td className="px-3 py-3 font-semibold text-slate-800">
+                              {challan.dcNumber || "-"}
+                            </td>
+                            <td className="px-3 py-3 text-slate-700">
+                              {formatDate(challan.issueDate)}
+                            </td>
+                            <td className="px-3 py-3 text-slate-700">
+                              {getChallanLocationLabel(challan, "from")}
+                            </td>
+                            <td className="px-3 py-3 text-slate-700">
+                              {getChallanLocationLabel(challan, "to")}
+                            </td>
+                            <td className="px-3 py-3 text-right text-slate-700">
+                              {getChallanItemCount(challan)}
+                            </td>
+                            <td className="px-3 py-3 text-right font-semibold text-slate-800">
+                              {formatQty(getChallanTotalQuantity(challan))}
+                            </td>
+                            <td className="px-3 py-3 text-slate-700">
+                              <span
+                                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusPillClass(
+                                  challan.status
+                                )}`}
+                              >
+                                {challan.status || "Draft"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-slate-500">
+                  Showing {filteredDeliveryChallansForSelection.length} of {availableChallans.length} DCs
+                </p>
+                <div className="flex items-center gap-4">
+                  <span className="font-semibold text-violet-800">
+                    {selectedDeliveryChallanIds.length} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDeliveryChallanIds([])}
+                    disabled={!selectedDeliveryChallanIds.length}
+                    className="text-sm font-semibold text-violet-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                  >
+                    Clear Selection
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <aside className="rounded-lg border border-violet-100 bg-violet-50 p-4">
+              <p className="text-sm font-semibold text-violet-900">Selection Summary</p>
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-600">Total DCs Selected</span>
+                  <span className="font-semibold text-slate-900">
+                    {selectedDeliveryChallansSummary.challans}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-600">Total Items</span>
+                  <span className="font-semibold text-slate-900">
+                    {selectedDeliveryChallansSummary.items}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-600">Total Quantity</span>
+                  <span className="font-semibold text-slate-900">
+                    {formatQty(selectedDeliveryChallansSummary.quantity)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-600">Total Available Qty</span>
+                  <span className="font-semibold text-slate-900">
+                    {formatQty(selectedDeliveryChallansSummary.availableQuantity)}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleLoadSelectedDeliveryChallans}
+                disabled={!selectedDeliveryChallanIds.length}
+                className="mt-5 w-full rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Load Selected DCs
+              </button>
+              <p className="mt-3 text-xs text-slate-500">
+                Selected DCs will load their items below.
+              </p>
+            </aside>
+          </div>
+          {errors.deliveryChallanId && (
+            <p className="px-6 pb-4 text-xs text-red-600">{errors.deliveryChallanId}</p>
+          )}
+          {errors.locationId && (
+            <p className="px-6 pb-4 text-xs text-red-600">{errors.locationId}</p>
+          )}
+        </section>
+
+        <section className={panel}>
+          <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h3 className="text-2xl font-semibold text-violet-800">
+                Line Items (From Selected Delivery Challans)
+                {itemRows.length ? (
+                  <span className="ml-3 rounded-full bg-violet-100 px-2.5 py-1 align-middle text-xs font-semibold text-violet-700">
+                    {itemRows.length} Items
+                  </span>
+                ) : null}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Select items and provide consumption quantity. Available quantity is based on delivery challan balance.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onToggleAllRows(true)}
+                disabled={!allSelectableRows.length}
+                className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Add All Available Items
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleAllRows(false)}
+                disabled={!selectedRows.length}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
+              >
+                Clear Selection
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto px-2 pb-2 pt-3">

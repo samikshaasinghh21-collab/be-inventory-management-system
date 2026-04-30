@@ -98,6 +98,12 @@ const normalizePurchaseOrder = (order = {}) => ({
   projectId: order.projectId ?? order.ProjectId ?? null,
   vendorId: order.vendorId ?? order.VendorId ?? null,
   locationId: order.locationId ?? order.LocationId ?? null,
+  shipToLocationId:
+    order.shipToLocationId ??
+    order.ShipToLocationId ??
+    order.locationId ??
+    order.LocationId ??
+    null,
   boqId: order.boqId ?? order.BOQId ?? order.BoqId ?? null,
   status: order.status ?? order.Status ?? "Draft",
   orderDate: order.orderDate ?? order.OrderDate ?? null,

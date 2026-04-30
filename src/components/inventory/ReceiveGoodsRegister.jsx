@@ -14,7 +14,7 @@ import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import { buildGstSummary } from "../../utils/taxUtils";
 import {
-  buildReceiveBillToText,
+  buildReceiveBillFromText,
   buildReceiveProjectDetailLines,
   buildReceiveShipToText,
   isReceiveProjectDetailsVisible,
@@ -1116,10 +1116,11 @@ const ReceiveGoodsRegister = () => {
             },
             { label: "Received By", value: viewReceipt.receivedBy },
           ]}
-          leftBlockTitle="Bill To"
+          leftBlockTitle="Bill From"
           leftBlockLines={splitDocumentText(
-            viewReceipt.billTo ||
-              buildReceiveBillToText(
+            viewReceipt.billFrom ||
+              viewReceipt.billTo ||
+              buildReceiveBillFromText(
                 projectMap[
                   String(
                     viewReceipt.projectId ||

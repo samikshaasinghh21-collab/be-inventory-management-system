@@ -87,6 +87,9 @@ const LineItemsEditor = ({
   extraFieldPlaceholder = "Notes",
   priceLabel = "Rate",
   readOnly = false,
+  hiddenCatalogItemIds = [],
+  hiddenCatalogItemNames = [],
+  hideSelectedCatalogItems = false,
 }) => {
   const settings = useSettings();
   const currency = settings?.preferences?.currency || "INR";
@@ -101,6 +104,71 @@ const LineItemsEditor = ({
         .replace(/[^a-z0-9]+/g, "-") || "default"}`,
     [title]
   );
+
+  const selectedCatalogKeys = useMemo(() => {
+    if (!hideSelectedCatalogItems) {
+      return new Set();
+    }
+    return new Set(
+      (items || [])
+        .map((item) => {
+          const numericId = Number.parseInt(item.itemId ?? item.id ?? "", 10);
+          if (Number.isFinite(numericId) && numericId > 0) {
+            return `id:${numericId}`;
+          }
+          const normalizedName = String(item.name ?? "").trim().toLowerCase();
+          return normalizedName ? `name:${normalizedName}` : null;
+        })
+        .filter(Boolean)
+    );
+  }, [hideSelectedCatalogItems, items]);
+
+  const availableCatalogItems = useMemo(() => {
+    const blockedIds = new Set(
+      (Array.isArray(hiddenCatalogItemIds) ? hiddenCatalogItemIds : [])
+        .map((value) => Number.parseInt(value, 10))
+        .filter((value) => Number.isFinite(value) && value > 0)
+    );
+    const blockedNames = new Set(
+      (Array.isArray(hiddenCatalogItemNames) ? hiddenCatalogItemNames : [])
+        .map((value) => String(value ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    return catalogItems.filter((catalogItem) => {
+      const itemId = Number.parseInt(
+        catalogItem.itemId ?? catalogItem.id ?? "",
+        10
+      );
+      const normalizedName = String(catalogItem.name ?? "")
+        .trim()
+        .toLowerCase();
+      if (Number.isFinite(itemId) && itemId > 0 && blockedIds.has(itemId)) {
+        return false;
+      }
+      if (normalizedName && blockedNames.has(normalizedName)) {
+        return false;
+      }
+      if (hideSelectedCatalogItems) {
+        const selectionKey =
+          Number.isFinite(itemId) && itemId > 0
+            ? `id:${itemId}`
+            : normalizedName
+            ? `name:${normalizedName}`
+            : null;
+        if (selectionKey && selectedCatalogKeys.has(selectionKey)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [
+    catalogItems,
+    hiddenCatalogItemIds,
+    hiddenCatalogItemNames,
+    hideSelectedCatalogItems,
+    selectedCatalogKeys,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -181,7 +249,7 @@ const LineItemsEditor = ({
   const handleNameChange = (id, value) => {
     const normalizedValue = String(value ?? "").trim().toLowerCase();
     const matchedCatalogItem =
-      catalogItems.find(
+      availableCatalogItems.find(
         (catalogItem) => catalogItem.name.toLowerCase() === normalizedValue
       ) ?? null;
 
@@ -423,7 +491,7 @@ const LineItemsEditor = ({
         </table>
       </div>
       <datalist id={catalogListId}>
-        {catalogItems.map((catalogItem) => (
+        {availableCatalogItems.map((catalogItem) => (
           <option key={catalogItem.id ?? catalogItem.name} value={catalogItem.name} />
         ))}
       </datalist>

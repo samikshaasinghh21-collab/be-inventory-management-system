@@ -9,9 +9,9 @@ import {
   createDeliveryChallan,
   deleteDeliveryChallan,
   fetchDeliveryChallans,
+  fetchNextDeliveryChallanNumber,
   updateDeliveryChallan,
 } from "../../services/deliveryChallanApi";
-import LineItemsEditor from "./LineItemsEditor";
 import DateInput from "../common/DateInput";
 import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
@@ -93,6 +93,7 @@ const mapReceiptItemsToChallanItems = (
     .map((item, index) => {
       const availableQty = Math.max(Number(resolveAvailableQty(item)) || 0, 0);
       const quantity = availableQty;
+      const receivedQty = getReceiptItemReceivedQty(item);
       return {
         id: item.id ?? `${Date.now()}-${index}`,
         receiveGoodsItemId: item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? null,
@@ -108,7 +109,8 @@ const mapReceiptItemsToChallanItems = (
         unit: item.unit || "PCS",
         hsn: item.hsn || "",
         gst: item.gst || "",
-        receivedQty: getReceiptItemReceivedQty(item),
+        receivedQty,
+        previouslyUsedQty: Math.max(receivedQty - availableQty, 0),
         availableQty,
         quantity,
         rate: Number(item.unitPrice ?? item.rate ?? 0) || 0,
@@ -120,6 +122,8 @@ const mapReceiptItemsToChallanItems = (
 
 const fmtQty = (value) =>
   (Number(value) || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+const toQuantity = (value) => Number(value) || 0;
 
 const normalizeLookupText = (value = "") => String(value ?? "").trim().toLowerCase();
 const normalizePreselectedReceiptIds = (value = []) =>
@@ -140,7 +144,8 @@ const DeliveryChallan = () => {
   const [receipts, setReceipts] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
-  const [items, setItems] = useState([createLineItem()]);
+  const [items, setItems] = useState([]);
+  const [loadedReceiptIds, setLoadedReceiptIds] = useState([]);
   const [receiptFilters, setReceiptFilters] = useState({
     search: "",
   });
@@ -189,16 +194,8 @@ const DeliveryChallan = () => {
     }
     try {
       setReceiptsLoading(true);
-      // Fetch all POs for the project, then fetch receipts for each
-      const projectPOs = purchaseOrders.filter(
-        (po) => String(po.projectId) === String(projectId)
-      );
-      const allReceipts = [];
-      for (const po of projectPOs) {
-        const list = await fetchReceiveGoods(po.id);
-        allReceipts.push(...(Array.isArray(list) ? list : []));
-      }
-      setReceipts(allReceipts);
+      const list = await fetchReceiveGoods({ projectId: Number(projectId) });
+      setReceipts(Array.isArray(list) ? list : []);
       setReceiptError("");
     } catch (error) {
       setReceipts([]);
@@ -212,15 +209,29 @@ const DeliveryChallan = () => {
     }
   };
 
+  const loadNextDcNumber = async () => {
+    try {
+      const nextNumber = await fetchNextDeliveryChallanNumber();
+      if (nextNumber) {
+        setForm((prev) =>
+          editingId ? prev : { ...prev, dcNumber: nextNumber }
+        );
+      }
+    } catch {
+      // Keep manual input fallback if auto-number API fails.
+    }
+  };
+
   useEffect(() => {
     void loadRecords();
     void loadLocations();
     void loadPurchaseOrders();
+    void loadNextDcNumber();
   }, []);
 
   useEffect(() => {
     void loadReceipts(form.projectId || null);
-  }, [form.projectId, purchaseOrders]);
+  }, [form.projectId]);
 
   useEffect(() => {
     const refreshRecords = () => {
@@ -238,6 +249,9 @@ const DeliveryChallan = () => {
     const refreshReceipts = () => {
       void loadReceipts(form.projectId || null);
     };
+    const refreshNumber = () => {
+      void loadNextDcNumber();
+    };
 
     window.addEventListener("delivery-challans:changed", refreshRecords);
     window.addEventListener("consumptions:changed", refreshRecords);
@@ -245,6 +259,7 @@ const DeliveryChallan = () => {
     window.addEventListener("projects:changed", refreshProjects);
     window.addEventListener("purchase-orders:changed", refreshPurchaseOrders);
     window.addEventListener("receive-goods:changed", refreshReceipts);
+    window.addEventListener("delivery-challans:changed", refreshNumber);
     return () => {
       window.removeEventListener("delivery-challans:changed", refreshRecords);
       window.removeEventListener("consumptions:changed", refreshRecords);
@@ -252,8 +267,9 @@ const DeliveryChallan = () => {
       window.removeEventListener("projects:changed", refreshProjects);
       window.removeEventListener("purchase-orders:changed", refreshPurchaseOrders);
       window.removeEventListener("receive-goods:changed", refreshReceipts);
+      window.removeEventListener("delivery-challans:changed", refreshNumber);
     };
-  }, [form.projectId, purchaseOrders]);
+  }, [form.projectId]);
 
   useEffect(() => {
     if (editingId || form.projectId || !projects.length) {
@@ -329,6 +345,15 @@ const DeliveryChallan = () => {
     }, {});
   }, [locations]);
 
+  const purchaseOrderMap = useMemo(
+    () =>
+      purchaseOrders.reduce((acc, purchaseOrder) => {
+        acc[String(purchaseOrder.id)] = purchaseOrder;
+        return acc;
+      }, {}),
+    [purchaseOrders]
+  );
+
   const receiptMap = useMemo(() => {
     return receipts.reduce((acc, receipt) => {
       acc[String(receipt.id)] = receipt;
@@ -378,22 +403,42 @@ const DeliveryChallan = () => {
   }, [receipts, form.projectId]);
 
   const filteredReceiptsForSelection = useMemo(() => {
-    const filterPoId = String(receiptFilters.purchaseOrderId || "");
     const searchText = normalizeLookupText(receiptFilters.search);
-
+    if (!searchText) {
+      return receiptsForSelection;
+    }
     return receiptsForSelection.filter((receipt) => {
-      if (filterPoId && String(receipt.purchaseOrderId) !== filterPoId) {
-        return false;
-      }
-      if (searchText) {
-        const reference = normalizeLookupText(getReceiptReference(receipt));
-        if (!reference.includes(searchText)) {
-          return false;
-        }
-      }
-      return true;
+      const reference = normalizeLookupText(getReceiptReference(receipt));
+      const poNumber = normalizeLookupText(
+        purchaseOrderMap[String(receipt.purchaseOrderId)]?.poNumber ||
+          `PO-${receipt.purchaseOrderId || ""}`
+      );
+      return reference.includes(searchText) || poNumber.includes(searchText);
     });
-  }, [receiptFilters, receiptsForSelection]);
+  }, [purchaseOrderMap, receiptFilters, receiptsForSelection]);
+
+  const getReceiptPurchaseOrderNumber = useCallback(
+    (receipt = {}) =>
+      purchaseOrderMap[String(receipt.purchaseOrderId)]?.poNumber ||
+      receipt.poNumber ||
+      receipt.PONumber ||
+      (receipt.purchaseOrderId ? `PO-${receipt.purchaseOrderId}` : "-"),
+    [purchaseOrderMap]
+  );
+
+  const getReceiptItemCount = useCallback(
+    (receipt = {}) => (Array.isArray(receipt.items) ? receipt.items.length : 0),
+    []
+  );
+
+  const getReceiptTotalQuantity = useCallback(
+    (receipt = {}) =>
+      (receipt.items || []).reduce(
+        (sum, item) => sum + getReceiptItemReceivedQty(item),
+        0
+      ),
+    []
+  );
 
   const selectedReceipts = useMemo(
     () =>
@@ -403,44 +448,9 @@ const DeliveryChallan = () => {
     [receiptMap, selectedReceiptIds]
   );
 
-  const selectedReceiptPurchaseOrderIds = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          selectedReceipts
-            .map((receipt) => String(receipt.purchaseOrderId || ""))
-            .filter(Boolean)
-        )
-      ),
-    [selectedReceipts]
-  );
-
-  const selectedReceiptPurchaseOrderId =
-    selectedReceiptPurchaseOrderIds.length === 1
-      ? selectedReceiptPurchaseOrderIds[0]
-      : "";
-
   const selectableFilteredReceiptIds = useMemo(() => {
-    if (selectedReceiptPurchaseOrderId) {
-      return filteredReceiptsForSelection
-        .filter(
-          (receipt) =>
-            String(receipt.purchaseOrderId || "") === selectedReceiptPurchaseOrderId
-        )
-        .map((receipt) => String(receipt.id));
-    }
-    const visiblePurchaseOrderIds = Array.from(
-      new Set(
-        filteredReceiptsForSelection
-          .map((receipt) => String(receipt.purchaseOrderId || ""))
-          .filter(Boolean)
-      )
-    );
-    if (visiblePurchaseOrderIds.length === 1) {
-      return filteredReceiptsForSelection.map((receipt) => String(receipt.id));
-    }
-    return [];
-  }, [filteredReceiptsForSelection, selectedReceiptPurchaseOrderId]);
+    return filteredReceiptsForSelection.map((receipt) => String(receipt.id));
+  }, [filteredReceiptsForSelection]);
 
   const deliveredQtyByReceiptItem = useMemo(() => {
     return records.reduce((acc, record) => {
@@ -486,6 +496,33 @@ const DeliveryChallan = () => {
     );
   }, [getRemainingReceiptItemQty, selectedReceipts]);
 
+  const selectedReceiptsSummary = useMemo(
+    () => ({
+      receipts: selectedReceipts.length,
+      items: selectedReceipts.reduce(
+        (sum, receipt) => sum + getReceiptItemCount(receipt),
+        0
+      ),
+      quantity: selectedReceipts.reduce(
+        (sum, receipt) => sum + getReceiptTotalQuantity(receipt),
+        0
+      ),
+    }),
+    [getReceiptItemCount, getReceiptTotalQuantity, selectedReceipts]
+  );
+
+  const loadedReceiptsSummary = useMemo(() => {
+    const loadedIds = new Set(loadedReceiptIds.map((id) => String(id)));
+    const loadedReceipts = receipts.filter((receipt) =>
+      loadedIds.has(String(receipt.id))
+    );
+    return {
+      receipts: loadedReceipts.length,
+      items: items.length,
+      quantity: items.reduce((sum, item) => sum + toQuantity(item.quantity), 0),
+    };
+  }, [items, loadedReceiptIds, receipts]);
+
   const formatReceiptReference = (value) => {
     if (Array.isArray(value)) {
       const refs = value
@@ -528,59 +565,34 @@ const DeliveryChallan = () => {
     if (editingId) {
       return;
     }
-    if (!selectedReceipts.length) {
-      setItems([createLineItem()]);
-      setForm((prev) => ({ ...prev, receiveGoodsId: "" }));
-      return;
-    }
-    const nextItems = selectedReceiptItems.length
-      ? selectedReceiptItems
-      : [createLineItem()];
-    const primaryReceipt = selectedReceipts[0];
-    setItems(nextItems);
-    setForm((prev) => ({
-      ...prev,
-      receiveGoodsId: primaryReceipt?.id ? String(primaryReceipt.id) : "",
-      projectId: primaryReceipt?.projectId
-        ? String(primaryReceipt.projectId)
-        : prev.projectId,
-      fromLocationId: primaryReceipt?.locationId
-        ? String(primaryReceipt.locationId)
-        : prev.fromLocationId,
-    }));
-    setReceiptError(
-      selectedReceiptItems.length
-        ? ""
-        : "Selected receipts do not have items with available quantity."
+    setLoadedReceiptIds((prev) =>
+      prev.filter((receiptId) => selectedReceiptIds.includes(String(receiptId)))
     );
-  }, [editingId, selectedReceiptItems, selectedReceipts]);
+  }, [editingId, selectedReceiptIds]);
 
   const resetForm = () => {
     setForm(createFormState());
-    setItems([createLineItem()]);
+    setItems([]);
+    setLoadedReceiptIds([]);
     setReceiptFilters({
-      purchaseOrderId: "",
       search: "",
     });
     setSelectedReceiptIds([]);
     setErrors({});
     setReceiptError("");
     setEditingId(null);
+    void loadNextDcNumber();
   };
 
   useEffect(() => {
     const preselectedIds = normalizePreselectedReceiptIds(
       location.state?.preselectedReceiveGoodsIds
     );
-    const preselectedPurchaseOrderId = String(
-      location.state?.preselectedPurchaseOrderId ?? ""
-    ).trim();
-
-    if (!preselectedIds.length || !preselectedPurchaseOrderId) {
+    if (!preselectedIds.length) {
       return;
     }
 
-    const signature = `${location.key}:${preselectedPurchaseOrderId}:${preselectedIds.join(",")}`;
+    const signature = `${location.key}:${preselectedIds.join(",")}`;
     if (prefillSignatureRef.current === signature) {
       return;
     }
@@ -590,7 +602,6 @@ const DeliveryChallan = () => {
     setErrors({});
     setReceiptError("");
     setReceiptFilters({
-      purchaseOrderId: preselectedPurchaseOrderId,
       search: "",
     });
     setSelectedReceiptIds(preselectedIds);
@@ -616,6 +627,12 @@ const DeliveryChallan = () => {
     if (!hasValidItem) {
       nextErrors.items = "Add at least one line item.";
     }
+    const invalidQuantityItem = items.find(
+      (item) => Number(item.quantity) > Number(item.availableQty ?? item.quantity)
+    );
+    if (invalidQuantityItem) {
+      nextErrors.items = `DC quantity for ${invalidQuantityItem.name || "an item"} cannot exceed available quantity.`;
+    }
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -624,12 +641,6 @@ const DeliveryChallan = () => {
   const handleSubmit = async (event) => {
     event.preventDefault();
     setReceiptError("");
-    if (selectedReceiptPurchaseOrderIds.length > 1) {
-      setReceiptError(
-        "Only receipts from the same purchase order can be fetched into one delivery challan."
-      );
-      return;
-    }
     if (!validate()) {
       return;
     }
@@ -713,10 +724,7 @@ const DeliveryChallan = () => {
     setErrors({});
     setReceiptFilters((prev) => ({
       ...prev,
-      purchaseOrderId:
-        recordReceiptIds.length > 0
-          ? String(receiptMap[recordReceiptIds[0]]?.purchaseOrderId || "")
-          : "",
+      search: "",
     }));
   };
 
@@ -769,10 +777,11 @@ const DeliveryChallan = () => {
     }));
     setReceiptFilters((prev) => ({
       ...prev,
-      purchaseOrderId: "",
       search: "",
     }));
     setSelectedReceiptIds([]);
+    setLoadedReceiptIds([]);
+    setItems([]);
     setReceiptError("");
   };
 
@@ -787,42 +796,16 @@ const DeliveryChallan = () => {
     }));
   };
 
-  const handleReceiptFilterChange = (field, value) => {
+  const handleReceiptFilterChange = (value) => {
     setReceiptFilters((prev) => ({
       ...prev,
-      [field]: value,
+      search: value,
     }));
-    if (field === "purchaseOrderId") {
-      setSelectedReceiptIds([]);
-      setReceiptError("");
-    }
   };
 
   const toggleReceiptSelection = (receiptId) => {
     const receipt = receiptMap[String(receiptId)];
     if (!receipt) {
-      return;
-    }
-    if (
-      receiptFilters.purchaseOrderId &&
-      String(receipt.purchaseOrderId) !== String(receiptFilters.purchaseOrderId)
-    ) {
-      return;
-    }
-    if (
-      selectedReceiptPurchaseOrderId &&
-      String(receipt.purchaseOrderId || "") !== selectedReceiptPurchaseOrderId &&
-      !selectedReceiptIds.includes(String(receiptId))
-    ) {
-      setReceiptError(
-        "Only receipts from the same purchase order can be selected for one delivery challan."
-      );
-      return;
-    }
-    if (selectedReceiptPurchaseOrderIds.length > 1) {
-      setReceiptError(
-        "Only receipts from the same purchase order can be selected for one delivery challan."
-      );
       return;
     }
     setReceiptError("");
@@ -834,25 +817,6 @@ const DeliveryChallan = () => {
   };
 
   const toggleAllFilteredReceipts = () => {
-    if (selectedReceiptPurchaseOrderIds.length > 1) {
-      setReceiptError(
-        "Only receipts from the same purchase order can be selected for one delivery challan."
-      );
-      return;
-    }
-    const visiblePurchaseOrderIds = Array.from(
-      new Set(
-        filteredReceiptsForSelection
-          .map((receipt) => String(receipt.purchaseOrderId || ""))
-          .filter(Boolean)
-      )
-    );
-    if (!selectedReceiptPurchaseOrderId && visiblePurchaseOrderIds.length > 1) {
-      setReceiptError(
-        "Select receipts from one purchase order at a time. Apply a purchase order filter before bulk select."
-      );
-      return;
-    }
     const selectableReceiptIds = selectableFilteredReceiptIds;
     if (!selectableReceiptIds.length) {
       return;
@@ -865,6 +829,58 @@ const DeliveryChallan = () => {
       }
       return Array.from(new Set([...prev, ...selectableReceiptIds]));
     });
+  };
+
+  const handleLoadSelectedReceipts = () => {
+    if (!selectedReceipts.length) {
+      setItems([]);
+      setLoadedReceiptIds([]);
+      setForm((prev) => ({ ...prev, receiveGoodsId: "" }));
+      return;
+    }
+    const nextItems = selectedReceiptItems.length ? selectedReceiptItems : [];
+    if (!nextItems.length) {
+      setReceiptError("Selected receipts do not have items with available quantity.");
+      return;
+    }
+    const primaryReceipt = selectedReceipts[0];
+    setItems(
+      nextItems.map((item) => ({
+        ...item,
+        quantity: Number(item.quantity ?? item.availableQty ?? 0) || 0,
+      }))
+    );
+    setLoadedReceiptIds(selectedReceiptIds);
+    setForm((prev) => ({
+      ...prev,
+      receiveGoodsId: primaryReceipt?.id ? String(primaryReceipt.id) : "",
+      fromLocationId: primaryReceipt?.locationId
+        ? String(primaryReceipt.locationId)
+        : prev.fromLocationId,
+    }));
+    setReceiptError("");
+  };
+
+  const handleLineItemQuantityChange = (itemId, nextValue) => {
+    const parsed = Number(nextValue);
+    const safeValue = Number.isFinite(parsed) ? parsed : 0;
+    setItems((prev) =>
+      prev.map((item) => {
+        if (String(item.id) !== String(itemId)) {
+          return item;
+        }
+        const availableQty = Number(item.availableQty ?? 0) || 0;
+        const clamped = Math.max(0, Math.min(safeValue, availableQty));
+        return {
+          ...item,
+          quantity: clamped,
+        };
+      })
+    );
+  };
+
+  const handleRemoveLineItem = (itemId) => {
+    setItems((prev) => prev.filter((item) => String(item.id) !== String(itemId)));
   };
 
   const allFilteredReceiptsSelected =
@@ -1099,121 +1115,6 @@ const DeliveryChallan = () => {
                 <option value="Closed">Closed</option>
               </select>
             </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">
-                Receive Receipt Reference (optional)
-              </label>
-              <div className="mt-1 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div>
-                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Purchase Order
-                    </label>
-                    <select
-                      value={receiptFilters.purchaseOrderId}
-                      onChange={(event) =>
-                        handleReceiptFilterChange("purchaseOrderId", event.target.value)
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                    >
-                      <option value="">Select purchase order</option>
-                      {purchaseOrders.map((po) => (
-                        <option key={po.id} value={po.id}>
-                          {po.poNumber || `PO-${po.id}`}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Receive Receipt Reference
-                    </label>
-                    <input
-                      type="text"
-                      value={receiptFilters.search}
-                      onChange={(event) =>
-                        handleReceiptFilterChange("search", event.target.value)
-                      }
-                      placeholder="Search reference (e.g. RG-001)"
-                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                    />
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-xs text-slate-500">
-                    Showing {filteredReceiptsForSelection.length} of {receiptsForSelection.length}{" "}
-                    receipts | Selected {selectedReceiptIds.length}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={toggleAllFilteredReceipts}
-                    disabled={!filteredReceiptsForSelection.length}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {allFilteredReceiptsSelected ? "Clear Visible" : "Select Visible"}
-                  </button>
-                </div>
-              </div>
-              <div className="mt-3 max-h-[320px] overflow-auto rounded-lg border border-slate-200 bg-white">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-slate-100 text-slate-600">
-                    <tr>
-                      <th className="p-3 text-left min-w-[80px]">Select</th>
-                      <th className="p-3 text-left min-w-[220px]">
-                        Receive Receipt Reference (optional)
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {receiptsLoading ? (
-                      <tr className="border-t">
-                        <td colSpan={2} className="p-4 text-center text-sm text-slate-500">
-                          Loading receipts...
-                        </td>
-                      </tr>
-                    ) : !receiptFilters.purchaseOrderId ? (
-                      <tr className="border-t">
-                        <td colSpan={2} className="p-4 text-center text-sm text-slate-500">
-                          Select a purchase order to load related receipts.
-                        </td>
-                      </tr>
-                    ) : filteredReceiptsForSelection.length === 0 ? (
-                      <tr className="border-t">
-                        <td colSpan={2} className="p-4 text-center text-sm text-slate-500">
-                          No receipts match the current filters.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredReceiptsForSelection.map((receipt) => {
-                        const isSelected = selectedReceiptIds.includes(String(receipt.id));
-                        const isSelectable =
-                          selectedReceiptPurchaseOrderIds.length <= 1 &&
-                          (!selectedReceiptPurchaseOrderId ||
-                            isSelected ||
-                            String(receipt.purchaseOrderId || "") ===
-                              selectedReceiptPurchaseOrderId);
-                        return (
-                          <tr key={receipt.id} className="border-t">
-                            <td className="p-3">
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                disabled={!isSelectable}
-                                onChange={() => toggleReceiptSelection(receipt.id)}
-                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-                              />
-                            </td>
-                            <td className="p-3 font-medium text-slate-800">
-                              {getReceiptReference(receipt)}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
             <div className="md:col-span-3">
               <label className="text-sm font-medium text-slate-700">
                 Notes
@@ -1230,11 +1131,245 @@ const DeliveryChallan = () => {
           </div>
         </div>
 
-        <LineItemsEditor
-          items={items}
-          onChange={setItems}
-          showHsnGst
-        />
+        <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-indigo-800">
+                Select Receive Receipts (All under selected Project)
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                All receive receipts from purchase orders under the selected project are listed below.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                type="search"
+                value={receiptFilters.search}
+                onChange={(event) => handleReceiptFilterChange(event.target.value)}
+                placeholder="Search receipts or PO..."
+                className="w-full min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              />
+              <button
+                type="button"
+                onClick={() => loadReceipts(form.projectId || null)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-indigo-300"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_260px]">
+            <div className="overflow-hidden rounded-lg border border-slate-200">
+              <div className="max-h-[330px] overflow-auto">
+                <table className="min-w-[980px] w-full text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="w-12 px-3 py-3 text-left">
+                        <input
+                          type="checkbox"
+                          checked={allFilteredReceiptsSelected}
+                          onChange={toggleAllFilteredReceipts}
+                          disabled={!filteredReceiptsForSelection.length}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                        />
+                      </th>
+                      <th className="px-3 py-3 text-left">Receive Receipt Reference</th>
+                      <th className="px-3 py-3 text-left">Purchase Order Number</th>
+                      <th className="px-3 py-3 text-left">Received Date</th>
+                      <th className="px-3 py-3 text-right">Item Count</th>
+                      <th className="px-3 py-3 text-right">Total Quantity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receiptsLoading ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                          Loading receipts for the selected project...
+                        </td>
+                      </tr>
+                    ) : !form.projectId ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                          Select a project to load receive receipts.
+                        </td>
+                      </tr>
+                    ) : filteredReceiptsForSelection.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                          No receive receipts found for this project.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredReceiptsForSelection.map((receipt) => {
+                        const isSelected = selectedReceiptIds.includes(String(receipt.id));
+                        return (
+                          <tr key={receipt.id} className="border-t border-slate-200 bg-white hover:bg-indigo-50/30">
+                            <td className="px-3 py-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleReceiptSelection(receipt.id)}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                              />
+                            </td>
+                            <td className="px-3 py-3 font-semibold text-slate-800">
+                              {getReceiptReference(receipt)}
+                            </td>
+                            <td className="px-3 py-3 text-slate-700">
+                              {getReceiptPurchaseOrderNumber(receipt)}
+                            </td>
+                            <td className="px-3 py-3 text-slate-700">
+                              {formatDate(receipt.receivedDate || receipt.invoiceDate || receipt.createdAt)}
+                            </td>
+                            <td className="px-3 py-3 text-right text-slate-700">
+                              {getReceiptItemCount(receipt)}
+                            </td>
+                            <td className="px-3 py-3 text-right font-semibold text-slate-800">
+                              {fmtQty(getReceiptTotalQuantity(receipt))}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-slate-500">
+                  Showing {filteredReceiptsForSelection.length} of {receiptsForSelection.length} receipts
+                </p>
+                <div className="flex items-center gap-4">
+                  <span className="font-medium text-indigo-800">
+                    {selectedReceiptIds.length} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedReceiptIds([])}
+                    disabled={!selectedReceiptIds.length}
+                    className="text-sm font-semibold text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                  >
+                    Clear Selection
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <aside className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+              <p className="text-sm font-semibold text-indigo-900">Selection Summary</p>
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Total Receipts Selected</span>
+                  <span className="font-semibold text-slate-900">{selectedReceiptsSummary.receipts}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Total Items</span>
+                  <span className="font-semibold text-slate-900">{selectedReceiptsSummary.items}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Total Quantity</span>
+                  <span className="font-semibold text-slate-900">{fmtQty(selectedReceiptsSummary.quantity)}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleLoadSelectedReceipts}
+                disabled={!selectedReceiptIds.length}
+                className="mt-5 w-full rounded-lg bg-indigo-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Load Selected Receipts
+              </button>
+            </aside>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+          <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <h2 className="text-lg font-semibold text-indigo-800">Line Items</h2>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <span className="font-semibold text-indigo-700">
+                {loadedReceiptsSummary.receipts} Receipts Selected
+              </span>
+              <span className="text-slate-600">
+                Total Items: <strong className="text-slate-900">{loadedReceiptsSummary.items}</strong>
+              </span>
+              <span className="text-slate-600">
+                Total Quantity: <strong className="text-slate-900">{fmtQty(loadedReceiptsSummary.quantity)}</strong>
+              </span>
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="overflow-x-auto">
+              <table className="min-w-[1180px] w-full text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-3 text-left w-12">#</th>
+                    <th className="px-3 py-3 text-left min-w-[210px]">Item Name</th>
+                    <th className="px-3 py-3 text-left min-w-[110px]">HSN / SAC</th>
+                    <th className="px-3 py-3 text-left min-w-[90px]">Unit</th>
+                    <th className="px-3 py-3 text-right min-w-[140px]">Received Quantity</th>
+                    <th className="px-3 py-3 text-right min-w-[150px]">Previously Used Quantity</th>
+                    <th className="px-3 py-3 text-right min-w-[130px]">Available Quantity</th>
+                    <th className="px-3 py-3 text-right min-w-[140px]">DC Quantity</th>
+                    <th className="px-3 py-3 text-right w-16">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!items.length ? (
+                    <tr>
+                      <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                        Select receipts and load them to populate delivery challan line items.
+                      </td>
+                    </tr>
+                  ) : (
+                    items.map((item, index) => {
+                      const quantity = toQuantity(item.quantity);
+                      const availableQty = toQuantity(item.availableQty);
+                      const hasError = quantity > availableQty;
+                      return (
+                        <tr key={item.id} className="border-t border-slate-200 bg-white">
+                          <td className="px-3 py-3 text-slate-600">{index + 1}</td>
+                          <td className="px-3 py-3 font-medium text-slate-800">{item.name || "-"}</td>
+                          <td className="px-3 py-3 text-slate-700">{item.hsn || "-"}</td>
+                          <td className="px-3 py-3 text-slate-700">{item.unit || "PCS"}</td>
+                          <td className="px-3 py-3 text-right text-slate-800">{fmtQty(item.receivedQty)}</td>
+                          <td className="px-3 py-3 text-right text-slate-700">{fmtQty(item.previouslyUsedQty)}</td>
+                          <td className="px-3 py-3 text-right font-semibold text-emerald-600">{fmtQty(item.availableQty)}</td>
+                          <td className="px-3 py-3">
+                            <input
+                              type="number"
+                              min="0"
+                              max={availableQty}
+                              step="0.01"
+                              value={item.quantity}
+                              onChange={(event) =>
+                                handleLineItemQuantityChange(item.id, event.target.value)
+                              }
+                              className={`ml-auto block w-32 rounded-lg border px-3 py-2 text-right text-sm outline-none transition focus:ring-2 ${
+                                hasError
+                                  ? "border-red-300 focus:border-red-500 focus:ring-red-100"
+                                  : "border-slate-200 focus:border-indigo-500 focus:ring-indigo-100"
+                              }`}
+                            />
+                          </td>
+                          <td className="px-3 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveLineItem(item.id)}
+                              className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:border-red-200 hover:text-red-600"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
         {receiptError && <p className="text-xs text-red-600">{receiptError}</p>}
         {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
 
