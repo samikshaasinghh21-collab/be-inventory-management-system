@@ -100,18 +100,57 @@ const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
 };
 
 const getReceiptItemQuantities = (item = {}) => {
-  const ordered = toQuantity(
+  const originalOrdered = toQuantity(
     item.orderedQty ?? item.quantity ?? item.OrderedQty
   );
-  const received = toQuantity(
-    item.totalReceivedQty ?? item.TotalReceivedQty ?? item.receivedQty ?? item.ReceivedQty
+  const receiptReceived = toQuantity(
+    item.receiptReceivedQty ??
+      item.ReceiptReceivedQty ??
+      item.receivedQty ??
+      item.ReceivedQty
   );
-  const consumed = toQuantity(item.totalConsumedQty ?? item.TotalConsumedQty ?? 0);
+  const cumulativeReceived = toQuantity(
+    item.totalReceivedQty ??
+      item.TotalReceivedQty ??
+      item.receivedQty ??
+      item.ReceivedQty ??
+      receiptReceived
+  );
+  const previouslyReceived = Math.max(
+    toQuantity(
+      item.previouslyReceivedQty ??
+        item.PreviouslyReceivedQty ??
+        cumulativeReceived - receiptReceived
+    ),
+    0
+  );
+  const availableBalance = Math.max(
+    toQuantity(
+      item.availableBalanceQty ??
+        item.AvailableBalanceQty ??
+        Math.max(originalOrdered - previouslyReceived, 0)
+    ),
+    0
+  );
+  const consumed = toQuantity(
+    item.receiptConsumedQty ??
+      item.ReceiptConsumedQty ??
+      item.consumedQty ??
+      item.ConsumedQty ??
+      item.totalConsumedQty ??
+      item.TotalConsumedQty ??
+      0
+  );
   const rawAvailable =
-    item.totalAvailableQty ?? item.TotalAvailableQty ?? item.availableQty ?? item.AvailableQty;
+    item.receiptAvailableQty ??
+    item.ReceiptAvailableQty ??
+    item.availableQty ??
+    item.AvailableQty ??
+    item.totalAvailableQty ??
+    item.TotalAvailableQty;
   const available =
     rawAvailable === undefined || rawAvailable === null || rawAvailable === ""
-      ? Math.max(received - consumed, 0)
+      ? Math.max(receiptReceived - consumed, 0)
       : toQuantity(rawAvailable);
   const rawPoBalance =
     item.totalPoBalanceQty ??
@@ -122,12 +161,12 @@ const getReceiptItemQuantities = (item = {}) => {
     item.BalanceQty;
   const poBalance =
     rawPoBalance === undefined || rawPoBalance === null || rawPoBalance === ""
-      ? Math.max(ordered - received, 0)
+      ? Math.max(originalOrdered - cumulativeReceived, 0)
       : toQuantity(rawPoBalance);
   return {
-    ordered,
-    received,
-    consumed,
+    ordered: availableBalance,
+    originalOrdered,
+    received: receiptReceived,
     available,
     poBalance,
   };
@@ -137,7 +176,12 @@ const getReceiptTotals = (receipt) => {
   const lines = Array.isArray(receipt?.items) ? receipt.items : [];
   return lines.reduce(
     (acc, item) => {
-      const { ordered, received, available, poBalance } =
+      const {
+        ordered,
+        received,
+        available,
+        poBalance,
+      } =
         getReceiptItemQuantities(item);
       return {
         ordered: acc.ordered + ordered,
@@ -146,7 +190,12 @@ const getReceiptTotals = (receipt) => {
         poBalance: acc.poBalance + poBalance,
       };
     },
-    { ordered: 0, received: 0, available: 0, poBalance: 0 }
+    {
+      ordered: 0,
+      received: 0,
+      available: 0,
+      poBalance: 0,
+    }
   );
 };
 
@@ -1031,7 +1080,12 @@ const ReceiveGoodsRegister = () => {
                                   </thead>
                                   <tbody>
                                     {(receipt.items || []).map((item, idx) => {
-                                      const { ordered, received, available, poBalance } =
+                                      const {
+                                        ordered,
+                                        received,
+                                        available,
+                                        poBalance,
+                                      } =
                                         getReceiptItemQuantities(item);
                                       const poItem = findMatchingPoItem(po, item, idx) || {};
                                       // Display saved receipt item name first, then PO item name, then identifier fallback
@@ -1153,7 +1207,12 @@ const ReceiveGoodsRegister = () => {
           tableRows={(viewReceipt.items || []).map((item, index) => {
             const po = poMap[String(viewReceipt.purchaseOrderId)];
             const poItem = findMatchingPoItem(po, item, index) || {};
-            const { ordered, received, available, poBalance } =
+            const {
+              ordered,
+              received,
+              available,
+              poBalance,
+            } =
               getReceiptItemQuantities(item);
             return {
               id: item.id ?? item.itemId ?? index,

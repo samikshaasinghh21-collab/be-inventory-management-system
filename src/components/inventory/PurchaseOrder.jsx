@@ -9,7 +9,6 @@ import {
 import { fetchVendors } from "../../services/vendorsApi";
 import { fetchBoqs } from "../../services/boqApi";
 import { fetchLocations } from "../../services/locationsApi";
-import { fetchConsumptions } from "../../services/consumptionApi";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
 import DateInput from "../common/DateInput";
@@ -101,7 +100,6 @@ const PurchaseOrder = () => {
   const [vendors, setVendors] = useState([]);
   const [locations, setLocations] = useState([]);
   const [records, setRecords] = useState([]);
-  const [consumptions, setConsumptions] = useState([]);
   const [form, setForm] = useState(createFormState);
   const [items, setItems] = useState([createLineItem()]);
   const [errors, setErrors] = useState({});
@@ -234,14 +232,6 @@ const PurchaseOrder = () => {
       setRecords([]);
     }
   };
-  const loadConsumptions = async () => {
-    try {
-      const list = await fetchConsumptions();
-      setConsumptions(Array.isArray(list) ? list : []);
-    } catch {
-      setConsumptions([]);
-    }
-  };
   const loadBoqs = async () => {
     try {
       setBoqsLoading(true);
@@ -266,23 +256,19 @@ const PurchaseOrder = () => {
     void loadLocations();
     void loadVendors();
     void loadBoqs();
-    void loadConsumptions();
   }, []);
 
   useEffect(() => {
     const refreshLinkedData = () => {
       void loadRecords();
       void loadBoqs();
-      void loadConsumptions();
     };
 
     window.addEventListener("purchase-orders:changed", refreshLinkedData);
     window.addEventListener("boqs:changed", refreshLinkedData);
-    window.addEventListener("consumptions:changed", refreshLinkedData);
     return () => {
       window.removeEventListener("purchase-orders:changed", refreshLinkedData);
       window.removeEventListener("boqs:changed", refreshLinkedData);
-      window.removeEventListener("consumptions:changed", refreshLinkedData);
     };
   }, []);
 
@@ -418,119 +404,6 @@ const PurchaseOrder = () => {
     });
   };
 
-  const blockedItemIds = useMemo(() => {
-    const next = new Set();
-    records.forEach((record) => {
-      if (editingId && String(record.id) === String(editingId)) {
-        return;
-      }
-      (record.items || []).forEach((item) => {
-        const itemId = Number.parseInt(item.itemId ?? item.ItemId ?? "", 10);
-        if (Number.isFinite(itemId) && itemId > 0) {
-          next.add(itemId);
-        }
-      });
-    });
-    consumptions.forEach((consumption) => {
-      (consumption.items || []).forEach((item) => {
-        const itemId = Number.parseInt(item.itemId ?? item.ItemId ?? "", 10);
-        if (Number.isFinite(itemId) && itemId > 0) {
-          next.add(itemId);
-        }
-      });
-    });
-    return next;
-  }, [consumptions, editingId, records]);
-
-  const blockedItemNames = useMemo(() => {
-    const next = new Set();
-    records.forEach((record) => {
-      if (editingId && String(record.id) === String(editingId)) {
-        return;
-      }
-      (record.items || []).forEach((item) => {
-        const normalized = String(item.name ?? "").trim().toLowerCase();
-        if (normalized) {
-          next.add(normalized);
-        }
-      });
-    });
-    consumptions.forEach((consumption) => {
-      (consumption.items || []).forEach((item) => {
-        const normalized = String(item.name ?? "").trim().toLowerCase();
-        if (normalized) {
-          next.add(normalized);
-        }
-      });
-    });
-    return next;
-  }, [consumptions, editingId, records]);
-
-  const editingRecord = useMemo(
-    () =>
-      editingId
-        ? records.find((record) => String(record.id) === String(editingId)) ?? null
-        : null,
-    [editingId, records]
-  );
-
-  const editingRecordItemIds = useMemo(
-    () =>
-      new Set(
-        (editingRecord?.items || [])
-          .map((item) => Number.parseInt(item.itemId ?? item.ItemId ?? "", 10))
-          .filter((value) => Number.isFinite(value) && value > 0)
-      ),
-    [editingRecord]
-  );
-
-  const editingRecordItemNames = useMemo(
-    () =>
-      new Set(
-        (editingRecord?.items || [])
-          .map((item) => String(item.name ?? "").trim().toLowerCase())
-          .filter(Boolean)
-      ),
-    [editingRecord]
-  );
-
-  const activeFormItemIds = useMemo(
-    () =>
-      new Set(
-        items
-          .map((item) => Number.parseInt(item.itemId ?? item.ItemId ?? "", 10))
-          .filter((value) => Number.isFinite(value) && value > 0)
-      ),
-    [items]
-  );
-
-  const hiddenCatalogItemIds = useMemo(
-    () =>
-      Array.from(blockedItemIds).filter(
-        (itemId) =>
-          !activeFormItemIds.has(itemId) && !editingRecordItemIds.has(itemId)
-      ),
-    [activeFormItemIds, blockedItemIds, editingRecordItemIds]
-  );
-
-  const activeFormItemNames = useMemo(
-    () =>
-      new Set(
-        items
-          .map((item) => String(item.name ?? "").trim().toLowerCase())
-          .filter(Boolean)
-      ),
-    [items]
-  );
-
-  const hiddenCatalogItemNames = useMemo(
-    () =>
-      Array.from(blockedItemNames).filter(
-        (name) => !activeFormItemNames.has(name) && !editingRecordItemNames.has(name)
-      ),
-    [activeFormItemNames, blockedItemNames, editingRecordItemNames]
-  );
-
   const isEditingLocked = Boolean(editingId) && isLockedPurchaseOrder(editingStatus);
   const isEditingLockedWithoutOverride = isEditingLocked && !closedPoOverrideApproved;
 
@@ -580,24 +453,6 @@ const PurchaseOrder = () => {
         }
         seen.add(identityKey);
 
-        if (
-          Number.isFinite(itemId) &&
-          itemId > 0 &&
-          blockedItemIds.has(itemId) &&
-          !editingRecordItemIds.has(itemId)
-        ) {
-          nextErrors.items = `${name} is already used in previous transactions and cannot be added again.`;
-          break;
-        }
-
-        if (
-          (!Number.isFinite(itemId) || itemId <= 0) &&
-          blockedItemNames.has(normalizedName) &&
-          !editingRecordItemNames.has(normalizedName)
-        ) {
-          nextErrors.items = `${name} is already used in previous transactions and cannot be added again.`;
-          break;
-        }
       }
     }
     setErrors(nextErrors);
@@ -1158,8 +1013,6 @@ const PurchaseOrder = () => {
           extraFieldKey="location"
           extraFieldLabel="Ship To"
           extraFieldPlaceholder="Ship-to note"
-          hiddenCatalogItemIds={hiddenCatalogItemIds}
-          hiddenCatalogItemNames={hiddenCatalogItemNames}
           hideSelectedCatalogItems
           readOnly={isEditingLockedWithoutOverride}
         />

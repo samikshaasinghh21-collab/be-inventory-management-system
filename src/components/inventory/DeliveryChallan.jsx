@@ -21,6 +21,7 @@ import {
   setActiveProjectId,
 } from "../../services/projectSelectionStore";
 
+
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
   name: "",

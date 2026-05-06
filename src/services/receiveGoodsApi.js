@@ -65,6 +65,26 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
   const receiptReceivedQty = toQuantity(
     item.receiptReceivedQty ?? item.ReceiptReceivedQty ?? item.receivedQty ?? item.ReceivedQty ?? 0
   );
+  const previouslyReceivedQty = Math.max(
+    toQuantity(
+      item.previouslyReceivedQty ??
+        item.PreviouslyReceivedQty ??
+        item.previousReceivedQty ??
+        item.PreviousReceivedQty ??
+        0
+    ),
+    0
+  );
+  const availableBalanceQty = Math.max(
+    toQuantity(
+      item.availableBalanceQty ??
+        item.AvailableBalanceQty ??
+        item.receivableQty ??
+        item.ReceivableQty ??
+        Math.max(orderedQty - previouslyReceivedQty, 0)
+    ),
+    0
+  );
   const receiptAvailableQty = toQuantity(
     item.receiptAvailableQty ??
       item.ReceiptAvailableQty ??
@@ -77,10 +97,12 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
       item.ReceiptBalanceQty ??
       item.balanceQty ??
       item.BalanceQty ??
-      Math.max(orderedQty - receiptReceivedQty, 0)
+      Math.max(availableBalanceQty - receiptReceivedQty, 0)
   );
   const totalReceivedQty = toQuantity(
-    item.totalReceivedQty ?? item.TotalReceivedQty ?? item.receivedQty ?? item.ReceivedQty ?? 0
+    item.totalReceivedQty ??
+      item.TotalReceivedQty ??
+      Math.max(previouslyReceivedQty + receiptReceivedQty, 0)
   );
   const totalAvailableQty = toQuantity(
     item.totalAvailableQty ??
@@ -171,6 +193,8 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
     receiptReceivedQty,
     receiptAvailableQty,
     receiptBalanceQty,
+    previouslyReceivedQty,
+    availableBalanceQty,
     totalReceivedQty,
     totalAvailableQty,
     totalPoBalanceQty,
