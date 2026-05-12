@@ -14,6 +14,7 @@ import {
 import { deleteItemApi, fetchItems, updateItemApi } from "../../services/inventoryApi";
 import useSettings from "../../hooks/useSettings";
 import StatusBadge from "../common/StatusBadge";
+import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
 
 const CATEGORY_OPTIONS = [
   "Networking",
@@ -36,23 +37,17 @@ const UNIT_OPTIONS = [
   "Litre",
 ];
 
-const currencyFormatter = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 2,
-});
-
 const compactFormatter = new Intl.NumberFormat("en-IN", {
   notation: "compact",
   maximumFractionDigits: 1,
 });
 
-const formatCurrency = (value) => currencyFormatter.format(Number(value) || 0);
+const formatCurrency = formatInrCurrency;
 const formatCompactNumber = (value) =>
   compactFormatter.format(Number(value) || 0);
 
 const normalizeProduct = (product = {}) => {
-  const rate = Number(product?.rate ?? product?.salesPrice ?? product?.price ?? 0);
+  const rate = roundUnitPrice(product?.rate ?? product?.salesPrice ?? product?.price ?? 0);
   const stock = Number(product?.stock ?? product?.Stock ?? 0);
   const qty = Number(product?.qty ?? 0);
   const taxPercentage = Number(
@@ -83,8 +78,8 @@ const normalizeProduct = (product = {}) => {
       product?.SerialNumbe ??
       "",
     qty: Number.isFinite(qty) ? qty : 0,
-    rate: Number.isFinite(rate) ? rate : 0,
-    price: Number.isFinite(rate) ? rate : 0,
+    rate,
+    price: rate,
   };
 };
 
@@ -267,7 +262,7 @@ export default function ProductCatalogDashboard() {
       brand: product.brand || "",
       unit: product.unit || "Nos",
       hsn: product.hsn || "",
-      rate: product.rate ?? "",
+      rate: product.rate || product.rate === 0 ? String(roundUnitPrice(product.rate)) : "",
       serialNumber: product.serialNumber || "",
       serialRequired: product.serialRequired ?? false,
       description: product.description || "",
@@ -307,7 +302,7 @@ export default function ProductCatalogDashboard() {
       brand: editValues.brand.trim(),
       unit: editValues.unit,
       hsn: editValues.hsn.trim(),
-      rate: Number(editValues.rate),
+      rate: roundUnitPrice(editValues.rate),
       serialNumber: editValues.serialNumber.trim(),
       serialRequired: editValues.serialRequired ?? false,
       description: editValues.description.trim(),
@@ -493,7 +488,7 @@ export default function ProductCatalogDashboard() {
       serialRequired: item.serialRequired ?? false,
       serialNumber: item.serialNumber ?? "",
       taxPercentage: item.taxPercentage ?? 0,
-      rate: item.rate || 0,
+      rate: roundUnitPrice(item.rate || 0),
       quantity: item.qty || 0,
       location: "",
     }));
@@ -516,7 +511,7 @@ export default function ProductCatalogDashboard() {
       gst: item.gst || "",
       serialNumber: item.serialNumber ?? "",
       taxPercentage: item.taxPercentage ?? 0,
-      rate: item.rate || 0,
+      rate: roundUnitPrice(item.rate || 0),
       quantity: item.qty || 0,
       notes: "",
     }));
@@ -1127,10 +1122,15 @@ export default function ProductCatalogDashboard() {
                       onChange={(event) =>
                         setEditValues((prev) => ({
                           ...prev,
-                          rate: event.target.value,
+                          rate:
+                            event.target.value === ""
+                              ? ""
+                              : String(roundUnitPrice(event.target.value)),
                         }))
                       }
-                      type="text"
+                      type="number"
+                      min="0"
+                      step="1"
                       className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
                       aria-invalid={Boolean(editErrors.rate)}
                     />

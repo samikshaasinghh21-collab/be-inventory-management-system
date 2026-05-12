@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import useMrpPlanning from "../hooks/useMrpPlanning";
-import useSettings from "../hooks/useSettings";
+import { formatInrCurrency, roundUnitPrice } from "../utils/formatters";
 
 const statusMeta = {
   ok: {
@@ -39,8 +39,6 @@ const formatDate = (value) => {
 
 const MaterialPlanning = () => {
   const navigate = useNavigate();
-  const settings = useSettings();
-  const currency = settings?.preferences?.currency || "INR";
   const { snapshot, loading, error } = useMrpPlanning();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedProjectId = searchParams.get("projectId") || "all";
@@ -51,17 +49,7 @@ const MaterialPlanning = () => {
       maximumFractionDigits: 2,
     });
 
-  const formatCurrency = (value) => {
-    try {
-      return new Intl.NumberFormat("en-IN", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 0,
-      }).format(Number(value || 0));
-    } catch {
-      return `${currency} ${Number(value || 0).toLocaleString("en-IN")}`;
-    }
-  };
+  const formatCurrency = formatInrCurrency;
 
   const filteredProjects = useMemo(() => {
     return snapshot.shortageResults.projects
@@ -465,7 +453,9 @@ const MaterialPlanning = () => {
                         {formatCurrency(
                           project.materials.reduce(
                             (sum, material) =>
-                              sum + Number(material.recommendedOrder || 0) * Number(material.price || 0),
+                              sum +
+                              Number(material.recommendedOrder || 0) *
+                                roundUnitPrice(material.price),
                             0
                           )
                         )}

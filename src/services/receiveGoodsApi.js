@@ -1,4 +1,5 @@
 import api from "./api";
+import { roundUnitPrice } from "../utils/formatters";
 
 const toQuantity = (value) => {
   if (value === null || value === undefined || value === "") {
@@ -168,7 +169,7 @@ export const normalizeReceiveGoodsItem = (item = {}) => {
     hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
     gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
     taxPercentage: toQuantity(item.taxPercentage ?? item.TaxPercentage ?? 0),
-    unitPrice: toQuantity(item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0),
+    unitPrice: roundUnitPrice(item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0),
     taxableAmount: toQuantity(item.taxableAmount ?? item.TaxableAmount ?? 0),
     cgstPercent: toQuantity(item.cgstPercent ?? item.CGSTPercent ?? 0),
     sgstPercent: toQuantity(item.sgstPercent ?? item.SGSTPercent ?? 0),

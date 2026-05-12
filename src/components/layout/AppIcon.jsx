@@ -74,6 +74,13 @@ const ICONS = {
       <path d="M12 11v10" />
     </>
   ),
+  download: (
+    <>
+      <path d="M12 4v10" />
+      <path d="m8 10 4 4 4-4" />
+      <path d="M5 20h14" />
+    </>
+  ),
   edit: (
     <>
       <path d="M4 20h4l10-10-4-4L4 16z" />

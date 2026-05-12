@@ -15,6 +15,7 @@ import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import DocumentViewPanel from "./DocumentViewPanel";
 import { buildGstSummary } from "../../utils/taxUtils";
+import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
 import {
   getActiveProjectId,
   setActiveProjectId,
@@ -133,7 +134,6 @@ const buildBoqSerialPreview = (items = []) => {
 
 const Boq = () => {
   const settings = useSettings();
-  const currency = settings?.preferences?.currency || "INR";
   const [projects, setProjects] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
@@ -149,19 +149,7 @@ const Boq = () => {
   const logoUrl = resolveBrandLogo(company.logo || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
-
-  const formatCurrency = (value) => {
-    const amount = Number(value) || 0;
-    try {
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      return `${currency} ${amount.toLocaleString()}`;
-    }
-  };
+  const formatCurrency = formatInrCurrency;
 
   const loadData = async () => {
     try {
@@ -256,7 +244,7 @@ const Boq = () => {
             hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
             gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
             quantity: item.quantity ?? item.qty ?? 1,
-            rate: item.rate ?? 0,
+            rate: roundUnitPrice(item.rate ?? 0),
             notes: item.notes ?? "",
           }));
           return [...base, ...mapped];
@@ -289,7 +277,7 @@ const Boq = () => {
       { label: "Draft BOQs", value: draftCount },
       { label: "Estimated Value", value: formatCurrency(totalValue) },
     ],
-    [records.length, draftCount, totalValue, currency]
+    [records.length, draftCount, totalValue, formatCurrency]
   );
 
   const resetForm = (nextRecords = records) => {
@@ -328,7 +316,7 @@ const Boq = () => {
     );
     const total = cleanedItems.reduce((sum, item) => {
       const qty = Number(item.quantity) || 0;
-      const rate = Number(item.rate) || 0;
+      const rate = roundUnitPrice(item.rate);
       return sum + qty * rate;
     }, 0);
 
@@ -349,7 +337,7 @@ const Boq = () => {
         hsn: item.hsn,
         gst: item.gst,
         quantity: Number(item.quantity) || 0,
-        rate: Number(item.rate) || 0,
+        rate: roundUnitPrice(item.rate),
         notes: item.notes,
       })),
       total,
@@ -396,7 +384,7 @@ const Boq = () => {
             hsn: item.hsn ?? item.HSN ?? "",
             gst: item.gst ?? item.GST ?? "",
             quantity: item.quantity ?? "",
-            rate: item.rate ?? "",
+            rate: item.rate || item.rate === 0 ? roundUnitPrice(item.rate) : "",
             notes: item.notes ?? "",
           }))
         : [createLineItem()]
@@ -821,7 +809,7 @@ const Boq = () => {
           ]}
           tableRows={(viewRecord.items || []).map((item, index) => {
             const qty = Number(item.quantity || 0);
-            const rate = Number(item.rate || 0);
+            const rate = roundUnitPrice(item.rate);
             const consumed = Number(item.consumedQty ?? 0) || 0;
             const available = Number.isFinite(Number(item.availableQty))
               ? Number(item.availableQty)

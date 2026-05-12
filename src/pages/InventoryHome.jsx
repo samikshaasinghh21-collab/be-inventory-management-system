@@ -8,6 +8,7 @@ import {
 } from "../services/inventoryApi";
 import { fetchVendors, syncVendorsCache } from "../services/vendorsApi";
 import useSettings from "../hooks/useSettings";
+import { formatInrCurrency, roundUnitPrice } from "../utils/formatters";
 
 const PAGE_SIZE = 12;
 
@@ -58,7 +59,6 @@ const InventoryHome = () => {
   const [showLowStockOnly, setShowLowStockOnly] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const currency = settings?.preferences?.currency || "INR";
   const lowStockThreshold = Number(settings?.inventory?.lowStockThreshold ?? 0);
   const unitLabel = settings?.inventory?.defaultUnit || "PCS";
   const itemAlerts = useMemo(() => {
@@ -85,17 +85,7 @@ const InventoryHome = () => {
     }, {});
   }, [notifications]);
 
-  const formatCurrency = (value) => {
-    try {
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 2,
-      }).format(value);
-    } catch {
-      return `${currency} ${Number(value || 0).toLocaleString()}`;
-    }
-  };
+  const formatCurrency = formatInrCurrency;
 
   const refreshItems = async () => {
     const list = await fetchItems();
@@ -148,7 +138,7 @@ const InventoryHome = () => {
   const rows = useMemo(() => {
     return items.map((item) => {
       const stock = Number(item.stock) || 0;
-      const price = Number(item.price) || 0;
+      const price = roundUnitPrice(item.price);
       const stockStatus = getStockStatus(stock, lowStockThreshold);
 
       return {
@@ -317,7 +307,7 @@ const InventoryHome = () => {
       id: "value",
       label: "Inventory Value",
       value: formatCurrency(stockValue),
-      hint: `${currency} valuation`,
+      hint: "INR valuation",
       iconClass: "bg-emerald-100 text-emerald-700",
       icon: "IV",
     },

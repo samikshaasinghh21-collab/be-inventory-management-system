@@ -1,4 +1,5 @@
 import api from "./api";
+import { formatCustomerName } from "../utils/formatters";
 
 export const normalizeCustomerContact = (contact = {}) => ({
   id: contact.id ?? contact.CustomerContactId ?? contact.customerContactId ?? null,
@@ -20,8 +21,10 @@ export const normalizeCustomer = (customer = {}) => {
 
   return {
     id: customer.id ?? customer.CustomerId ?? customer.customerId ?? null,
-    name: customer.name ?? customer.CustomerName ?? "",
-    companyName: customer.companyName ?? customer.CompanyName ?? "",
+    name: formatCustomerName(customer.name ?? customer.CustomerName ?? ""),
+    companyName: formatCustomerName(
+      customer.companyName ?? customer.CompanyName ?? ""
+    ),
     address: customer.address ?? customer.Address ?? "",
     gstNumber: customer.gstNumber ?? customer.GSTNumber ?? "",
     gstType:

@@ -1,4 +1,5 @@
 import api from "./api";
+import { roundUnitPrice } from "../utils/formatters";
 
 const emitInventoryChange = () => {
   if (typeof window !== "undefined") {
@@ -25,7 +26,7 @@ const normalizeItem = (item = {}) => {
     unit: item.unit ?? item.Unit ?? "PCS",
     stock: Number(item.stock ?? item.Stock ?? 0),
     currentStock: Number(item.currentStock ?? item.stock ?? item.Stock ?? 0),
-    price: Number(item.price ?? item.Price ?? 0),
+    price: roundUnitPrice(item.price ?? item.Price ?? 0),
     taxPercentage: Number.isFinite(taxPercentage) ? taxPercentage : 0,
     gst,
     reOrderLevel: Number(
@@ -57,14 +58,20 @@ export const fetchItems = async () => {
 };
 
 export const createItem = async (item) => {
-  const response = await api.post("/items", item);
+  const response = await api.post("/items", {
+    ...item,
+    price: roundUnitPrice(item.price),
+  });
   const normalized = normalizeItem(response.data?.item ?? response.data);
   emitInventoryChange();
   return normalized;
 };
 
 export const updateItemApi = async (id, item) => {
-  const response = await api.put(`/items/${id}`, item);
+  const response = await api.put(`/items/${id}`, {
+    ...item,
+    price: roundUnitPrice(item.price),
+  });
   const normalized = normalizeItem(response.data?.item ?? response.data);
   emitInventoryChange();
   return normalized;

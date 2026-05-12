@@ -18,6 +18,7 @@ import {
   buildReceiveBillFromText,
   buildReceiveProjectDetailLines,
   buildReceiveShipToText,
+  buildReceiveVendorAddressText,
   isReceiveProjectDetailsVisible,
   splitDocumentText,
 } from "../../utils/receiveGoodsDocument";
@@ -29,6 +30,7 @@ import {
 import PasswordPromptModal from "../common/PasswordPromptModal";
 import { getClosedPoAuthError } from "../../utils/closedPoAuth";
 import { getGstTaxMode } from "../../utils/gstUtils";
+import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
 
 const RECEIVE_STATUS_OPTIONS = ["Draft", "Partially Received", "Closed"];
 
@@ -500,7 +502,7 @@ const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
         quantity: toNumber(
           item.receiptReceivedQty ?? item.ReceiptReceivedQty ?? item.receivedQty
         ),
-        unitPrice: toNumber(poItem?.unitPrice ?? poItem?.rate ?? 0),
+        unitPrice: roundUnitPrice(poItem?.unitPrice ?? poItem?.rate ?? 0),
         taxPercentage: poItem?.taxPercentage ?? poItem?.gst ?? 0,
         gst: poItem?.gst ?? poItem?.taxPercentage ?? 0,
       };
@@ -594,7 +596,6 @@ const ReceiveGoods = () => {
   const logoUrl = resolveBrandLogo(company.logo || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
-  const currency = settings?.preferences?.currency || "INR";
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [projects, setProjects] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -623,18 +624,7 @@ const ReceiveGoods = () => {
 
   const purchaseOrderIdFromSearch = searchParams.get("purchaseOrderId") || "";
   const receiptIdFromSearch = searchParams.get("receiptId") || "";
-  const formatCurrency = (value) => {
-    const amount = toNumber(value);
-    try {
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      return `${currency} ${amount.toLocaleString()}`;
-    }
-  };
+  const formatCurrency = formatInrCurrency;
 
   const loadData = async () => {
     try {
@@ -769,8 +759,25 @@ const ReceiveGoods = () => {
         setClosedPoOverrideApproved(false);
         return;
       }
+      const systemBillFrom =
+        buildReceiveVendorAddressText(selectedVendor) ||
+        buildReceiveBillFromText(selectedProject);
+      if (
+        isLockedPurchaseOrder(selectedPurchaseOrder.status) &&
+        !receiptIdFromSearch
+      ) {
+        setApiError(getPurchaseOrderLockMessage(selectedPurchaseOrder.status));
+        setReceiptHistory([]);
+        setSelectedReceipt(null);
+        setEditingReceipt(null);
+        setClosedPoOverrideApproved(false);
+        setReceiveForm(createReceiveForm());
+        setHasStatusOverride(false);
+        return;
+      }
       try {
         setReceiptLoading(true);
+        setApiError("");
         const receiptList = await fetchReceiveGoods(selectedPurchaseOrder.id);
         if (!isActive) return;
         const safeReceiptList = Array.isArray(receiptList) ? receiptList : [];
@@ -800,9 +807,9 @@ const ReceiveGoods = () => {
             safeReceiptList,
             nextEditingReceipt,
             {
-            billFrom: buildReceiveBillFromText(selectedProject),
-            shipTo: buildReceiveShipToText(selectedLocation),
-            showProjectDetails: true,
+              billFrom: systemBillFrom,
+              shipTo: buildReceiveShipToText(selectedLocation),
+              showProjectDetails: true,
             }
           )
         );
@@ -820,7 +827,7 @@ const ReceiveGoods = () => {
         setClosedPoOverrideApproved(false);
         setReceiveForm(
           createReceiveForm(selectedPurchaseOrder, [], null, {
-            billFrom: buildReceiveBillFromText(selectedProject),
+            billFrom: systemBillFrom,
             shipTo: buildReceiveShipToText(selectedLocation),
             showProjectDetails: true,
           })
@@ -834,7 +841,13 @@ const ReceiveGoods = () => {
     return () => {
       isActive = false;
     };
-  }, [receiptIdFromSearch, selectedLocation, selectedProject, selectedPurchaseOrder]);
+  }, [
+    receiptIdFromSearch,
+    selectedLocation,
+    selectedProject,
+    selectedPurchaseOrder,
+    selectedVendor,
+  ]);
 
   const receiveItems = useMemo(
     () =>
@@ -867,9 +880,24 @@ const ReceiveGoods = () => {
     [receiveForm.items]
   );
 
+  const visibleReceiveItems = useMemo(() => {
+    const indexedItems = receiveItems.map((item, index) => ({
+      ...item,
+      receiveFormIndex: index,
+    }));
+
+    if (editingReceipt) {
+      return indexedItems;
+    }
+
+    return indexedItems.filter(
+      (item) => toNumber(item.pendingQty ?? item.availableBalanceQty) > 0
+    );
+  }, [editingReceipt, receiveItems]);
+
   const totals = useMemo(
     () =>
-      receiveItems.reduce(
+      visibleReceiveItems.reduce(
         (acc, item) => ({
           pending: acc.pending + item.availableBalanceQty,
           received: acc.received + item.receivedQty,
@@ -877,7 +905,7 @@ const ReceiveGoods = () => {
         }),
         { pending: 0, received: 0, balance: 0 }
       ),
-    [receiveItems]
+    [visibleReceiveItems]
   );
 
   const totalValue = useMemo(
@@ -1179,7 +1207,10 @@ const ReceiveGoods = () => {
     { taxMode: viewReceipt?.taxMode || getPurchaseOrderTaxMode(viewPurchaseOrder) }
   );
   const viewBillFrom = splitDocumentText(
-    viewReceipt?.billFrom || viewReceipt?.billTo || buildReceiveBillFromText(viewProject)
+    viewReceipt?.billFrom ||
+      viewReceipt?.billTo ||
+      buildReceiveVendorAddressText(viewVendor) ||
+      buildReceiveBillFromText(viewProject)
   );
   const viewShipTo = splitDocumentText(
     viewReceipt?.shipTo || buildReceiveShipToText(viewLocation)
@@ -1635,10 +1666,12 @@ const ReceiveGoods = () => {
                             receiptHistory,
                             editingReceipt,
                             {
-                            billFrom: buildReceiveBillFromText(selectedProject),
-                            shipTo: buildReceiveShipToText(selectedLocation),
-                            showProjectDetails: true,
-                   }
+                              billFrom:
+                                buildReceiveVendorAddressText(selectedVendor) ||
+                                buildReceiveBillFromText(selectedProject),
+                              shipTo: buildReceiveShipToText(selectedLocation),
+                              showProjectDetails: true,
+                            }
                           )
                         );
                         setHasStatusOverride(false);
@@ -1819,12 +1852,20 @@ const ReceiveGoods = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {receiveItems.map((item, index) => {
-                          const lineKey = getReceiveLineKey(item, index);
+                        {visibleReceiveItems.length === 0 && (
+                          <tr>
+                            <td colSpan="5" className="p-6 text-center text-slate-500">
+                              No pending items to receive.
+                            </td>
+                          </tr>
+                        )}
+                        {visibleReceiveItems.map((item, index) => {
+                          const sourceIndex = item.receiveFormIndex ?? index;
+                          const lineKey = getReceiveLineKey(item, sourceIndex);
                           const serialNumbers = getItemSerialNumbers(item);
                           const expectedSerialCount = Math.max(toNumber(item.receivedQty), 0);
                           const hasSerialWarning = false;
-                          const uniqueItemKey = `receive-item-${index}-${item.id ?? item.poItemId ?? item.itemId ?? index}`;
+                          const uniqueItemKey = `receive-item-${sourceIndex}-${item.id ?? item.poItemId ?? item.itemId ?? sourceIndex}`;
 
                           return (
                             <Fragment key={uniqueItemKey}>
@@ -2024,8 +2065,8 @@ const ReceiveGoods = () => {
           ]}
           tableRows={(purchaseOrderPreview.items || []).map((item, index) => {
             const qty = Number(item.quantity || 0);
-            const rate = Number(item.rate ?? item.unitPrice ?? 0);
-            const amount = Number(item.totalPrice ?? qty * rate);
+            const rate = roundUnitPrice(item.rate ?? item.unitPrice ?? 0);
+            const amount = qty * rate;
             return {
               id: item.id || index,
               serial: index + 1,

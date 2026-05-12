@@ -15,4 +15,4 @@ export const isLockedPurchaseOrder = (status) =>
 export const getPurchaseOrderLockMessage = (status) =>
   isCancelledPurchaseOrder(status)
     ? "This Purchase Order is Cancelled."
-    : "This Purchase Order is Closed.";
+    : "PO is Closed";

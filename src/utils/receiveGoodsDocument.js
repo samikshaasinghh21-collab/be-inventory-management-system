@@ -15,6 +15,16 @@ export const buildReceiveBillFromText = (project = null) =>
 
 export const buildReceiveBillToText = buildReceiveBillFromText;
 
+export const buildReceiveVendorAddressText = (vendor = null) =>
+  joinLines([
+    vendor?.companyName || vendor?.name,
+    vendor?.address,
+    [vendor?.city, vendor?.state, vendor?.pincode].filter(Boolean).join(", "),
+    vendor?.gstNumber ? `GST: ${vendor.gstNumber}` : "",
+    vendor?.phone ? `Phone: ${vendor.phone}` : "",
+    vendor?.email ? `Email: ${vendor.email}` : "",
+  ]);
+
 export const buildReceiveShipToText = (location = null) =>
   joinLines([
     location?.name,

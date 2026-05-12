@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import useSettings from "../../hooks/useSettings";
 import { fetchItems } from "../../services/inventoryApi";
 import { getProducts } from "../../services/productsStore";
 import {
   formatTaxPercentage,
   parseTaxPercentage,
 } from "../../utils/taxUtils";
+import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
 
 const createEmptyItem = (extraFieldKey = "notes") => {
   const base = {
@@ -29,7 +29,7 @@ const createEmptyItem = (extraFieldKey = "notes") => {
 };
 
 const normalizeCatalogItem = (item = {}) => {
-  const rate = Number(item.rate ?? item.price ?? item.salesPrice ?? item.unitPrice ?? 0);
+  const rate = roundUnitPrice(item.rate ?? item.price ?? item.salesPrice ?? item.unitPrice ?? 0);
   const taxPercentage = parseTaxPercentage(
     item.taxPercentage ?? item.gst ?? item.GST ?? 0
   );
@@ -44,7 +44,7 @@ const normalizeCatalogItem = (item = {}) => {
       String(item.gst ?? item.GST ?? "").trim() ||
       formatTaxPercentage(taxPercentage),
     taxPercentage,
-    rate: Number.isFinite(rate) ? rate : 0,
+    rate,
     serialRequired:
       item.serialRequired ?? item.SerialRequired ?? item.IsSerialTracked ?? false,
     serialNumber:
@@ -91,8 +91,6 @@ const LineItemsEditor = ({
   hiddenCatalogItemNames = [],
   hideSelectedCatalogItems = false,
 }) => {
-  const settings = useSettings();
-  const currency = settings?.preferences?.currency || "INR";
   const [catalogItems, setCatalogItems] = useState(() =>
     mergeCatalogItems(getProducts(), [])
   );
@@ -205,18 +203,7 @@ const LineItemsEditor = ({
     };
   }, []);
 
-  const formatCurrency = (value) => {
-    const amount = Number(value) || 0;
-    try {
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      return `${currency} ${amount.toLocaleString()}`;
-    }
-  };
+  const formatCurrency = formatInrCurrency;
 
   const handleAdd = () => {
     onChange([...(items || []), createEmptyItem(extraFieldKey)]);
@@ -232,11 +219,13 @@ const LineItemsEditor = ({
   };
 
   const handleUpdate = (id, field, value) => {
+    const nextValue =
+      field === "rate" && value !== "" ? String(roundUnitPrice(value)) : value;
     const next = (items || []).map((item) =>
       item.id === id
         ? {
             ...item,
-            [field]: value,
+            [field]: nextValue,
             ...(field === "gst"
               ? { taxPercentage: parseTaxPercentage(value) }
               : {}),
@@ -276,7 +265,7 @@ const LineItemsEditor = ({
           matchedCatalogItem.taxPercentage ?? item.taxPercentage ?? 0,
         rate:
           matchedCatalogItem.rate || matchedCatalogItem.rate === 0
-            ? matchedCatalogItem.rate
+            ? roundUnitPrice(matchedCatalogItem.rate)
             : item.rate,
         serialRequired:
           matchedCatalogItem.serialRequired ?? item.serialRequired ?? false,
@@ -288,7 +277,7 @@ const LineItemsEditor = ({
 
   const total = (items || []).reduce((sum, item) => {
     const qty = Number(item.quantity) || 0;
-    const rate = Number(item.rate) || 0;
+    const rate = roundUnitPrice(item.rate);
     return sum + qty * rate;
   }, 0);
 
@@ -351,7 +340,7 @@ const LineItemsEditor = ({
                 item[extraFieldKey] ??
                 (extraFieldKey !== "notes" ? item.notes ?? "" : "");
               const qty = Number(item.quantity) || 0;
-              const rate = Number(item.rate) || 0;
+              const rate = roundUnitPrice(item.rate);
               const amount = qty * rate;
               return (
                 <tr key={item.id} className="border-t">
@@ -450,7 +439,8 @@ const LineItemsEditor = ({
                     <input
                       type="number"
                       min="0"
-                      value={item.rate}
+                      step="1"
+                      value={item.rate === "" ? "" : roundUnitPrice(item.rate)}
                       disabled={readOnly}
                       onChange={(event) =>
                         handleUpdate(item.id, "rate", event.target.value)

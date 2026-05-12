@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   createConsumption,
   deleteConsumption,
   fetchConsumptions,
   updateConsumption,
 } from "../../services/consumptionApi";
+import { fetchAvailableInventory } from "../../services/availableInventoryApi";
 import { fetchDeliveryChallans } from "../../services/deliveryChallanApi";
 import { fetchLocations } from "../../services/locationsApi";
 import { fetchProjects } from "../../services/projectsApi";
@@ -143,10 +145,20 @@ const isConsumptionLinkedToChallan = (consumption = {}, challan = {}) => {
 };
 
 const buildExistingConsumptionLookup = (items = []) => {
+  const bySourceKey = new Map();
   const bySourceId = new Map();
   const byMaterialKey = new Map();
 
   (Array.isArray(items) ? items : []).forEach((item) => {
+    const sourceKey = String(item.sourceKey ?? item.SourceKey ?? "").trim();
+    if (sourceKey) {
+      if (!bySourceKey.has(sourceKey)) {
+        bySourceKey.set(sourceKey, []);
+      }
+      bySourceKey.get(sourceKey).push(item);
+      return;
+    }
+
     const sourceId = toNullableInt(item.receiveGoodsItemId ?? item.ReceiveGoodsItemId);
     if (sourceId !== null) {
       if (!bySourceId.has(sourceId)) {
@@ -166,12 +178,21 @@ const buildExistingConsumptionLookup = (items = []) => {
     byMaterialKey.get(key).push(item);
   });
 
-  return { bySourceId, byMaterialKey };
+  return { bySourceKey, bySourceId, byMaterialKey };
 };
 
-const takeExistingItem = ({ sourceId, key, existingLookup }) => {
+const takeExistingItem = ({ sourceKey, sourceId, key, existingLookup }) => {
   if (!existingLookup) {
     return null;
+  }
+
+  if (sourceKey && existingLookup.bySourceKey.has(sourceKey)) {
+    const queue = existingLookup.bySourceKey.get(sourceKey);
+    const match = queue.shift() ?? null;
+    if (!queue.length) {
+      existingLookup.bySourceKey.delete(sourceKey);
+    }
+    return match;
   }
 
   if (sourceId !== null && existingLookup.bySourceId.has(sourceId)) {
@@ -293,6 +314,65 @@ const buildRowsFromSelectedChallan = ({
   });
 };
 
+const buildRowsFromAvailableInventory = ({
+  rows,
+  editingConsumption,
+  autoSelectAvailable = false,
+}) => {
+  const existingLookup = editingConsumption
+    ? buildExistingConsumptionLookup(editingConsumption.items || [])
+    : null;
+
+  return (Array.isArray(rows) ? rows : []).map((line, index) => {
+    const sourceKey = String(line.sourceKey ?? "").trim();
+    const sourceId = toNullableInt(line.receiveGoodsItemId);
+    const key = materialKey(line);
+    const availableQuantity = Math.max(toNumber(line.availableQty), 0);
+    const existingItem = takeExistingItem({
+      sourceKey,
+      sourceId,
+      key,
+      existingLookup,
+    });
+    const existingQuantity = Math.max(toNumber(existingItem?.quantity), 0);
+    const selectedQuantity =
+      existingQuantity > 0
+        ? Math.min(existingQuantity, availableQuantity || existingQuantity)
+        : autoSelectAvailable
+        ? availableQuantity
+        : 0;
+
+    return {
+      rowId: `${sourceKey || sourceId || key || "available"}-${index}`,
+      index,
+      sourceType: line.sourceType || "receive",
+      sourceKey,
+      sourceRef: line.sourceRef || "",
+      sourceQty: Math.max(toNumber(line.sourceQty), 0),
+      boqItemId: toNullableInt(existingItem?.boqItemId ?? line.itemId) ?? null,
+      itemId: toNullableInt(line.itemId ?? existingItem?.itemId) ?? null,
+      receiveGoodsId: toNullableInt(line.receiveGoodsId),
+      receiveGoodsItemId: sourceId,
+      deliveryChallanId: toNullableInt(line.deliveryChallanId),
+      deliveryChallanItemId: toNullableInt(line.deliveryChallanItemId),
+      deliveryChallanRef: line.sourceType === "dc" ? line.sourceRef || "" : "",
+      name: line.name || "",
+      description: line.description || "",
+      unit: line.unit || "PCS",
+      hsn: line.hsn || "",
+      gst: line.gst || "",
+      rate: toNumber(line.rate),
+      notes: line.notes || "",
+      dcQty: Math.max(toNumber(line.sourceQty), 0),
+      previouslyConsumed: Math.max(toNumber(line.consumedQty), 0),
+      reallocatedQty: Math.max(toNumber(line.reallocatedQty), 0),
+      availableQty: availableQuantity,
+      selected: selectedQuantity > 0,
+      consumeQty: selectedQuantity > 0 ? formatQuantityInputText(selectedQuantity) : "",
+    };
+  });
+};
+
 const createEmptyForm = ({ records = [], company = {} }) => ({
   consumptionNumber: buildConsumptionReference(records),
   projectId: "",
@@ -321,6 +401,7 @@ const statusPillClass = (status) => {
 };
 
 const Consumption = () => {
+  const navigate = useNavigate();
   const settings = useSettings();
   const company = settings?.company ?? {};
 
@@ -328,19 +409,22 @@ const Consumption = () => {
   const [locations, setLocations] = useState([]);
   const [deliveryChallans, setDeliveryChallans] = useState([]);
   const [consumptions, setConsumptions] = useState([]);
+  const [availableInventory, setAvailableInventory] = useState([]);
 
   const [form, setForm] = useState(() => createEmptyForm({ company }));
   const [itemRows, setItemRows] = useState([]);
   const [selectedDeliveryChallanIds, setSelectedDeliveryChallanIds] = useState([]);
-  const [loadedDeliveryChallanIds, setLoadedDeliveryChallanIds] = useState([]);
+  const [, setLoadedDeliveryChallanIds] = useState([]);
   const [deliveryChallanFilter, setDeliveryChallanFilter] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editingConsumption, setEditingConsumption] = useState(null);
 
   const [loading, setLoading] = useState(false);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
   const [feedback, setFeedback] = useState({ type: "", message: "" });
+  const [inventoryError, setInventoryError] = useState("");
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -406,6 +490,8 @@ const Consumption = () => {
       setErrors({});
       setFeedback({ type: "", message: "" });
       setItemRows([]);
+      setAvailableInventory([]);
+      setInventoryError("");
       setSelectedDeliveryChallanIds([]);
       setLoadedDeliveryChallanIds([]);
       setDeliveryChallanFilter("");
@@ -476,6 +562,66 @@ const Consumption = () => {
     return locations;
   }, [form.projectId, locations]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const projectId = form.projectId;
+    const locationId = form.locationId;
+
+    if (!projectId || !locationId) {
+      setAvailableInventory([]);
+      setInventoryError("");
+      if (!editingId) {
+        setItemRows([]);
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setInventoryLoading(true);
+    setInventoryError("");
+    fetchAvailableInventory({
+      projectId,
+      locationId,
+      excludeConsumptionId: editingId || undefined,
+    })
+      .then((list) => {
+        if (cancelled) {
+          return;
+        }
+        const safeList = Array.isArray(list) ? list : [];
+        setAvailableInventory(safeList);
+        setItemRows(
+          buildRowsFromAvailableInventory({
+            rows: safeList,
+            editingConsumption,
+          })
+        );
+        setLoadedDeliveryChallanIds([]);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setAvailableInventory([]);
+        setItemRows([]);
+        setInventoryError(
+          error?.response?.data?.error ||
+            error?.message ||
+            "Could not load available inventory."
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setInventoryLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editingConsumption, editingId, form.locationId, form.projectId]);
+
   const availableChallans = useMemo(() => {
     if (!form.projectId) {
       return deliveryChallans;
@@ -485,17 +631,16 @@ const Consumption = () => {
     );
   }, [deliveryChallans, form.projectId]);
 
-  const selectedChallan = useMemo(
-    () =>
-      deliveryChallans.find(
-        (challan) => String(challan.id) === String(form.deliveryChallanId)
-      ) || null,
-    [deliveryChallans, form.deliveryChallanId]
-  );
-
   const filteredDeliveryChallansForSelection = useMemo(() => {
     const keyword = normalizeText(deliveryChallanFilter);
+    const selectedLocationId = String(form.locationId || "");
     return availableChallans.filter((challan) => {
+      if (
+        selectedLocationId &&
+        String(challan.toLocationId ?? challan.ToLocationId ?? "") !== selectedLocationId
+      ) {
+        return false;
+      }
       if (!keyword) {
         return true;
       }
@@ -517,7 +662,7 @@ const Consumption = () => {
         .toLowerCase()
         .includes(keyword);
     });
-  }, [availableChallans, deliveryChallanFilter, locationMap]);
+  }, [availableChallans, deliveryChallanFilter, form.locationId, locationMap]);
 
   const selectedDeliveryChallans = useMemo(
     () =>
@@ -525,14 +670,6 @@ const Consumption = () => {
         .map((challanId) => deliveryChallanMap[String(challanId)])
         .filter(Boolean),
     [deliveryChallanMap, selectedDeliveryChallanIds]
-  );
-
-  const loadedDeliveryChallans = useMemo(
-    () =>
-      loadedDeliveryChallanIds
-        .map((challanId) => deliveryChallanMap[String(challanId)])
-        .filter(Boolean),
-    [deliveryChallanMap, loadedDeliveryChallanIds]
   );
 
   const selectableFilteredDeliveryChallanIds = useMemo(
@@ -572,11 +709,6 @@ const Consumption = () => {
     [selectedRows]
   );
 
-  const totalDcQuantity = useMemo(
-    () => itemRows.reduce((sum, row) => sum + Math.max(toNumber(row.dcQty), 0), 0),
-    [itemRows]
-  );
-
   const getChallanItemCount = (challan = {}) =>
     Array.isArray(challan.items) ? challan.items.length : 0;
 
@@ -586,15 +718,22 @@ const Consumption = () => {
       0
     );
 
-  const getChallanAvailableQuantity = (challan = {}) =>
-    buildRowsFromSelectedChallan({
-      challan,
-      consumptions,
-      editingConsumption:
-        editingConsumption && isConsumptionLinkedToChallan(editingConsumption, challan)
-          ? editingConsumption
-          : null,
-    }).reduce((sum, row) => sum + Math.max(toNumber(row.availableQty), 0), 0);
+  const getChallanAvailableQuantity = useCallback(
+    (challan = {}) => {
+      const challanId = String(challan.id ?? challan.deliveryChallanId ?? "");
+      if (!challanId) {
+        return 0;
+      }
+      return availableInventory.reduce((sum, row) => {
+        const isDcRow = normalizeText(row.sourceType) === "dc";
+        const rowChallanId = String(row.deliveryChallanId ?? "");
+        return isDcRow && rowChallanId === challanId
+          ? sum + Math.max(toNumber(row.availableQty), 0)
+          : sum;
+      }, 0);
+    },
+    [availableInventory]
+  );
 
   const getChallanLocationLabel = (challan = {}, type = "to") => {
     const id =
@@ -624,7 +763,7 @@ const Consumption = () => {
         0
       ),
     }),
-    [consumptions, editingConsumption, selectedDeliveryChallans]
+    [getChallanAvailableQuantity, selectedDeliveryChallans]
   );
 
   const totalEntries = consumptions.length;
@@ -758,71 +897,24 @@ const Consumption = () => {
     setSelectedDeliveryChallanIds([]);
     setLoadedDeliveryChallanIds([]);
     setDeliveryChallanFilter("");
+    setAvailableInventory([]);
+    setInventoryError("");
     clearError("projectId");
     clearError("locationId");
     clearError("deliveryChallanId");
   };
 
-  const resolveLocationIdFromChallan = (challan) => {
-    const directId =
-      challan?.toLocationId ??
-      challan?.ToLocationId ??
-      challan?.locationId ??
-      challan?.LocationId ??
-      null;
-
-    const parsedId = toNullableInt(directId);
-    if (parsedId !== null) {
-      return String(parsedId);
-    }
-
-    const targetName = normalizeText(challan?.toLocation ?? challan?.ToLocation ?? "");
-    if (!targetName) {
-      return "";
-    }
-
-    const matched = locations.find((location) => normalizeText(location.name) === targetName);
-    return matched ? String(matched.id) : "";
-  };
-
-  const onDeliveryChallanChange = (deliveryChallanId) => {
-    const selected = deliveryChallans.find(
-      (challan) => String(challan.id) === String(deliveryChallanId)
-    );
-
-    if (!selected) {
-      setForm((prev) => ({
-        ...prev,
-        deliveryChallanId: "",
-        deliveryChallanRef: "",
-      }));
-      setItemRows([]);
-      clearError("deliveryChallanId");
-      return;
-    }
-
-    const shouldUseExistingItems =
-      editingConsumption && isConsumptionLinkedToChallan(editingConsumption, selected);
-
-    const rows = buildRowsFromSelectedChallan({
-      challan: selected,
-      consumptions,
-      editingConsumption: shouldUseExistingItems ? editingConsumption : null,
-      autoSelectAvailable: !shouldUseExistingItems,
-    });
-
-    const locationId = resolveLocationIdFromChallan(selected);
-
+  const onLocationChange = (locationId) => {
     setForm((prev) => ({
       ...prev,
-      projectId: selected.projectId ? String(selected.projectId) : prev.projectId,
-      locationId: locationId || prev.locationId,
-      deliveryChallanId: String(selected.id),
-      deliveryChallanRef: selected.dcNumber || prev.deliveryChallanRef,
+      locationId,
+      deliveryChallanId: "",
+      deliveryChallanRef: "",
     }));
-
-    setItemRows(rows);
-    clearError("deliveryChallanId");
+    setItemRows([]);
+    setSelectedDeliveryChallanIds([]);
+    setLoadedDeliveryChallanIds([]);
+    clearError("locationId");
     clearError("items");
   };
 
@@ -853,56 +945,57 @@ const Consumption = () => {
     clearError("deliveryChallanId");
   };
 
+  const clearDeliveryChallanSelection = () => {
+    setSelectedDeliveryChallanIds([]);
+    setLoadedDeliveryChallanIds([]);
+    setItemRows(
+      buildRowsFromAvailableInventory({
+        rows: availableInventory,
+        editingConsumption,
+      })
+    );
+    setForm((prev) => ({
+      ...prev,
+      deliveryChallanId: "",
+      deliveryChallanRef: "",
+    }));
+    clearError("deliveryChallanId");
+    clearError("items");
+  };
+
   const handleLoadSelectedDeliveryChallans = () => {
     if (!selectedDeliveryChallans.length) {
-      setItemRows([]);
-      setLoadedDeliveryChallanIds([]);
-      setForm((prev) => ({
-        ...prev,
-        locationId: "",
-        deliveryChallanId: "",
-        deliveryChallanRef: "",
-      }));
+      clearDeliveryChallanSelection();
       return;
     }
 
     const loadedIds = selectedDeliveryChallans.map((challan) => String(challan.id));
-    const nextRows = selectedDeliveryChallans.flatMap((challan, challanIndex) => {
-      const shouldUseExistingItems =
-        editingConsumption && isConsumptionLinkedToChallan(editingConsumption, challan);
-      return buildRowsFromSelectedChallan({
-        challan,
-        consumptions,
-        editingConsumption: shouldUseExistingItems ? editingConsumption : null,
-        autoSelectAvailable: !shouldUseExistingItems,
-      }).map((row) => ({
-        ...row,
-        rowId: `${challan.id}-${row.rowId}`,
-        deliveryChallanId: toNullableInt(challan.id),
-        deliveryChallanRef: challan.dcNumber || "",
-        sourceDcNumber: challan.dcNumber || `DC ${challanIndex + 1}`,
-      }));
+    const loadedIdSet = new Set(loadedIds);
+    const filteredInventoryRows = availableInventory.filter((row) => {
+      const isDcRow = normalizeText(row.sourceType) === "dc";
+      return isDcRow && loadedIdSet.has(String(row.deliveryChallanId ?? ""));
+    });
+    const nextRows = buildRowsFromAvailableInventory({
+      rows: filteredInventoryRows,
+      editingConsumption,
+      autoSelectAvailable: true,
     });
 
     if (!nextRows.length || !nextRows.some((row) => row.availableQty > 0)) {
       setErrors((prev) => ({
         ...prev,
-        items: "Selected delivery challans do not have items with available quantity.",
+        items:
+          "Selected delivery challans do not have remaining inventory for this location.",
       }));
       return;
     }
 
     const primaryChallan = selectedDeliveryChallans[0];
-    const locationId = resolveLocationIdFromChallan(primaryChallan);
-    const fallbackLocationId = selectedProjectLocations[0]?.id
-      ? String(selectedProjectLocations[0].id)
-      : "";
     setLoadedDeliveryChallanIds(loadedIds);
     setItemRows(nextRows);
     setForm((prev) => ({
       ...prev,
       projectId: primaryChallan.projectId ? String(primaryChallan.projectId) : prev.projectId,
-      locationId: locationId || prev.locationId || fallbackLocationId,
       deliveryChallanId: primaryChallan.id ? String(primaryChallan.id) : "",
       deliveryChallanRef: selectedDeliveryChallans
         .map((challan) => challan.dcNumber)
@@ -1039,9 +1132,6 @@ const Consumption = () => {
     if (!String(form.locationId || "").trim()) {
       nextErrors.locationId = "Location is required.";
     }
-    if (!loadedDeliveryChallanIds.length) {
-      nextErrors.deliveryChallanId = "Select and load at least one delivery challan.";
-    }
     if (!String(form.consumptionDate || "").trim()) {
       nextErrors.consumptionDate = "Consumption date is required.";
     }
@@ -1051,7 +1141,7 @@ const Consumption = () => {
 
     const chosen = itemRows.filter((row) => row.selected);
     if (!chosen.length) {
-      nextErrors.items = "Select at least one item from the delivery challan.";
+      nextErrors.items = "Select at least one available inventory item.";
     } else {
       const invalidRow = chosen.find((row) => {
         const requested = Math.max(toNumber(row.consumeQty), 0);
@@ -1080,9 +1170,13 @@ const Consumption = () => {
           toNullableInt(row.boqItemId) ??
           toNullableInt(row.receiveGoodsItemId) ??
           null,
+        receiveGoodsId: toNullableInt(row.receiveGoodsId),
         deliveryChallanId: toNullableInt(row.deliveryChallanId),
+        deliveryChallanItemId: toNullableInt(row.deliveryChallanItemId),
         deliveryChallanRef: row.deliveryChallanRef || "",
         receiveGoodsItemId: toNullableInt(row.receiveGoodsItemId),
+        sourceType: row.sourceType || "",
+        sourceKey: row.sourceKey || "",
         name: row.name,
         description: row.description || "",
         unit: row.unit || "PCS",
@@ -1094,19 +1188,32 @@ const Consumption = () => {
         notes: row.notes || "",
       }))
       .filter((item) => item.name && item.quantity > 0);
+    const selectedDeliveryChallanIdsForPayload = Array.from(
+      new Set(
+        selectedItems
+          .map((item) => toNullableInt(item.deliveryChallanId))
+          .filter((id) => id !== null)
+      )
+    );
+    const selectedDeliveryChallanRefsForPayload = Array.from(
+      new Set(
+        itemRows
+          .filter((row) => row.selected && row.sourceType === "dc")
+          .map((row) => row.sourceRef || row.deliveryChallanRef)
+          .filter(Boolean)
+      )
+    );
 
     return {
       consumptionNumber: String(form.consumptionNumber || "").trim(),
       projectId: toNullableInt(form.projectId),
       locationId: toNullableInt(form.locationId),
-      deliveryChallanId: toNullableInt(form.deliveryChallanId),
-      deliveryChallanIds: loadedDeliveryChallanIds
-        .map((id) => toNullableInt(id))
-        .filter((id) => id !== null),
+      deliveryChallanId:
+        selectedDeliveryChallanIdsForPayload[0] ?? toNullableInt(form.deliveryChallanId),
+      deliveryChallanIds: selectedDeliveryChallanIdsForPayload,
       deliveryChallanRef:
-        loadedDeliveryChallans.length
-          ? loadedDeliveryChallans.map((challan) => challan.dcNumber).filter(Boolean).join(", ")
-          : selectedChallan?.dcNumber || String(form.deliveryChallanRef || "").trim(),
+        selectedDeliveryChallanRefsForPayload.join(", ") ||
+        String(form.deliveryChallanRef || "").trim(),
       consumptionDate: form.consumptionDate || null,
       issuedBy: String(form.issuedBy || "").trim(),
       status: String(form.status || "Logged").trim() || "Logged",
@@ -1224,6 +1331,11 @@ const Consumption = () => {
         }).map((row) => ({
           ...row,
           rowId: `${challan.id}-${row.rowId}`,
+          sourceType: "dc",
+          sourceKey:
+            row.sourceKey ||
+            `dc:${challan.id}:${row.receiveGoodsItemId ?? row.itemId ?? materialKey(row)}`,
+          sourceRef: challan.dcNumber || "",
           deliveryChallanId: toNullableInt(challan.id),
           deliveryChallanRef: challan.dcNumber || "",
           sourceDcNumber: challan.dcNumber || `DC ${challanIndex + 1}`,
@@ -1295,6 +1407,23 @@ const Consumption = () => {
 
   return (
     <div className="space-y-6">
+      <section className="flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => navigate("/inventory/delivery-challan")}
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-violet-200 hover:text-violet-700"
+        >
+          DC Option
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate("/inventory/reallocate-return")}
+          className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800"
+        >
+          Reallocation
+        </button>
+      </section>
+
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <article className={`${panel} p-5`}>
           <p className="text-sm font-medium text-slate-500">Total Entries</p>
@@ -1429,7 +1558,29 @@ const Consumption = () => {
               </select>
             </label>
 
-            <input type="hidden" value={form.locationId} readOnly />
+            <label>
+              <span className="text-sm font-semibold text-slate-700">
+                Location <span className="text-red-600">*</span>
+              </span>
+              <select
+                className={field}
+                value={form.locationId}
+                onChange={(event) => onLocationChange(event.target.value)}
+                disabled={!form.projectId}
+              >
+                <option value="">
+                  {form.projectId ? "Select location" : "Select project first"}
+                </option>
+                {selectedProjectLocations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+              {errors.locationId && (
+                <p className="mt-1 text-xs text-red-600">{errors.locationId}</p>
+              )}
+            </label>
           </div>
 
           <div className="grid grid-cols-1 gap-4 border-t border-slate-200 px-6 py-5 md:grid-cols-2">
@@ -1501,10 +1652,10 @@ const Consumption = () => {
           <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 className="text-2xl font-semibold text-violet-800">
-                Select Delivery Challans (All under selected Project)
+                Optional Delivery Challan Lookup
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                All delivery challans from the selected project are listed below. Select one or more to load items.
+                Available inventory loads automatically from the selected project and location. Use this lookup only when you want to narrow the list to specific DCs.
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1552,7 +1703,7 @@ const Consumption = () => {
                     {!form.projectId ? (
                       <tr>
                         <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
-                          Select a project to load delivery challans.
+                          Select a project to review delivery challans.
                         </td>
                       </tr>
                     ) : filteredDeliveryChallansForSelection.length === 0 ? (
@@ -1621,7 +1772,7 @@ const Consumption = () => {
                   </span>
                   <button
                     type="button"
-                    onClick={() => setSelectedDeliveryChallanIds([])}
+                    onClick={clearDeliveryChallanSelection}
                     disabled={!selectedDeliveryChallanIds.length}
                     className="text-sm font-semibold text-violet-700 disabled:cursor-not-allowed disabled:text-slate-400"
                   >
@@ -1668,7 +1819,7 @@ const Consumption = () => {
                 Load Selected DCs
               </button>
               <p className="mt-3 text-xs text-slate-500">
-                Selected DCs will load their items below.
+                Loading DCs is optional; location inventory is already loaded below.
               </p>
             </aside>
           </div>
@@ -1684,7 +1835,7 @@ const Consumption = () => {
           <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 className="text-2xl font-semibold text-violet-800">
-                Line Items (From Selected Delivery Challans)
+                Available Inventory
                 {itemRows.length ? (
                   <span className="ml-3 rounded-full bg-violet-100 px-2.5 py-1 align-middle text-xs font-semibold text-violet-700">
                     {itemRows.length} Items
@@ -1692,8 +1843,23 @@ const Consumption = () => {
                 ) : null}
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                Select items and provide consumption quantity. Available quantity is based on delivery challan balance.
+                Select items and provide consumption quantity. Available quantity includes Receive and DC stock minus prior consumption and reallocation.
               </p>
+              {inventoryLoading && (
+                <p className="mt-2 text-xs font-semibold text-violet-700">
+                  Loading available inventory...
+                </p>
+              )}
+              {!inventoryLoading && form.projectId && form.locationId && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Showing {availableInventory.length} available balance rows for this location.
+                </p>
+              )}
+              {inventoryError && (
+                <p className="mt-2 text-xs font-semibold text-red-600">
+                  {inventoryError}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -1727,12 +1893,16 @@ const Consumption = () => {
                     />
                   </th>
                   <th className="px-3 py-3 text-left font-semibold w-16">#</th>
+                  <th className="px-3 py-3 text-left font-semibold min-w-[180px]">Source</th>
                   <th className="px-3 py-3 text-left font-semibold min-w-[220px]">Material</th>
                   <th className="px-3 py-3 text-left font-semibold min-w-[110px]">HSN / SAC</th>
                   <th className="px-3 py-3 text-left font-semibold min-w-[90px]">Unit</th>
-                  <th className="px-3 py-3 text-right font-semibold min-w-[120px]">DC Quantity</th>
+                  <th className="px-3 py-3 text-right font-semibold min-w-[120px]">Source Qty</th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[150px]">
                     Previously Consumed
+                  </th>
+                  <th className="px-3 py-3 text-right font-semibold min-w-[150px]">
+                    Reallocated
                   </th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[120px]">
                     Available Qty
@@ -1745,8 +1915,10 @@ const Consumption = () => {
               <tbody>
                 {!itemRows.length && (
                   <tr>
-                    <td colSpan="9" className="px-4 py-10 text-center text-slate-500">
-                      Select a delivery challan to load available items.
+                    <td colSpan="11" className="px-4 py-10 text-center text-slate-500">
+                      {form.projectId && form.locationId
+                        ? "No available inventory found for this project and location."
+                        : "Select a project and location to load available inventory."}
                     </td>
                   </tr>
                 )}
@@ -1765,6 +1937,16 @@ const Consumption = () => {
                       />
                     </td>
                     <td className="px-3 py-2 text-slate-700">{index + 1}</td>
+                    <td className="px-3 py-2 text-slate-700">
+                      <span className="font-semibold uppercase text-slate-600">
+                        {row.sourceType === "dc" ? "DC" : row.sourceType || "Receive"}
+                      </span>
+                      {row.sourceRef ? (
+                        <span className="block text-xs text-slate-500">
+                          {row.sourceRef}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2 text-slate-800">{row.name || "-"}</td>
                     <td className="px-3 py-2 text-slate-700">{row.hsn || "-"}</td>
                     <td className="px-3 py-2 text-slate-700">{row.unit || "PCS"}</td>
@@ -1773,6 +1955,9 @@ const Consumption = () => {
                     </td>
                     <td className="px-3 py-2 text-right text-slate-700">
                       {formatQty(row.previouslyConsumed)}
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-700">
+                      {formatQty(row.reallocatedQty)}
                     </td>
                     <td className="px-3 py-2 text-right font-semibold text-emerald-600">
                       {formatQty(row.availableQty)}
@@ -1827,7 +2012,7 @@ const Consumption = () => {
               {!!itemRows.length && (
                 <tfoot>
                   <tr className="bg-violet-50">
-                    <td colSpan="7" className="px-3 py-3 text-right font-semibold text-violet-800">
+                    <td colSpan="9" className="px-3 py-3 text-right font-semibold text-violet-800">
                       Total Quantity to Consume:
                     </td>
                     <td colSpan="2" className="px-3 py-3 text-right text-lg font-bold text-violet-900">
@@ -1986,6 +2171,17 @@ const Consumption = () => {
                           className="font-semibold text-violet-700 hover:underline"
                         >
                           Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate("/inventory/reallocate-return", {
+                              state: { consumptionId: record.id },
+                            })
+                          }
+                          className="font-semibold text-indigo-700 hover:underline"
+                        >
+                          Reallocation
                         </button>
                         <button
                           type="button"

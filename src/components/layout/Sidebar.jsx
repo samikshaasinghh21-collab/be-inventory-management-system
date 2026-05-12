@@ -15,8 +15,14 @@ const buildInitials = (value = "Inventory Workspace") =>
     .map((part) => part[0]?.toUpperCase() || "")
     .join("") || "IW";
 
+const collectExpandableItems = (items = []) =>
+  items.flatMap((item) => [
+    ...(item.children?.length ? [item] : []),
+    ...collectExpandableItems(item.children || []),
+  ]);
+
 const EXPANDABLE_ITEMS = NAVIGATION_SECTIONS.flatMap((section) =>
-  (section.items || []).filter((item) => item.children?.length)
+  collectExpandableItems(section.items || [])
 );
 
 const createOpenState = (pathname) =>
@@ -70,14 +76,20 @@ const Sidebar = ({
     }
   };
 
-  const renderLeafItem = (item, isChild = false) => {
+  const getChildStyle = (depth) =>
+    depth > 0 ? { paddingLeft: `${0.85 + depth * 0.75}rem` } : undefined;
+
+  const renderLeafItem = (item, depth = 0) => {
     const isActive = isNavigationItemActive(location.pathname, item);
+    const isChild = depth > 0;
+
     return (
       <NavLink
         key={item.id}
         to={item.to || getDefaultDestination(item)}
         title={item.label}
         onClick={closeSidebarOnMobile}
+        style={getChildStyle(depth)}
         className={() =>
           [
             "sidebar-nav-link",
@@ -106,13 +118,14 @@ const Sidebar = ({
     );
   };
 
-  const renderSectionItem = (item) => {
+  const renderSectionItem = (item, depth = 0) => {
     const isActive = isNavigationItemActive(location.pathname, item);
     const isExpanded = !!openGroups[item.id];
     const destination = getDefaultDestination(item);
+    const isChild = depth > 0;
 
     if (!item.children?.length) {
-      return renderLeafItem(item);
+      return renderLeafItem(item, depth);
     }
 
     return (
@@ -122,10 +135,12 @@ const Sidebar = ({
           className={[
             "sidebar-nav-link",
             "has-children",
+            isChild ? "is-child" : "",
             isActive ? "is-active" : "",
           ]
             .filter(Boolean)
             .join(" ")}
+          style={getChildStyle(depth)}
           onClick={() => {
             if (isCollapsed && isDesktop) {
               navigate(destination);
@@ -167,7 +182,7 @@ const Sidebar = ({
 
         {!isCollapsed && isExpanded && (
           <div className="sidebar-subnav">
-            {item.children.map((child) => renderLeafItem(child, true))}
+            {item.children.map((child) => renderSectionItem(child, depth + 1))}
           </div>
         )}
       </div>

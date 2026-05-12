@@ -1,3 +1,5 @@
+import { formatCustomerName } from "../utils/formatters";
+
 const pad = (value) => String(value).padStart(2, "0");
 
 export const normalizeProjectDate = (value) => {
@@ -34,12 +36,14 @@ export const normalizeProjectRecord = (project = {}) => ({
     project.customerId ??
     project.CustomerId ??
     null,
-  client: project.client ?? project.Client ?? "",
+  client: formatCustomerName(project.client ?? project.Client ?? ""),
   companyName:
-    project.companyName ??
-    project.ClientCompany ??
-    project.clientCompany ??
-    "",
+    formatCustomerName(
+      project.companyName ??
+        project.ClientCompany ??
+        project.clientCompany ??
+        ""
+    ),
   address:
     project.address ??
     project.ClientAddress ??

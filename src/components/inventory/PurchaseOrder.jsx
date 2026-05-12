@@ -30,6 +30,7 @@ import {
   setActiveProjectId,
 } from "../../services/projectSelectionStore";
 import { DEFAULT_PURCHASE_ORDER_TERMS } from "../../utils/purchaseOrderTerms";
+import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -61,7 +62,7 @@ const createRecommendationLineItem = (recommendation = {}) => ({
   serialRequired: false,
   taxPercentage: recommendation.taxPercentage ?? 0,
   quantity: recommendation.recommendedOrder ?? recommendation.shortage ?? 0,
-  rate: recommendation.unitPrice ?? 0,
+  rate: roundUnitPrice(recommendation.unitPrice ?? 0),
   notes: recommendation.notes ?? "",
   location: recommendation.locationName ?? "",
 });
@@ -94,7 +95,6 @@ const formatAddressLine = (vendor) => {
 const PurchaseOrder = () => {
   const navigate = useNavigate();
   const settings = useSettings();
-  const currency = settings?.preferences?.currency || "INR";
   const location = useLocation();
   const [projects, setProjects] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -146,7 +146,10 @@ const PurchaseOrder = () => {
         serialRequired: item.serialRequired ?? false,
         taxPercentage: item.taxPercentage ?? 0,
         quantity: item.quantity ?? "",
-        rate: item.unitPrice ?? item.rate ?? "",
+          rate:
+            item.unitPrice || item.unitPrice === 0 || item.rate || item.rate === 0
+              ? roundUnitPrice(item.unitPrice ?? item.rate)
+              : "",
         location: item.location ?? item.notes ?? "",
         notes: item.notes ?? item.location ?? "",
       }));
@@ -195,18 +198,7 @@ const PurchaseOrder = () => {
     window.history.replaceState({}, document.title);
   }, [location.state, editingId]);
 
-  const formatCurrency = (value) => {
-    const amount = Number(value) || 0;
-    try {
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      return `${currency} ${amount.toLocaleString()}`;
-    }
-  };
+  const formatCurrency = formatInrCurrency;
 
   const loadLocations = async () => {
     try {
@@ -340,7 +332,7 @@ const PurchaseOrder = () => {
           serialRequired: product.serialRequired ?? false,
           taxPercentage: product.taxPercentage ?? parseTaxPercentage(product.gst),
           quantity: product.quantity ?? product.qty ?? 1,
-          rate: product.rate ?? product.salesPrice ?? product.price ?? 0,
+          rate: roundUnitPrice(product.rate ?? product.salesPrice ?? product.price ?? 0),
           location: "",
         }));
       if (mapped.length > 0) {
@@ -487,7 +479,7 @@ const PurchaseOrder = () => {
       allowLockedEdit: isEditingLocked && closedPoOverrideApproved,
       items: cleanedItems.map((item) => {
         const qty = Number(item.quantity) || 0;
-        const unitPrice = Number(item.rate) || 0;
+        const unitPrice = roundUnitPrice(item.rate);
         const lineLocation = String(item.location ?? item.notes ?? "").trim();
         return {
           itemId: item.itemId ?? null,
@@ -540,9 +532,9 @@ const PurchaseOrder = () => {
       const directRate = Number(item.rate ?? item.Rate);
       const rate =
         Number.isFinite(directRate) && directRate >= 0
-          ? directRate
+          ? roundUnitPrice(directRate)
           : qty > 0
-          ? (Number(item.amount ?? 0) || 0) / qty
+          ? roundUnitPrice((Number(item.amount ?? 0) || 0) / qty)
           : 0;
 
       return {

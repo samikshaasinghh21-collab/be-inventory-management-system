@@ -28,8 +28,22 @@ const normalizeConsumptionItem = (item = {}) => ({
   boqItemId:
     item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId ?? null,
   itemId: item.itemId ?? item.ItemId ?? item.BoqItemId ?? item.BOQItemId ?? null,
+  deliveryChallanId:
+    item.deliveryChallanId ??
+    item.DeliveryChallanId ??
+    item.DeliveryChallanID ??
+    item.ChallanId ??
+    null,
+  deliveryChallanItemId:
+    item.deliveryChallanItemId ??
+    item.DeliveryChallanItemId ??
+    item.DeliveryChallanLineItemId ??
+    null,
   receiveGoodsItemId:
     item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId ?? null,
+  receiveGoodsId: item.receiveGoodsId ?? item.ReceiveGoodsId ?? null,
+  sourceType: item.sourceType ?? item.SourceType ?? "",
+  sourceKey: item.sourceKey ?? item.SourceKey ?? "",
   name: item.name ?? item.Item ?? item.item ?? item.Name ?? "",
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",
@@ -40,6 +54,50 @@ const normalizeConsumptionItem = (item = {}) => ({
   rate: Number(item.rate ?? item.Rate ?? 0) || 0,
   notes: item.notes ?? item.Notes ?? "",
 });
+
+const buildConsumptionItemKey = (item = {}, index = 0) => {
+  const id = item.id ?? item.Id;
+  if (id !== null && id !== undefined && id !== "") {
+    return `id:${id}`;
+  }
+  const sourceIds = [
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId,
+    item.boqItemId ?? item.BoqItemId ?? item.BOQItemId,
+    item.itemId ?? item.ItemId,
+  ]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(":");
+  if (sourceIds) {
+    return `source:${sourceIds}:${Number(item.quantity ?? item.Quantity ?? 0) || 0}`;
+  }
+  const name = String(
+    item.name ?? item.Item ?? item.item ?? item.Name ?? ""
+  ).trim().toLowerCase();
+  if (!name) {
+    return `index:${index}`;
+  }
+  return [
+    "line",
+    name,
+    String(item.unit ?? item.Unit ?? "PCS").trim().toUpperCase(),
+    Number(item.quantity ?? item.Quantity ?? 0) || 0,
+    Number(item.rate ?? item.Rate ?? 0) || 0,
+    String(item.notes ?? item.Notes ?? "").trim().toLowerCase(),
+  ].join(":");
+};
+
+const dedupeConsumptionItems = (items = []) => {
+  const uniqueItems = new Map();
+  (Array.isArray(items) ? items : []).forEach((item, index) => {
+    const normalizedItem = normalizeConsumptionItem(item);
+    const key = buildConsumptionItemKey(normalizedItem, index);
+    if (!uniqueItems.has(key)) {
+      uniqueItems.set(key, normalizedItem);
+    }
+  });
+  return Array.from(uniqueItems.values());
+};
 
 const normalizeConsumption = (consumption = {}) => ({
   id: consumption.id ?? consumption.ConsumptionId ?? consumption.Id ?? null,
@@ -90,12 +148,63 @@ const normalizeConsumption = (consumption = {}) => ({
   companyEmail: consumption.companyEmail ?? consumption.CompanyEmail ?? "",
   createdAt: consumption.createdAt ?? consumption.CreatedAt ?? null,
   updatedAt: consumption.updatedAt ?? consumption.UpdatedAt ?? null,
-  items: Array.isArray(consumption.items)
-    ? consumption.items.map(normalizeConsumptionItem)
-    : Array.isArray(consumption.ConsumptionItems)
-    ? consumption.ConsumptionItems.map(normalizeConsumptionItem)
-    : [],
+  items: dedupeConsumptionItems(
+    Array.isArray(consumption.items)
+      ? consumption.items
+      : Array.isArray(consumption.ConsumptionItems)
+      ? consumption.ConsumptionItems
+      : []
+  ),
 });
+
+const buildConsumptionRecordKey = (record = {}, index = 0) => {
+  const id = record.id ?? record.consumptionId;
+  if (id !== null && id !== undefined && id !== "") {
+    return `id:${id}`;
+  }
+  const reference = String(record.consumptionNumber ?? "").trim().toLowerCase();
+  if (reference) {
+    return `ref:${reference}`;
+  }
+  const challanIds = (record.deliveryChallanIds || [])
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  const compositeParts = [
+    record.projectId ?? "",
+    record.locationId ?? "",
+    record.deliveryChallanId ?? challanIds ?? "",
+    String(record.deliveryChallanRef ?? "").trim().toLowerCase(),
+    record.consumptionDate ?? "",
+    String(record.issuedBy ?? "").trim().toLowerCase(),
+  ];
+  return compositeParts.some((part) => String(part ?? "").trim())
+    ? `record:${compositeParts.join(":")}`
+    : `index:${index}`;
+};
+
+const dedupeConsumptions = (records = []) => {
+  const uniqueRecords = new Map();
+  (Array.isArray(records) ? records : []).forEach((record, index) => {
+    const normalizedRecord = normalizeConsumption(record);
+    const key = buildConsumptionRecordKey(normalizedRecord, index);
+    const existingRecord = uniqueRecords.get(key);
+    if (!existingRecord) {
+      uniqueRecords.set(key, normalizedRecord);
+      return;
+    }
+    uniqueRecords.set(key, {
+      ...existingRecord,
+      ...normalizedRecord,
+      items: dedupeConsumptionItems([
+        ...(existingRecord.items || []),
+        ...(normalizedRecord.items || []),
+      ]),
+    });
+  });
+  return Array.from(uniqueRecords.values());
+};
 
 export const fetchConsumptions = async () => {
   const response = await api.get("/consumptions");
@@ -104,7 +213,7 @@ export const fetchConsumptions = async () => {
     : Array.isArray(response.data)
     ? response.data
     : [];
-  return list.map(normalizeConsumption);
+  return dedupeConsumptions(list);
 };
 
 export const createConsumption = async (payload) => {

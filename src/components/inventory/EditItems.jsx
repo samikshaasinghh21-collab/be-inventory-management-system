@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useInventory } from "../../context/InventoryContext";
+import { roundUnitPrice } from "../../utils/formatters";
 
 const GST_OPTIONS = [
   "None",
@@ -49,7 +50,7 @@ const EditItems = () => {
     const item = items.find((item) => item.id === parseInt(id));
     if (item) {
       setItemName(item.name || "");
-      setPrice(item.price || "");
+      setPrice(item.price || item.price === 0 ? String(roundUnitPrice(item.price)) : "");
       setStock(item.stock || "");
       setGst(item.gst || "None");
       setCategory(item.category || "");
@@ -63,7 +64,7 @@ const EditItems = () => {
       id: parseInt(id),
       name: itemName,
       category,
-      price: Number(price),
+      price: roundUnitPrice(price),
       stock: Number(stock),
       gst,
       hsn,
@@ -196,8 +197,12 @@ const EditItems = () => {
                 <label className="text-sm font-medium">Sales Price</label>
                 <input
                   value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  type="text"
+                  onChange={(e) =>
+                    setPrice(e.target.value === "" ? "" : String(roundUnitPrice(e.target.value)))
+                  }
+                  type="number"
+                  min="0"
+                  step="1"
                   placeholder="₹ ex: 200"
                   className="w-full mt-1 border rounded px-3 py-2"
                 />

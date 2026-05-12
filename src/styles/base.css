@@ -99,6 +99,8 @@ img {
   #boq-print-area *,
   #delivery-challan-print-area,
   #delivery-challan-print-area *,
+  #payslip-print-area,
+  #payslip-print-area *,
   #consumption-view-panel,
   #consumption-view-panel *,
   #consumption-register,
@@ -108,6 +110,7 @@ img {
 
   #boq-print-area,
   #delivery-challan-print-area,
+  #payslip-print-area,
   #consumption-view-panel,
   #consumption-register {
     position: absolute;

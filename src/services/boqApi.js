@@ -1,4 +1,5 @@
 import api from "./api";
+import { roundUnitPrice } from "../utils/formatters";
 
 const emitBoqChange = () => {
   if (typeof window !== "undefined") {
@@ -10,7 +11,7 @@ const emitBoqChange = () => {
 
 const normalizeBoqItem = (item = {}) => {
   const quantity = Number(item.quantity ?? item.Quantity ?? 0);
-  const rate = Number(item.rate ?? item.Rate ?? 0);
+  const rate = roundUnitPrice(item.rate ?? item.Rate ?? item.unitPrice ?? item.UnitPrice ?? 0);
   const rawConsumed =
     item.consumedQty ?? item.ConsumedQty ?? item.totalConsumed ?? item.TotalConsumed ?? null;
   const consumedQty = Number.isFinite(Number(rawConsumed)) ? Number(rawConsumed) : null;
@@ -21,8 +22,7 @@ const normalizeBoqItem = (item = {}) => {
     : Number.isFinite(consumedQty)
     ? Math.max(quantity - consumedQty, 0)
     : null;
-  const amountFromValues = quantity * rate;
-  const amount = Number(item.amount ?? item.Amount ?? amountFromValues) || amountFromValues;
+  const amount = quantity * rate;
   return {
     id: item.id ?? item.LineItemId ?? null,
     boqId: item.boqId ?? item.BOQId ?? null,

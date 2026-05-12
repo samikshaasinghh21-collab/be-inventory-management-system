@@ -156,7 +156,6 @@
 
 .sidebar-nav-link.is-child {
   min-height: 2.55rem;
-  padding-left: 2.9rem;
   border-radius: 14px;
 }
 
@@ -180,17 +179,23 @@
 .sidebar-nav-label {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
   font-size: 0.89rem;
   font-weight: 600;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .sidebar-nav-meta {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
   color: rgba(255, 255, 255, 0.62);
   font-size: 0.72rem;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .sidebar-nav-chevron {
@@ -207,8 +212,8 @@
 }
 
 .sidebar-subnav {
-  margin: 0.25rem 0 0.35rem 1.6rem;
-  padding-left: 0.7rem;
+  margin: 0.25rem 0 0.35rem 0.55rem;
+  padding-left: 0.35rem;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
 }
 

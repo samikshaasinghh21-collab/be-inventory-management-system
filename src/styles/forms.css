@@ -1,6 +1,5 @@
 .app-content :is(
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-    select,
     textarea
   ),
 .input {
@@ -16,6 +15,7 @@
     border-color 0.2s ease,
     box-shadow 0.2s ease,
     background-color 0.2s ease;
+  text-transform: uppercase;
 }
 
 .app-content textarea,
@@ -42,6 +42,7 @@
   )::placeholder,
 .input::placeholder {
   color: var(--text-muted);
+  text-transform: none;
 }
 
 .app-content select,

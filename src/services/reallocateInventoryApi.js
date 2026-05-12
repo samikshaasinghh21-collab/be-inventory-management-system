@@ -22,6 +22,17 @@ const normalizeReallocateInventoryItem = (item = {}) => ({
     item.reallocateInventoryId ??
     item.ReallocateInventoryId ??
     null,
+  receiveGoodsItemId:
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId ?? null,
+  deliveryChallanId:
+    item.deliveryChallanId ?? item.DeliveryChallanId ?? item.ChallanId ?? null,
+  deliveryChallanItemId:
+    item.deliveryChallanItemId ??
+    item.DeliveryChallanItemId ??
+    item.DeliveryChallanLineItemId ??
+    null,
+  sourceType: item.sourceType ?? item.SourceType ?? "",
+  sourceKey: item.sourceKey ?? item.SourceKey ?? "",
   item: item.item ?? item.Item ?? item.name ?? item.Name ?? "",
   name: item.name ?? item.item ?? item.Item ?? item.Name ?? "",
   description: item.description ?? item.Description ?? "",

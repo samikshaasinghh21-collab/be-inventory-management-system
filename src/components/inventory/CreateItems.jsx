@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createItem } from "../../services/inventoryApi";
+import { roundUnitPrice } from "../../utils/formatters";
 
 const GST_OPTIONS = [
   "None",
@@ -53,7 +54,7 @@ const CreateItems = () => {
         category,
         hsn,
         stock: Number(stock),
-        price: Number(price),
+        price: roundUnitPrice(price),
         gst,
         description,
       });
@@ -236,8 +237,12 @@ const CreateItems = () => {
                     </label>
                     <input
                       value={price}
-                      onChange={(e) => setPrice(e.target.value)}
-                      type="text"
+                      onChange={(e) =>
+                        setPrice(e.target.value === "" ? "" : String(roundUnitPrice(e.target.value)))
+                      }
+                      type="number"
+                      min="0"
+                      step="1"
                       placeholder="INR ex: 200"
                       className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
                     />

@@ -22,6 +22,7 @@ import {
 import { getGstTaxMode } from "../../utils/gstUtils";
 import PasswordPromptModal from "../common/PasswordPromptModal";
 import { getClosedPoAuthError, isAdminRole } from "../../utils/closedPoAuth";
+import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
 
 const formatAddressLine = (vendor) => {
   const {
@@ -138,19 +139,7 @@ const PurchaseOrderRegister = () => {
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
 
-  const formatCurrency = (value) => {
-    const amount = Number(value) || 0;
-    try {
-      return new Intl.NumberFormat("en-IN", {
-        style: "currency",
-        currency: "INR",
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      return `\u20B9${amount.toLocaleString("en-IN")}`;
-    }
-  };
+  const formatCurrency = formatInrCurrency;
 
   const loadRecords = async () => {
     try {
@@ -851,9 +840,8 @@ const PurchaseOrderRegister = () => {
                                       const qty = Number(item.quantity ?? 0) || 0;
                                       const { ordered, received, available } =
                                         getPoItemQuantities(item);
-                                      const rate = Number(item.unitPrice ?? item.rate ?? 0) || 0;
-                                      const amount =
-                                        Number(item.totalPrice ?? qty * rate) || 0;
+                                      const rate = roundUnitPrice(item.unitPrice ?? item.rate ?? 0);
+                                      const amount = qty * rate;
                                       return (
                                         <tr
                                           key={item.id ?? item.itemId ?? `${key}-item-${itemIndex}`}
@@ -937,8 +925,8 @@ const PurchaseOrderRegister = () => {
           tableRows={(viewRecord.items || []).map((item, index) => {
             const qty = Number(item.quantity || 0);
             const { ordered, received, available } = getPoItemQuantities(item);
-            const rate = Number(item.rate ?? item.unitPrice ?? 0);
-            const amount = Number(item.totalPrice ?? qty * rate);
+            const rate = roundUnitPrice(item.rate ?? item.unitPrice ?? 0);
+            const amount = qty * rate;
             return {
               id: item.id || index,
               serial: index + 1,

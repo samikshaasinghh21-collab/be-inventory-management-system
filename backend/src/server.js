@@ -1008,6 +1008,9 @@ const normalizeDeliveryChallan = (row = {}) => {
       "",
     issueDate: row.IssueDate ?? row.issueDate ?? null,
     status: row.Status ?? row.status ?? "Draft",
+    podStatus: row.PODStatus ?? row.podStatus ?? "Pending",
+    podReference: row.PODReference ?? row.podReference ?? "",
+    podDate: row.PODDate ?? row.podDate ?? null,
     notes: row.Notes ?? row.notes ?? "",
     deliveredQty: Number(row.DeliveredQty ?? row.deliveredQty ?? 0) || 0,
     consumedQty: Number(row.ConsumedQty ?? row.consumedQty ?? 0) || 0,
@@ -1260,8 +1263,18 @@ const normalizeConsumptionItem = (row = {}) => ({
     null,
   boqItemId: row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null,
   itemId: row.ItemId ?? row.itemId ?? row.BoqItemId ?? row.boqItemId ?? null,
+  deliveryChallanId:
+    row.DeliveryChallanId ?? row.deliveryChallanId ?? row.ChallanId ?? null,
+  deliveryChallanItemId:
+    row.DeliveryChallanItemId ??
+    row.deliveryChallanItemId ??
+    row.DeliveryChallanLineItemId ??
+    row.deliveryChallanLineItemId ??
+    null,
   receiveGoodsItemId:
     row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? null,
+  sourceType: row.SourceType ?? row.sourceType ?? "",
+  sourceKey: row.SourceKey ?? row.sourceKey ?? "",
   name: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
   description: row.Description ?? row.description ?? "",
   unit: row.Unit ?? row.unit ?? "PCS",
@@ -1324,6 +1337,18 @@ const normalizeReallocateInventoryItem = (row = {}) => ({
     row.ReallocateInventoryId ??
     row.reallocateInventoryId ??
     null,
+  receiveGoodsItemId:
+    row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? null,
+  deliveryChallanId:
+    row.DeliveryChallanId ?? row.deliveryChallanId ?? row.ChallanId ?? null,
+  deliveryChallanItemId:
+    row.DeliveryChallanItemId ??
+    row.deliveryChallanItemId ??
+    row.DeliveryChallanLineItemId ??
+    row.deliveryChallanLineItemId ??
+    null,
+  sourceType: row.SourceType ?? row.sourceType ?? "",
+  sourceKey: row.SourceKey ?? row.sourceKey ?? "",
   item: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
   name: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
   description: row.Description ?? row.description ?? "",
@@ -1684,7 +1709,7 @@ const isLockedPurchaseOrderStatus = (status) =>
 const getLockedPurchaseOrderError = (status) =>
   isCancelledPurchaseOrderStatus(status)
     ? "This Purchase Order is Cancelled."
-    : "This Purchase Order is Closed.";
+    : "PO is Closed";
 
 const normalizeReceiveGoods = (row = {}) => {
   const id =
@@ -5649,6 +5674,9 @@ const ensureDeliveryChallanTables = async () => {
           EWayBillNumber NVARCHAR(100) NULL,
           IssueDate DATE NULL,
           Status NVARCHAR(50) NULL,
+          PODStatus NVARCHAR(50) NULL,
+          PODReference NVARCHAR(100) NULL,
+          PODDate DATE NULL,
           Notes NVARCHAR(MAX) NULL,
           CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
           UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -5719,6 +5747,18 @@ const ensureDeliveryChallanTables = async () => {
       IF COL_LENGTH('dbo.DeliveryChallan', 'Status') IS NULL
       BEGIN
         ALTER TABLE dbo.DeliveryChallan ADD Status NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODStatus') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODStatus NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODReference') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODReference NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODDate') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODDate DATE NULL;
       END;
       IF COL_LENGTH('dbo.DeliveryChallan', 'Notes') IS NULL
       BEGIN
@@ -6029,7 +6069,11 @@ const ensureConsumptionTables = async () => {
           ConsumptionId INT NULL,
           BoqItemId INT NULL,
           ItemId INT NULL,
+          DeliveryChallanId INT NULL,
+          DeliveryChallanItemId BIGINT NULL,
           ReceiveGoodsItemId INT NULL,
+          SourceType NVARCHAR(50) NULL,
+          SourceKey NVARCHAR(200) NULL,
           Item NVARCHAR(200) NULL,
           Description NVARCHAR(500) NULL,
           Unit NVARCHAR(100) NULL,
@@ -6079,9 +6123,25 @@ const ensureConsumptionTables = async () => {
       BEGIN
         ALTER TABLE dbo.ConsumptionItems ADD ItemId INT NULL;
       END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'DeliveryChallanId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD DeliveryChallanId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'DeliveryChallanItemId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD DeliveryChallanItemId BIGINT NULL;
+      END;
       IF COL_LENGTH('dbo.ConsumptionItems', 'ReceiveGoodsItemId') IS NULL
       BEGIN
         ALTER TABLE dbo.ConsumptionItems ADD ReceiveGoodsItemId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'SourceType') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD SourceType NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.ConsumptionItems', 'SourceKey') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ConsumptionItems ADD SourceKey NVARCHAR(200) NULL;
       END;
       IF COL_LENGTH('dbo.ConsumptionItems', 'Item') IS NULL
       BEGIN
@@ -6676,6 +6736,11 @@ const ensureReallocateInventoryTables = async () => {
         CREATE TABLE dbo.ReallocateInventoryItems (
           Id INT IDENTITY(1,1) PRIMARY KEY,
           TransferId INT NULL,
+          ReceiveGoodsItemId INT NULL,
+          DeliveryChallanId INT NULL,
+          DeliveryChallanItemId BIGINT NULL,
+          SourceType NVARCHAR(50) NULL,
+          SourceKey NVARCHAR(200) NULL,
           Item NVARCHAR(200) NULL,
           Description NVARCHAR(500) NULL,
           Unit NVARCHAR(100) NULL,
@@ -6688,6 +6753,26 @@ const ensureReallocateInventoryTables = async () => {
       IF COL_LENGTH('dbo.ReallocateInventoryItems', 'TransferId') IS NULL
       BEGIN
         ALTER TABLE dbo.ReallocateInventoryItems ADD TransferId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'ReceiveGoodsItemId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD ReceiveGoodsItemId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'DeliveryChallanId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD DeliveryChallanId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'DeliveryChallanItemId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD DeliveryChallanItemId BIGINT NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'SourceType') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD SourceType NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'SourceKey') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD SourceKey NVARCHAR(200) NULL;
       END;
       IF COL_LENGTH('dbo.ReallocateInventoryItems', 'Item') IS NULL
       BEGIN
@@ -6718,6 +6803,606 @@ const ensureReallocateInventoryTables = async () => {
   } catch (error) {
     ensureReallocateInventoryTablesPromise = null;
     throw error;
+  }
+};
+
+const normalizeAvailabilitySourceType = (value = "") => {
+  const normalized = normalizeInventoryKeyValue(value);
+  if (["dc", "delivery", "delivery-challan", "delivery challan"].includes(normalized)) {
+    return "dc";
+  }
+  if (["receive", "receipt", "receive-goods", "receive goods"].includes(normalized)) {
+    return "receive";
+  }
+  if (["reallocate", "reallocation"].includes(normalized)) {
+    return "reallocation";
+  }
+  return normalized;
+};
+
+const buildAvailabilitySourceKey = (item = {}) => {
+  const explicit = normalizeOptionalString(item.sourceKey ?? item.SourceKey);
+  if (explicit) {
+    return explicit;
+  }
+
+  const sourceType = normalizeAvailabilitySourceType(
+    item.sourceType ?? item.SourceType
+  );
+  const deliveryChallanId = toNullableInt(
+    item.deliveryChallanId ??
+      item.DeliveryChallanId ??
+      item.deliveryChallanID ??
+      item.ChallanId
+  );
+  const receiveGoodsItemId = toNullableInt(
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+  );
+  const itemId = toNullableInt(item.itemId ?? item.ItemId);
+  const materialKey = buildInventoryMaterialKey(item);
+
+  if (sourceType === "dc" || deliveryChallanId !== null) {
+    const identity = receiveGoodsItemId ?? itemId ?? materialKey;
+    return identity ? `dc:${deliveryChallanId ?? "unknown"}:${identity}` : "";
+  }
+
+  if (sourceType === "receive" || receiveGoodsItemId !== null) {
+    return receiveGoodsItemId !== null ? `receive:${receiveGoodsItemId}` : "";
+  }
+
+  if (sourceType === "reallocation") {
+    const id = item.id ?? item.Id ?? item.transferId ?? item.TransferId ?? materialKey;
+    return id ? `reallocation:${id}` : "";
+  }
+
+  return "";
+};
+
+const isInactiveAvailabilityMovementStatus = (status = "") =>
+  ["cancelled", "canceled", "rejected", "void"].includes(
+    normalizeInventoryKeyValue(status)
+  );
+
+const isCompletedAvailabilityMovementStatus = (status = "") =>
+  normalizeInventoryKeyValue(status) === "completed";
+
+const toAvailabilityQuantity = (value) => Math.max(Number(value ?? 0) || 0, 0);
+
+const loadAvailableInventoryRows = async (
+  db,
+  {
+    projectId = null,
+    locationId = null,
+    excludeConsumptionId = null,
+    excludeReallocateInventoryId = null,
+    includeZero = false,
+  } = {}
+) => {
+  const safeProjectId = toNullableInt(projectId);
+  const safeLocationId = toNullableInt(locationId);
+  if (!safeProjectId || !safeLocationId) {
+    const error = new Error("projectId and locationId are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  await ensureReceiveTables();
+  await ensureDeliveryChallanTables();
+  await ensureConsumptionTables();
+  await ensureReallocateInventoryTables();
+
+  const receivePk = await refreshReceiveGoodsPk();
+  const receiveItemsFk = await refreshReceiveGoodsItemsFk();
+  const deliveryPk = await refreshDeliveryChallanPk();
+  const deliveryFk = await refreshDeliveryChallanItemsFk();
+  const consumptionPk = await refreshConsumptionPk();
+  const consumptionFk = await refreshConsumptionItemsFk();
+  const reallocatePk = await refreshReallocateInventoryPk();
+  const reallocateFk = await refreshReallocateInventoryItemsFk();
+
+  const sourceEntries = new Map();
+  const materialIndex = new Map();
+  const makeEntryMapKey = (entry) =>
+    `${entry.projectId}|${entry.locationId}|${entry.sourceKey}`;
+  const makeMaterialIndexKey = (entry) =>
+    `${entry.projectId}|${entry.locationId}|${entry.materialKey}`;
+
+  const indexEntry = (entry) => {
+    const indexKey = makeMaterialIndexKey(entry);
+    if (!materialIndex.has(indexKey)) {
+      materialIndex.set(indexKey, []);
+    }
+    materialIndex.get(indexKey).push(entry);
+  };
+
+  const addSourceEntry = (rawEntry, quantity) => {
+    const sourceQty = toAvailabilityQuantity(quantity);
+    if (!sourceQty) {
+      return null;
+    }
+
+    const materialKey = buildInventoryMaterialKey(rawEntry);
+    const sourceKey = buildAvailabilitySourceKey(rawEntry);
+    const entryProjectId = toNullableInt(rawEntry.projectId) ?? safeProjectId;
+    const entryLocationId = toNullableInt(rawEntry.locationId) ?? safeLocationId;
+    if (!materialKey || !sourceKey || entryProjectId !== safeProjectId) {
+      return null;
+    }
+
+    const entry = {
+      projectId: entryProjectId,
+      locationId: entryLocationId,
+      sourceType: normalizeAvailabilitySourceType(rawEntry.sourceType) || "receive",
+      sourceKey,
+      receiveGoodsId: toNullableInt(rawEntry.receiveGoodsId),
+      receiveGoodsItemId: toNullableInt(rawEntry.receiveGoodsItemId),
+      deliveryChallanId: toNullableInt(rawEntry.deliveryChallanId),
+      deliveryChallanItemId: toNullableInt(rawEntry.deliveryChallanItemId),
+      itemId: toNullableInt(rawEntry.itemId),
+      name: normalizeOptionalString(rawEntry.name ?? rawEntry.item) ?? "Item",
+      description: normalizeOptionalString(rawEntry.description) ?? "",
+      unit: normalizeOptionalString(rawEntry.unit) ?? "PCS",
+      hsn: normalizeOptionalString(rawEntry.hsn) ?? "",
+      gst: normalizeOptionalString(rawEntry.gst) ?? "",
+      rate: Number(rawEntry.rate ?? rawEntry.unitPrice ?? 0) || 0,
+      sourceRef: normalizeOptionalString(rawEntry.sourceRef) ?? "",
+      sourceDate: rawEntry.sourceDate ?? null,
+      materialKey,
+      sourceQty: 0,
+      consumedQty: 0,
+      reallocatedQty: 0,
+    };
+
+    const mapKey = makeEntryMapKey(entry);
+    const existing = sourceEntries.get(mapKey);
+    if (existing) {
+      existing.sourceQty += sourceQty;
+      return existing;
+    }
+
+    entry.sourceQty = sourceQty;
+    sourceEntries.set(mapKey, entry);
+    indexEntry(entry);
+    return entry;
+  };
+
+  const getAvailableBeforeMovement = (entry) =>
+    Math.max(entry.sourceQty - entry.consumedQty - entry.reallocatedQty, 0);
+
+  const applyMovementQuantity = ({
+    projectId: movementProjectId = safeProjectId,
+    locationId: movementLocationId = safeLocationId,
+    item = {},
+    quantity,
+    field,
+    fallbackDeliveryChallanId = null,
+  }) => {
+    const safeMovementProjectId = toNullableInt(movementProjectId) ?? safeProjectId;
+    const safeMovementLocationId = toNullableInt(movementLocationId);
+    const movementQty = toAvailabilityQuantity(quantity);
+    if (
+      safeMovementProjectId !== safeProjectId ||
+      safeMovementLocationId !== safeLocationId ||
+      !movementQty
+    ) {
+      return;
+    }
+
+    const explicitSourceKey = buildAvailabilitySourceKey({
+      ...item,
+      deliveryChallanId:
+        item.deliveryChallanId ??
+        item.DeliveryChallanId ??
+        fallbackDeliveryChallanId,
+    });
+    if (explicitSourceKey) {
+      const exact = sourceEntries.get(
+        `${safeProjectId}|${safeLocationId}|${explicitSourceKey}`
+      );
+      if (exact) {
+        exact[field] += movementQty;
+        return;
+      }
+    }
+
+    const receiveGoodsItemId = toNullableInt(
+      item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+    );
+    const deliveryChallanId = toNullableInt(
+      item.deliveryChallanId ??
+        item.DeliveryChallanId ??
+        fallbackDeliveryChallanId
+    );
+    const materialKey = buildInventoryMaterialKey(item);
+    let candidates = [];
+
+    if (materialKey) {
+      candidates = materialIndex.get(`${safeProjectId}|${safeLocationId}|${materialKey}`) ?? [];
+    }
+
+    if (deliveryChallanId !== null) {
+      const dcCandidates = candidates.filter(
+        (entry) =>
+          entry.sourceType === "dc" &&
+          entry.deliveryChallanId === deliveryChallanId &&
+          (receiveGoodsItemId === null ||
+            entry.receiveGoodsItemId === receiveGoodsItemId)
+      );
+      if (dcCandidates.length) {
+        candidates = dcCandidates;
+      }
+    } else if (receiveGoodsItemId !== null) {
+      const receiveCandidates = candidates.filter(
+        (entry) =>
+          entry.sourceType === "receive" &&
+          entry.receiveGoodsItemId === receiveGoodsItemId
+      );
+      if (receiveCandidates.length) {
+        candidates = receiveCandidates;
+      }
+    }
+
+    if (!candidates.length) {
+      return;
+    }
+
+    let remaining = movementQty;
+    candidates.forEach((entry, index) => {
+      if (remaining <= 0) {
+        return;
+      }
+      const available = getAvailableBeforeMovement(entry);
+      const shouldForceLast = index === candidates.length - 1;
+      const applied = Math.min(
+        remaining,
+        available > 0 ? available : shouldForceLast ? remaining : 0
+      );
+      if (applied > 0) {
+        entry[field] += applied;
+        remaining -= applied;
+      }
+    });
+  };
+
+  const receiveRequest = new sql.Request(db);
+  receiveRequest.input("ProjectId", sql.Int, safeProjectId);
+  receiveRequest.input("LocationId", sql.Int, safeLocationId);
+  const receiveItemsResult = await receiveRequest.query(`
+    SELECT
+      rgi.*,
+      rg.${toIdentifier(receivePk)} AS HeaderReceiveGoodsId,
+      rg.ProjectId AS HeaderProjectId,
+      rg.LocationId AS HeaderLocationId,
+      rg.ReceivedDate AS HeaderDate,
+      rg.InvoiceNumber AS HeaderInvoiceNumber
+    FROM dbo.ReceiveGoods rg
+    INNER JOIN dbo.ReceiveGoodsItems rgi
+      ON rgi.${toIdentifier(receiveItemsFk)} = rg.${toIdentifier(receivePk)}
+    WHERE rg.ProjectId = @ProjectId
+      AND rg.LocationId = @LocationId
+  `);
+
+  (receiveItemsResult.recordset ?? []).forEach((row) => {
+    const item = normalizeReceiveGoodsItem(row);
+    addSourceEntry(
+      {
+        sourceType: "receive",
+        sourceKey: `receive:${item.id}`,
+        projectId: row.HeaderProjectId,
+        locationId: row.HeaderLocationId,
+        receiveGoodsId: row.HeaderReceiveGoodsId ?? item.receiveGoodsId,
+        receiveGoodsItemId: item.id,
+        itemId: item.itemId,
+        name: item.name,
+        description: item.description,
+        unit: item.unit,
+        hsn: item.hsn,
+        gst: item.gst,
+        rate: item.unitPrice,
+        sourceRef: row.HeaderInvoiceNumber
+          ? `Receipt ${row.HeaderReceiveGoodsId} | INV ${row.HeaderInvoiceNumber}`
+          : `Receipt ${row.HeaderReceiveGoodsId}`,
+        sourceDate: row.HeaderDate,
+      },
+      item.receivedQty
+    );
+  });
+
+  const dcSourceRequest = new sql.Request(db);
+  dcSourceRequest.input("ProjectId", sql.Int, safeProjectId);
+  dcSourceRequest.input("LocationId", sql.Int, safeLocationId);
+  const dcItemsAtLocationResult = await dcSourceRequest.query(`
+    SELECT
+      dci.*,
+      dci.Id AS DeliveryChallanItemId,
+      dc.${toIdentifier(deliveryPk)} AS HeaderDeliveryChallanId,
+      dc.ProjectId AS HeaderProjectId,
+      dc.ToLocationId AS HeaderLocationId,
+      dc.DCNumber AS HeaderDcNumber,
+      dc.IssueDate AS HeaderDate
+    FROM dbo.DeliveryChallan dc
+    INNER JOIN dbo.DeliveryChallanItems dci
+      ON dci.${toIdentifier(deliveryFk)} = dc.${toIdentifier(deliveryPk)}
+    WHERE dc.ProjectId = @ProjectId
+      AND dc.ToLocationId = @LocationId
+  `);
+
+  (dcItemsAtLocationResult.recordset ?? []).forEach((row) => {
+    const item = normalizeDeliveryChallanItem(row);
+    addSourceEntry(
+      {
+        sourceType: "dc",
+        projectId: row.HeaderProjectId,
+        locationId: row.HeaderLocationId,
+        deliveryChallanId: row.HeaderDeliveryChallanId,
+        deliveryChallanItemId: row.DeliveryChallanItemId ?? item.id,
+        receiveGoodsItemId: item.receiveGoodsItemId,
+        itemId: item.itemId,
+        name: item.name,
+        description: item.description,
+        unit: item.unit,
+        hsn: item.hsn,
+        gst: item.gst,
+        rate: item.rate,
+        sourceRef: row.HeaderDcNumber || `DC ${row.HeaderDeliveryChallanId}`,
+        sourceDate: row.HeaderDate,
+      },
+      item.quantity
+    );
+  });
+
+  const outgoingDcRequest = new sql.Request(db);
+  outgoingDcRequest.input("ProjectId", sql.Int, safeProjectId);
+  outgoingDcRequest.input("LocationId", sql.Int, safeLocationId);
+  const outgoingDcItemsResult = await outgoingDcRequest.query(`
+    SELECT
+      dci.*,
+      dc.ProjectId AS HeaderProjectId,
+      dc.FromLocationId AS HeaderLocationId
+    FROM dbo.DeliveryChallan dc
+    INNER JOIN dbo.DeliveryChallanItems dci
+      ON dci.${toIdentifier(deliveryFk)} = dc.${toIdentifier(deliveryPk)}
+    WHERE dc.ProjectId = @ProjectId
+      AND dc.FromLocationId = @LocationId
+  `);
+
+  (outgoingDcItemsResult.recordset ?? []).forEach((row) => {
+    const item = normalizeDeliveryChallanItem(row);
+    applyMovementQuantity({
+      projectId: row.HeaderProjectId,
+      locationId: row.HeaderLocationId,
+      item: {
+        ...item,
+        sourceType: "receive",
+        sourceKey: item.receiveGoodsItemId
+          ? `receive:${item.receiveGoodsItemId}`
+          : "",
+      },
+      quantity: item.quantity,
+      field: "reallocatedQty",
+    });
+  });
+
+  const reallocateItemsResult = await new sql.Request(db).query(`
+    SELECT
+      rii.*,
+      ri.${toIdentifier(reallocatePk)} AS HeaderTransferId,
+      ri.FromLocationId AS HeaderFromLocationId,
+      ri.ToLocationId AS HeaderToLocationId,
+      ri.TransferDate AS HeaderTransferDate,
+      ri.Notes AS HeaderNotes
+    FROM dbo.ReallocateInventory ri
+    INNER JOIN dbo.ReallocateInventoryItems rii
+      ON rii.${toIdentifier(reallocateFk)} = ri.${toIdentifier(reallocatePk)}
+  `);
+
+  (reallocateItemsResult.recordset ?? []).forEach((row) => {
+    const transfer = normalizeReallocateInventory({
+      Id: row.HeaderTransferId,
+      FromLocationId: row.HeaderFromLocationId,
+      ToLocationId: row.HeaderToLocationId,
+      TransferDate: row.HeaderTransferDate,
+      Notes: row.HeaderNotes,
+    });
+    const transferId = toNullableInt(transfer.id);
+    if (
+      toNullableInt(excludeReallocateInventoryId) !== null &&
+      transferId === toNullableInt(excludeReallocateInventoryId)
+    ) {
+      return;
+    }
+    if (
+      isInactiveAvailabilityMovementStatus(transfer.status) ||
+      (toNullableInt(transfer.projectId) !== null &&
+        toNullableInt(transfer.projectId) !== safeProjectId)
+    ) {
+      return;
+    }
+    if (
+      transfer.type !== "Reallocate" ||
+      !isCompletedAvailabilityMovementStatus(transfer.status) ||
+      toNullableInt(transfer.toLocationId) !== safeLocationId
+    ) {
+      return;
+    }
+
+    const item = normalizeReallocateInventoryItem(row);
+    const itemQty = toAvailabilityQuantity(item.quantity);
+    if (!itemQty) {
+      return;
+    }
+    const sourceKey =
+      buildAvailabilitySourceKey(item) ||
+      `reallocation:${transferId ?? "record"}:${item.id ?? buildInventoryMaterialKey(item)}`;
+    addSourceEntry(
+      {
+        ...item,
+        sourceType:
+          normalizeAvailabilitySourceType(item.sourceType) || "reallocation",
+        sourceKey,
+        projectId: toNullableInt(transfer.projectId) ?? safeProjectId,
+        locationId: transfer.toLocationId,
+        sourceRef: transfer.referenceNumber,
+        sourceDate: transfer.transferDate ?? transfer.requestDate,
+      },
+      itemQty
+    );
+  });
+
+  const consumptionRequest = new sql.Request(db);
+  consumptionRequest.input("ProjectId", sql.Int, safeProjectId);
+  consumptionRequest.input("LocationId", sql.Int, safeLocationId);
+  consumptionRequest.input("ExcludeConsumptionId", sql.Int, toNullableInt(excludeConsumptionId));
+  const consumptionItemsResult = await consumptionRequest.query(`
+    SELECT
+      ci.*,
+      c.${toIdentifier(consumptionPk)} AS HeaderConsumptionId,
+      c.ProjectId AS HeaderProjectId,
+      c.LocationId AS HeaderLocationId,
+      c.DeliveryChallanId AS HeaderDeliveryChallanId
+    FROM dbo.Consumption c
+    INNER JOIN dbo.ConsumptionItems ci
+      ON ci.${toIdentifier(consumptionFk)} = c.${toIdentifier(consumptionPk)}
+    WHERE c.ProjectId = @ProjectId
+      AND c.LocationId = @LocationId
+      AND (
+        @ExcludeConsumptionId IS NULL
+        OR c.${toIdentifier(consumptionPk)} <> @ExcludeConsumptionId
+      )
+  `);
+
+  (consumptionItemsResult.recordset ?? []).forEach((row) => {
+    const item = normalizeConsumptionItem(row);
+    applyMovementQuantity({
+      projectId: row.HeaderProjectId,
+      locationId: row.HeaderLocationId,
+      item,
+      quantity: item.quantity,
+      field: "consumedQty",
+      fallbackDeliveryChallanId: row.HeaderDeliveryChallanId,
+    });
+  });
+
+  (reallocateItemsResult.recordset ?? []).forEach((row) => {
+    const transfer = normalizeReallocateInventory({
+      Id: row.HeaderTransferId,
+      FromLocationId: row.HeaderFromLocationId,
+      ToLocationId: row.HeaderToLocationId,
+      TransferDate: row.HeaderTransferDate,
+      Notes: row.HeaderNotes,
+    });
+    const transferId = toNullableInt(transfer.id);
+    if (
+      toNullableInt(excludeReallocateInventoryId) !== null &&
+      transferId === toNullableInt(excludeReallocateInventoryId)
+    ) {
+      return;
+    }
+    if (
+      isInactiveAvailabilityMovementStatus(transfer.status) ||
+      (toNullableInt(transfer.projectId) !== null &&
+        toNullableInt(transfer.projectId) !== safeProjectId)
+    ) {
+      return;
+    }
+
+    const item = normalizeReallocateInventoryItem(row);
+    const itemQty = toAvailabilityQuantity(item.quantity);
+    if (!itemQty) {
+      return;
+    }
+
+    applyMovementQuantity({
+      projectId: toNullableInt(transfer.projectId) ?? safeProjectId,
+      locationId: transfer.fromLocationId,
+      item,
+      quantity: itemQty,
+      field: "reallocatedQty",
+    });
+
+  });
+
+  return Array.from(sourceEntries.values())
+    .map((entry) => ({
+      ...entry,
+      availableQty: Math.max(
+        entry.sourceQty - entry.consumedQty - entry.reallocatedQty,
+        0
+      ),
+    }))
+    .filter((entry) => includeZero || entry.availableQty > 0)
+    .sort((left, right) => {
+      const sourceTypeOrder = left.sourceType.localeCompare(right.sourceType);
+      if (sourceTypeOrder !== 0) {
+        return sourceTypeOrder;
+      }
+      return String(left.name || "").localeCompare(String(right.name || ""));
+    });
+};
+
+const validateAvailableInventorySelection = async (
+  tx,
+  {
+    projectId = null,
+    locationId = null,
+    items = [],
+    excludeConsumptionId = null,
+    excludeReallocateInventoryId = null,
+  } = {}
+) => {
+  const requestedItems = Array.isArray(items) ? items : [];
+  if (!requestedItems.length) {
+    return;
+  }
+
+  const availableRows = await loadAvailableInventoryRows(tx, {
+    projectId,
+    locationId,
+    excludeConsumptionId,
+    excludeReallocateInventoryId,
+    includeZero: true,
+  });
+  const rowsBySourceKey = new Map();
+  const rowsByMaterialKey = new Map();
+  availableRows.forEach((row) => {
+    rowsBySourceKey.set(row.sourceKey, row);
+    if (!rowsByMaterialKey.has(row.materialKey)) {
+      rowsByMaterialKey.set(row.materialKey, []);
+    }
+    rowsByMaterialKey.get(row.materialKey).push(row);
+  });
+
+  const requestedByKey = new Map();
+  requestedItems.forEach((item) => {
+    const quantity = toAvailabilityQuantity(item.quantity ?? item.Quantity);
+    if (!quantity) {
+      return;
+    }
+    const sourceKey = buildAvailabilitySourceKey(item);
+    const materialKey = buildInventoryMaterialKey(item);
+    const key = sourceKey ? `source:${sourceKey}` : `material:${materialKey}`;
+    requestedByKey.set(key, {
+      sourceKey,
+      materialKey,
+      name: item.name ?? item.Item ?? "the selected material",
+      quantity: (requestedByKey.get(key)?.quantity ?? 0) + quantity,
+    });
+  });
+
+  for (const request of requestedByKey.values()) {
+    const availableQty = request.sourceKey
+      ? rowsBySourceKey.get(request.sourceKey)?.availableQty ?? 0
+      : (rowsByMaterialKey.get(request.materialKey) ?? []).reduce(
+          (sum, row) => sum + toAvailabilityQuantity(row.availableQty),
+          0
+        );
+    if (request.quantity > availableQty + 0.0001) {
+      const error = new Error(
+        `Quantity for ${request.name} cannot be greater than the available inventory balance (${availableQty}).`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
   }
 };
 
@@ -7106,6 +7791,38 @@ app.delete("/api/items/:id", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to delete item",
+    });
+  }
+});
+
+app.get("/api/available-inventory", async (req, res) => {
+  const projectId = toNullableInt(req.query.projectId);
+  const locationId = toNullableInt(req.query.locationId);
+  const excludeConsumptionId = toNullableInt(req.query.excludeConsumptionId);
+  const excludeReallocateInventoryId = toNullableInt(
+    req.query.excludeReallocateInventoryId
+  );
+
+  if (!projectId || !locationId) {
+    return res.status(400).json({
+      ok: false,
+      error: "projectId and locationId are required",
+    });
+  }
+
+  try {
+    const pool = await getPool();
+    const items = await loadAvailableInventoryRows(pool, {
+      projectId,
+      locationId,
+      excludeConsumptionId,
+      excludeReallocateInventoryId,
+    });
+    return res.json({ ok: true, items });
+  } catch (error) {
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch available inventory",
     });
   }
 });
@@ -10978,6 +11695,9 @@ app.post("/api/delivery-challans", async (req, res) => {
     eWayBillNumber = null,
     issueDate = null,
     status = "Draft",
+    podStatus = "Pending",
+    podReference = null,
+    podDate = null,
     notes = null,
     items = [],
   } = req.body ?? {};
@@ -10997,8 +11717,11 @@ app.post("/api/delivery-challans", async (req, res) => {
   const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? null;
   const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? null;
   const safeStatus = normalizeOptionalString(status) ?? "Draft";
+  const safePodStatus = normalizeOptionalString(podStatus) ?? "Pending";
+  const safePodReference = normalizeOptionalString(podReference) ?? null;
   const safeNotes = normalizeOptionalString(notes) ?? null;
   const parsedIssueDate = parseDateInput(issueDate);
+  const parsedPodDate = parseDateInput(podDate);
 
   if (!safeProjectId) {
     return res.status(400).json({ ok: false, error: "projectId is required" });
@@ -11014,6 +11737,9 @@ app.post("/api/delivery-challans", async (req, res) => {
   }
   if (Number.isNaN(parsedIssueDate)) {
     return res.status(400).json({ ok: false, error: "Invalid issueDate" });
+  }
+  if (Number.isNaN(parsedPodDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid podDate" });
   }
 
   const normalizedItems = (Array.isArray(items) ? items : [])
@@ -11085,14 +11811,17 @@ app.post("/api/delivery-challans", async (req, res) => {
     insertHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
     insertHeaderReq.input("IssueDate", sql.Date, parsedIssueDate ?? null);
     insertHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
+    insertHeaderReq.input("PODStatus", sql.NVarChar(50), safePodStatus);
+    insertHeaderReq.input("PODReference", sql.NVarChar(100), safePodReference);
+    insertHeaderReq.input("PODDate", sql.Date, parsedPodDate ?? null);
     insertHeaderReq.input("Notes", sql.NVarChar(sql.MAX), safeNotes);
 
     const headerResult = await insertHeaderReq.query(`
       INSERT INTO dbo.DeliveryChallan
-        (DCNumber, ProjectId, ReceiveGoodsId, FromLocationId, ToLocationId, ToLocation, VehicleNumber, EWayBillNumber, IssueDate, Status, Notes)
+        (DCNumber, ProjectId, ReceiveGoodsId, FromLocationId, ToLocationId, ToLocation, VehicleNumber, EWayBillNumber, IssueDate, Status, PODStatus, PODReference, PODDate, Notes)
       OUTPUT INSERTED.*
       VALUES
-        (@DCNumber, @ProjectId, @ReceiveGoodsId, @FromLocationId, @ToLocationId, @ToLocation, @VehicleNumber, @EWayBillNumber, @IssueDate, @Status, @Notes)
+        (@DCNumber, @ProjectId, @ReceiveGoodsId, @FromLocationId, @ToLocationId, @ToLocation, @VehicleNumber, @EWayBillNumber, @IssueDate, @Status, @PODStatus, @PODReference, @PODDate, @Notes)
     `);
 
     const headerRow = headerResult.recordset?.[0];
@@ -11178,6 +11907,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     eWayBillNumber = null,
     issueDate = null,
     status = "Draft",
+    podStatus = "Pending",
+    podReference = null,
+    podDate = null,
     notes = null,
     items = [],
   } = req.body ?? {};
@@ -11197,8 +11929,11 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
   const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? null;
   const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? null;
   const safeStatus = normalizeOptionalString(status) ?? "Draft";
+  const safePodStatus = normalizeOptionalString(podStatus) ?? "Pending";
+  const safePodReference = normalizeOptionalString(podReference) ?? null;
   const safeNotes = normalizeOptionalString(notes) ?? null;
   const parsedIssueDate = parseDateInput(issueDate);
+  const parsedPodDate = parseDateInput(podDate);
 
   if (!safeProjectId) {
     return res.status(400).json({ ok: false, error: "projectId is required" });
@@ -11214,6 +11949,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
   }
   if (Number.isNaN(parsedIssueDate)) {
     return res.status(400).json({ ok: false, error: "Invalid issueDate" });
+  }
+  if (Number.isNaN(parsedPodDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid podDate" });
   }
 
   const normalizedItems = (Array.isArray(items) ? items : [])
@@ -11300,6 +12038,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     updateHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
     updateHeaderReq.input("IssueDate", sql.Date, parsedIssueDate ?? null);
     updateHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
+    updateHeaderReq.input("PODStatus", sql.NVarChar(50), safePodStatus);
+    updateHeaderReq.input("PODReference", sql.NVarChar(100), safePodReference);
+    updateHeaderReq.input("PODDate", sql.Date, parsedPodDate ?? null);
     updateHeaderReq.input("Notes", sql.NVarChar(sql.MAX), safeNotes);
 
     const headerResult = await updateHeaderReq.query(`
@@ -11314,6 +12055,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
           EWayBillNumber = @EWayBillNumber,
           IssueDate = @IssueDate,
           Status = @Status,
+          PODStatus = @PODStatus,
+          PODReference = @PODReference,
+          PODDate = @PODDate,
           Notes = @Notes,
           UpdatedAt = SYSUTCDATETIME()
       OUTPUT INSERTED.*
@@ -11822,6 +12566,12 @@ const mapConsumptionItemsFromDeliveryChallan = (
   });
 };
 
+const LEGACY_CONSUMPTION_HELPERS = [
+  validateConsumptionAgainstDeliveryChallan,
+  loadDeliveryChallanSourceForConsumption,
+  mapConsumptionItemsFromDeliveryChallan,
+];
+
 app.post("/api/consumptions", async (req, res) => {
   const {
     consumptionNumber,
@@ -11879,12 +12629,6 @@ app.post("/api/consumptions", async (req, res) => {
   if (!safeLocationId) {
     return res.status(400).json({ ok: false, error: "locationId is required" });
   }
-  if (!safeDeliveryChallanIds.length && !safeDeliveryChallanRef) {
-    return res.status(400).json({
-      ok: false,
-      error: "deliveryChallanId is required",
-    });
-  }
   if (Number.isNaN(parsedConsumptionDate)) {
     return res.status(400).json({ ok: false, error: "Invalid consumptionDate" });
   }
@@ -11901,11 +12645,34 @@ app.post("/api/consumptions", async (req, res) => {
       const receiveGoodsItemId = toNullableInt(
         item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
       );
+      const deliveryChallanId = toNullableInt(
+        item.deliveryChallanId ?? item.DeliveryChallanId
+      );
+      const deliveryChallanItemId = toNullableInt(
+        item.deliveryChallanItemId ??
+          item.DeliveryChallanItemId ??
+          item.deliveryChallanLineItemId ??
+          item.DeliveryChallanLineItemId
+      );
+      const sourceType =
+        normalizeAvailabilitySourceType(item.sourceType ?? item.SourceType) ||
+        (deliveryChallanId !== null ? "dc" : "receive");
       return {
-        deliveryChallanId: toNullableInt(item.deliveryChallanId ?? item.DeliveryChallanId),
+        deliveryChallanId,
+        deliveryChallanItemId,
+        receiveGoodsId: toNullableInt(item.receiveGoodsId ?? item.ReceiveGoodsId),
         itemId,
         boqItemId,
         receiveGoodsItemId,
+        sourceType,
+        sourceKey:
+          normalizeOptionalString(item.sourceKey ?? item.SourceKey) ??
+          buildAvailabilitySourceKey({
+            ...item,
+            deliveryChallanId,
+            receiveGoodsItemId,
+            sourceType,
+          }),
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
@@ -11935,99 +12702,33 @@ app.post("/api/consumptions", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
-    const deliverySources = [];
-    if (safeDeliveryChallanIds.length) {
-      for (const selectedDeliveryChallanId of safeDeliveryChallanIds) {
-        deliverySources.push(
-          await loadDeliveryChallanSourceForConsumption(tx, {
-            deliveryChallanId: selectedDeliveryChallanId,
-            deliveryChallanRef: null,
-          })
-        );
-      }
-    } else {
-      deliverySources.push(
-        await loadDeliveryChallanSourceForConsumption(tx, {
-          deliveryChallanId: safeDeliveryChallanId,
-          deliveryChallanRef: safeDeliveryChallanRef,
-        })
-      );
-    }
-    const resolvedDeliveryChallan = deliverySources[0].challan;
-    const challanItems = deliverySources.flatMap((source) => source.challanItems);
-    const mappedItems = mapConsumptionItemsFromDeliveryChallan(
-      normalizedItems,
-      challanItems
+    const mappedItems = normalizedItems.map((item) => ({
+      ...item,
+      sourceKey: item.sourceKey || buildAvailabilitySourceKey(item),
+    }));
+
+    await validateAvailableInventorySelection(tx, {
+      projectId: safeProjectId,
+      locationId: safeLocationId,
+      items: mappedItems,
+    });
+
+    const resolvedDeliveryChallanIds = Array.from(
+      new Set(
+        [
+          ...safeDeliveryChallanIds,
+          ...mappedItems.map((item) => toNullableInt(item.deliveryChallanId)),
+        ].filter((value) => value !== null)
+      )
     );
-
-    const sourceItemIds = uniqueReceiveGoodsItemIds(
-      mappedItems.map((item) => item.receiveGoodsItemId ?? null)
-    );
-    if (sourceItemIds.length) {
-      const sourceItems = await loadReceiveGoodsItemsForConsumption(tx, {
-        receiveGoodsId: null,
-        receiveGoodsItemIds: sourceItemIds,
-      });
-      const consumedTotals = await loadReceiveConsumedTotals(tx, sourceItemIds);
-      const requestedQtyBySourceId = mappedItems.reduce((acc, item) => {
-        const sourceId = toNullableInt(item.receiveGoodsItemId ?? null);
-        if (sourceId === null) {
-          return acc;
-        }
-        acc.set(sourceId, (acc.get(sourceId) ?? 0) + (Number(item.quantity) || 0));
-        return acc;
-      }, new Map());
-      for (const row of sourceItems) {
-        const sourceId = toNullableInt(row.id);
-        const sourceQty = Number(row.receivedQty ?? 0) || 0;
-        const alreadyConsumed = consumedTotals.get(sourceId) ?? 0;
-        const requestedQty = requestedQtyBySourceId.get(sourceId) ?? 0;
-        if (requestedQty > sourceQty - alreadyConsumed) {
-          const error = new Error(
-            `Quantity for ${row.name || "the linked receipt item"} cannot be greater than the available quantity (${Math.max(
-              sourceQty - alreadyConsumed,
-              0
-            )}).`
-          );
-          error.statusCode = 400;
-          throw error;
-        }
-      }
-    }
-
-    for (const source of deliverySources) {
-      const sourceId = toNullableInt(source.challan.id);
-      const sourceReceiveGoodsItemIds = new Set(
-        source.challanItems
-          .map((item) => toNullableInt(item.receiveGoodsItemId ?? item.ReceiveGoodsItemId))
-          .filter((value) => value !== null)
-      );
-      const sourceItems =
-        deliverySources.length === 1
-          ? mappedItems
-          : mappedItems.filter((item) => {
-              const itemDeliveryChallanId = toNullableInt(item.deliveryChallanId);
-              const itemReceiveGoodsItemId = toNullableInt(item.receiveGoodsItemId);
-              if (itemDeliveryChallanId !== null) {
-                return itemDeliveryChallanId === sourceId;
-              }
-              return (
-                itemReceiveGoodsItemId !== null &&
-                sourceReceiveGoodsItemIds.has(itemReceiveGoodsItemId)
-              );
-            });
-      if (!sourceItems.length) {
-        continue;
-      }
-      await validateConsumptionAgainstDeliveryChallan(tx, {
-        deliveryChallanId: source.challan.id,
-        deliveryChallanRef: source.challan.dcNumber,
-        items: sourceItems,
-      });
-    }
-
+    const resolvedDeliveryChallanId =
+      safeDeliveryChallanId ?? resolvedDeliveryChallanIds[0] ?? null;
     const resolvedReceiveGoodsId =
-      toNullableInt(resolvedDeliveryChallan.receiveGoodsId) ?? safeReceiveGoodsId;
+      safeReceiveGoodsId ??
+      mappedItems
+        .map((item) => toNullableInt(item.receiveGoodsId))
+        .find((value) => value !== null) ??
+      null;
     const insertHeaderReq = new sql.Request(tx);
     insertHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
     insertHeaderReq.input("ProjectId", sql.Int, safeProjectId);
@@ -12036,22 +12737,17 @@ app.post("/api/consumptions", async (req, res) => {
     insertHeaderReq.input(
       "DeliveryChallanId",
       sql.Int,
-      toNullableInt(resolvedDeliveryChallan.id)
+      resolvedDeliveryChallanId
     );
     insertHeaderReq.input(
       "DeliveryChallanIds",
       sql.NVarChar(sql.MAX),
-      JSON.stringify(safeDeliveryChallanIds.length ? safeDeliveryChallanIds : [toNullableInt(resolvedDeliveryChallan.id)].filter((value) => value !== null))
+      JSON.stringify(resolvedDeliveryChallanIds)
     );
     insertHeaderReq.input(
       "DeliveryChallanRef",
       sql.NVarChar(100),
-      deliverySources
-        .map((source) => source.challan.dcNumber)
-        .filter(Boolean)
-        .join(", ") ||
-        normalizeOptionalString(resolvedDeliveryChallan.dcNumber) ||
-        null
+      safeDeliveryChallanRef
     );
     insertHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
     insertHeaderReq.input("IssuedBy", sql.NVarChar(200), safeIssuedBy);
@@ -12082,11 +12778,19 @@ app.post("/api/consumptions", async (req, res) => {
       insertItemReq.input("ConsumptionId", sql.Int, consumptionId);
       insertItemReq.input("BoqItemId", sql.Int, item.boqItemId ?? null);
       insertItemReq.input("ItemId", sql.Int, item.itemId ?? null);
+      insertItemReq.input("DeliveryChallanId", sql.Int, item.deliveryChallanId ?? null);
+      insertItemReq.input(
+        "DeliveryChallanItemId",
+        sql.BigInt,
+        item.deliveryChallanItemId ?? null
+      );
       insertItemReq.input(
         "ReceiveGoodsItemId",
         sql.Int,
         item.receiveGoodsItemId ?? null
       );
+      insertItemReq.input("SourceType", sql.NVarChar(50), item.sourceType ?? null);
+      insertItemReq.input("SourceKey", sql.NVarChar(200), item.sourceKey ?? null);
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
@@ -12097,9 +12801,9 @@ app.post("/api/consumptions", async (req, res) => {
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.ConsumptionItems
-          (${fkCol}, BoqItemId, ItemId, ReceiveGoodsItemId, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
+          (${fkCol}, BoqItemId, ItemId, DeliveryChallanId, DeliveryChallanItemId, ReceiveGoodsItemId, SourceType, SourceKey, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@ConsumptionId, @BoqItemId, @ItemId, @ReceiveGoodsItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
+          (@ConsumptionId, @BoqItemId, @ItemId, @DeliveryChallanId, @DeliveryChallanItemId, @ReceiveGoodsItemId, @SourceType, @SourceKey, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
@@ -12206,11 +12910,34 @@ app.put("/api/consumptions/:id", async (req, res) => {
       const receiveGoodsItemId = toNullableInt(
         item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
       );
+      const deliveryChallanId = toNullableInt(
+        item.deliveryChallanId ?? item.DeliveryChallanId
+      );
+      const deliveryChallanItemId = toNullableInt(
+        item.deliveryChallanItemId ??
+          item.DeliveryChallanItemId ??
+          item.deliveryChallanLineItemId ??
+          item.DeliveryChallanLineItemId
+      );
+      const sourceType =
+        normalizeAvailabilitySourceType(item.sourceType ?? item.SourceType) ||
+        (deliveryChallanId !== null ? "dc" : "receive");
       return {
-        deliveryChallanId: toNullableInt(item.deliveryChallanId ?? item.DeliveryChallanId),
+        deliveryChallanId,
+        deliveryChallanItemId,
+        receiveGoodsId: toNullableInt(item.receiveGoodsId ?? item.ReceiveGoodsId),
         itemId,
         boqItemId,
         receiveGoodsItemId,
+        sourceType,
+        sourceKey:
+          normalizeOptionalString(item.sourceKey ?? item.SourceKey) ??
+          buildAvailabilitySourceKey({
+            ...item,
+            deliveryChallanId,
+            receiveGoodsItemId,
+            sourceType,
+          }),
         name,
         description: normalizeOptionalString(item.description ?? item.Description) ?? null,
         unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
@@ -12253,142 +12980,42 @@ app.put("/api/consumptions/:id", async (req, res) => {
       return res.status(404).json({ ok: false, error: "Consumption not found" });
     }
 
-    const existingItemsResult = await new sql.Request(tx)
-      .input("ConsumptionId", sql.Int, id)
-      .query(`
-        SELECT BoqItemId, ReceiveGoodsItemId, Quantity
-        FROM dbo.ConsumptionItems
-        WHERE ${fkCol} = @ConsumptionId
-      `);
-    const existingItems = existingItemsResult.recordset ?? [];
-
     const currentDeliveryChallanIds = parseJsonArray(
       currentConsumptionRow?.DeliveryChallanIds
     )
       .map((value) => toNullableInt(value))
       .filter((value) => value !== null);
-    const requestedDeliveryChallanIds = safeDeliveryChallanIds.length
-      ? safeDeliveryChallanIds
-      : currentDeliveryChallanIds;
-    const requestedDeliveryChallanId =
-      safeDeliveryChallanId ?? toNullableInt(currentConsumptionRow?.DeliveryChallanId);
-    const requestedDeliveryChallanRef =
-      safeDeliveryChallanRef ??
-      normalizeOptionalString(currentConsumptionRow?.DeliveryChallanRef) ??
-      null;
-    if (!requestedDeliveryChallanIds.length && requestedDeliveryChallanId === null && !requestedDeliveryChallanRef) {
-      const error = new Error("deliveryChallanId is required");
-      error.statusCode = 400;
-      throw error;
-    }
+    const mappedItems = normalizedItems.map((item) => ({
+      ...item,
+      sourceKey: item.sourceKey || buildAvailabilitySourceKey(item),
+    }));
 
-    const deliverySources = [];
-    if (requestedDeliveryChallanIds.length) {
-      for (const selectedDeliveryChallanId of requestedDeliveryChallanIds) {
-        deliverySources.push(
-          await loadDeliveryChallanSourceForConsumption(tx, {
-            deliveryChallanId: selectedDeliveryChallanId,
-            deliveryChallanRef: null,
-          })
-        );
-      }
-    } else {
-      deliverySources.push(
-        await loadDeliveryChallanSourceForConsumption(tx, {
-          deliveryChallanId: requestedDeliveryChallanId,
-          deliveryChallanRef: requestedDeliveryChallanRef,
-        })
-      );
-    }
-    const resolvedDeliveryChallan = deliverySources[0].challan;
-    const challanItems = deliverySources.flatMap((source) => source.challanItems);
-    const mappedItems = mapConsumptionItemsFromDeliveryChallan(
-      normalizedItems,
-      challanItems
+    await validateAvailableInventorySelection(tx, {
+      projectId: safeProjectId,
+      locationId: safeLocationId,
+      items: mappedItems,
+      excludeConsumptionId: id,
+    });
+
+    const resolvedDeliveryChallanIds = Array.from(
+      new Set(
+        [
+          ...(safeDeliveryChallanIds.length
+            ? safeDeliveryChallanIds
+            : currentDeliveryChallanIds),
+          ...mappedItems.map((item) => toNullableInt(item.deliveryChallanId)),
+        ].filter((value) => value !== null)
+      )
     );
-
-    const sourceItemIds = uniqueReceiveGoodsItemIds(
-      mappedItems.map((item) => item.receiveGoodsItemId ?? null)
-    );
-    if (sourceItemIds.length) {
-      const sourceItems = await loadReceiveGoodsItemsForConsumption(tx, {
-        receiveGoodsId: null,
-        receiveGoodsItemIds: sourceItemIds,
-      });
-      const consumedTotals = await loadReceiveConsumedTotals(tx, sourceItemIds);
-      const existingQtyById = existingItems.reduce((acc, row) => {
-        const sourceId = toNullableInt(
-          row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? row.ReceiveItemId ?? row.BoqItemId
-        );
-        if (sourceId !== null) {
-          acc.set(sourceId, (acc.get(sourceId) ?? 0) + (Number(row.Quantity ?? 0) || 0));
-        }
-        return acc;
-      }, new Map());
-      const requestedQtyBySourceId = mappedItems.reduce((acc, item) => {
-        const sourceId = toNullableInt(item.receiveGoodsItemId ?? null);
-        if (sourceId === null) {
-          return acc;
-        }
-        acc.set(sourceId, (acc.get(sourceId) ?? 0) + (Number(item.quantity) || 0));
-        return acc;
-      }, new Map());
-
-      for (const row of sourceItems) {
-        const sourceId = toNullableInt(row.id);
-        const sourceQty = Number(row.receivedQty ?? 0) || 0;
-        const existingQty = existingQtyById.get(sourceId) ?? 0;
-        const consumedOtherThanCurrent = Math.max(
-          (consumedTotals.get(sourceId) ?? 0) - existingQty,
-          0
-        );
-        const requestedQty = requestedQtyBySourceId.get(sourceId) ?? 0;
-        const availableQty = Math.max(sourceQty - consumedOtherThanCurrent, 0);
-        if (requestedQty > availableQty) {
-          const error = new Error(
-            `Quantity for ${row.name || "the linked receipt item"} cannot be greater than the available quantity (${availableQty}).`
-          );
-          error.statusCode = 400;
-          throw error;
-        }
-      }
-    }
-
-    for (const source of deliverySources) {
-      const sourceId = toNullableInt(source.challan.id);
-      const sourceReceiveGoodsItemIds = new Set(
-        source.challanItems
-          .map((item) => toNullableInt(item.receiveGoodsItemId ?? item.ReceiveGoodsItemId))
-          .filter((value) => value !== null)
-      );
-      const sourceItems =
-        deliverySources.length === 1
-          ? mappedItems
-          : mappedItems.filter((item) => {
-              const itemDeliveryChallanId = toNullableInt(item.deliveryChallanId);
-              const itemReceiveGoodsItemId = toNullableInt(item.receiveGoodsItemId);
-              if (itemDeliveryChallanId !== null) {
-                return itemDeliveryChallanId === sourceId;
-              }
-              return (
-                itemReceiveGoodsItemId !== null &&
-                sourceReceiveGoodsItemIds.has(itemReceiveGoodsItemId)
-              );
-            });
-      if (!sourceItems.length) {
-        continue;
-      }
-      await validateConsumptionAgainstDeliveryChallan(tx, {
-        deliveryChallanId: source.challan.id,
-        deliveryChallanRef: source.challan.dcNumber,
-        consumptionId: id,
-        items: sourceItems,
-      });
-    }
-
+    const resolvedDeliveryChallanId =
+      safeDeliveryChallanId ??
+      resolvedDeliveryChallanIds[0] ??
+      toNullableInt(currentConsumptionRow?.DeliveryChallanId);
     const resolvedReceiveGoodsId =
-      toNullableInt(resolvedDeliveryChallan.receiveGoodsId) ??
       safeReceiveGoodsId ??
+      mappedItems
+        .map((item) => toNullableInt(item.receiveGoodsId))
+        .find((value) => value !== null) ??
       toNullableInt(currentConsumptionRow?.ReceiveGoodsId);
     const updateHeaderReq = new sql.Request(tx);
     updateHeaderReq.input("ConsumptionId", sql.Int, id);
@@ -12399,25 +13026,18 @@ app.put("/api/consumptions/:id", async (req, res) => {
     updateHeaderReq.input(
       "DeliveryChallanId",
       sql.Int,
-      toNullableInt(resolvedDeliveryChallan.id)
+      resolvedDeliveryChallanId
     );
     updateHeaderReq.input(
       "DeliveryChallanIds",
       sql.NVarChar(sql.MAX),
-      JSON.stringify(
-        requestedDeliveryChallanIds.length
-          ? requestedDeliveryChallanIds
-          : [toNullableInt(resolvedDeliveryChallan.id)].filter((value) => value !== null)
-      )
+      JSON.stringify(resolvedDeliveryChallanIds)
     );
     updateHeaderReq.input(
       "DeliveryChallanRef",
       sql.NVarChar(100),
-      deliverySources
-        .map((source) => source.challan.dcNumber)
-        .filter(Boolean)
-        .join(", ") ||
-        normalizeOptionalString(resolvedDeliveryChallan.dcNumber) ||
+      safeDeliveryChallanRef ??
+        normalizeOptionalString(currentConsumptionRow?.DeliveryChallanRef) ??
         null
     );
     updateHeaderReq.input("ConsumptionDate", sql.Date, parsedConsumptionDate ?? null);
@@ -12468,11 +13088,19 @@ app.put("/api/consumptions/:id", async (req, res) => {
       insertItemReq.input("ConsumptionId", sql.Int, id);
       insertItemReq.input("BoqItemId", sql.Int, item.boqItemId ?? null);
       insertItemReq.input("ItemId", sql.Int, item.itemId ?? null);
+      insertItemReq.input("DeliveryChallanId", sql.Int, item.deliveryChallanId ?? null);
+      insertItemReq.input(
+        "DeliveryChallanItemId",
+        sql.BigInt,
+        item.deliveryChallanItemId ?? null
+      );
       insertItemReq.input(
         "ReceiveGoodsItemId",
         sql.Int,
         item.receiveGoodsItemId ?? null
       );
+      insertItemReq.input("SourceType", sql.NVarChar(50), item.sourceType ?? null);
+      insertItemReq.input("SourceKey", sql.NVarChar(200), item.sourceKey ?? null);
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
@@ -12483,9 +13111,9 @@ app.put("/api/consumptions/:id", async (req, res) => {
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.ConsumptionItems
-          (${fkCol}, BoqItemId, ItemId, ReceiveGoodsItemId, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
+          (${fkCol}, BoqItemId, ItemId, DeliveryChallanId, DeliveryChallanItemId, ReceiveGoodsItemId, SourceType, SourceKey, Item, Description, Unit, HSN, GST, Quantity, Rate, Notes)
         VALUES
-          (@ConsumptionId, @BoqItemId, @ItemId, @ReceiveGoodsItemId, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
+          (@ConsumptionId, @BoqItemId, @ItemId, @DeliveryChallanId, @DeliveryChallanItemId, @ReceiveGoodsItemId, @SourceType, @SourceKey, @Item, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
       `);
     }
 
@@ -12699,6 +13327,12 @@ app.post("/api/reallocate-inventory", async (req, res) => {
   const safeNotes = normalizeOptionalString(notes) ?? "";
   const parsedRequestDate = parseDateInput(requestDate);
 
+  if (!safeProjectId) {
+    return res.status(400).json({
+      ok: false,
+      error: "projectId is required",
+    });
+  }
   if (!safeFromLocationId) {
     return res.status(400).json({
       ok: false,
@@ -12719,13 +13353,39 @@ app.post("/api/reallocate-inventory", async (req, res) => {
   }
 
   const normalizedItems = (Array.isArray(items) ? items : [])
-    .map((item) => ({
-      name: String(item.name ?? item.item ?? item.Item ?? "").trim(),
-      description:
-        normalizeOptionalString(item.description ?? item.Description) ?? null,
-      unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
-      quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
-    }))
+    .map((item) => {
+      const name = String(item.name ?? item.item ?? item.Item ?? "").trim();
+      const deliveryChallanId = toNullableInt(
+        item.deliveryChallanId ?? item.DeliveryChallanId
+      );
+      const deliveryChallanItemId = toNullableInt(
+        item.deliveryChallanItemId ??
+          item.DeliveryChallanItemId ??
+          item.deliveryChallanLineItemId ??
+          item.DeliveryChallanLineItemId
+      );
+      const receiveGoodsItemId = toNullableInt(
+        item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+      );
+      const sourceType =
+        normalizeAvailabilitySourceType(item.sourceType ?? item.SourceType) ||
+        (deliveryChallanId !== null ? "dc" : "receive");
+      const normalizedItem = {
+        name,
+        description:
+          normalizeOptionalString(item.description ?? item.Description) ?? null,
+        unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+        receiveGoodsItemId,
+        deliveryChallanId,
+        deliveryChallanItemId,
+        sourceType,
+        sourceKey: normalizeOptionalString(item.sourceKey ?? item.SourceKey) ?? null,
+      };
+      normalizedItem.sourceKey =
+        normalizedItem.sourceKey || buildAvailabilitySourceKey(normalizedItem);
+      return normalizedItem;
+    })
     .filter((item) => item.name && item.quantity > 0);
 
   if (!normalizedItems.length) {
@@ -12743,6 +13403,12 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     const pool = await getPool();
     tx = pool.transaction();
     await tx.begin();
+
+    await validateAvailableInventorySelection(tx, {
+      projectId: safeProjectId,
+      locationId: safeFromLocationId,
+      items: normalizedItems,
+    });
 
     const now = new Date().toISOString();
     const notesPayload = buildReallocateNotesPayload({
@@ -12786,15 +13452,20 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     for (const item of normalizedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("TransferId", sql.Int, transferId);
+      insertItemReq.input("ReceiveGoodsItemId", sql.Int, item.receiveGoodsItemId);
+      insertItemReq.input("DeliveryChallanId", sql.Int, item.deliveryChallanId);
+      insertItemReq.input("DeliveryChallanItemId", sql.BigInt, item.deliveryChallanItemId);
+      insertItemReq.input("SourceType", sql.NVarChar(50), item.sourceType);
+      insertItemReq.input("SourceKey", sql.NVarChar(200), item.sourceKey);
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       await insertItemReq.query(`
         INSERT INTO dbo.ReallocateInventoryItems
-          (${fkCol}, Item, Description, Unit, Quantity)
+          (${fkCol}, ReceiveGoodsItemId, DeliveryChallanId, DeliveryChallanItemId, SourceType, SourceKey, Item, Description, Unit, Quantity)
         VALUES
-          (@TransferId, @Item, @Description, @Unit, @Quantity)
+          (@TransferId, @ReceiveGoodsItemId, @DeliveryChallanId, @DeliveryChallanItemId, @SourceType, @SourceKey, @Item, @Description, @Unit, @Quantity)
       `);
     }
 
@@ -12817,7 +13488,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     });
   } catch (error) {
     await rollbackTx(tx);
-    return res.status(500).json({
+    return res.status(error?.statusCode ?? 500).json({
       ok: false,
       error: error?.message ?? "Failed to create reallocation",
     });
@@ -12864,6 +13535,12 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
   const safeNotes = normalizeOptionalString(notes) ?? "";
   const parsedRequestDate = parseDateInput(requestDate);
 
+  if (!safeProjectId) {
+    return res.status(400).json({
+      ok: false,
+      error: "projectId is required",
+    });
+  }
   if (!safeFromLocationId) {
     return res.status(400).json({
       ok: false,
@@ -12884,13 +13561,39 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
   }
 
   const normalizedItems = (Array.isArray(items) ? items : [])
-    .map((item) => ({
-      name: String(item.name ?? item.item ?? item.Item ?? "").trim(),
-      description:
-        normalizeOptionalString(item.description ?? item.Description) ?? null,
-      unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
-      quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
-    }))
+    .map((item) => {
+      const name = String(item.name ?? item.item ?? item.Item ?? "").trim();
+      const deliveryChallanId = toNullableInt(
+        item.deliveryChallanId ?? item.DeliveryChallanId
+      );
+      const deliveryChallanItemId = toNullableInt(
+        item.deliveryChallanItemId ??
+          item.DeliveryChallanItemId ??
+          item.deliveryChallanLineItemId ??
+          item.DeliveryChallanLineItemId
+      );
+      const receiveGoodsItemId = toNullableInt(
+        item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+      );
+      const sourceType =
+        normalizeAvailabilitySourceType(item.sourceType ?? item.SourceType) ||
+        (deliveryChallanId !== null ? "dc" : "receive");
+      const normalizedItem = {
+        name,
+        description:
+          normalizeOptionalString(item.description ?? item.Description) ?? null,
+        unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+        quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+        receiveGoodsItemId,
+        deliveryChallanId,
+        deliveryChallanItemId,
+        sourceType,
+        sourceKey: normalizeOptionalString(item.sourceKey ?? item.SourceKey) ?? null,
+      };
+      normalizedItem.sourceKey =
+        normalizedItem.sourceKey || buildAvailabilitySourceKey(normalizedItem);
+      return normalizedItem;
+    })
     .filter((item) => item.name && item.quantity > 0);
 
   if (!normalizedItems.length) {
@@ -12926,6 +13629,13 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     }
 
     const previousRecord = normalizeReallocateInventory(currentRow);
+    await validateAvailableInventorySelection(tx, {
+      projectId: safeProjectId,
+      locationId: safeFromLocationId,
+      items: normalizedItems,
+      excludeReallocateInventoryId: id,
+    });
+
     const notesPayload = buildReallocateNotesPayload({
       referenceNumber: safeReferenceNumber,
       type: safeType,
@@ -12976,15 +13686,20 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     for (const item of normalizedItems) {
       const insertItemReq = new sql.Request(tx);
       insertItemReq.input("TransferId", sql.Int, id);
+      insertItemReq.input("ReceiveGoodsItemId", sql.Int, item.receiveGoodsItemId);
+      insertItemReq.input("DeliveryChallanId", sql.Int, item.deliveryChallanId);
+      insertItemReq.input("DeliveryChallanItemId", sql.BigInt, item.deliveryChallanItemId);
+      insertItemReq.input("SourceType", sql.NVarChar(50), item.sourceType);
+      insertItemReq.input("SourceKey", sql.NVarChar(200), item.sourceKey);
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       await insertItemReq.query(`
         INSERT INTO dbo.ReallocateInventoryItems
-          (${fkCol}, Item, Description, Unit, Quantity)
+          (${fkCol}, ReceiveGoodsItemId, DeliveryChallanId, DeliveryChallanItemId, SourceType, SourceKey, Item, Description, Unit, Quantity)
         VALUES
-          (@TransferId, @Item, @Description, @Unit, @Quantity)
+          (@TransferId, @ReceiveGoodsItemId, @DeliveryChallanId, @DeliveryChallanItemId, @SourceType, @SourceKey, @Item, @Description, @Unit, @Quantity)
       `);
     }
 
@@ -13007,7 +13722,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     });
   } catch (error) {
     await rollbackTx(tx);
-    return res.status(500).json({
+    return res.status(error?.statusCode ?? 500).json({
       ok: false,
       error: error?.message ?? "Failed to update reallocation",
     });

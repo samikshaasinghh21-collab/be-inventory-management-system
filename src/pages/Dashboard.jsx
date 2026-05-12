@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import useSettings from "../hooks/useSettings";
 import { formatDate } from "../utils/dateFormat";
+import { formatInrCurrency, roundUnitPrice } from "../utils/formatters";
 import { ensureApiAvailable, isApiUnavailableError } from "../services/api";
 import { fetchProjects } from "../services/projectsApi";
 import {
@@ -138,8 +138,6 @@ const getFallbackDashboardData = () => ({
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const settings = useSettings();
-  const currency = settings?.preferences?.currency || "INR";
 
   const [activeTab, setActiveTab] = useState("overview");
   const [selectedProjectId, setSelectedProjectId] = useState("all");
@@ -160,21 +158,7 @@ const Dashboard = () => {
     goodsDelivered: [],
   });
 
-  const formatCurrency = useCallback(
-    (value) => {
-      const amount = toNumber(value);
-      try {
-        return new Intl.NumberFormat("en-IN", {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 0,
-        }).format(amount);
-      } catch {
-        return `${currency} ${amount.toLocaleString("en-IN")}`;
-      }
-    },
-    [currency]
-  );
+  const formatCurrency = useCallback((value) => formatInrCurrency(value), []);
 
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     if (silent) setRefreshing(true);
@@ -388,7 +372,7 @@ const Dashboard = () => {
 
     const inventoryValue = isAllProjects
       ? data.items.reduce(
-          (sum, item) => sum + toNumber(item.stock) * toNumber(item.price),
+          (sum, item) => sum + toNumber(item.stock) * roundUnitPrice(item.price),
           0
         )
       : purchaseOrders.reduce((sum, po) => sum + toNumber(po.total), 0);

@@ -7,6 +7,7 @@ import { addCategory, getCategories } from "../../services/categoryStore";
 import { fetchLocations } from "../../services/locationsApi";
 import { saveProduct } from "../../services/productsStore";
 import { TAX_OPTIONS, formatTaxPercentage } from "../../utils/taxUtils";
+import { roundUnitPrice } from "../../utils/formatters";
 import DateInput from "../common/DateInput";
 
 const UNIT_OPTIONS = [
@@ -174,8 +175,10 @@ const CreateProduct = () => {
   const selectedCategory = String(form.category || form.customCategory || "").trim();
 
   const updateField = (key, value) => {
+    const nextValue =
+      key === "price" && value !== "" ? String(roundUnitPrice(value)) : value;
     setForm((prev) => {
-      const next = { ...prev, [key]: value };
+      const next = { ...prev, [key]: nextValue };
       if (key === "prepBy") {
         next.updatedBy = value;
       }
@@ -254,7 +257,7 @@ const CreateProduct = () => {
     }
 
     const locationName = selectedLocation?.name || "";
-    const price = Number(form.price) || 0;
+    const price = roundUnitPrice(form.price);
     const currentStock = Number(form.currentStock) || 0;
     const openStock = Number(form.openStock) || 0;
     const now = todayIso();
@@ -586,7 +589,7 @@ const CreateProduct = () => {
                   <input
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="1"
                     value={form.price}
                     onChange={(event) => updateField("price", event.target.value)}
                     placeholder="0.00"

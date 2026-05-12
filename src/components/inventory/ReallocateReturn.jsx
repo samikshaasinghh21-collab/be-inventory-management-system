@@ -5,6 +5,7 @@ import DateInput from "../common/DateInput";
 import { fetchVendors, syncVendorsCache } from "../../services/vendorsApi";
 import { fetchItems, updateQuantityApi } from "../../services/inventoryApi";
 import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
+import { fetchAvailableInventory } from "../../services/availableInventoryApi";
 import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import { fetchBoqs } from "../../services/boqApi";
 import {
@@ -147,6 +148,7 @@ const ReallocateReturn = () => {
   const [consumptions, setConsumptions] = useState([]);
   const [inventoryItems, setInventoryItems] = useState([]);
   const [records, setRecords] = useState([]);
+  const [availableInventory, setAvailableInventory] = useState([]);
   const [form, setForm] = useState(createFormState);
   const [items, setItems] = useState([]);
   const [errors, setErrors] = useState({});
@@ -157,6 +159,8 @@ const ReallocateReturn = () => {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [viewRecord, setViewRecord] = useState(null);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState("");
  
   const loadRecords = async () => {
     try {
@@ -270,6 +274,16 @@ const ReallocateReturn = () => {
       return acc;
     }, {});
   }, [locations]);
+
+  const projectLocations = useMemo(() => {
+    if (!form.projectId) {
+      return locations;
+    }
+    const matching = locations.filter(
+      (location) => String(location.projectId) === String(form.projectId)
+    );
+    return matching.length ? matching : locations;
+  }, [form.projectId, locations]);
  
   const vendorMap = useMemo(() => {
     return vendors.reduce((acc, vendor) => {
@@ -473,6 +487,114 @@ const ReallocateReturn = () => {
       };
     });
   };
+
+  const buildItemsFromAvailableInventory = (rows = [], existingItems = []) => {
+    const existingBySourceKey = (existingItems || []).reduce((acc, item) => {
+      const sourceKey = String(item.sourceKey || "").trim();
+      if (sourceKey) {
+        acc[sourceKey] = toQuantity(item.quantity);
+      }
+      return acc;
+    }, {});
+    const existingByMaterial = (existingItems || []).reduce((acc, item) => {
+      const key = `${String(item.name || "").trim().toLowerCase()}::${String(
+        item.unit || "PCS"
+      )
+        .trim()
+        .toUpperCase()}`;
+      if (key !== "::PCS" && existingBySourceKey[String(item.sourceKey || "").trim()] === undefined) {
+        acc[key] = toQuantity(item.quantity);
+      }
+      return acc;
+    }, {});
+
+    return (Array.isArray(rows) ? rows : []).map((row, index) => {
+      const sourceKey = String(row.sourceKey || "").trim();
+      const materialKey = `${String(row.name || "").trim().toLowerCase()}::${String(
+        row.unit || "PCS"
+      )
+        .trim()
+        .toUpperCase()}`;
+      const availableQty = toQuantity(row.availableQty);
+      const existingQty =
+        sourceKey && existingBySourceKey[sourceKey] !== undefined
+          ? existingBySourceKey[sourceKey]
+          : existingByMaterial[materialKey];
+      const quantity =
+        existingQty !== undefined ? Math.min(existingQty, availableQty) : availableQty;
+
+      return {
+        id: sourceKey || `${row.sourceType || "source"}-${index}`,
+        sourceType: row.sourceType || "",
+        sourceKey,
+        sourceRef: row.sourceRef || "",
+        receiveGoodsId: row.receiveGoodsId ?? null,
+        receiveGoodsItemId: row.receiveGoodsItemId ?? null,
+        deliveryChallanId: row.deliveryChallanId ?? null,
+        deliveryChallanItemId: row.deliveryChallanItemId ?? null,
+        name: String(row.name || "").trim(),
+        description: row.description || "",
+        unit: row.unit || "PCS",
+        consumedQty: toQuantity(row.sourceQty),
+        availableQty,
+        quantity,
+      };
+    });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!form.projectId || !form.fromLocationId) {
+      setAvailableInventory([]);
+      setInventoryError("");
+      if (!editingId) {
+        setItems([]);
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setInventoryLoading(true);
+    setInventoryError("");
+    fetchAvailableInventory({
+      projectId: form.projectId,
+      locationId: form.fromLocationId,
+      excludeReallocateInventoryId: editingId || undefined,
+    })
+      .then((list) => {
+        if (cancelled) {
+          return;
+        }
+        const safeList = Array.isArray(list) ? list : [];
+        const editingRecord = editingId
+          ? records.find((record) => String(record.id) === String(editingId))
+          : null;
+        setAvailableInventory(safeList);
+        setItems(buildItemsFromAvailableInventory(safeList, editingRecord?.items || []));
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setAvailableInventory([]);
+        setItems([]);
+        setInventoryError(
+          error?.response?.data?.error ||
+            error?.message ||
+            "Could not load available inventory."
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setInventoryLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editingId, form.fromLocationId, form.projectId, records]);
  
   const applyConsumptionSelection = (consumptionId, options = {}) => {
     const source = consumptionMap[String(consumptionId)] || null;
@@ -498,8 +620,10 @@ const ReallocateReturn = () => {
   const resetForm = () => {
     setForm(createFormState());
     setItems([]);
+    setAvailableInventory([]);
     setErrors({});
     setSaveError("");
+    setInventoryError("");
     setEditingId(null);
   };
  
@@ -507,9 +631,6 @@ const ReallocateReturn = () => {
     const nextErrors = {};
     if (!form.referenceNumber.trim()) {
       nextErrors.referenceNumber = "Reference number is required.";
-    }
-    if (!form.consumptionId) {
-      nextErrors.consumptionId = "Select an inventory reference.";
     }
     if (!form.projectId) {
       nextErrors.projectId = "Select a project.";
@@ -528,14 +649,14 @@ const ReallocateReturn = () => {
       (item) => String(item.name || "").trim() && toQuantity(item.quantity) > 0
     );
     if (!hasValidItem) {
-      nextErrors.items = "Select at least one received material quantity.";
+      nextErrors.items = "Select at least one available material quantity.";
     }
  
     const hasOverQty = items.some(
       (item) => toQuantity(item.quantity) > toQuantity(item.availableQty)
     );
     if (hasOverQty) {
-      nextErrors.items = "Request quantity cannot exceed available received quantity.";
+      nextErrors.items = "Request quantity cannot exceed available inventory quantity.";
     }
  
     setErrors(nextErrors);
@@ -551,7 +672,14 @@ const ReallocateReturn = () => {
     const cleanedItems = items
       .map((item) => ({
         id: item.id,
+        sourceType: item.sourceType || "",
+        sourceKey: item.sourceKey || "",
+        receiveGoodsId: item.receiveGoodsId ?? null,
+        receiveGoodsItemId: item.receiveGoodsItemId ?? null,
+        deliveryChallanId: item.deliveryChallanId ?? null,
+        deliveryChallanItemId: item.deliveryChallanItemId ?? null,
         name: String(item.name || "").trim(),
+        description: item.description || "",
         unit: item.unit || "PCS",
         consumedQty: toQuantity(item.consumedQty),
         availableQty: toQuantity(item.availableQty),
@@ -564,7 +692,7 @@ const ReallocateReturn = () => {
       referenceNumber: form.referenceNumber.trim(),
       type: form.type,
       consumptionId: form.consumptionId ? Number(form.consumptionId) : null,
-      consumptionNumber: getReceiveReference(source),
+      consumptionNumber: source ? getReceiveReference(source) : "Project inventory",
       projectId: form.projectId ? Number(form.projectId) : null,
       fromLocationId: form.fromLocationId ? Number(form.fromLocationId) : null,
       toLocationId: form.toLocationId ? Number(form.toLocationId) : null,
@@ -787,13 +915,13 @@ const ReallocateReturn = () => {
  
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Receive Inventory Ref *
+                Optional Receive Inventory Ref
               </label>
               <input
                 type="search"
                 value={consumptionQuery}
                 onChange={(event) => setConsumptionQuery(event.target.value)}
-                placeholder="Search by receive ref, PO, BOQ, item, or date"
+                placeholder="Optional search by receive ref, PO, BOQ, item, or date"
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
               <div className="mt-2">
@@ -813,7 +941,7 @@ const ReallocateReturn = () => {
                 onChange={(event) => applyConsumptionSelection(event.target.value)}
                 className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
-                <option value="">Select PO / BOQ / receipt reference</option>
+                <option value="">Use project/location inventory</option>
                 {filteredConsumptions.map((entry) => (
                   <option key={entry.id} value={entry.id}>
                     {buildReceiveReferenceLabel(entry, purchaseOrderMap, boqMap)}
@@ -837,7 +965,12 @@ const ReallocateReturn = () => {
               <select
                 value={form.projectId}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, projectId: event.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    projectId: event.target.value,
+                    consumptionId: "",
+                    fromLocationId: "",
+                  }))
                 }
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
@@ -856,12 +989,16 @@ const ReallocateReturn = () => {
               <select
                 value={form.fromLocationId}
                 onChange={(event) =>
-                  setForm((prev) => ({ ...prev, fromLocationId: event.target.value }))
+                  setForm((prev) => ({
+                    ...prev,
+                    fromLocationId: event.target.value,
+                    consumptionId: "",
+                  }))
                 }
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
                 <option value="">Select location</option>
-                {locations.map((location) => (
+                {projectLocations.map((location) => (
                   <option key={location.id} value={location.id}>
                     {location.name}
                   </option>
@@ -967,14 +1104,25 @@ const ReallocateReturn = () => {
  
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="mb-4 text-base font-semibold text-slate-800">
-            Materials From Receive Inventory
+            Materials From Available Inventory
           </h3>
+          <div className="mb-3 text-xs text-slate-500">
+            {inventoryLoading
+              ? "Loading available inventory..."
+              : form.projectId && form.fromLocationId
+              ? `Showing ${availableInventory.length} balance rows for this source location.`
+              : "Select project and source location to load available inventory."}
+            {inventoryError ? (
+              <span className="ml-2 font-semibold text-red-600">{inventoryError}</span>
+            ) : null}
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-100 text-slate-600">
                 <tr>
+                  <th className="min-w-[180px] p-3 text-left">Source</th>
                   <th className="min-w-[200px] p-3 text-left">Material</th>
-                  <th className="min-w-[120px] p-3 text-left">Received Qty</th>
+                  <th className="min-w-[120px] p-3 text-left">Source Qty</th>
                   <th className="min-w-[120px] p-3 text-left">Available Qty</th>
                   <th className="min-w-[160px] p-3 text-left">Request Qty</th>
                 </tr>
@@ -982,13 +1130,25 @@ const ReallocateReturn = () => {
               <tbody>
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan="4" className="p-4 text-center text-slate-500">
-                      Select an inventory reference to load materials.
+                    <td colSpan="5" className="p-4 text-center text-slate-500">
+                      {form.projectId && form.fromLocationId
+                        ? "No available materials found for this project/location."
+                        : "Select project and source location to load materials."}
                     </td>
                   </tr>
                 )}
                 {items.map((item) => (
                   <tr key={item.id} className="border-t">
+                    <td className="p-3 text-slate-700">
+                      <span className="font-semibold uppercase">
+                        {item.sourceType === "dc" ? "DC" : item.sourceType || "Receive"}
+                      </span>
+                      {item.sourceRef ? (
+                        <span className="block text-xs text-slate-500">
+                          {item.sourceRef}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="p-3 font-medium text-slate-800">{item.name || "-"}</td>
                     <td className="p-3">{toQuantity(item.consumedQty)}</td>
                     <td className="p-3">{toQuantity(item.availableQty)}</td>

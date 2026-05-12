@@ -11,6 +11,7 @@ const toNumber = (value) => {
 };
 
 const roundQuantity = (value) => Number(toNumber(value).toFixed(2));
+const roundUnitPrice = (value) => Math.round(toNumber(value));
 
 const parseDate = (value) => {
   if (!value) {
@@ -120,7 +121,7 @@ const createInventoryResolver = (items = []) => {
       unit: item.unit ?? item.salesUnit ?? item.Unit ?? "PCS",
       hsn: item.hsn ?? item.HSN ?? "",
       stock: toNumber(item.stock ?? item.currentStock ?? item.Stock ?? 0),
-      price: toNumber(item.price ?? item.Price ?? 0),
+      price: roundUnitPrice(item.price ?? item.Price ?? 0),
       gst: item.gst ?? item.GST ?? "",
       taxPercentage: toNumber(item.taxPercentage ?? item.TaxPercentage ?? 0),
       locationId: item.locationId ?? item.LocationId ?? null,
@@ -197,7 +198,7 @@ const buildBaseMaterial = (material = {}, resolvedItem = null) => ({
     (toNumber(resolvedItem?.taxPercentage ?? material.taxPercentage) > 0
       ? `${toNumber(resolvedItem?.taxPercentage ?? material.taxPercentage)}%`
       : ""),
-  price: toNumber(resolvedItem?.price ?? material.rate ?? material.unitPrice ?? 0),
+  price: roundUnitPrice(resolvedItem?.price ?? material.rate ?? material.unitPrice ?? 0),
   locationId: resolvedItem?.locationId ?? material.locationId ?? null,
   locationName: resolvedItem?.locationName ?? material.locationName ?? material.location ?? "",
 });
@@ -410,7 +411,7 @@ export const calculateInventoryAvailability = ({
             vendorId: order.vendorId ?? null,
             locationId: order.locationId ?? null,
             quantity: remainingQuantity,
-            unitPrice: toNumber(item.unitPrice ?? item.rate),
+            unitPrice: roundUnitPrice(item.unitPrice ?? item.rate),
             expectedDate: order.expectedDate ?? null,
             projectId: order.projectId ?? null,
           })
@@ -678,7 +679,7 @@ export const generatePurchaseRecommendations = ({
           vendorId: order.vendorId ?? null,
           vendorName: vendor ? getVendorLabel(vendor) : "",
           locationId: order.locationId ?? null,
-          unitPrice: toNumber(item.unitPrice ?? item.rate ?? 0),
+          unitPrice: roundUnitPrice(item.unitPrice ?? item.rate ?? 0),
         });
       });
     });
@@ -705,7 +706,7 @@ export const generatePurchaseRecommendations = ({
         vendorId: hint.vendorId ?? null,
         vendorName: hint.vendorName ?? "",
         locationId: hint.locationId ?? shortage.locationId ?? null,
-        unitPrice: hint.unitPrice ?? shortage.price ?? 0,
+        unitPrice: roundUnitPrice(hint.unitPrice ?? shortage.price ?? 0),
         notes: `MRP recommendation for ${shortage.projectName}.`,
         message: `${shortage.productName} is short by ${shortage.shortage} ${shortage.unit} for ${shortage.projectName}.`,
       };

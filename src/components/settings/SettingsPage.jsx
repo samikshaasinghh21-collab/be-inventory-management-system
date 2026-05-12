@@ -44,6 +44,14 @@ const textareaClass = `${inputClass} min-h-[120px]`;
 const sectionClass =
   "border border-slate-200 rounded-xl p-5 bg-white shadow-sm scroll-mt-24";
 
+const normalizeSettingsForm = (settings = {}) => ({
+  ...settings,
+  preferences: {
+    ...(settings.preferences || {}),
+    currency: "INR",
+  },
+});
+
 const ToggleItem = ({ checked, onChange, title, description }) => (
   <label className="flex items-start gap-3 text-sm text-slate-600">
     <input
@@ -60,9 +68,9 @@ const ToggleItem = ({ checked, onChange, title, description }) => (
 );
 
 const SettingsPage = () => {
-  const [form, setForm] = useState(() => getSettings());
+  const [form, setForm] = useState(() => normalizeSettingsForm(getSettings()));
   const [baseline, setBaseline] = useState(() =>
-    JSON.stringify(getSettings())
+    JSON.stringify(normalizeSettingsForm(getSettings()))
   );
   const [status, setStatus] = useState(null);
   const timeoutRef = useRef(null);
@@ -99,8 +107,10 @@ const SettingsPage = () => {
     if (!isDirty) {
       return;
     }
-    saveSettings(form);
-    setBaseline(JSON.stringify(form));
+    const normalized = normalizeSettingsForm(form);
+    saveSettings(normalized);
+    setForm(normalized);
+    setBaseline(JSON.stringify(normalized));
     showStatus("success", "Settings saved.");
   };
 
@@ -423,10 +433,7 @@ const SettingsPage = () => {
                   }
                   className={inputClass}
                 >
-                  <option value="INR">INR</option>
-                  <option value="USD">USD</option>
-                  <option value="EUR">EUR</option>
-                  <option value="GBP">GBP</option>
+                  <option value="INR">INR (Indian Rupee)</option>
                 </select>
               </div>
               <div>

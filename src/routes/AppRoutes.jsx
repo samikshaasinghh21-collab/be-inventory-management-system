@@ -17,9 +17,9 @@ import ToolsHistory from "../pages/ToolsHistory";
 import ToolsBulkImport from "../pages/ToolsBulkImport";
 import ToolsHandoverTool from "../pages/ToolsHandoverTool";
 import ToolsMap from "../pages/ToolsMap";
+import HrmsPlaceholder from "../pages/HrmsPlaceholder";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
-import Login from "../pages/Login";
 import CreateAccount from "../pages/CreateAccount";
 import SsoCallback from "../pages/SsoCallback";
 
@@ -41,18 +41,72 @@ import PurchaseOrderRegister from "../components/inventory/PurchaseOrderRegister
 import Invoice from "../components/inventory/Invoice";
 import ReceiveGoodsRegister from "../components/inventory/ReceiveGoodsRegister";
 import Consumption from "../components/inventory/Consumption";
+import ReallocateReturn from "../components/inventory/ReallocateReturn";
+import ReallocationRegister from "../components/inventory/ReallocationRegister";
 import BoqDetail from "../components/inventory/BoqDetail";
 import ReportsPage from "../components/inventory/ReportsPage";
+
+const HRMS_PAGE_ROUTES = [
+  { path: "/dashboard", page: "dashboard" },
+  { path: "/employees", page: "employees" },
+  { path: "/employees/list", page: "employees" },
+  { path: "/employees/add", page: "add-employee" },
+  { path: "/employees/profile", page: "employee-profile" },
+  { path: "/employees/profile/:employeeId", page: "employee-profile" },
+  { path: "/employees/edit", page: "edit-employee" },
+  { path: "/employees/edit/:employeeId", page: "edit-employee" },
+  { path: "/employees/print-profile", page: "employee-profile" },
+  { path: "/employees/print-profile/:employeeId", page: "employee-profile" },
+  { path: "/reviews", page: "reviews" },
+  { path: "/reviews/add", page: "reviews" },
+  { path: "/reviews/salary-reassessment", page: "salary-reassessment" },
+  { path: "/reviews/history", page: "reviews" },
+  { path: "/attendance", page: "attendance" },
+  { path: "/payroll", page: "payroll" },
+  { path: "/payslip", page: "payslip" },
+  { path: "/relieving", page: "relieving" },
+  { path: "/relieving/exit-request", page: "relieving" },
+  { path: "/relieving/final-settlement", page: "relieving" },
+  { path: "/relieving/letters", page: "relieving" },
+  { path: "/search", page: "search" },
+  { path: "/reports", page: "reports" },
+  { path: "/permissions", page: "permissions" },
+  { path: "/hrms", page: "dashboard" },
+  { path: "/hrms/employees/add", page: "add-employee" },
+  { path: "/hrms/employees/list", page: "employees" },
+  { path: "/hrms/employees/profile", page: "employee-profile" },
+  { path: "/hrms/employees/profile/:employeeId", page: "employee-profile" },
+  { path: "/hrms/employees/edit", page: "edit-employee" },
+  { path: "/hrms/employees/edit/:employeeId", page: "edit-employee" },
+  { path: "/hrms/employees/print-profile", page: "employee-profile" },
+  { path: "/hrms/employees/print-profile/:employeeId", page: "employee-profile" },
+  { path: "/hrms/reviews/add", page: "reviews" },
+  { path: "/hrms/reviews/salary-reassessment", page: "salary-reassessment" },
+  { path: "/hrms/reviews/history", page: "reviews" },
+  { path: "/hrms/payroll/monthly-attendance", page: "attendance" },
+  { path: "/hrms/payroll/salary-processing", page: "payroll" },
+  { path: "/hrms/payroll/payslip", page: "payslip" },
+  { path: "/hrms/relieving/exit-request", page: "relieving" },
+  { path: "/hrms/relieving/final-settlement", page: "relieving" },
+  { path: "/hrms/relieving/letters", page: "relieving" },
+  { path: "/hrms/search", page: "search" },
+  { path: "/hrms/reports", page: "reports" },
+  { path: "/hrms/permissions", page: "permissions" },
+];
 
 const AppRoutes = () => {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
+      <Route
+        path="/login"
+        element={<HrmsPlaceholder page="login" />}
+      />
       <Route path="/create-account" element={<CreateAccount />} />
       <Route path="/auth/sso/callback" element={<SsoCallback />} />
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
       </Route>
+      <Route path="/inventory/tools/map" element={<ToolsMap />} />
 
       <Route element={<MainLayout />}>
         <Route path="/inventory" element={<InventoryHome />} />
@@ -91,7 +145,6 @@ const AppRoutes = () => {
           path="/inventory/tools/bulk-import"
           element={<ToolsBulkImport />}
         />
-        <Route path="/inventory/tools/map" element={<ToolsMap />} />
         <Route path="/inventory/projects" element={<ProjectsHome />} />
         <Route path="/inventory/products" element={<Product />} />
 
@@ -118,8 +171,17 @@ const AppRoutes = () => {
         />
         <Route path="/inventory/invoice" element={<Invoice />} />
         <Route path="/inventory/consumption" element={<Consumption />} />
-        <Route path="/inventory/return-dc" element={<Navigate replace to="/inventory" />} />
+        <Route path="/inventory/reallocate-return" element={<ReallocateReturn />} />
+        <Route path="/inventory/reallocation-register" element={<ReallocationRegister />} />
+        <Route path="/inventory/return-dc" element={<Navigate replace to="/inventory/reallocate-return" />} />
         <Route path="/inventory/reports" element={<ReportsPage />} />
+        {HRMS_PAGE_ROUTES.map((screen) => (
+          <Route
+            key={screen.path}
+            path={screen.path}
+            element={<HrmsPlaceholder page={screen.page} />}
+          />
+        ))}
 
         <Route path="/inventory/cart" element={<Cart />} />
         <Route path="/account" element={<Profile />} />

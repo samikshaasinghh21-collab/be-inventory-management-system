@@ -1,5 +1,6 @@
 import api from "./api";
 import { DEFAULT_PURCHASE_ORDER_TERMS } from "../utils/purchaseOrderTerms";
+import { roundUnitPrice } from "../utils/formatters";
 
 const emitPurchaseOrdersChange = ({
   includeBoqs = false,
@@ -40,6 +41,10 @@ const normalizePoItem = (item = {}) => {
     0
   );
 
+  const unitPrice = roundUnitPrice(
+    item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0
+  );
+
   return {
     id: item.id ?? item.Id ?? item.POItemId ?? null,
     poItemId:
@@ -73,17 +78,8 @@ const normalizePoItem = (item = {}) => {
     totalAvailableQty: availableQty,
     poBalanceQty,
     totalPoBalanceQty: poBalanceQty,
-    unitPrice: Number(
-      item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0
-    ),
-    totalPrice: Number(
-      item.totalPrice ??
-        item.TotalPrice ??
-        item.total ??
-        item.Total ??
-        ((item.quantity ?? item.Quantity ?? item.Qty ?? 0) *
-          (item.unitPrice ?? item.UnitPrice ?? item.rate ?? item.Rate ?? 0))
-    ),
+    unitPrice,
+    totalPrice: quantity * unitPrice,
   };
 };
 

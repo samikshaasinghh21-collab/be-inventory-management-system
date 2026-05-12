@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import useSettings from "../../hooks/useSettings";
 import { fetchBoq } from "../../services/boqApi";
 import { fetchProjects } from "../../services/projectsApi";
+import { formatInrCurrency } from "../../utils/formatters";
 
 const BoqDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const settings = useSettings();
-  const currency = settings?.preferences?.currency || "INR";
 
   const [boq, setBoq] = useState(null);
   const [projects, setProjects] = useState([]);
@@ -23,18 +21,7 @@ const BoqDetail = () => {
     }, {});
   }, [projects]);
 
-  const formatCurrency = (value) => {
-    const amount = Number(value) || 0;
-    try {
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      return `${currency} ${amount.toLocaleString()}`;
-    }
-  };
+  const formatCurrency = formatInrCurrency;
 
   const handleExportCsv = () => {
     if (!boq) return;

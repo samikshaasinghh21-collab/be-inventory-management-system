@@ -45,6 +45,9 @@ const createFormState = () => ({
   eWayBillNumber: "",
   issueDate: new Date().toISOString().slice(0, 10),
   status: "Draft",
+  podStatus: "Pending",
+  podReference: "",
+  podDate: "",
   notes: "",
 });
 
@@ -589,6 +592,12 @@ const DeliveryChallan = () => {
     const preselectedIds = normalizePreselectedReceiptIds(
       location.state?.preselectedReceiveGoodsIds
     );
+    const preselectedProjectId = String(
+      location.state?.preselectedProjectId ?? ""
+    ).trim();
+    const preselectedFromLocationId = String(
+      location.state?.preselectedFromLocationId ?? ""
+    ).trim();
     if (!preselectedIds.length) {
       return;
     }
@@ -605,6 +614,11 @@ const DeliveryChallan = () => {
     setReceiptFilters({
       search: "",
     });
+    setForm((prev) => ({
+      ...prev,
+      projectId: preselectedProjectId || prev.projectId,
+      fromLocationId: preselectedFromLocationId || prev.fromLocationId,
+    }));
     setSelectedReceiptIds(preselectedIds);
   }, [location.key, location.state]);
 
@@ -704,6 +718,9 @@ const DeliveryChallan = () => {
       eWayBillNumber: record.eWayBillNumber || "",
       issueDate: record.issueDate || new Date().toISOString().slice(0, 10),
       status: record.status || "Draft",
+      podStatus: record.podStatus || "Pending",
+      podReference: record.podReference || "",
+      podDate: record.podDate || "",
       notes: record.notes || "",
     });
     setItems(record.items?.length ? record.items : [createLineItem()]);
@@ -761,6 +778,39 @@ const DeliveryChallan = () => {
   const handleViewChallan = (record) => {
     if (!record) return;
     setSelectedChallan(record);
+  };
+
+  const handlePodStatusChange = async (record, nextPodStatus) => {
+    if (!record?.id) {
+      return;
+    }
+    const nextPodDate =
+      nextPodStatus === "Received"
+        ? record.podDate || new Date().toISOString().slice(0, 10)
+        : record.podDate || "";
+    try {
+      setReceiptError("");
+      await updateDeliveryChallan(record.id, {
+        ...record,
+        podStatus: nextPodStatus,
+        podDate: nextPodDate,
+        items: record.items || [],
+      });
+      await loadRecords();
+      if (selectedChallan && String(selectedChallan.id) === String(record.id)) {
+        setSelectedChallan((prev) =>
+          prev
+            ? { ...prev, podStatus: nextPodStatus, podDate: nextPodDate }
+            : prev
+        );
+      }
+    } catch (error) {
+      setReceiptError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to update POD status."
+      );
+    }
   };
 
   const handleProjectChange = (nextProjectId) => {
@@ -839,12 +889,31 @@ const DeliveryChallan = () => {
       setForm((prev) => ({ ...prev, receiveGoodsId: "" }));
       return;
     }
+    const selectedLocationIds = Array.from(
+      new Set(
+        selectedReceipts
+          .map((receipt) => {
+            const linkedPurchaseOrder =
+              purchaseOrderMap[String(receipt.purchaseOrderId)] || null;
+            return String(
+              receipt.locationId ?? linkedPurchaseOrder?.locationId ?? ""
+            ).trim();
+          })
+          .filter(Boolean)
+      )
+    );
+    if (selectedLocationIds.length > 1) {
+      setReceiptError("Selected receipts must come from the same source location.");
+      return;
+    }
     const nextItems = selectedReceiptItems.length ? selectedReceiptItems : [];
     if (!nextItems.length) {
       setReceiptError("Selected receipts do not have items with available quantity.");
       return;
     }
     const primaryReceipt = selectedReceipts[0];
+    const primaryPurchaseOrder =
+      purchaseOrderMap[String(primaryReceipt?.purchaseOrderId)] || null;
     setItems(
       nextItems.map((item) => ({
         ...item,
@@ -855,8 +924,15 @@ const DeliveryChallan = () => {
     setForm((prev) => ({
       ...prev,
       receiveGoodsId: primaryReceipt?.id ? String(primaryReceipt.id) : "",
+      projectId: primaryReceipt?.projectId
+        ? String(primaryReceipt.projectId)
+        : primaryPurchaseOrder?.projectId
+        ? String(primaryPurchaseOrder.projectId)
+        : prev.projectId,
       fromLocationId: primaryReceipt?.locationId
         ? String(primaryReceipt.locationId)
+        : primaryPurchaseOrder?.locationId
+        ? String(primaryPurchaseOrder.locationId)
         : prev.fromLocationId,
     }));
     setReceiptError("");
@@ -1115,6 +1191,58 @@ const DeliveryChallan = () => {
                 <option value="Delivered">Delivered</option>
                 <option value="Closed">Closed</option>
               </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                POD Status
+              </label>
+              <select
+                value={form.podStatus}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    podStatus: event.target.value,
+                    podDate:
+                      event.target.value === "Received" && !prev.podDate
+                        ? new Date().toISOString().slice(0, 10)
+                        : prev.podDate,
+                  }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              >
+                <option value="Pending">Pending</option>
+                <option value="Received">Received</option>
+                <option value="Not Required">Not Required</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                POD Reference
+              </label>
+              <input
+                type="text"
+                value={form.podReference}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    podReference: event.target.value,
+                  }))
+                }
+                placeholder="POD reference"
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">
+                POD Date
+              </label>
+              <DateInput
+                value={form.podDate}
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, podDate: value || "" }))
+                }
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+              />
             </div>
             <div className="md:col-span-3">
               <label className="text-sm font-medium text-slate-700">
@@ -1417,7 +1545,7 @@ const DeliveryChallan = () => {
             Print register
           </button>
         </div>
-        <table className="min-w-[1300px] text-sm">
+        <table className="min-w-[1450px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">DC No</th>
@@ -1428,13 +1556,14 @@ const DeliveryChallan = () => {
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
               <th className="p-3 text-right min-w-[140px]">Balance Qty</th>
+              <th className="p-3 text-left min-w-[170px]">POD</th>
               <th className="p-3 text-left min-w-[120px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {records.length === 0 && (
               <tr>
-                <td colSpan="9" className="p-6 text-center text-slate-500">
+                <td colSpan="10" className="p-6 text-center text-slate-500">
                   No delivery challans created yet.
                 </td>
               </tr>
@@ -1464,6 +1593,26 @@ const DeliveryChallan = () => {
                 <td className="p-3">{record.items?.length || 0}</td>
                 <td className="p-3 text-right font-medium text-slate-800">
                   {fmtQty(record.balanceQty)}
+                </td>
+                <td className="p-3">
+                  <select
+                    value={record.podStatus || "Pending"}
+                    onChange={(event) =>
+                      handlePodStatusChange(record, event.target.value)
+                    }
+                    className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700"
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Received">Received</option>
+                    <option value="Not Required">Not Required</option>
+                  </select>
+                  {record.podReference || record.podDate ? (
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {[record.podReference, formatDate(record.podDate)]
+                        .filter((value) => value && value !== "-")
+                        .join(" | ")}
+                    </p>
+                  ) : null}
                 </td>
                 <td className="p-3 flex gap-3">
                   <button
@@ -1560,6 +1709,16 @@ const DeliveryChallan = () => {
                   <p className="font-semibold">{formatDate(selectedChallan.issueDate)}</p>
                   <p className="text-slate-600">E-Way Bill No:</p>
                   <p className="font-semibold">{selectedChallan.eWayBillNumber || "-"}</p>
+                  <p className="text-slate-600">POD:</p>
+                  <p className="font-semibold">
+                    {[
+                      selectedChallan.podStatus || "Pending",
+                      selectedChallan.podReference,
+                      formatDate(selectedChallan.podDate),
+                    ]
+                      .filter((value) => value && value !== "-")
+                      .join(" | ") || "-"}
+                  </p>
                   <p className="text-slate-600">Project:</p>
                   <p className="font-semibold">{selectedProject.name || "-"}</p>
                   <p className="text-slate-600">Client:</p>

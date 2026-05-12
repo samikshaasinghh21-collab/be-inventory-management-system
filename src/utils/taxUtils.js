@@ -1,3 +1,5 @@
+import { roundCurrencyValue, roundUnitPrice } from "./formatters";
+
 export const TAX_OPTIONS = [5, 12, 18, 28];
 
 export const parseTaxPercentage = (value) => {
@@ -21,7 +23,7 @@ export const formatTaxPercentage = (value) => {
 };
 
 export const getItemUnitPrice = (item = {}) =>
-  Number(item.unitPrice ?? item.rate ?? 0) || 0;
+  roundUnitPrice(item.unitPrice ?? item.rate ?? 0);
 
 export const getItemQuantity = (item = {}) =>
   Number(item.quantity ?? item.qty ?? 0) || 0;
@@ -37,10 +39,10 @@ export const buildLineTaxBreakdown = (item = {}, options = {}) => {
   const unitPrice = getItemUnitPrice(item);
   const taxPercentage = parseTaxPercentage(item.taxPercentage ?? item.gst);
   const taxMode = options.taxMode === "inter" ? "inter" : "intra";
-  const taxableAmount = quantity * unitPrice;
-  const gstAmount = (taxableAmount * taxPercentage) / 100;
+  const taxableAmount = roundCurrencyValue(quantity * unitPrice);
+  const gstAmount = roundCurrencyValue((taxableAmount * taxPercentage) / 100);
   const halfRate = taxPercentage / 2;
-  const halfAmount = gstAmount / 2;
+  const halfAmount = roundCurrencyValue(gstAmount / 2);
 
   return {
     taxableAmount,
@@ -86,12 +88,23 @@ export const buildGstSummary = (items = [], options = {}) => {
 
   const orderedGroups = Array.from(groups.values()).sort((a, b) => a.rate - b.rate);
   if (taxMode === "inter") {
-    summary.igstGroups = orderedGroups.map((group) => ({ ...group }));
+    summary.igstGroups = orderedGroups.map((group) => ({
+      ...group,
+      amount: roundCurrencyValue(group.amount),
+    }));
   } else {
-    summary.cgstGroups = orderedGroups.map((group) => ({ ...group }));
-    summary.sgstGroups = orderedGroups.map((group) => ({ ...group }));
+    summary.cgstGroups = orderedGroups.map((group) => ({
+      ...group,
+      amount: roundCurrencyValue(group.amount),
+    }));
+    summary.sgstGroups = orderedGroups.map((group) => ({
+      ...group,
+      amount: roundCurrencyValue(group.amount),
+    }));
   }
-  summary.total = summary.subtotal + summary.totalTax;
+  summary.subtotal = roundCurrencyValue(summary.subtotal);
+  summary.totalTax = roundCurrencyValue(summary.totalTax);
+  summary.total = roundCurrencyValue(summary.subtotal + summary.totalTax);
 
   return summary;
 };
