@@ -70,16 +70,16 @@ export const NAVIGATION_SECTIONS = [
         id: "procurement",
         label: "Procurement",
         icon: "clipboard",
-        subtitle: "Purchase orders and procurement registers.",
+        subtitle: "Purchase order workflows and registers.",
         children: [
           createNavItem({
             id: "purchase-orders",
-            label: "PO Register",
+            label: "Purchase Order",
             to: "/inventory/purchase-order",
             icon: "clipboard",
             matchPrefixes: ["/inventory/purchase-order", "/inventory/purchase-orders"],
-            subtitle: "Create and manage purchase order register entries.",
-            searchKeywords: ["po", "procurement"],
+            subtitle: "Create and manage purchase orders.",
+            searchKeywords: ["po", "procurement", "purchase order"],
           }),
           createNavItem({
             id: "purchase-register",
@@ -745,7 +745,7 @@ export const HEADER_QUICK_ACTIONS = [
   },
   {
     id: "quick-po",
-    label: "PO Register",
+    label: "Purchase Order",
     to: "/inventory/purchase-order",
     icon: "clipboard",
   },

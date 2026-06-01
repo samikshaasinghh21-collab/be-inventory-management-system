@@ -19,6 +19,7 @@ import { fetchVendors } from "../../services/vendorsApi";
 import ReportFilters from "./reports/ReportFilters";
 import ReportTable from "./reports/ReportTable";
 import WorkflowSummary from "./reports/WorkflowSummary";
+import AppIcon from "../layout/AppIcon";
 import {
   REPORT_ACTIVITY_TYPES,
   buildExcelRows,
@@ -259,7 +260,7 @@ const ReportsPage = () => {
     () =>
       filteredRows.reduce(
         (sum, row) => sum + Number(row.receivedQty ?? 0),
-        0
+          0
       ),
     [filteredRows]
   );
@@ -451,41 +452,43 @@ const ReportsPage = () => {
   ];
 
   return (
-    <div id="inventory-project-report" className="space-y-6 p-4 md:p-6">
-      <section className="rounded-[32px] border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/70 px-6 py-6 shadow-sm">
+    <div id="inventory-project-report" className="reports-page space-y-5 p-4 md:p-6">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm md:px-6">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               Inventory Management / Reports
             </p>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-900">Report</h1>
-            <p className="mt-2 max-w-2xl text-sm text-slate-600">
+            <h1 className="mt-2 text-2xl font-semibold text-slate-900 md:text-3xl">
+              Inventory Reports
+            </h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
               View all live inventory activities under a project across BOQ, purchase
               orders, receive goods, delivery challan, and consumption.
             </p>
-            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
               Synced {lastUpdatedLabel}
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-3 xl:justify-end">
             <button
               type="button"
               onClick={handleExportExcel}
               disabled={!filteredRows.length || isExportingExcel}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="app-btn app-btn-primary text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <span className="text-base">+</span>
+              <AppIcon name="download" className="h-4 w-4" />
               {isExportingExcel ? "Exporting..." : "Export Excel"}
             </button>
             <button
               type="button"
               onClick={handleExportPdf}
               disabled={!filteredRows.length}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+              className="app-btn app-btn-outline text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <span className="text-base">+</span>
+              <AppIcon name="file" className="h-4 w-4" />
               Export PDF
             </button>
           </div>
@@ -516,19 +519,21 @@ const ReportsPage = () => {
         disabled={loading && !records.projects.length}
       />
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         {summaryCards.map((card) => (
           <article
             key={card.id}
-            className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm"
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   {card.label}
                 </p>
-                <p className="mt-2 text-3xl font-semibold text-slate-900">{card.value}</p>
-                <p className="mt-1 text-sm text-slate-500">{card.hint}</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900 md:text-3xl">
+                  {card.value}
+                </p>
+                <p className="mt-1 text-sm leading-5 text-slate-500">{card.hint}</p>
               </div>
               <span className={`rounded-2xl border px-3 py-1.5 text-xs font-semibold ${card.tone}`}>
                 Live

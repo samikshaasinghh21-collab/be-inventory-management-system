@@ -12,9 +12,8 @@ import {
   updateProduct,
 } from "../../services/productsStore";
 import { deleteItemApi, fetchItems, updateItemApi } from "../../services/inventoryApi";
-import useSettings from "../../hooks/useSettings";
-import StatusBadge from "../common/StatusBadge";
 import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
+import AppIcon from "../layout/AppIcon";
 
 const CATEGORY_OPTIONS = [
   "Networking",
@@ -160,8 +159,9 @@ function EmptyState({ hasFilters, onClearFilters, onCreate }) {
         <button
           type="button"
           onClick={onCreate}
-          className="rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500"
+          className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500"
         >
+          <AppIcon name="plus" className="h-4 w-4" />
           Create Product
         </button>
       </div>
@@ -172,9 +172,6 @@ function EmptyState({ hasFilters, onClearFilters, onCreate }) {
 export default function ProductCatalogDashboard() {
   const navigate = useNavigate();
   const location = useLocation();
-  const settings = useSettings();
-  const company = settings?.company || {};
-  const profile = settings?.profile || {};
   const [items, setItems] = useState(() =>
     normalizeStoredProducts(getProducts())
   );
@@ -421,34 +418,6 @@ export default function ProductCatalogDashboard() {
     return Array.from(mergedCategories);
   }, [items]);
 
-  const systemStatus = useMemo(() => {
-    const profileName = String(profile.fullName || "").trim();
-    const companySignals = [
-      company.name,
-      company.email,
-      company.address,
-      company.gstin,
-    ]
-      .map((value) => String(value || "").trim())
-      .filter(Boolean);
-
-    return {
-      realtimeInventory: items.length > 0,
-      reportsReady: items.some((item) => Number(item.rate ?? item.price ?? 0) > 0),
-      workspaceSynced: Boolean(
-        companySignals.length > 0 ||
-          (profileName && profileName !== "Demo Account")
-      ),
-    };
-  }, [
-    company.address,
-    company.email,
-    company.gstin,
-    company.name,
-    items,
-    profile.fullName,
-  ]);
-
   const pickParam = new URLSearchParams(location.search).get("pick");
   const isPickingForPo = pickParam === "po";
   const isPickingForBoq = pickParam === "boq";
@@ -528,57 +497,6 @@ export default function ProductCatalogDashboard() {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
         <div className="space-y-6">
-          <section className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-3xl">
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                Inventory Workspace
-              </p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-                Product Catalog
-              </h1>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                Manage inventory products, pricing, and metadata.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-3">
-                <StatusBadge
-                  visible={systemStatus.realtimeInventory}
-                  label="Realtime Inventory Enabled"
-                  description="Delivery challan and consumption totals stay aligned across registers."
-                  color="green"
-                />
-                <StatusBadge
-                  visible={systemStatus.reportsReady}
-                  label="Reports Ready"
-                  description="Use the reports workspace for daily movement summaries and exports."
-                  color="blue"
-                />
-                <StatusBadge
-                  visible={systemStatus.workspaceSynced}
-                  label="Workspace Synced"
-                  description="Profile, settings, and project-aware navigation are up to date."
-                  color="purple"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => void loadProducts()}
-                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-              >
-                Refresh Catalog
-              </button>
-              <button
-                type="button"
-                onClick={goToCreateProduct}
-                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500"
-              >
-                + Create Product
-              </button>
-            </div>
-          </section>
-
           <div className="flex flex-wrap gap-2">
             <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
               {selectionContextLabel}
@@ -982,7 +900,7 @@ export default function ProductCatalogDashboard() {
                   aria-label="Close"
                   type="button"
                 >
-                  X
+                  <AppIcon name="x" className="h-4 w-4" />
                 </button>
               </div>
 

@@ -261,10 +261,27 @@ const ICONS = {
       <path d="M18 6 6 18" />
     </>
   ),
+  check: (
+    <>
+      <path d="m5 13 4 4L19 7" />
+    </>
+  ),
+  more: (
+    <>
+      <circle cx="6" cy="12" r="1.2" />
+      <circle cx="12" cy="12" r="1.2" />
+      <circle cx="18" cy="12" r="1.2" />
+    </>
+  ),
 };
 
 const AppIcon = ({ className = "h-5 w-5", name = "grid" }) => (
-  <svg {...iconProps} className={className}>
+  <svg
+    {...iconProps}
+    aria-hidden="true"
+    className={["app-icon", className].filter(Boolean).join(" ")}
+    focusable="false"
+  >
     {ICONS[name] || ICONS.grid}
   </svg>
 );

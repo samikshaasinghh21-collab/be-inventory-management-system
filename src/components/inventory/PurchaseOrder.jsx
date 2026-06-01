@@ -435,7 +435,11 @@ const PurchaseOrder = () => {
         }
         const itemId = Number.parseInt(item.itemId ?? item.ItemId ?? "", 10);
         const normalizedName = name.toLowerCase();
-        const normalizedUnit = String(item.unit ?? "PCS").trim().toUpperCase() || "PCS";
+        const normalizedUnit = String(item.unit || "0").trim().toUpperCase() || "0";
+        if (item.unit && !/^\d+$/.test(String(item.unit))) {
+          nextErrors.items = "Line item Unit accepts numeric values only.";
+          break;
+        }
         const identityKey = Number.isFinite(itemId) && itemId > 0
           ? `id:${itemId}`
           : `name:${normalizedName}::${normalizedUnit}`;
@@ -486,7 +490,7 @@ const PurchaseOrder = () => {
           boqItemId: item.boqItemId ?? null,
           name: item.name?.trim() || "",
           description: item.description || "",
-          unit: item.unit || "PCS",
+          unit: item.unit || "0",
           hsn: String(item.hsn ?? "").trim(),
           gst:
             String(item.gst ?? "").trim() ||
@@ -584,7 +588,7 @@ const PurchaseOrder = () => {
   };
 
   return (
-    <div className="p-6">
+    <div className="po-page p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
@@ -977,37 +981,35 @@ const PurchaseOrder = () => {
               </label>
               <textarea
                 value={form.termsAndConditions}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    termsAndConditions: event.target.value,
-                  }))
-                }
                 placeholder="Purchase order terms and conditions"
-                disabled={isEditingLockedWithoutOverride}
-                className="mt-1 min-h-[180px] w-full rounded-lg border border-slate-200 px-3 py-3 text-sm leading-6 text-left whitespace-pre-wrap disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                readOnly
+                aria-readonly="true"
+                className="mt-1 min-h-[180px] w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-3 text-left text-sm leading-6 text-slate-600 whitespace-pre-wrap"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Auto-filled by default and editable for PO-specific clauses.
+                Default static terms are applied to every purchase order.
               </p>
             </div>
           </div>
         </div>
 
-        <LineItemsEditor
-          items={items}
-          onChange={setItems}
-          onPickFromProducts={goPickProducts}
-          pickLabel="Pick from Products"
-          showHsnGst
-          showSerialNumber
-          priceLabel="Unit Price"
-          extraFieldKey="location"
-          extraFieldLabel="Ship To"
-          extraFieldPlaceholder="Ship-to note"
-          hideSelectedCatalogItems
-          readOnly={isEditingLockedWithoutOverride}
-        />
+        <div className="po-line-items-panel">
+          <LineItemsEditor
+            items={items}
+            onChange={setItems}
+            onPickFromProducts={goPickProducts}
+            pickLabel="Pick from Products"
+            showHsnGst
+            showSerialNumber
+            priceLabel="Unit Price"
+            extraFieldKey="location"
+            extraFieldLabel="Ship To"
+            extraFieldPlaceholder="Ship-to note"
+            hideSelectedCatalogItems
+            readOnly={isEditingLockedWithoutOverride}
+            unitNumericOnly
+          />
+        </div>
         {errors.items && (
           <p className="text-xs text-red-600">{errors.items}</p>
         )}

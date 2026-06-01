@@ -17,7 +17,6 @@ import {
   buildReceiveBillFromText,
   buildReceiveProjectDetailLines,
   buildReceiveShipToText,
-  buildReceiveVendorAddressText,
   isReceiveProjectDetailsVisible,
   splitDocumentText,
 } from "../../utils/receiveGoodsDocument";
@@ -29,7 +28,6 @@ import {
   isCancelledPurchaseOrder,
   isLockedPurchaseOrder,
 } from "../../utils/purchaseOrderStatus";
-import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
 
 const formatAddressLine = (vendor) => {
   const {
@@ -74,12 +72,6 @@ const compareReceiptChronology = (left = {}, right = {}) => {
   );
 };
 
-const hasValue = (value) =>
-  value !== undefined && value !== null && value !== "";
-
-const sameId = (left, right) =>
-  hasValue(left) && hasValue(right) && String(left) === String(right);
-
 const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   const alignClass = align === "right" ? "text-right" : "text-left";
   return (
@@ -107,14 +99,9 @@ const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   );
 };
 
-const getReceiptItemQuantities = (item = {}, poItem = null) => {
+const getReceiptItemQuantities = (item = {}) => {
   const originalOrdered = toQuantity(
-    item.orderedQty ??
-      item.quantity ??
-      item.OrderedQty ??
-      poItem?.orderedQty ??
-      poItem?.quantity ??
-      poItem?.Quantity
+    item.orderedQty ?? item.quantity ?? item.OrderedQty
   );
   const receiptReceived = toQuantity(
     item.receiptReceivedQty ??
@@ -170,8 +157,6 @@ const getReceiptItemQuantities = (item = {}, poItem = null) => {
     item.TotalPoBalanceQty ??
     item.poBalanceQty ??
     item.PoBalanceQty ??
-    item.receiptBalanceQty ??
-    item.ReceiptBalanceQty ??
     item.balanceQty ??
     item.BalanceQty;
   const poBalance =
@@ -179,19 +164,13 @@ const getReceiptItemQuantities = (item = {}, poItem = null) => {
       ? Math.max(originalOrdered - cumulativeReceived, 0)
       : toQuantity(rawPoBalance);
   return {
-    ordered: originalOrdered,
+    ordered: availableBalance,
     originalOrdered,
     received: receiptReceived,
     available,
-    availableBalance,
     poBalance,
   };
 };
-
-const getReceiptMovementItems = (receipt = {}) =>
-  (receipt.items || [])
-    .map((item, index) => ({ ...item, receiptItemIndex: index }))
-    .filter((item) => getReceiptItemQuantities(item).received > 0);
 
 const getReceiptTotals = (receipt) => {
   const lines = Array.isArray(receipt?.items) ? receipt.items : [];
@@ -225,27 +204,22 @@ const findMatchingPoItem = (purchaseOrder, receiptItem, index) => {
   if (!poItems.length) return null;
 
   const receiptPoItemId =
-    receiptItem.poItemId ||
-    receiptItem.POItemId ||
-    receiptItem.PurchaseOrderItemId ||
-    receiptItem.purchaseOrderItemId;
-  if (hasValue(receiptPoItemId)) {
+    receiptItem.poItemId || receiptItem.POItemId || receiptItem.PurchaseOrderItemId;
+  if (receiptPoItemId) {
     const exactMatch = poItems.find(
       (poItem) =>
-        sameId(poItem.id, receiptPoItemId) ||
-        sameId(poItem.POItemId, receiptPoItemId) ||
-        sameId(poItem.poItemId, receiptPoItemId) ||
-        sameId(poItem.PurchaseOrderItemId, receiptPoItemId)
+        poItem.id === receiptPoItemId ||
+        poItem.POItemId === receiptPoItemId ||
+        poItem.poItemId === receiptPoItemId ||
+        poItem.PurchaseOrderItemId === receiptPoItemId
     );
     if (exactMatch) return exactMatch;
   }
 
   const receiptItemId = receiptItem.itemId || receiptItem.ItemId;
-  if (hasValue(receiptItemId)) {
+  if (receiptItemId) {
     const itemIdMatch = poItems.find(
-      (poItem) =>
-        sameId(poItem.itemId, receiptItemId) ||
-        sameId(poItem.ItemId, receiptItemId)
+      (poItem) => poItem.itemId === receiptItemId || poItem.ItemId === receiptItemId
     );
     if (itemIdMatch) return itemIdMatch;
   }
@@ -267,7 +241,7 @@ const buildReceiptSummaryItems = (receipt, purchaseOrder) =>
         quantity: toQuantity(
           item.receiptReceivedQty ?? item.ReceiptReceivedQty ?? item.receivedQty ?? item.ReceivedQty
         ),
-        unitPrice: roundUnitPrice(poItem?.unitPrice ?? poItem?.rate ?? 0),
+        unitPrice: toQuantity(poItem?.unitPrice ?? poItem?.rate ?? 0),
         taxPercentage: poItem?.taxPercentage ?? poItem?.gst ?? 0,
         gst: poItem?.gst ?? poItem?.taxPercentage ?? 0,
       };
@@ -298,11 +272,23 @@ const ReceiveGoodsRegister = () => {
   const [adminPasswordError, setAdminPasswordError] = useState("");
   const settings = useSettings();
   const company = settings?.company || {};
+  const currency = settings?.preferences?.currency || "INR";
   const logoUrl = resolveBrandLogo(company.logo || "");
   const brandName = company.name || "Bangalore Electronics";
   const brandDescription = company.address || "Company address";
 
-  const formatCurrency = formatInrCurrency;
+  const formatCurrency = (value) => {
+    const amount = toQuantity(value);
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    } catch {
+      return `${currency} ${amount.toLocaleString()}`;
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -395,20 +381,6 @@ const ReceiveGoodsRegister = () => {
       return acc;
     }, {});
   }, [locations]);
-
-  const getReceiptBillFromText = (receipt = {}) => {
-    const po = poMap[String(receipt.purchaseOrderId)];
-    const vendor =
-      vendorMap[String(receipt.vendorId || po?.vendorId)] || null;
-    const project =
-      projectMap[String(receipt.projectId || po?.projectId)] || null;
-    return (
-      receipt.billFrom ||
-      receipt.billTo ||
-      buildReceiveVendorAddressText(vendor) ||
-      buildReceiveBillFromText(project)
-    );
-  };
 
   const receiptMap = useMemo(() => {
     return orderedReceipts.reduce((acc, receipt) => {
@@ -511,7 +483,7 @@ const ReceiveGoodsRegister = () => {
   }, [receiptMap]);
 
   const totalReceivedLines = useMemo(
-    () => receipts.reduce((sum, rec) => sum + getReceiptMovementItems(rec).length, 0),
+    () => receipts.reduce((sum, rec) => sum + (rec.items?.length || 0), 0),
     [receipts]
   );
 
@@ -746,8 +718,6 @@ const ReceiveGoodsRegister = () => {
       return;
     }
 
-    const primaryReceipt = selected[0];
-    const primaryPo = poMap[String(primaryReceipt.purchaseOrderId)];
     setSelectionError("");
     navigate("/inventory/delivery-challan", {
       state: {
@@ -755,12 +725,6 @@ const ReceiveGoodsRegister = () => {
           .map((receipt) => String(receipt.id ?? "").trim())
           .filter(Boolean),
         preselectedPurchaseOrderId: uniquePoIds[0],
-        preselectedProjectId: String(
-          primaryReceipt.projectId || primaryPo?.projectId || ""
-        ),
-        preselectedFromLocationId: String(
-          primaryReceipt.locationId || primaryPo?.locationId || ""
-        ),
       },
     });
   };
@@ -1006,7 +970,7 @@ const ReceiveGoodsRegister = () => {
                       <td className="p-3">
                         {statusBadge(receipt.status || po?.status)}
                       </td>
-                      <td className="p-3">{getReceiptMovementItems(receipt).length}</td>
+                      <td className="p-3">{receipt.items?.length || 0}</td>
                       <td className="p-3 font-medium text-slate-800">
                         {totals.received}
                       </td>
@@ -1115,17 +1079,15 @@ const ReceiveGoodsRegister = () => {
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {getReceiptMovementItems(receipt).map((item, idx) => {
-                                      const sourceIndex = item.receiptItemIndex ?? idx;
-                                      const poItem =
-                                        findMatchingPoItem(po, item, sourceIndex) || {};
+                                    {(receipt.items || []).map((item, idx) => {
                                       const {
                                         ordered,
                                         received,
                                         available,
                                         poBalance,
                                       } =
-                                        getReceiptItemQuantities(item, poItem);
+                                        getReceiptItemQuantities(item);
+                                      const poItem = findMatchingPoItem(po, item, idx) || {};
                                       // Display saved receipt item name first, then PO item name, then identifier fallback
                                       const displayItemName =
                                         item.name ||
@@ -1209,7 +1171,18 @@ const ReceiveGoodsRegister = () => {
             { label: "Received By", value: viewReceipt.receivedBy },
           ]}
           leftBlockTitle="Bill From"
-          leftBlockLines={splitDocumentText(getReceiptBillFromText(viewReceipt))}
+          leftBlockLines={splitDocumentText(
+            viewReceipt.billFrom ||
+              viewReceipt.billTo ||
+              buildReceiveBillFromText(
+                projectMap[
+                  String(
+                    viewReceipt.projectId ||
+                      poMap[String(viewReceipt.purchaseOrderId)]?.projectId
+                  )
+                ]
+              )
+          )}
           rightBlockTitle="Ship To"
           rightBlockLines={splitDocumentText(
             viewReceipt.shipTo ||
@@ -1231,23 +1204,22 @@ const ReceiveGoodsRegister = () => {
             { key: "available", label: "Available", align: "right", widthClass: "w-24" },
             { key: "balance", label: "PO Balance", align: "right", widthClass: "w-24" },
           ]}
-          tableRows={getReceiptMovementItems(viewReceipt).map((item, index) => {
+          tableRows={(viewReceipt.items || []).map((item, index) => {
             const po = poMap[String(viewReceipt.purchaseOrderId)];
-            const sourceIndex = item.receiptItemIndex ?? index;
-            const poItem = findMatchingPoItem(po, item, sourceIndex) || {};
+            const poItem = findMatchingPoItem(po, item, index) || {};
             const {
               ordered,
               received,
               available,
               poBalance,
             } =
-              getReceiptItemQuantities(item, poItem);
+              getReceiptItemQuantities(item);
             return {
               id: item.id ?? item.itemId ?? index,
               serial: index + 1,
               name:
-                item.name ||
                 poItem.name ||
+                item.name ||
                 item.itemId ||
                 item.poItemId ||
                 `Item ${index + 1}` ||
@@ -1351,7 +1323,7 @@ const ReceiveGoodsRegister = () => {
           setAdminPasswordError("");
         }}
         onConfirm={confirmClosedPoReceiptEdit}
-      />
+      /> 
       <PasswordPromptModal
         isOpen={Boolean(deleteLockedReceipt)}
         title="Delete Locked PO Receipt"
@@ -1374,6 +1346,7 @@ const ReceiveGoodsRegister = () => {
       />
     </div>
   );
+  
 };
 
 export default ReceiveGoodsRegister;

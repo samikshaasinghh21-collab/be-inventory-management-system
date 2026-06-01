@@ -13,6 +13,16 @@
   text-transform: uppercase;
 }
 
+.app-icon {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.app-content :is(button, a, .app-btn) > .app-icon {
+  align-self: center;
+}
+
 .app-muted {
   color: var(--text-secondary);
 }
@@ -48,6 +58,67 @@
 
 .dark body {
   color: var(--text-primary);
+}
+
+.line-items-editor {
+  min-width: 0;
+}
+
+.line-items-scroll {
+  max-height: clamp(280px, 46vh, 560px);
+  scrollbar-color: rgba(97, 96, 97, 0.36) transparent;
+}
+
+.po-line-items-panel {
+  min-width: 0;
+}
+
+.reports-page {
+  color: var(--text-primary);
+}
+
+.reports-page :is(h1, h2, h3, p) {
+  letter-spacing: 0;
+}
+
+.app-content :is(input, select, textarea, button) {
+  max-width: 100%;
+}
+
+.app-route-frame,
+.app-content-inner,
+.app-content :is(section, article, form, table, .overflow-x-auto, .overflow-auto) {
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .app-content .p-6 {
+    padding: 1rem;
+  }
+
+  .app-content .px-6 {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .app-content .py-6 {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .app-content :is(.text-3xl, .text-\[32px\]) {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+
+  .line-items-scroll {
+    max-height: min(60vh, 520px);
+  }
+
+  .reports-page {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
 }
 
 .dark .app-header-inner {

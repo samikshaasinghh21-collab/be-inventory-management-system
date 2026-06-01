@@ -259,6 +259,7 @@ const Locations = () => {
               <label className="text-sm font-medium text-slate-700">
                 Manager / Contact
               </label>
+          
               <input
                 type="text"
                 value={form.manager}

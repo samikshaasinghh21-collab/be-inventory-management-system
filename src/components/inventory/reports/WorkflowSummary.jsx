@@ -5,15 +5,15 @@ const WorkflowSummary = ({
   totalQuantity = 0,
 }) => {
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
       <div className="border-b border-slate-100 pb-4">
-        <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
           Workflow Summary
         </p>
-        <h2 className="mt-2 text-2xl font-semibold text-slate-900">
+        <h2 className="mt-2 text-xl font-semibold text-slate-900 md:text-2xl">
           {projectName || "Select a project"}
         </h2>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-sm leading-6 text-slate-600">
           {totalActivities} activities across {totalQuantity.toLocaleString("en-IN")} quantity.
         </p>
       </div>
@@ -29,7 +29,7 @@ const WorkflowSummary = ({
                 }`}
               />
             </div>
-            <div className="min-w-0 flex-1 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3">
+            <div className="min-w-0 flex-1 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-base font-semibold text-slate-800">

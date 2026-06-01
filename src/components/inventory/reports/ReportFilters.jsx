@@ -1,7 +1,7 @@
 import { REPORT_ACTIVITY_TYPES } from "./reportUtils";
 
 const inputClass =
-  "mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
+  "mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
 
 const ReportFilters = ({
   projects = [],
@@ -17,7 +17,7 @@ const ReportFilters = ({
   const selectedTypes = new Set(filters.types || []);
 
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
       <div className="grid gap-4 xl:grid-cols-12">
         <div className="xl:col-span-5">
           <label className="text-sm font-medium text-slate-700">
@@ -70,7 +70,7 @@ const ReportFilters = ({
               return (
                 <label
                   key={activity.key}
-                  className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition ${
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm leading-5 transition ${
                     isSelected
                       ? "border-blue-200 bg-blue-50 text-blue-700"
                       : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300"
@@ -142,7 +142,7 @@ const ReportFilters = ({
           type="button"
           onClick={onApply}
           disabled={disabled}
-          className="inline-flex items-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="app-btn app-btn-primary text-sm disabled:cursor-not-allowed disabled:opacity-60"
         >
           Apply Filters
         </button>
@@ -150,7 +150,7 @@ const ReportFilters = ({
           type="button"
           onClick={onReset}
           disabled={disabled}
-          className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+          className="app-btn app-btn-secondary text-sm disabled:cursor-not-allowed disabled:opacity-60"
         >
           Reset
         </button>

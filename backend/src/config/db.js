@@ -1,5 +1,6 @@
 import sql from "mssql";
 import dotenv from "dotenv";
+import net from "net";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -22,18 +23,44 @@ const toInt = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const toBool = (value, fallback) => {
+  if (value == null) {
+    return fallback;
+  }
+  return String(value).toLowerCase() === "true";
+};
+
+const dbServer = getEnv("DB_HOST", "DB_SERVER")?.trim();
+const dbEncrypt = toBool(process.env.DB_ENCRYPT, false);
+const dbTrustServerCertificate = toBool(
+  process.env.DB_TRUST_SERVER_CERTIFICATE,
+  true,
+);
+const configuredTlsServerName = getEnv(
+  "DB_TLS_SERVER_NAME",
+  "DB_SERVER_NAME",
+)?.trim();
+const dbServerIsIp = typeof dbServer === "string" && net.isIP(dbServer) !== 0;
+// Tedious passes the server address as TLS SNI during encrypted prelogin.
+// Node warns on IP-based SNI, so use a DNS-style fallback for trusted certs.
+const tlsServerName =
+  configuredTlsServerName ||
+  (dbEncrypt && dbTrustServerCertificate && dbServerIsIp
+    ? "localhost"
+    : undefined);
+
 const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  server: getEnv("DB_HOST", "DB_SERVER"),
+  server: dbServer,
   port: toInt(process.env.DB_PORT, 1433),
   database: getEnv("DB_NAME", "DB_DATABASE"),
   connectionTimeout: toInt(process.env.DB_CONNECTION_TIMEOUT_MS, 30000),
   requestTimeout: toInt(process.env.DB_REQUEST_TIMEOUT_MS, 120000),
   options: {
-    encrypt: String(process.env.DB_ENCRYPT ?? "false").toLowerCase() === "true",
-    trustServerCertificate:
-      String(process.env.DB_TRUST_SERVER_CERTIFICATE ?? "true").toLowerCase() === "true",
+    encrypt: dbEncrypt,
+    trustServerCertificate: dbTrustServerCertificate,
+    ...(tlsServerName ? { serverName: tlsServerName } : {}),
   },
   pool: {
     max: toInt(process.env.DB_POOL_MAX, 10),

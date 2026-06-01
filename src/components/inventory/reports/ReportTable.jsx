@@ -30,11 +30,13 @@ const ReportTable = ({
   const pageNumbers = buildPageNumbers(safePage, totalPages);
 
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white shadow-sm">
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">Project Activity Report</h2>
-          <p className="mt-1 text-sm text-slate-500">
+          <h2 className="text-lg font-semibold text-slate-900 md:text-xl">
+            Project Activity Report
+          </h2>
+          <p className="mt-1 text-sm leading-5 text-slate-500">
             {rows.length
               ? `${rows.length} live activity rows available`
               : "No activity rows match the current filters"}
@@ -46,7 +48,7 @@ const ReportTable = ({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-[1650px] text-sm">
+        <table className="min-w-[1320px] text-sm">
           <thead className="bg-slate-50 text-slate-700">
             <tr>
               <th className="px-4 py-3 text-left font-semibold min-w-[110px]">Date</th>
@@ -140,7 +142,7 @@ const ReportTable = ({
         <p className="text-slate-500">
           Showing {startCount}-{endCount} of {rows.length} records
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => onPageChange(Math.max(1, safePage - 1))}

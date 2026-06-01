@@ -411,7 +411,7 @@ const Profile = () => {
                   onChange={(event) =>
                     updateProfile("regionFormat", event.target.value)
                   }
-                  placeholder="English (United States); 8/31/2000; 01:01 - 23:59"
+                  placeholder="English (India); 31/08/2000; 01:01 - 23:59"
                   className={textareaClass}
                 />
               </div>

@@ -67,7 +67,7 @@ const formatActivityTime = (value) => {
   const diffMs = now.getTime() - date.getTime();
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   if (diffDays <= 0) {
-    return date.toLocaleTimeString("en-US", {
+    return date.toLocaleTimeString("en-GB", {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -502,7 +502,7 @@ const Dashboard = () => {
       point.setDate(base.getDate() - i);
       const key = dateKey(point);
       chartDays.push({
-        label: point.toLocaleDateString("en-US", { weekday: "short" }),
+        label: point.toLocaleDateString("en-GB", { weekday: "short" }),
         values: locationSeries.map((series) =>
           toNumber(locationDayMap.get(`${key}|${series.id}`))
         ),

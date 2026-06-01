@@ -9,6 +9,7 @@ import {
 import { fetchVendors, syncVendorsCache } from "../services/vendorsApi";
 import useSettings from "../hooks/useSettings";
 import { formatInrCurrency, roundUnitPrice } from "../utils/formatters";
+import AppIcon from "../components/layout/AppIcon";
 
 const PAGE_SIZE = 12;
 
@@ -354,9 +355,10 @@ const InventoryHome = () => {
           <button
             type="button"
             onClick={() => navigate("/inventory/create-product")}
-            className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
           >
-            + Create Product
+            <AppIcon name="plus" className="h-4 w-4" />
+            Create Product
           </button>
         </div>
       </section>
@@ -397,16 +399,7 @@ const InventoryHome = () => {
         <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_220px_220px_auto]">
           <label className="relative block">
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              >
-                <circle cx="11" cy="11" r="7" />
-                <path d="M20 20l-3.5-3.5" />
-              </svg>
+              <AppIcon name="search" className="h-4 w-4" />
             </span>
             <input
               type="search"
@@ -678,9 +671,10 @@ const InventoryHome = () => {
           <button
             type="button"
             onClick={() => navigate("/inventory/create-vendors")}
-            className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
-            + Create Vendor
+            <AppIcon name="plus" className="h-4 w-4" />
+            Create Vendor
           </button>
         </div>
 
@@ -755,8 +749,9 @@ const InventoryHome = () => {
             <button
               type="button"
               onClick={() => navigate("/inventory/create-product")}
-              className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
             >
+              <AppIcon name="plus" className="h-4 w-4" />
               Add New Product
             </button>
           </div>
