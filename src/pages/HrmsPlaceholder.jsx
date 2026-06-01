@@ -1,6 +1,42 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import DateInput from "../components/common/DateInput";
 import AppIcon from "../components/layout/AppIcon";
+import {
+  createHrmsEmployee,
+  deleteHrmsEmployee,
+  fetchHrmsEmployees,
+  getHrmsEmployeeErrorMessage,
+  updateHrmsEmployee,
+} from "../services/hrmsEmployeesApi";
+import {
+  fetchHrmsAttendance,
+  getHrmsAttendanceErrorMessage,
+  saveHrmsAttendance,
+} from "../services/hrmsAttendanceApi";
+import {
+  createHrmsReview,
+  fetchHrmsReviews,
+  getHrmsReviewErrorMessage,
+} from "../services/hrmsReviewsApi";
+import {
+  createHrmsSalaryReassessment,
+  deleteHrmsSalaryReassessment,
+  fetchHrmsSalaryReassessments,
+  getHrmsSalaryReassessmentErrorMessage,
+  updateHrmsSalaryReassessment,
+} from "../services/hrmsSalaryReassessmentsApi";
+import {
+  deleteHrmsSalaryBatch,
+  fetchHrmsSalaryBatches,
+  getHrmsSalaryErrorMessage,
+  saveHrmsSalaryBatch,
+} from "../services/hrmsSalariesApi";
+import {
+  createHrmsRelieving,
+  fetchHrmsRelieving,
+  getHrmsRelievingErrorMessage,
+} from "../services/hrmsRelievingApi";
 
 const seedEmployees = [];
 
@@ -72,13 +108,13 @@ const writeStoredList = (key, value) => {
 const useStoredList = (key, fallback = []) => {
   const [items, setItems] = useState(() => readStoredList(key, fallback));
 
-  const saveItems = (updater) => {
+  const saveItems = useCallback((updater) => {
     setItems((current) => {
       const next = typeof updater === "function" ? updater(current) : updater;
       writeStoredList(key, next);
       return next;
     });
-  };
+  }, [key]);
 
   return [items, saveItems];
 };
@@ -88,6 +124,10 @@ const useHrmsEmployees = () => {
     HRMS_STORAGE_KEYS.employees,
     seedEmployees
   );
+  const [apiState, setApiState] = useState({
+    error: "",
+    loading: true,
+  });
   const cleanedEmployees = removeDemoEmployees(employees);
 
   useEffect(() => {
@@ -105,7 +145,483 @@ const useHrmsEmployees = () => {
     });
   };
 
-  return [cleanedEmployees, saveCleanEmployees];
+  const refreshEmployees = useCallback(async () => {
+    setApiState((current) => ({ ...current, loading: true }));
+
+    try {
+      const records = await fetchHrmsEmployees();
+      saveEmployees(removeDemoEmployees(records));
+      setApiState({ error: "", loading: false });
+      return records;
+    } catch (error) {
+      setApiState({
+        error: getHrmsEmployeeErrorMessage(
+          error,
+          "Could not load employees from the HRMS database."
+        ),
+        loading: false,
+      });
+      return null;
+    }
+  }, [saveEmployees]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadEmployees = async () => {
+      setApiState((current) => ({ ...current, loading: true }));
+
+      try {
+        const records = await fetchHrmsEmployees();
+        if (!active) return;
+        saveEmployees(removeDemoEmployees(records));
+        setApiState({ error: "", loading: false });
+      } catch (error) {
+        if (!active) return;
+        setApiState({
+          error: getHrmsEmployeeErrorMessage(
+            error,
+            "Could not load employees from the HRMS database."
+          ),
+          loading: false,
+        });
+      }
+    };
+
+    loadEmployees();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("hrms:employees:changed", loadEmployees);
+    }
+
+    return () => {
+      active = false;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("hrms:employees:changed", loadEmployees);
+      }
+    };
+  }, [saveEmployees]);
+
+  return [
+    cleanedEmployees,
+    saveCleanEmployees,
+    {
+      ...apiState,
+      refresh: refreshEmployees,
+    },
+  ];
+};
+
+const useHrmsReviews = () => {
+  const [reviews, setReviews] = useState([]);
+  const [apiState, setApiState] = useState({
+    error: "",
+    loading: true,
+  });
+
+  const saveReviews = useCallback((updater) => {
+    setReviews((current) =>
+      typeof updater === "function" ? updater(current) : updater
+    );
+  }, []);
+
+  const refreshReviews = useCallback(async () => {
+    setApiState((current) => ({ ...current, loading: true }));
+
+    try {
+      const records = await fetchHrmsReviews();
+      setReviews(records);
+      setApiState({ error: "", loading: false });
+      return records;
+    } catch (error) {
+      setApiState({
+        error: getHrmsReviewErrorMessage(
+          error,
+          "Could not load reviews from the HRMS database."
+        ),
+        loading: false,
+      });
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadReviews = async () => {
+      setApiState((current) => ({ ...current, loading: true }));
+
+      try {
+        const records = await fetchHrmsReviews();
+        if (!active) return;
+        setReviews(records);
+        setApiState({ error: "", loading: false });
+      } catch (error) {
+        if (!active) return;
+        setApiState({
+          error: getHrmsReviewErrorMessage(
+            error,
+            "Could not load reviews from the HRMS database."
+          ),
+          loading: false,
+        });
+      }
+    };
+
+    loadReviews();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("hrms:reviews:changed", loadReviews);
+    }
+
+    return () => {
+      active = false;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("hrms:reviews:changed", loadReviews);
+      }
+    };
+  }, []);
+
+  return [
+    reviews,
+    saveReviews,
+    {
+      ...apiState,
+      refresh: refreshReviews,
+    },
+  ];
+};
+
+const useHrmsSalaryReassessments = () => {
+  const [salaryReassessments, setSalaryReassessments] = useState([]);
+  const [apiState, setApiState] = useState({
+    error: "",
+    loading: true,
+  });
+
+  const saveSalaryReassessments = useCallback((updater) => {
+    setSalaryReassessments((current) =>
+      typeof updater === "function" ? updater(current) : updater
+    );
+  }, []);
+
+  const refreshSalaryReassessments = useCallback(async () => {
+    setApiState((current) => ({ ...current, loading: true }));
+
+    try {
+      const records = await fetchHrmsSalaryReassessments();
+      setSalaryReassessments(records);
+      setApiState({ error: "", loading: false });
+      return records;
+    } catch (error) {
+      setApiState({
+        error: getHrmsSalaryReassessmentErrorMessage(
+          error,
+          "Could not load salary reassessments from the HRMS database."
+        ),
+        loading: false,
+      });
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadSalaryReassessments = async () => {
+      setApiState((current) => ({ ...current, loading: true }));
+
+      try {
+        const records = await fetchHrmsSalaryReassessments();
+        if (!active) return;
+        setSalaryReassessments(records);
+        setApiState({ error: "", loading: false });
+      } catch (error) {
+        if (!active) return;
+        setApiState({
+          error: getHrmsSalaryReassessmentErrorMessage(
+            error,
+            "Could not load salary reassessments from the HRMS database."
+          ),
+          loading: false,
+        });
+      }
+    };
+
+    loadSalaryReassessments();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(
+        "hrms:salary-reassessments:changed",
+        loadSalaryReassessments
+      );
+    }
+
+    return () => {
+      active = false;
+      if (typeof window !== "undefined") {
+        window.removeEventListener(
+          "hrms:salary-reassessments:changed",
+          loadSalaryReassessments
+        );
+      }
+    };
+  }, []);
+
+  return [
+    salaryReassessments,
+    saveSalaryReassessments,
+    {
+      ...apiState,
+      refresh: refreshSalaryReassessments,
+    },
+  ];
+};
+
+const useHrmsAttendance = () => {
+  const [attendance, setAttendance] = useState([]);
+  const [apiState, setApiState] = useState({
+    error: "",
+    loading: true,
+  });
+
+  const saveAttendanceRecords = useCallback((updater) => {
+    setAttendance((current) =>
+      typeof updater === "function" ? updater(current) : updater
+    );
+  }, []);
+
+  const refreshAttendance = useCallback(async () => {
+    setApiState((current) => ({ ...current, loading: true }));
+
+    try {
+      const records = await fetchHrmsAttendance();
+      setAttendance(records);
+      setApiState({ error: "", loading: false });
+      return records;
+    } catch (error) {
+      setApiState({
+        error: getHrmsAttendanceErrorMessage(
+          error,
+          "Could not load attendance from the HRMS database."
+        ),
+        loading: false,
+      });
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadAttendance = async () => {
+      setApiState((current) => ({ ...current, loading: true }));
+
+      try {
+        const records = await fetchHrmsAttendance();
+        if (!active) return;
+        setAttendance(records);
+        setApiState({ error: "", loading: false });
+      } catch (error) {
+        if (!active) return;
+        setApiState({
+          error: getHrmsAttendanceErrorMessage(
+            error,
+            "Could not load attendance from the HRMS database."
+          ),
+          loading: false,
+        });
+      }
+    };
+
+    loadAttendance();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("hrms:attendance:changed", loadAttendance);
+    }
+
+    return () => {
+      active = false;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("hrms:attendance:changed", loadAttendance);
+      }
+    };
+  }, []);
+
+  return [
+    attendance,
+    saveAttendanceRecords,
+    {
+      ...apiState,
+      refresh: refreshAttendance,
+    },
+  ];
+};
+
+const useHrmsSalaries = () => {
+  const [salaryBatches, setSalaryBatches] = useState([]);
+  const [apiState, setApiState] = useState({
+    error: "",
+    loading: true,
+  });
+
+  const saveSalaryBatches = useCallback((updater) => {
+    setSalaryBatches((current) =>
+      typeof updater === "function" ? updater(current) : updater
+    );
+  }, []);
+
+  const refreshSalaryBatches = useCallback(async () => {
+    setApiState((current) => ({ ...current, loading: true }));
+
+    try {
+      const records = await fetchHrmsSalaryBatches();
+      setSalaryBatches(records);
+      setApiState({ error: "", loading: false });
+      return records;
+    } catch (error) {
+      setApiState({
+        error: getHrmsSalaryErrorMessage(
+          error,
+          "Could not load salaries from the HRMS database."
+        ),
+        loading: false,
+      });
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadSalaryBatches = async () => {
+      setApiState((current) => ({ ...current, loading: true }));
+
+      try {
+        const records = await fetchHrmsSalaryBatches();
+        if (!active) return;
+        setSalaryBatches(records);
+        setApiState({ error: "", loading: false });
+      } catch (error) {
+        if (!active) return;
+        setApiState({
+          error: getHrmsSalaryErrorMessage(
+            error,
+            "Could not load salaries from the HRMS database."
+          ),
+          loading: false,
+        });
+      }
+    };
+
+    loadSalaryBatches();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("hrms:salaries:changed", loadSalaryBatches);
+    }
+
+    return () => {
+      active = false;
+      if (typeof window !== "undefined") {
+        window.removeEventListener(
+          "hrms:salaries:changed",
+          loadSalaryBatches
+        );
+      }
+    };
+  }, []);
+
+  return [
+    salaryBatches,
+    saveSalaryBatches,
+    {
+      ...apiState,
+      refresh: refreshSalaryBatches,
+    },
+  ];
+};
+
+const useHrmsRelieving = () => {
+  const [relievingRecords, setRelievingRecords] = useState([]);
+  const [apiState, setApiState] = useState({
+    error: "",
+    loading: true,
+  });
+
+  const saveRelievingRecords = useCallback((updater) => {
+    setRelievingRecords((current) =>
+      typeof updater === "function" ? updater(current) : updater
+    );
+  }, []);
+
+  const refreshRelievingRecords = useCallback(async () => {
+    setApiState((current) => ({ ...current, loading: true }));
+
+    try {
+      const records = await fetchHrmsRelieving();
+      setRelievingRecords(records);
+      setApiState({ error: "", loading: false });
+      return records;
+    } catch (error) {
+      setApiState({
+        error: getHrmsRelievingErrorMessage(
+          error,
+          "Could not load relieving records from the HRMS database."
+        ),
+        loading: false,
+      });
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadRelievingRecords = async () => {
+      setApiState((current) => ({ ...current, loading: true }));
+
+      try {
+        const records = await fetchHrmsRelieving();
+        if (!active) return;
+        setRelievingRecords(records);
+        setApiState({ error: "", loading: false });
+      } catch (error) {
+        if (!active) return;
+        setApiState({
+          error: getHrmsRelievingErrorMessage(
+            error,
+            "Could not load relieving records from the HRMS database."
+          ),
+          loading: false,
+        });
+      }
+    };
+
+    loadRelievingRecords();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("hrms:relieving:changed", loadRelievingRecords);
+    }
+
+    return () => {
+      active = false;
+      if (typeof window !== "undefined") {
+        window.removeEventListener(
+          "hrms:relieving:changed",
+          loadRelievingRecords
+        );
+      }
+    };
+  }, []);
+
+  return [
+    relievingRecords,
+    saveRelievingRecords,
+    {
+      ...apiState,
+      refresh: refreshRelievingRecords,
+    },
+  ];
 };
 
 const saveSession = (session) => {
@@ -123,11 +639,11 @@ const saveSession = (session) => {
 
 const createEmployeeId = (records) => {
   const maxNumber = records.reduce((max, employee) => {
-    const match = String(employee.id || "").match(/\d+/);
-    return Math.max(max, match ? Number(match[0]) : 0);
+    const match = String(employee.id || "").match(/^BE(\d+)$/i);
+    return Math.max(max, match ? Number(match[1]) : 0);
   }, 0);
 
-  return `EMP${String(maxNumber + 1).padStart(3, "0")}`;
+  return `BE${String(maxNumber + 1).padStart(2, "0")}`;
 };
 
 const getInitials = (name = "") =>
@@ -140,18 +656,110 @@ const getInitials = (name = "") =>
 
 const todayValue = () => new Date().toISOString().slice(0, 10);
 
+const padDatePart = (value) => String(value).padStart(2, "0");
+
 const formatDate = (value) => {
   if (!value) return "";
-  const [year, month, day] = String(value).split("-");
-  return day && month && year ? `${day}-${month}-${year}` : value;
+  const text = String(value).trim();
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+  if (isoMatch) {
+    return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+  }
+  const dmyMatch = /^(\d{2})[-/](\d{2})[-/](\d{2,4})$/.exec(text);
+  if (dmyMatch) {
+    const year = dmyMatch[3].length === 2 ? `20${dmyMatch[3]}` : dmyMatch[3];
+    return `${dmyMatch[1]}/${dmyMatch[2]}/${year}`;
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return `${padDatePart(date.getDate())}/${padDatePart(
+    date.getMonth() + 1
+  )}/${date.getFullYear()}`;
+};
+
+const formatDateTime = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return formatDate(value);
+  }
+  return `${formatDate(date.toISOString())} ${date.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+};
+
+const monthNameFormatter = new Intl.DateTimeFormat("en-US", {
+  month: "long",
+  year: "numeric",
+});
+
+const getCurrentAttendanceMonth = () => monthNameFormatter.format(new Date());
+
+const normalizeAttendanceMonth = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+
+  const isoMatch = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(text);
+  if (isoMatch) {
+    return monthNameFormatter.format(
+      new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, 1)
+    );
+  }
+
+  const parsed = new Date(`1 ${text}`);
+  if (!Number.isNaN(parsed.getTime())) {
+    return monthNameFormatter.format(parsed);
+  }
+
+  return text;
+};
+
+const getAttendanceMonthIndex = (value) => {
+  const normalized = normalizeAttendanceMonth(value);
+  const parsed = new Date(`1 ${normalized}`);
+  if (Number.isNaN(parsed.getTime())) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  return parsed.getFullYear() * 12 + parsed.getMonth();
+};
+
+const areAttendanceMonthsEqual = (left, right) =>
+  normalizeAttendanceMonth(left) === normalizeAttendanceMonth(right);
+
+const buildAttendanceMonthOptions = (latestMonth, savedMonths = []) => {
+  const baseMonth = normalizeAttendanceMonth(latestMonth) || getCurrentAttendanceMonth();
+  const baseDate = new Date(`1 ${baseMonth}`);
+  const options = new Set(savedMonths.map(normalizeAttendanceMonth).filter(Boolean));
+
+  if (!Number.isNaN(baseDate.getTime())) {
+    for (let index = 0; index < 24; index += 1) {
+      options.add(
+        monthNameFormatter.format(
+          new Date(baseDate.getFullYear(), baseDate.getMonth() - index, 1)
+        )
+      );
+    }
+  } else {
+    options.add(baseMonth);
+  }
+
+  return Array.from(options).sort(
+    (first, second) =>
+      getAttendanceMonthIndex(second) - getAttendanceMonthIndex(first)
+  );
 };
 
 const toDateInputValue = (value = "") => {
   const text = String(value || "");
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
 
-  const match = text.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  return match ? `${match[3]}-${match[2]}-${match[1]}` : "";
+  const match = text.match(/^(\d{2})[-/](\d{2})[-/](\d{2,4})$/);
+  if (!match) return "";
+  const year = match[3].length === 2 ? `20${match[3]}` : match[3];
+  return `${year}-${match[2]}-${match[1]}`;
 };
 
 const displayValue = (value) => {
@@ -171,7 +779,9 @@ const buildEmployeeForm = (employee) => {
     dateOfBirth: toDateInputValue(source.dateOfBirth),
     department: source.department || "",
     designation: source.designation || "",
+    documents: normalizeEmployeeDocuments(source.documents),
     email: source.email || "",
+    emergencyContactNumber: source.emergencyContactNumber || "",
     fullName: source.name || "",
     gender: source.gender || "",
     joined: toDateInputValue(source.joined),
@@ -181,6 +791,9 @@ const buildEmployeeForm = (employee) => {
     phone: source.phone || "",
     photo: source.photo || "",
     salary: String(source.salary || ""),
+    salaryDeduction: String(source.salaryDeduction ?? source.deduction ?? ""),
+    pfAmount: String(source.pfAmount ?? source.providentFund ?? ""),
+    esiAmount: String(source.esiAmount ?? source.esi ?? ""),
     status: source.status || "Active",
   };
 };
@@ -235,6 +848,70 @@ const readProfilePhoto = (file) =>
     reader.readAsDataURL(file);
   });
 
+const employeeDocumentFields = [
+  { key: "pan", label: "PAN", multiple: false },
+  { key: "aadhaar", label: "Aadhar", multiple: false },
+  { key: "offerLetter", label: "Offer Letter", multiple: false },
+  { key: "bankDetails", label: "Bank Details", multiple: false },
+  { key: "uan", label: "UAN Number", multiple: false },
+  { key: "esi", label: "ESI", multiple: false },
+  { key: "certificate", label: "Certificate", multiple: false },
+  {
+    key: "additionalSpecialisationCertificates",
+    label: "Additional Specialisation Certificates",
+    multiple: true,
+  },
+];
+
+const emptyEmployeeDocuments = () =>
+  employeeDocumentFields.reduce((documents, field) => {
+    documents[field.key] = [];
+    return documents;
+  }, {});
+
+const normalizeEmployeeDocuments = (documents = {}) => {
+  const source =
+    documents && typeof documents === "object" && !Array.isArray(documents)
+      ? documents
+      : {};
+  return employeeDocumentFields.reduce((normalized, field) => {
+    const value = source[field.key];
+    normalized[field.key] = Array.isArray(value)
+      ? value.filter(Boolean)
+      : value
+        ? [value]
+        : [];
+    return normalized;
+  }, {});
+};
+
+const readEmployeeDocumentFile = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      resolve(null);
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      reject(new Error(`${file.name} must be 5 MB or smaller.`));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () =>
+      resolve({
+        id: `doc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: file.name,
+        size: file.size,
+        type: file.type || "Document",
+        uploadedAt: new Date().toISOString(),
+        dataUrl: String(reader.result || ""),
+      });
+    reader.onerror = () =>
+      reject(new Error(`Could not read ${file.name}. Please try again.`));
+    reader.readAsDataURL(file);
+  });
+
 const escapeHtml = (value = "") =>
   String(value)
     .replaceAll("&", "&amp;")
@@ -253,6 +930,7 @@ const printEmployeeProfile = (employee) => {
     ["Designation", displayValue(employee.designation)],
     ["Email", displayValue(employee.email)],
     ["Phone", displayValue(employee.phone)],
+    ["Emergency Contact", displayValue(employee.emergencyContactNumber)],
     ["Status", displayValue(employee.status)],
     ["Reporting To", displayValue(employee.manager)],
     ["Date of Joining", displayValue(employee.joined)],
@@ -347,7 +1025,7 @@ const printEmployeeProfile = (employee) => {
         <section class="header">
           <div>
             <h1>Employee Profile</h1>
-            <p class="muted">Generated from HRMS local data</p>
+            <p class="muted">Generated from HRMS database data</p>
           </div>
           ${
             employee.photo
@@ -385,11 +1063,235 @@ const printEmployeeProfile = (employee) => {
   }, 250);
 };
 
+const getRelievingLetterData = (record = {}, employee = {}) => {
+  const employeeName = displayValue(record.employeeName || employee.name);
+  const employeeId = displayValue(record.employeeId || employee.id);
+  const designation = displayValue(employee.designation);
+  const department = displayValue(employee.department);
+  const joinedDate = displayValue(employee.joined);
+  const resignationDate = displayValue(record.resignationDate);
+  const lastWorkingDate = displayValue(record.lastWorkingDate);
+  const noticePeriod = displayValue(record.noticePeriod);
+  const letterDate = formatDate(
+    String(record.savedAt || todayValue()).slice(0, 10)
+  );
+  const referenceNo = String(record.id || `REL-${Date.now()}`).replace(
+    "REL-",
+    "RL-"
+  );
+
+  return {
+    department,
+    designation,
+    employeeId,
+    employeeName,
+    joinedDate,
+    lastWorkingDate,
+    letterDate,
+    noticePeriod,
+    referenceNo,
+    resignationDate,
+    rows: [
+      ["Reference No", referenceNo],
+      ["Employee ID", employeeId],
+      ["Employee Name", employeeName],
+      ["Designation", designation],
+      ["Department", department],
+      ["Date of Joining", joinedDate],
+      ["Resignation Date", resignationDate],
+      ["Last Working Date", lastWorkingDate],
+      ["Notice Period", noticePeriod],
+    ],
+    paragraphs: [
+      `This is to certify that ${employeeName}, Employee ID ${employeeId}, was employed with Bangalore Electronics as ${designation} in the ${department} department.`,
+      `Based on the approved exit formalities, ${employeeName} is relieved from duties with effect from the close of business on ${lastWorkingDate}.`,
+      `The handover checklist and final settlement steps have been recorded in the HRMS relieving register for internal reference.`,
+      `We thank ${employeeName} for the services rendered to the organization and wish continued success in future assignments.`,
+    ],
+  };
+};
+
+const printRelievingLetter = (record, employee) => {
+  if (typeof window === "undefined" || !record) return;
+
+  const letter = getRelievingLetterData(record, employee);
+  const checklist = Array.isArray(record.checklist) ? record.checklist : [];
+  const printWindow = window.open("", "_blank", "width=900,height=700");
+
+  if (!printWindow) {
+    window.print();
+    return;
+  }
+
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>${escapeHtml(letter.employeeName)} - Relieving Letter</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            padding: 34px;
+            color: #0f172a;
+            font-family: Arial, sans-serif;
+            background: #ffffff;
+            line-height: 1.6;
+          }
+          .letter {
+            max-width: 820px;
+            margin: 0 auto;
+            border: 1px solid #cbd5e1;
+            padding: 32px;
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            border-bottom: 2px solid #1d4ed8;
+            padding-bottom: 18px;
+          }
+          h1 { margin: 0; font-size: 25px; }
+          h2 { margin: 28px 0 18px; text-align: center; font-size: 21px; text-transform: uppercase; }
+          .muted { margin: 5px 0 0; color: #64748b; font-size: 13px; }
+          .meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 9px 22px;
+            margin-top: 24px;
+            font-size: 13px;
+          }
+          .label { color: #64748b; }
+          p { font-size: 15px; margin: 16px 0; }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 22px;
+            font-size: 13px;
+          }
+          th, td {
+            border: 1px solid #e2e8f0;
+            padding: 9px 10px;
+            text-align: left;
+          }
+          th { background: #f8fafc; color: #475569; }
+          .signature {
+            display: flex;
+            justify-content: space-between;
+            gap: 36px;
+            margin-top: 54px;
+            font-size: 13px;
+          }
+          .signature div {
+            min-width: 220px;
+            border-top: 1px solid #334155;
+            padding-top: 8px;
+          }
+          @media print {
+            body { padding: 0; }
+            .letter { border: 0; }
+          }
+        </style>
+      </head>
+      <body>
+        <article class="letter">
+          <section class="header">
+            <div>
+              <h1>Bangalore Electronics</h1>
+              <p class="muted">Human Resources Department</p>
+            </div>
+            <div>
+              <p class="muted"><strong>Date:</strong> ${escapeHtml(letter.letterDate)}</p>
+              <p class="muted"><strong>Ref:</strong> ${escapeHtml(letter.referenceNo)}</p>
+            </div>
+          </section>
+          <h2>Relieving Letter</h2>
+          <section class="meta">
+            ${letter.rows
+              .map(
+                ([label, value]) => `
+                  <div><span class="label">${escapeHtml(label)}:</span> ${escapeHtml(value)}</div>
+                `
+              )
+              .join("")}
+          </section>
+          ${letter.paragraphs
+            .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
+            .join("")}
+          <table>
+            <thead>
+              <tr>
+                <th>Checklist Item</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${checklist
+                .map(
+                  (item) => `
+                    <tr>
+                      <td>${escapeHtml(item.label)}</td>
+                      <td>${item.checked ? "Completed" : "Pending"}</td>
+                    </tr>
+                  `
+                )
+                .join("")}
+            </tbody>
+          </table>
+          <section class="signature">
+            <div>Employee Signature</div>
+            <div>Authorised HR Signatory</div>
+          </section>
+        </article>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.focus();
+  window.setTimeout(() => {
+    printWindow.print();
+  }, 250);
+};
+
 const cycleAttendanceStatus = (status) => {
   const order = ["P", "A", "L", "H"];
   const currentIndex = order.indexOf(status);
   return order[(currentIndex + 1) % order.length] || "P";
 };
+
+const DEFAULT_ATTENDANCE_STATUSES = [
+  "P",
+  "P",
+  "P",
+  "A",
+  "P",
+  "L",
+  "H",
+  "P",
+  "P",
+  "P",
+  "P",
+  "A",
+  "P",
+  "P",
+  "P",
+  "P",
+  "P",
+  "L",
+  "P",
+  "P",
+  "P",
+  "A",
+  "P",
+  "P",
+  "P",
+  "H",
+  "P",
+  "P",
+  "P",
+  "P",
+  "P",
+];
 
 const statusClasses = {
   Active: "bg-emerald-50 text-emerald-700",
@@ -408,6 +1310,67 @@ const money = (value) =>
   `Rs. ${Number(value || 0).toLocaleString("en-IN", {
     maximumFractionDigits: 0,
   })}`;
+
+const toSalaryNumber = (value, fallback = 0) => {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const calculatePfAmount = (grossSalary) =>
+  Math.round(toSalaryNumber(grossSalary) * 0.12);
+
+const calculateEsiAmount = (grossSalary) =>
+  Math.round(toSalaryNumber(grossSalary) * 0.015);
+
+const getSalaryBreakup = (source = {}, grossOverride) => {
+  const grossSalary = toSalaryNumber(
+    grossOverride ?? source.salary ?? source.basicSalary
+  );
+  const deduction = toSalaryNumber(
+    source.salaryDeduction ?? source.deduction ?? source.SalaryDeduction
+  );
+  const pfAmount = toSalaryNumber(
+    source.pfAmount ??
+      source.providentFund ??
+      source.PFAmount ??
+      source.ProvidentFund,
+    calculatePfAmount(grossSalary)
+  );
+  const esiAmount = toSalaryNumber(
+    source.esiAmount ?? source.esi ?? source.ESIAmount,
+    calculateEsiAmount(grossSalary)
+  );
+  const totalDeductions = deduction + pfAmount + esiAmount;
+
+  return {
+    deduction,
+    esiAmount,
+    grossSalary,
+    netSalary: grossSalary - totalDeductions,
+    pfAmount,
+    totalDeductions,
+  };
+};
+
+const getFormSalaryBreakup = (form = {}) => {
+  const grossSalary = toSalaryNumber(form.salary);
+  const deduction = toSalaryNumber(form.salaryDeduction);
+  const pfAmount = toSalaryNumber(form.pfAmount, calculatePfAmount(grossSalary));
+  const esiAmount = toSalaryNumber(form.esiAmount, calculateEsiAmount(grossSalary));
+  const totalDeductions = deduction + pfAmount + esiAmount;
+
+  return {
+    deduction,
+    esiAmount,
+    grossSalary,
+    netSalary: grossSalary - totalDeductions,
+    pfAmount,
+    totalDeductions,
+  };
+};
 
 const clampNumber = (value, min = 0, max = 100) =>
   Math.min(max, Math.max(min, Number(value) || 0));
@@ -481,6 +1444,151 @@ const Button = ({ children, variant = "primary", className = "", ...props }) => 
     </button>
   );
 };
+
+const EmployeeDocumentsSection = ({ documents, onChange, onError }) => {
+  const normalizedDocuments = normalizeEmployeeDocuments(documents);
+  const uploadedCount = employeeDocumentFields.reduce(
+    (count, field) => count + normalizedDocuments[field.key].length,
+    0
+  );
+
+  const handleUpload = async (field, files) => {
+    const selectedFiles = Array.from(files || []);
+    if (!selectedFiles.length) return;
+
+    try {
+      const uploadedDocuments = (
+        await Promise.all(selectedFiles.map(readEmployeeDocumentFile))
+      ).filter(Boolean);
+
+      onChange({
+        ...normalizedDocuments,
+        [field.key]: field.multiple
+          ? [...normalizedDocuments[field.key], ...uploadedDocuments]
+          : uploadedDocuments.slice(0, 1),
+      });
+    } catch (uploadError) {
+      onError(uploadError.message || "Document upload failed.");
+    }
+  };
+
+  const removeDocument = (fieldKey, documentId) => {
+    onChange({
+      ...normalizedDocuments,
+      [fieldKey]: normalizedDocuments[fieldKey].filter(
+        (document) => document.id !== documentId
+      ),
+    });
+  };
+
+  return (
+    <section className="rounded-xl border border-blue-100 bg-gradient-to-br from-white via-sky-50/50 to-emerald-50/40 p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-100 pb-4">
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-lg bg-blue-700 text-white shadow-sm shadow-blue-100">
+            <AppIcon name="folder" className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="text-base font-bold text-slate-950">Documents</h2>
+            <p className="text-xs font-semibold text-slate-500">
+              Employee compliance and joining records
+            </p>
+          </div>
+        </div>
+        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+          {uploadedCount} uploaded
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {employeeDocumentFields.map((field) => (
+          <div
+            key={field.key}
+            className="grid gap-3 rounded-lg border border-slate-200 bg-white/90 p-4 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-slate-800">{field.label}</p>
+                <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  {field.multiple ? "Multiple files" : "Single file"}
+                </p>
+              </div>
+              <span className="grid h-8 w-8 place-items-center rounded-md bg-sky-50 text-blue-700">
+                <AppIcon name="upload" className="h-4 w-4" />
+              </span>
+            </div>
+            <Input
+              type="file"
+              multiple={field.multiple}
+              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx"
+              className="cursor-pointer bg-slate-50 px-2 py-2 text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-blue-700 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-blue-800"
+              onChange={(event) => {
+                handleUpload(field, event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <div className="grid gap-2">
+              {normalizedDocuments[field.key].length ? (
+                normalizedDocuments[field.key].map((document) => (
+                  <div
+                    key={document.id || document.name}
+                    className="flex items-center justify-between gap-3 rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-xs"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-white text-blue-700">
+                        <AppIcon name="file" className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 truncate font-semibold text-slate-700">
+                        {document.name}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 text-slate-500">
+                      <span>{Math.ceil(Number(document.size || 0) / 1024)} KB</span>
+                      <Button
+                        variant="ghost"
+                        className="min-h-7 px-2 text-xs text-rose-600 hover:bg-rose-50"
+                        onClick={() => removeDocument(field.key, document.id)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <span className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-400">
+                  No file uploaded
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
+const EmployeeFormTabs = ({ tabs, activeTab, onChange, trailing }) => (
+  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+    <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1">
+      {tabs.map((item) => (
+        <button
+          key={item}
+          type="button"
+          onClick={() => onChange(item)}
+          className={[
+            "min-h-9 rounded-md px-4 text-sm font-bold transition",
+            activeTab === item
+              ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-100"
+              : "text-slate-500 hover:bg-white/70 hover:text-slate-800",
+          ].join(" ")}
+        >
+          {item}
+        </button>
+      ))}
+    </div>
+    {trailing}
+  </div>
+);
 
 const Panel = ({ children, className = "", ...props }) => (
   <section
@@ -890,8 +1998,8 @@ const HrmsLoginPage = () => {
 const DashboardPage = () => {
   const [storedEmployees] = useHrmsEmployees();
   const [reviews] = useStoredList(HRMS_STORAGE_KEYS.reviews, []);
-  const [payroll] = useStoredList(HRMS_STORAGE_KEYS.payroll, []);
-  const [relieving] = useStoredList(HRMS_STORAGE_KEYS.relieving, []);
+  const [payroll] = useHrmsSalaries();
+  const [relieving] = useHrmsRelieving();
   const totalEmployees = storedEmployees.length;
   const activeEmployees = storedEmployees.filter(
     (employee) => employee.status === "Active"
@@ -902,11 +2010,11 @@ const DashboardPage = () => {
   const relievedEmployees = storedEmployees.filter(
     (employee) => employee.status === "Relieved"
   ).length;
-  const latestPayroll = payroll[payroll.length - 1];
+  const latestPayroll = payroll[0];
   const recentEmployee = storedEmployees[0];
 
   const stats = [
-    { label: "Total Employees", value: totalEmployees, delta: "Saved locally" },
+    { label: "Total Employees", value: totalEmployees, delta: "HRMS database" },
     { label: "Active Employees", value: activeEmployees, delta: "Live count" },
     { label: "On Leave", value: onLeaveEmployees, delta: "Live count" },
     { label: "Relieved", value: relievedEmployees, delta: "Live count" },
@@ -999,11 +2107,11 @@ const DashboardPage = () => {
                 ? "Relieving data saved"
                 : reviews.length
                   ? "Review saved"
-                  : "Employee data saved locally"
+                  : "Employee data saved to HRMS database"
               : "Add employee details to start"}
           </span>
           <span className="ml-auto text-xs text-slate-400">
-            {recentEmployee ? "Local DB" : ""}
+            {recentEmployee ? "HRMS DB" : ""}
           </span>
         </div>
       </Panel>
@@ -1012,7 +2120,7 @@ const DashboardPage = () => {
 };
 
 const EmployeeListPage = () => {
-  const [employees] = useHrmsEmployees();
+  const [employees, , employeesState] = useHrmsEmployees();
   const [query, setQuery] = useState("");
   const filteredEmployees = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -1034,6 +2142,14 @@ const EmployeeListPage = () => {
 
   return (
     <Panel>
+      <div className="mb-4 grid gap-2">
+        <Notice tone="warning">{employeesState.error}</Notice>
+        <Notice>
+          {employeesState.loading && !employees.length
+            ? "Loading employees from HRMS database..."
+            : ""}
+        </Notice>
+      </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Input
           value={query}
@@ -1134,13 +2250,16 @@ const AddEmployeePage = () => {
   const [tab, setTab] = useState("Personal Details");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     address: "",
     bloodGroup: "",
     dateOfBirth: "",
     department: "",
     designation: "",
+    documents: emptyEmployeeDocuments(),
     email: "",
+    emergencyContactNumber: "",
     fullName: "",
     gender: "",
     joined: "",
@@ -1149,7 +2268,10 @@ const AddEmployeePage = () => {
     nationality: "",
     phone: "",
     photo: "",
+    pfAmount: "",
     salary: "",
+    salaryDeduction: "",
+    esiAmount: "",
     status: "Active",
   });
   const tabs = ["Personal Details", "Employment Details", "Salary Details", "Documents"];
@@ -1173,7 +2295,7 @@ const AddEmployeePage = () => {
     }
   };
 
-  const handleSave = (event) => {
+  const handleSave = async (event) => {
     event.preventDefault();
 
     if (!form.fullName.trim() || !form.email.trim() || !form.phone.trim()) {
@@ -1181,17 +2303,21 @@ const AddEmployeePage = () => {
       return;
     }
 
+    const salaryBreakup = getFormSalaryBreakup(form);
     const newEmployee = {
-      id: employeeId,
       name: form.fullName.trim(),
       department: form.department,
       designation: form.designation,
       email: form.email.trim(),
+      emergencyContactNumber: form.emergencyContactNumber.trim(),
       phone: form.phone.trim(),
       status: form.status,
       manager: form.manager.trim(),
       joined: formatDate(form.joined),
-      salary: Number(form.salary) || 0,
+      salary: salaryBreakup.grossSalary,
+      salaryDeduction: salaryBreakup.deduction,
+      pfAmount: salaryBreakup.pfAmount,
+      esiAmount: salaryBreakup.esiAmount,
       avatar: getInitials(form.fullName),
       address: form.address.trim(),
       bloodGroup: form.bloodGroup,
@@ -1200,11 +2326,30 @@ const AddEmployeePage = () => {
       maritalStatus: form.maritalStatus,
       nationality: form.nationality.trim(),
       photo: form.photo,
+      documents: form.documents,
     };
 
-    setEmployees((current) => [newEmployee, ...current]);
-    setMessage(`${newEmployee.name} saved locally as ${newEmployee.id}.`);
-    window.setTimeout(() => navigate("/employees"), 450);
+    try {
+      setSaving(true);
+      const savedEmployee = await createHrmsEmployee(newEmployee);
+      setEmployees((current) => [
+        savedEmployee,
+        ...current.filter((record) => record.id !== savedEmployee.id),
+      ]);
+      setMessage(
+        `${savedEmployee.name} saved to HRMS database as ${savedEmployee.id}.`
+      );
+      window.setTimeout(() => navigate("/employees"), 450);
+    } catch (saveError) {
+      setError(
+        getHrmsEmployeeErrorMessage(
+          saveError,
+          "Could not save employee to the HRMS database."
+        )
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1213,188 +2358,244 @@ const AddEmployeePage = () => {
         <Notice>{message}</Notice>
         <Notice tone="warning">{error}</Notice>
       </div>
-      <div className="flex flex-wrap gap-1 border-b border-slate-200">
-        {tabs.map((item) => (
-          <button
-            key={item}
-            type="button"
-            onClick={() => setTab(item)}
-            className={[
-              "min-h-10 border-b-2 px-4 text-sm font-bold",
-              tab === item
-                ? "border-blue-700 text-blue-700"
-                : "border-transparent text-slate-500",
-            ].join(" ")}
-          >
-            {item}
-          </button>
-        ))}
-      </div>
+      <EmployeeFormTabs tabs={tabs} activeTab={tab} onChange={setTab} />
 
       <form
-        className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_168px]"
+        className="mt-5 grid gap-5"
         onSubmit={handleSave}
       >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Full Name">
-            <Input
-              value={form.fullName}
-              onChange={(event) => updateForm("fullName", event.target.value)}
-              placeholder="Enter full name"
-            />
-          </Field>
-          <Field label="Employee ID">
-            <Input value={employeeId} disabled />
-          </Field>
-          <Field label="Date of Birth">
-            <Input
-              type="date"
-              value={form.dateOfBirth}
-              onChange={(event) => updateForm("dateOfBirth", event.target.value)}
-            />
-          </Field>
-          <Field label="Gender">
-            <Input
-              as="select"
-              value={form.gender}
-              onChange={(event) => updateForm("gender", event.target.value)}
-            >
-              <option value="" disabled>
-                Select Gender
-              </option>
-              <option>Male</option>
-              <option>Female</option>
-              <option>Other</option>
-            </Input>
-          </Field>
-          <Field label="Date of Joining">
-            <Input
-              type="date"
-              value={form.joined}
-              onChange={(event) => updateForm("joined", event.target.value)}
-            />
-          </Field>
-          <Field label="Reporting Manager">
-            <Input
-              value={form.manager}
-              onChange={(event) => updateForm("manager", event.target.value)}
-              placeholder="Enter reporting manager"
-            />
-          </Field>
-          <Field label="Nationality">
-            <Input
-              value={form.nationality}
-              onChange={(event) => updateForm("nationality", event.target.value)}
-              placeholder="Enter nationality"
-            />
-          </Field>
-          <Field label="Marital Status">
-            <Input
-              as="select"
-              value={form.maritalStatus}
-              onChange={(event) => updateForm("maritalStatus", event.target.value)}
-            >
-              <option value="">Select Marital Status</option>
-              {maritalStatusOptions.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </Input>
-          </Field>
-          <Field label="Blood Group">
-            <Input
-              as="select"
-              value={form.bloodGroup}
-              onChange={(event) => updateForm("bloodGroup", event.target.value)}
-            >
-              <option value="">Select Blood Group</option>
-              {bloodGroupOptions.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </Input>
-          </Field>
-          <Field label="Phone Number">
-            <Input
-              value={form.phone}
-              onChange={(event) => updateForm("phone", event.target.value)}
-              placeholder="Enter phone number"
-            />
-          </Field>
-          <Field label="Email">
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(event) => updateForm("email", event.target.value)}
-              placeholder="Enter email"
-            />
-          </Field>
-          <Field label="Department">
-            <Input
-              as="select"
-              value={form.department}
-              onChange={(event) => updateForm("department", event.target.value)}
-            >
-              <option value="">Select Department</option>
-              <option>IT</option>
-              <option>HR</option>
-              <option>Finance</option>
-              <option>Marketing</option>
-            </Input>
-          </Field>
-          <Field label="Designation">
-            <Input
-              value={form.designation}
-              onChange={(event) => updateForm("designation", event.target.value)}
-              placeholder="Enter designation"
-            />
-          </Field>
-          <Field label="Basic Salary">
-            <Input
-              type="number"
-              min="0"
-              value={form.salary}
-              onChange={(event) => updateForm("salary", event.target.value)}
-              placeholder="Enter salary"
-            />
-          </Field>
-          <Field label="Status">
-            <Input
-              as="select"
-              value={form.status}
-              onChange={(event) => updateForm("status", event.target.value)}
-            >
-              <option>Active</option>
-              <option>On Leave</option>
-            </Input>
-          </Field>
-          <Field label="Address">
-            <Input
-              as="textarea"
-              rows={3}
-              value={form.address}
-              onChange={(event) => updateForm("address", event.target.value)}
-              placeholder="Enter address"
-              className="sm:col-span-2"
-            />
-          </Field>
-        </div>
+        {tab === "Personal Details" && (
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_180px]">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Full Name">
+                <Input
+                  value={form.fullName}
+                  onChange={(event) => updateForm("fullName", event.target.value)}
+                  placeholder="Enter full name"
+                />
+              </Field>
+              <Field label="Employee ID">
+                <Input value={employeeId} disabled />
+              </Field>
+              <Field label="Date of Birth">
+                <DateInput
+                  className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                  value={form.dateOfBirth}
+                  onChange={(value) => updateForm("dateOfBirth", value)}
+                />
+              </Field>
+              <Field label="Gender">
+                <Input
+                  as="select"
+                  value={form.gender}
+                  onChange={(event) => updateForm("gender", event.target.value)}
+                >
+                  <option value="" disabled>
+                    Select Gender
+                  </option>
+                  <option>Male</option>
+                  <option>Female</option>
+                  <option>Other</option>
+                </Input>
+              </Field>
+              <Field label="Nationality">
+                <Input
+                  value={form.nationality}
+                  onChange={(event) => updateForm("nationality", event.target.value)}
+                  placeholder="Enter nationality"
+                />
+              </Field>
+              <Field label="Marital Status">
+                <Input
+                  as="select"
+                  value={form.maritalStatus}
+                  onChange={(event) => updateForm("maritalStatus", event.target.value)}
+                >
+                  <option value="">Select Marital Status</option>
+                  {maritalStatusOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </Input>
+              </Field>
+              <Field label="Blood Group">
+                <Input
+                  as="select"
+                  value={form.bloodGroup}
+                  onChange={(event) => updateForm("bloodGroup", event.target.value)}
+                >
+                  <option value="">Select Blood Group</option>
+                  {bloodGroupOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </Input>
+              </Field>
+              <Field label="Phone Number">
+                <Input
+                  value={form.phone}
+                  onChange={(event) => updateForm("phone", event.target.value)}
+                  placeholder="Enter phone number"
+                />
+              </Field>
+              <Field label="Emergency Contact Number">
+                <Input
+                  value={form.emergencyContactNumber}
+                  onChange={(event) =>
+                    updateForm("emergencyContactNumber", event.target.value)
+                  }
+                  placeholder="Enter emergency contact number"
+                />
+              </Field>
+              <Field label="Email">
+                <Input
+                  type="email"
+                  value={form.email}
+                  onChange={(event) => updateForm("email", event.target.value)}
+                  placeholder="Enter email"
+                />
+              </Field>
+              <Field label="Address">
+                <Input
+                  as="textarea"
+                  rows={3}
+                  value={form.address}
+                  onChange={(event) => updateForm("address", event.target.value)}
+                  placeholder="Enter address"
+                  className="sm:col-span-2"
+                />
+              </Field>
+            </div>
 
-        <div className="grid content-start gap-3">
-          <p className="text-xs font-bold text-slate-700">Photo</p>
-          <div className="grid aspect-square place-items-center rounded-md border border-slate-200 bg-slate-50">
-            <Avatar
-              initials={getInitials(form.fullName)}
-              size="lg"
-              src={form.photo}
-            />
+            <div className="grid content-start gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+              <p className="text-xs font-bold text-slate-700">Photo</p>
+              <div className="grid aspect-square place-items-center rounded-md border border-slate-200 bg-white">
+                <Avatar
+                  initials={getInitials(form.fullName)}
+                  size="lg"
+                  src={form.photo}
+                />
+              </div>
+              <Input type="file" accept="image/*" onChange={handlePhotoUpload} />
+            </div>
           </div>
-          <Input type="file" accept="image/*" onChange={handlePhotoUpload} />
-        </div>
+        )}
+
+        {tab === "Employment Details" && (
+          <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2">
+            <Field label="Date of Joining">
+              <DateInput
+                className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                value={form.joined}
+                onChange={(value) => updateForm("joined", value)}
+              />
+            </Field>
+            <Field label="Reporting Manager">
+              <Input
+                value={form.manager}
+                onChange={(event) => updateForm("manager", event.target.value)}
+                placeholder="Enter reporting manager"
+              />
+            </Field>
+            <Field label="Department">
+              <Input
+                as="select"
+                value={form.department}
+                onChange={(event) => updateForm("department", event.target.value)}
+              >
+                <option value="">Select Department</option>
+                <option>IT</option>
+                <option>HR</option>
+                <option>Finance</option>
+                <option>Marketing</option>
+              </Input>
+            </Field>
+            <Field label="Designation">
+              <Input
+                value={form.designation}
+                onChange={(event) => updateForm("designation", event.target.value)}
+                placeholder="Enter designation"
+              />
+            </Field>
+            <Field label="Status">
+              <Input
+                as="select"
+                value={form.status}
+                onChange={(event) => updateForm("status", event.target.value)}
+              >
+                <option>Active</option>
+                <option>On Leave</option>
+              </Input>
+            </Field>
+          </div>
+        )}
+
+        {tab === "Salary Details" && (
+          <div className="grid gap-4 rounded-lg border border-blue-100 bg-blue-50/40 p-4 sm:grid-cols-2">
+            <Field label="Gross Salary">
+              <Input
+                type="number"
+                min="0"
+                value={form.salary}
+                onChange={(event) => updateForm("salary", event.target.value)}
+                placeholder="Enter gross salary"
+              />
+            </Field>
+            <Field label="Deduction">
+              <Input
+                type="number"
+                min="0"
+                value={form.salaryDeduction}
+                onChange={(event) =>
+                  updateForm("salaryDeduction", event.target.value)
+                }
+                placeholder="Enter deduction"
+              />
+            </Field>
+            <Field label="PF">
+              <Input
+                type="number"
+                min="0"
+                value={
+                  form.pfAmount === ""
+                    ? calculatePfAmount(form.salary)
+                    : form.pfAmount
+                }
+                onChange={(event) => updateForm("pfAmount", event.target.value)}
+              />
+            </Field>
+            <Field label="ESI">
+              <Input
+                type="number"
+                min="0"
+                value={
+                  form.esiAmount === ""
+                    ? calculateEsiAmount(form.salary)
+                    : form.esiAmount
+                }
+                onChange={(event) => updateForm("esiAmount", event.target.value)}
+              />
+            </Field>
+            <div className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-blue-900 sm:col-span-2">
+              <span>Net Salary</span>
+              <span>{money(getFormSalaryBreakup(form).netSalary)}</span>
+            </div>
+          </div>
+        )}
+
+        {tab === "Documents" && (
+          <EmployeeDocumentsSection
+            documents={form.documents}
+            onChange={(documents) => updateForm("documents", documents)}
+            onError={setError}
+          />
+        )}
 
         <div className="flex justify-end gap-2 lg:col-span-2">
           <Button variant="secondary" onClick={() => navigate("/employees")}>
             Cancel
           </Button>
-          <Button type="submit">Save & Next</Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? "Saving..." : "Save & Next"}
+          </Button>
         </div>
       </form>
     </Panel>
@@ -1408,6 +2609,7 @@ const EditEmployeePage = () => {
   const [tab, setTab] = useState("Personal Details");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const employee = useMemo(
     () =>
       employees.find((record) => record.id === employeeId) ||
@@ -1443,7 +2645,7 @@ const EditEmployeePage = () => {
     }
   };
 
-  const handleUpdate = (event) => {
+  const handleUpdate = async (event) => {
     event.preventDefault();
 
     if (!employee) {
@@ -1456,17 +2658,22 @@ const EditEmployeePage = () => {
       return;
     }
 
+    const salaryBreakup = getFormSalaryBreakup(form);
     const updatedEmployee = {
       ...employee,
       name: form.fullName.trim(),
       department: form.department,
       designation: form.designation.trim(),
       email: form.email.trim(),
+      emergencyContactNumber: form.emergencyContactNumber.trim(),
       phone: form.phone.trim(),
       status: form.status,
       manager: form.manager.trim(),
       joined: formatDate(form.joined),
-      salary: Number(form.salary) || 0,
+      salary: salaryBreakup.grossSalary,
+      salaryDeduction: salaryBreakup.deduction,
+      pfAmount: salaryBreakup.pfAmount,
+      esiAmount: salaryBreakup.esiAmount,
       avatar: getInitials(form.fullName),
       address: form.address.trim(),
       bloodGroup: form.bloodGroup,
@@ -1475,15 +2682,32 @@ const EditEmployeePage = () => {
       maritalStatus: form.maritalStatus,
       nationality: form.nationality.trim(),
       photo: form.photo,
+      documents: form.documents,
     };
 
-    setEmployees((current) =>
-      current.map((record) =>
-        record.id === updatedEmployee.id ? updatedEmployee : record
-      )
-    );
-    setMessage(`${updatedEmployee.name} updated locally.`);
-    window.setTimeout(() => navigate("/employees"), 450);
+    try {
+      setSaving(true);
+      const savedEmployee = await updateHrmsEmployee(
+        updatedEmployee.id,
+        updatedEmployee
+      );
+      setEmployees((current) =>
+        current.map((record) =>
+          record.id === savedEmployee.id ? savedEmployee : record
+        )
+      );
+      setMessage(`${savedEmployee.name} updated in the HRMS database.`);
+      window.setTimeout(() => navigate("/employees"), 450);
+    } catch (saveError) {
+      setError(
+        getHrmsEmployeeErrorMessage(
+          saveError,
+          "Could not update employee in the HRMS database."
+        )
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!employee) {
@@ -1504,192 +2728,252 @@ const EditEmployeePage = () => {
         <Notice tone="warning">{error}</Notice>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200">
-        <div className="flex flex-wrap gap-1">
-          {tabs.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setTab(item)}
-              className={[
-                "min-h-10 border-b-2 px-4 text-sm font-bold",
-                tab === item
-                  ? "border-blue-700 text-blue-700"
-                  : "border-transparent text-slate-500",
-              ].join(" ")}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-        <span className="pb-2 text-xs font-bold text-slate-500">
-          Editing {employee.id}
-        </span>
-      </div>
+      <EmployeeFormTabs
+        tabs={tabs}
+        activeTab={tab}
+        onChange={setTab}
+        trailing={
+          <span className="text-xs font-bold text-slate-500">
+            Editing {employee.id}
+          </span>
+        }
+      />
 
       <form
-        className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_168px]"
+        className="mt-5 grid gap-5"
         onSubmit={handleUpdate}
       >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Full Name">
-            <Input
-              value={form.fullName}
-              onChange={(event) => updateForm("fullName", event.target.value)}
-              placeholder="Enter full name"
-            />
-          </Field>
-          <Field label="Employee ID">
-            <Input value={employee.id} disabled />
-          </Field>
-          <Field label="Date of Birth">
-            <Input
-              type="date"
-              value={form.dateOfBirth}
-              onChange={(event) => updateForm("dateOfBirth", event.target.value)}
-            />
-          </Field>
-          <Field label="Gender">
-            <Input
-              as="select"
-              value={form.gender}
-              onChange={(event) => updateForm("gender", event.target.value)}
-            >
-              <option value="">Select Gender</option>
-              <option>Male</option>
-              <option>Female</option>
-              <option>Other</option>
-            </Input>
-          </Field>
-          <Field label="Date of Joining">
-            <Input
-              type="date"
-              value={form.joined}
-              onChange={(event) => updateForm("joined", event.target.value)}
-            />
-          </Field>
-          <Field label="Reporting Manager">
-            <Input
-              value={form.manager}
-              onChange={(event) => updateForm("manager", event.target.value)}
-              placeholder="Enter reporting manager"
-            />
-          </Field>
-          <Field label="Nationality">
-            <Input
-              value={form.nationality}
-              onChange={(event) => updateForm("nationality", event.target.value)}
-              placeholder="Enter nationality"
-            />
-          </Field>
-          <Field label="Marital Status">
-            <Input
-              as="select"
-              value={form.maritalStatus}
-              onChange={(event) => updateForm("maritalStatus", event.target.value)}
-            >
-              <option value="">Select Marital Status</option>
-              {maritalStatusOptions.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </Input>
-          </Field>
-          <Field label="Blood Group">
-            <Input
-              as="select"
-              value={form.bloodGroup}
-              onChange={(event) => updateForm("bloodGroup", event.target.value)}
-            >
-              <option value="">Select Blood Group</option>
-              {bloodGroupOptions.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </Input>
-          </Field>
-          <Field label="Phone Number">
-            <Input
-              value={form.phone}
-              onChange={(event) => updateForm("phone", event.target.value)}
-              placeholder="Enter phone number"
-            />
-          </Field>
-          <Field label="Email">
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(event) => updateForm("email", event.target.value)}
-              placeholder="Enter email"
-            />
-          </Field>
-          <Field label="Department">
-            <Input
-              as="select"
-              value={form.department}
-              onChange={(event) => updateForm("department", event.target.value)}
-            >
-              <option value="">Select Department</option>
-              <option>IT</option>
-              <option>HR</option>
-              <option>Finance</option>
-              <option>Marketing</option>
-            </Input>
-          </Field>
-          <Field label="Designation">
-            <Input
-              value={form.designation}
-              onChange={(event) => updateForm("designation", event.target.value)}
-              placeholder="Enter designation"
-            />
-          </Field>
-          <Field label="Basic Salary">
-            <Input
-              type="number"
-              min="0"
-              value={form.salary}
-              onChange={(event) => updateForm("salary", event.target.value)}
-              placeholder="Enter salary"
-            />
-          </Field>
-          <Field label="Status">
-            <Input
-              as="select"
-              value={form.status}
-              onChange={(event) => updateForm("status", event.target.value)}
-            >
-              <option>Active</option>
-              <option>On Leave</option>
-              <option>Relieved</option>
-            </Input>
-          </Field>
-          <Field label="Address">
-            <Input
-              as="textarea"
-              rows={3}
-              value={form.address}
-              onChange={(event) => updateForm("address", event.target.value)}
-              placeholder="Enter address"
-              className="sm:col-span-2"
-            />
-          </Field>
-        </div>
+        {tab === "Personal Details" && (
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_180px]">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Full Name">
+                <Input
+                  value={form.fullName}
+                  onChange={(event) => updateForm("fullName", event.target.value)}
+                  placeholder="Enter full name"
+                />
+              </Field>
+              <Field label="Employee ID">
+                <Input value={employee.id} disabled />
+              </Field>
+              <Field label="Date of Birth">
+                <DateInput
+                  className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                  value={form.dateOfBirth}
+                  onChange={(value) => updateForm("dateOfBirth", value)}
+                />
+              </Field>
+              <Field label="Gender">
+                <Input
+                  as="select"
+                  value={form.gender}
+                  onChange={(event) => updateForm("gender", event.target.value)}
+                >
+                  <option value="">Select Gender</option>
+                  <option>Male</option>
+                  <option>Female</option>
+                  <option>Other</option>
+                </Input>
+              </Field>
+              <Field label="Nationality">
+                <Input
+                  value={form.nationality}
+                  onChange={(event) => updateForm("nationality", event.target.value)}
+                  placeholder="Enter nationality"
+                />
+              </Field>
+              <Field label="Marital Status">
+                <Input
+                  as="select"
+                  value={form.maritalStatus}
+                  onChange={(event) => updateForm("maritalStatus", event.target.value)}
+                >
+                  <option value="">Select Marital Status</option>
+                  {maritalStatusOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </Input>
+              </Field>
+              <Field label="Blood Group">
+                <Input
+                  as="select"
+                  value={form.bloodGroup}
+                  onChange={(event) => updateForm("bloodGroup", event.target.value)}
+                >
+                  <option value="">Select Blood Group</option>
+                  {bloodGroupOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </Input>
+              </Field>
+              <Field label="Phone Number">
+                <Input
+                  value={form.phone}
+                  onChange={(event) => updateForm("phone", event.target.value)}
+                  placeholder="Enter phone number"
+                />
+              </Field>
+              <Field label="Emergency Contact Number">
+                <Input
+                  value={form.emergencyContactNumber}
+                  onChange={(event) =>
+                    updateForm("emergencyContactNumber", event.target.value)
+                  }
+                  placeholder="Enter emergency contact number"
+                />
+              </Field>
+              <Field label="Email">
+                <Input
+                  type="email"
+                  value={form.email}
+                  onChange={(event) => updateForm("email", event.target.value)}
+                  placeholder="Enter email"
+                />
+              </Field>
+              <Field label="Address">
+                <Input
+                  as="textarea"
+                  rows={3}
+                  value={form.address}
+                  onChange={(event) => updateForm("address", event.target.value)}
+                  placeholder="Enter address"
+                  className="sm:col-span-2"
+                />
+              </Field>
+            </div>
 
-        <div className="grid content-start gap-3">
-          <p className="text-xs font-bold text-slate-700">Photo</p>
-          <div className="grid aspect-square place-items-center rounded-md border border-slate-200 bg-slate-50">
-            <Avatar
-              initials={getInitials(form.fullName)}
-              size="lg"
-              src={form.photo}
-            />
+            <div className="grid content-start gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+              <p className="text-xs font-bold text-slate-700">Photo</p>
+              <div className="grid aspect-square place-items-center rounded-md border border-slate-200 bg-white">
+                <Avatar
+                  initials={getInitials(form.fullName)}
+                  size="lg"
+                  src={form.photo}
+                />
+              </div>
+              <Input type="file" accept="image/*" onChange={handlePhotoUpload} />
+            </div>
           </div>
-          <Input type="file" accept="image/*" onChange={handlePhotoUpload} />
-        </div>
+        )}
+
+        {tab === "Employment Details" && (
+          <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2">
+            <Field label="Date of Joining">
+              <DateInput
+                className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                value={form.joined}
+                onChange={(value) => updateForm("joined", value)}
+              />
+            </Field>
+            <Field label="Reporting Manager">
+              <Input
+                value={form.manager}
+                onChange={(event) => updateForm("manager", event.target.value)}
+                placeholder="Enter reporting manager"
+              />
+            </Field>
+            <Field label="Department">
+              <Input
+                as="select"
+                value={form.department}
+                onChange={(event) => updateForm("department", event.target.value)}
+              >
+                <option value="">Select Department</option>
+                <option>IT</option>
+                <option>HR</option>
+                <option>Finance</option>
+                <option>Marketing</option>
+              </Input>
+            </Field>
+            <Field label="Designation">
+              <Input
+                value={form.designation}
+                onChange={(event) => updateForm("designation", event.target.value)}
+                placeholder="Enter designation"
+              />
+            </Field>
+            <Field label="Status">
+              <Input
+                as="select"
+                value={form.status}
+                onChange={(event) => updateForm("status", event.target.value)}
+              >
+                <option>Active</option>
+                <option>On Leave</option>
+                <option>Relieved</option>
+              </Input>
+            </Field>
+          </div>
+        )}
+
+        {tab === "Salary Details" && (
+          <div className="grid gap-4 rounded-lg border border-blue-100 bg-blue-50/40 p-4 sm:grid-cols-2">
+            <Field label="Gross Salary">
+              <Input
+                type="number"
+                min="0"
+                value={form.salary}
+                onChange={(event) => updateForm("salary", event.target.value)}
+                placeholder="Enter gross salary"
+              />
+            </Field>
+            <Field label="Deduction">
+              <Input
+                type="number"
+                min="0"
+                value={form.salaryDeduction}
+                onChange={(event) =>
+                  updateForm("salaryDeduction", event.target.value)
+                }
+                placeholder="Enter deduction"
+              />
+            </Field>
+            <Field label="PF">
+              <Input
+                type="number"
+                min="0"
+                value={
+                  form.pfAmount === ""
+                    ? calculatePfAmount(form.salary)
+                    : form.pfAmount
+                }
+                onChange={(event) => updateForm("pfAmount", event.target.value)}
+              />
+            </Field>
+            <Field label="ESI">
+              <Input
+                type="number"
+                min="0"
+                value={
+                  form.esiAmount === ""
+                    ? calculateEsiAmount(form.salary)
+                    : form.esiAmount
+                }
+                onChange={(event) => updateForm("esiAmount", event.target.value)}
+              />
+            </Field>
+            <div className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-blue-900 sm:col-span-2">
+              <span>Net Salary</span>
+              <span>{money(getFormSalaryBreakup(form).netSalary)}</span>
+            </div>
+          </div>
+        )}
+
+        {tab === "Documents" && (
+          <EmployeeDocumentsSection
+            documents={form.documents}
+            onChange={(documents) => updateForm("documents", documents)}
+            onError={setError}
+          />
+        )}
 
         <div className="flex justify-end gap-2 lg:col-span-2">
           <Button variant="secondary" onClick={() => navigate("/employees")}>
             Cancel
           </Button>
-          <Button type="submit">Update Employee</Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? "Updating..." : "Update Employee"}
+          </Button>
         </div>
       </form>
     </Panel>
@@ -1703,13 +2987,15 @@ const EmployeeProfilePage = () => {
   const [, setPayrollBatches] = useStoredList(HRMS_STORAGE_KEYS.payroll, []);
   const [, setRelievingRecords] = useStoredList(HRMS_STORAGE_KEYS.relieving, []);
   const [, setReviewRecords] = useStoredList(HRMS_STORAGE_KEYS.reviews, []);
-  const [, setSalaryHistory] = useStoredList(HRMS_STORAGE_KEYS.salaryHistory, []);
+  const [salaryHistory, setSalaryHistory, salaryReassessmentsState] =
+    useHrmsSalaryReassessments();
   const navigate = useNavigate();
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(
     employeeId || employees[0]?.id || ""
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const employee =
     employees.find((record) => record.id === selectedEmployeeId) ||
     employees[0] ||
@@ -1747,17 +3033,31 @@ const EmployeeProfilePage = () => {
   const selectEmployee = (id) => {
     setSelectedEmployeeId(id);
     setMessage("");
+    setError("");
     navigate(`/employees/profile/${id}`, { replace: true });
   };
 
-  const deleteEmployee = () => {
+  const deleteEmployee = async () => {
     if (!employee) return;
 
     const confirmed = window.confirm(
-      `Delete ${employee.name} (${employee.id}) from local HRMS records?`
+      `Delete ${employee.name} (${employee.id}) from HRMS database records?`
     );
 
     if (!confirmed) return;
+
+    try {
+      setError("");
+      await deleteHrmsEmployee(employee.id);
+    } catch (deleteError) {
+      setError(
+        getHrmsEmployeeErrorMessage(
+          deleteError,
+          "Could not delete employee from the HRMS database."
+        )
+      );
+      return;
+    }
 
     const nextEmployees = employees.filter((record) => record.id !== employee.id);
     setEmployees(nextEmployees);
@@ -1781,7 +3081,8 @@ const EmployeeProfilePage = () => {
     );
     const nextEmployeeId = nextEmployees[0]?.id || "";
     setSelectedEmployeeId(nextEmployeeId);
-    setMessage(`${employee.name} deleted from local HRMS records.`);
+    setError("");
+    setMessage(`${employee.name} deleted from HRMS database records.`);
     navigate(
       nextEmployeeId ? `/employees/profile/${nextEmployeeId}` : "/employees/profile",
       { replace: true }
@@ -1814,7 +3115,17 @@ const EmployeeProfilePage = () => {
       <Panel>
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto]">
           <div className="grid gap-3">
-            <Notice>{message}</Notice>
+            <div className="grid gap-2">
+              <Notice>{message}</Notice>
+              <Notice tone="warning">
+                {error || salaryReassessmentsState.error}
+              </Notice>
+              <Notice>
+                {salaryReassessmentsState.loading && !salaryHistory.length
+                  ? "Loading salary reassessments from HRMS database..."
+                  : ""}
+              </Notice>
+            </div>
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px]">
               <Field label="Search Employee">
                 <Input
@@ -1899,9 +3210,10 @@ const EmployeeProfilePage = () => {
         rightRows={[
           ["Email", displayValue(employee.email)],
           ["Phone", displayValue(employee.phone)],
+          ["Emergency Contact", displayValue(employee.emergencyContactNumber)],
           ["Reporting To", displayValue(employee.manager)],
           ["Joining Date", displayValue(employee.joined)],
-          ["Basic Salary", money(employee.salary)],
+          ["Gross Salary", money(employee.salary)],
         ]}
         tableColumns={["Sl No", "Particulars", "Details"]}
         tableRows={[
@@ -1916,7 +3228,7 @@ const EmployeeProfilePage = () => {
           { id: "blood", values: ["6", "Blood Group", displayValue(employee.bloodGroup)] },
         ]}
         bottomLeftTitle="Employee Notes"
-        bottomLeftValue="Registered employee details from local HRMS records."
+        bottomLeftValue="Registered employee details from HRMS database records."
       />
     </div>
   );
@@ -1924,18 +3236,20 @@ const EmployeeProfilePage = () => {
 
 const ReviewsPage = () => {
   const [employees] = useHrmsEmployees();
-  const [reviews, setReviews] = useStoredList(HRMS_STORAGE_KEYS.reviews, []);
+  const [reviews, setReviews, reviewsState] = useHrmsReviews();
   const [rating, setRating] = useState(4);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [activeReviewId, setActiveReviewId] = useState("");
   const [form, setForm] = useState({
     comments: "",
     employeeId: employees[0]?.id || "",
     improvement: "",
-    period: "01-01-2024 - 31-12-2024",
+    period: "01/01/2024 - 31/12/2024",
     reviewer: "",
     strengths: "",
-    type: "Annual",
+    type: "Manual",
   });
   const selectedEmployee =
     employees.find((employee) => employee.id === form.employeeId) || null;
@@ -1958,18 +3272,18 @@ const ReviewsPage = () => {
   const updateForm = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
     setMessage("");
+    setError("");
   };
 
-  const saveReview = (event) => {
+  const saveReview = async (event) => {
     event.preventDefault();
 
     if (!selectedEmployee) {
-      setMessage("Add an employee before saving a review.");
+      setError("Add an employee before saving a review.");
       return;
     }
 
     const review = {
-      id: `REV-${Date.now()}`,
       comments: form.comments.trim(),
       employeeId: selectedEmployee.id,
       employeeName: selectedEmployee.name,
@@ -1979,23 +3293,44 @@ const ReviewsPage = () => {
       reviewer: form.reviewer,
       strengths: form.strengths.trim(),
       type: form.type,
-      savedAt: new Date().toISOString(),
     };
 
-    setReviews((current) => [review, ...current]);
-    setActiveReviewId(review.id);
-    setMessage(
-      `Review saved locally for ${selectedEmployee.name}. Total reviews: ${
-        reviews.length + 1
-      }.`
-    );
+    try {
+      setSaving(true);
+      const savedReview = await createHrmsReview(review);
+      setReviews((current) => [
+        savedReview,
+        ...current.filter((record) => record.id !== savedReview.id),
+      ]);
+      setActiveReviewId(savedReview.id);
+      setMessage(
+        `Review saved to HRMS database for ${savedReview.employeeName}. Total reviews: ${
+          reviews.length + 1
+        }.`
+      );
+    } catch (saveError) {
+      setError(
+        getHrmsReviewErrorMessage(
+          saveError,
+          "Could not save review to the HRMS database."
+        )
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="grid gap-4">
       <Panel>
-        <div className="mb-4">
+        <div className="mb-4 grid gap-2">
           <Notice>{message}</Notice>
+          <Notice tone="warning">{error || reviewsState.error}</Notice>
+          <Notice>
+            {reviewsState.loading && !reviews.length
+              ? "Loading reviews from HRMS database..."
+              : ""}
+          </Notice>
         </div>
         <div className="flex flex-wrap gap-1 border-b border-slate-200">
           {["Review Details", "Salary Reassessment"].map((item, index) => (
@@ -2036,8 +3371,8 @@ const ReviewsPage = () => {
                 value={form.period}
                 onChange={(event) => updateForm("period", event.target.value)}
               >
-                <option>01-01-2024 - 31-12-2024</option>
-                <option>01-07-2024 - 31-12-2024</option>
+                <option>01/01/2024 - 31/12/2024</option>
+                <option>01/07/2024 - 31/12/2024</option>
               </Input>
             </Field>
             <Field label="Review Type">
@@ -2046,6 +3381,7 @@ const ReviewsPage = () => {
                 value={form.type}
                 onChange={(event) => updateForm("type", event.target.value)}
               >
+                <option>Manual</option>
                 <option>Annual</option>
                 <option>Quarterly</option>
                 <option>Probation</option>
@@ -2121,11 +3457,14 @@ const ReviewsPage = () => {
                   strengths: "",
                 }));
                 setMessage("");
+                setError("");
               }}
             >
               Cancel
             </Button>
-            <Button type="submit">Save Review</Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? "Saving..." : "Save Review"}
+            </Button>
           </div>
         </form>
       </Panel>
@@ -2135,7 +3474,7 @@ const ReviewsPage = () => {
           <div>
             <h2 className="text-base font-bold">Review Register</h2>
             <p className="text-sm text-slate-500">
-              Saved review details from localStorage.
+              Saved review details from HRMS database.
             </p>
           </div>
           <Link to="/reviews/history">
@@ -2167,7 +3506,7 @@ const ReviewsPage = () => {
                 >
                   <td className="px-3 py-3">
                     {record.savedAt
-                      ? new Date(record.savedAt).toLocaleString()
+                      ? formatDateTime(record.savedAt)
                       : "Not provided"}
                   </td>
                   <td className="px-3 py-3">
@@ -2218,7 +3557,7 @@ const ReviewsPage = () => {
             [
               "Saved Date",
               activeReviewRecord.savedAt
-                ? new Date(activeReviewRecord.savedAt).toLocaleString()
+                ? formatDateTime(activeReviewRecord.savedAt)
                 : "Not provided",
             ],
             ["Register Ref", activeReviewRecord.id],
@@ -2259,6 +3598,8 @@ const reassessmentMetricLabels = {
   taskCompletion: "Task Completion",
   innovation: "Innovation",
   clientFeedback: "Client Feedback",
+  reporting: "Reporting",
+  skillDevelopment: "Skill Development",
 };
 
 const defaultReassessmentMetrics = {
@@ -2270,6 +3611,8 @@ const defaultReassessmentMetrics = {
   taskCompletion: 84,
   innovation: 78,
   clientFeedback: 80,
+  reporting: 82,
+  skillDevelopment: 81,
 };
 
 const approvalStatuses = [
@@ -2281,17 +3624,16 @@ const approvalStatuses = [
 
 const SalaryReassessmentPage = () => {
   const [employees, setEmployees] = useHrmsEmployees();
-  const [reviews, setReviews] = useStoredList(HRMS_STORAGE_KEYS.reviews, []);
-  const [salaryHistory, setSalaryHistory] = useStoredList(
-    HRMS_STORAGE_KEYS.salaryHistory,
-    []
-  );
+  const [salaryHistory, setSalaryHistory, salaryReassessmentsState] =
+    useHrmsSalaryReassessments();
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(
     employees[0]?.id || ""
   );
   const [metrics, setMetrics] = useState(defaultReassessmentMetrics);
   const [documents, setDocuments] = useState([]);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [savingAction, setSavingAction] = useState("");
   const [activeRegisterId, setActiveRegisterId] = useState("");
   const [registerEmployeeFilter, setRegisterEmployeeFilter] = useState("all");
   const [registerStatusFilter, setRegisterStatusFilter] = useState("all");
@@ -2402,13 +3744,13 @@ const SalaryReassessmentPage = () => {
       : reviewScore >= 78
         ? "Developing"
         : "Not Ready";
+  const compensationBreakup = getSalaryBreakup(selectedEmployee || {}, revisedSalary);
   const compensationRows = [
-    ["Basic Salary", Math.round(revisedSalary * 0.5)],
-    ["HRA", Math.round(revisedSalary * 0.2)],
-    ["Allowances", Math.round(revisedSalary * 0.15)],
-    ["Incentives", bonus],
-    ["PF", Math.round(revisedSalary * 0.06)],
-    ["Tax Estimate", Math.round(revisedSalary * 0.05)],
+    ["Gross Salary", compensationBreakup.grossSalary],
+    ["Deduction", compensationBreakup.deduction],
+    ["PF", compensationBreakup.pfAmount],
+    ["ESI", compensationBreakup.esiAmount],
+    ["Net Salary", compensationBreakup.netSalary],
   ];
 
   useEffect(() => {
@@ -2427,6 +3769,7 @@ const SalaryReassessmentPage = () => {
       proposedRole: employee?.designation || "",
     }));
     setMessage("");
+    setError("");
   };
 
   useEffect(() => {
@@ -2443,11 +3786,13 @@ const SalaryReassessmentPage = () => {
   const updateForm = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
     setMessage("");
+    setError("");
   };
 
   const updateMetric = (key, value) => {
     setMetrics((current) => ({ ...current, [key]: clampNumber(value) }));
     setMessage("");
+    setError("");
   };
 
   const buildRecord = (status) => {
@@ -2460,6 +3805,11 @@ const SalaryReassessmentPage = () => {
       behaviorScore: Number(form.behaviorScore) || 0,
       bonus,
       compensationRows,
+      esiAmount: compensationBreakup.esiAmount,
+      netSalary: compensationBreakup.netSalary,
+      pfAmount: compensationBreakup.pfAmount,
+      salaryDeduction: compensationBreakup.deduction,
+      totalDeductions: compensationBreakup.totalDeductions,
       currentRole: selectedEmployee?.designation || "",
       currentSalary,
       departmentTransfer: form.departmentTransfer,
@@ -2506,57 +3856,61 @@ const SalaryReassessmentPage = () => {
     };
   };
 
-  const saveReassessment = (status = "Pending", activateSalary = false) => {
+  const saveReassessment = async (status = "Pending", activateSalary = false) => {
     if (!selectedEmployee) {
-      setMessage("Add an employee before saving salary reassessment.");
+      setError("Add an employee before saving salary reassessment.");
       return;
     }
 
     const record = buildRecord(status);
-    setSalaryHistory((current) => [record, ...current]);
-    setReviews((current) => [
-      {
-        id: `REV-${record.id}`,
-        comments: record.managerComments || record.hrComments,
-        employeeId: record.employeeId,
-        employeeName: record.employeeName,
-        improvement: record.improvement,
-        period: record.reviewPeriod,
-        rating: record.overallRating,
-        reviewer: record.reviewerName,
-        salaryReassessmentId: record.id,
-        strengths: record.strengths,
-        type: "Salary Reassessment",
-        savedAt: record.savedAt,
-      },
-      ...current,
-    ]);
+    const nextEmployee = {
+      ...selectedEmployee,
+      department: form.departmentTransfer || selectedEmployee.department,
+      designation:
+        form.promotionRecommendation === "Promotion Recommended" &&
+        form.proposedRole
+          ? form.proposedRole
+          : selectedEmployee.designation,
+      salary: revisedSalary,
+    };
 
-    if (activateSalary) {
-      setEmployees((current) =>
-        current.map((employee) =>
-          employee.id === selectedEmployee.id
-            ? {
-                ...employee,
-                department: form.departmentTransfer || employee.department,
-                designation:
-                  form.promotionRecommendation === "Promotion Recommended" &&
-                  form.proposedRole
-                    ? form.proposedRole
-                    : employee.designation,
-                salary: revisedSalary,
-              }
-            : employee
+    try {
+      setSavingAction(status);
+      setError("");
+      const savedRecord = await createHrmsSalaryReassessment(record);
+      setSalaryHistory((current) => [
+        savedRecord,
+        ...current.filter((item) => item.id !== savedRecord.id),
+      ]);
+
+      if (activateSalary) {
+        const savedEmployee = await updateHrmsEmployee(
+          selectedEmployee.id,
+          nextEmployee
+        );
+        setEmployees((current) =>
+          current.map((employee) =>
+            employee.id === savedEmployee.id ? savedEmployee : employee
+          )
+        );
+      }
+
+      setMessage(
+        activateSalary
+          ? `Salary activated for ${savedRecord.employeeName}. Revised salary is ${money(savedRecord.revisedSalary)}.`
+          : `Salary reassessment saved to HRMS database for ${savedRecord.employeeName}.`
+      );
+      setActiveRegisterId(savedRecord.id);
+    } catch (saveError) {
+      setError(
+        getHrmsSalaryReassessmentErrorMessage(
+          saveError,
+          "Could not save salary reassessment to the HRMS database."
         )
       );
+    } finally {
+      setSavingAction("");
     }
-
-    setMessage(
-      activateSalary
-        ? `Salary activated for ${selectedEmployee.name}. Revised salary is ${money(revisedSalary)}.`
-        : `Salary reassessment saved locally for ${selectedEmployee.name}.`
-    );
-    setActiveRegisterId(record.id);
   };
 
   const loadRegisterRecord = (record) => {
@@ -2605,52 +3959,74 @@ const SalaryReassessmentPage = () => {
         record.notificationSettings?.notifyPromotion ?? current.notifyPromotion,
       reminder: record.notificationSettings?.reminder ?? current.reminder,
     }));
-    setMessage(`${record.employeeName} reassessment loaded from register.`);
+    setError("");
+    setMessage(`${record.employeeName} reassessment loaded from HRMS database register.`);
 
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
-  const activateRegisterRecord = (record) => {
+  const activateRegisterRecord = async (record) => {
     if (!record) return;
 
-    setEmployees((current) =>
-      current.map((employee) =>
-        employee.id === record.employeeId
-          ? {
-              ...employee,
-              department: record.departmentTransfer || employee.department,
-              designation:
-                record.promotionRecommendation === "Promotion Recommended" &&
-                record.proposedRole
-                  ? record.proposedRole
-                  : employee.designation,
-              salary: Number(record.revisedSalary || employee.salary || 0),
-            }
-          : employee
-      )
-    );
-    setSalaryHistory((current) =>
-      current.map((item) =>
-        item.id === record.id
-          ? {
-              ...item,
-              directorStatus: "Approved",
-              hrStatus: "Approved",
-              managerStatus: "Approved",
-              salaryStatus: "Salary Activated",
-            }
-          : item
-      )
-    );
-    setActiveRegisterId(record.id);
-    setMessage(
-      `${record.employeeName} salary activated from register. Revised salary is ${money(record.revisedSalary)}.`
-    );
+    const employee = employees.find((item) => item.id === record.employeeId);
+    const activatedRecord = {
+      ...record,
+      directorStatus: "Approved",
+      hrStatus: "Approved",
+      managerStatus: "Approved",
+      salaryActivationStatus: "Salary Activated",
+      salaryStatus: "Salary Activated",
+      status: "Salary Activated",
+    };
+
+    try {
+      setSavingAction(`activate-${record.id}`);
+      setError("");
+      const savedRecord = await updateHrmsSalaryReassessment(
+        record.id,
+        activatedRecord
+      );
+
+      if (employee) {
+        const savedEmployee = await updateHrmsEmployee(employee.id, {
+          ...employee,
+          department: record.departmentTransfer || employee.department,
+          designation:
+            record.promotionRecommendation === "Promotion Recommended" &&
+            record.proposedRole
+              ? record.proposedRole
+              : employee.designation,
+          salary: Number(record.revisedSalary || employee.salary || 0),
+        });
+        setEmployees((current) =>
+          current.map((item) =>
+            item.id === savedEmployee.id ? savedEmployee : item
+          )
+        );
+      }
+
+      setSalaryHistory((current) =>
+        current.map((item) => (item.id === savedRecord.id ? savedRecord : item))
+      );
+      setActiveRegisterId(savedRecord.id);
+      setMessage(
+        `${savedRecord.employeeName} salary activated from register. Revised salary is ${money(savedRecord.revisedSalary)}.`
+      );
+    } catch (activateError) {
+      setError(
+        getHrmsSalaryReassessmentErrorMessage(
+          activateError,
+          "Could not activate salary reassessment in the HRMS database."
+        )
+      );
+    } finally {
+      setSavingAction("");
+    }
   };
 
-  const deleteRegisterRecord = (record) => {
+  const deleteRegisterRecord = async (record) => {
     if (!record) return;
 
     const confirmed = window.confirm(
@@ -2659,14 +4035,25 @@ const SalaryReassessmentPage = () => {
 
     if (!confirmed) return;
 
-    setSalaryHistory((current) =>
-      current.filter((item) => item.id !== record.id)
-    );
-    setReviews((current) =>
-      current.filter((item) => item.salaryReassessmentId !== record.id)
-    );
-    setActiveRegisterId("");
-    setMessage(`${record.employeeName} reassessment deleted from register.`);
+    try {
+      setSavingAction(`delete-${record.id}`);
+      setError("");
+      await deleteHrmsSalaryReassessment(record.id);
+      setSalaryHistory((current) =>
+        current.filter((item) => item.id !== record.id)
+      );
+      setActiveRegisterId("");
+      setMessage(`${record.employeeName} reassessment deleted from HRMS database.`);
+    } catch (deleteError) {
+      setError(
+        getHrmsSalaryReassessmentErrorMessage(
+          deleteError,
+          "Could not delete salary reassessment from the HRMS database."
+        )
+      );
+    } finally {
+      setSavingAction("");
+    }
   };
 
   const downloadRegisterRecord = (record) => {
@@ -2743,7 +4130,7 @@ const SalaryReassessmentPage = () => {
             <tr><td class="label">Current Salary</td><td>${escapeHtml(money(currentSalary))}</td></tr>
             <tr><td class="label">Increment</td><td>${incrementPercent}% (${escapeHtml(money(incrementAmount))})</td></tr>
             <tr><td class="label">Revised Salary</td><td>${escapeHtml(money(revisedSalary))}</td></tr>
-            <tr><td class="label">Effective Date</td><td>${escapeHtml(form.effectiveDate)}</td></tr>
+            <tr><td class="label">Effective Date</td><td>${escapeHtml(formatDate(form.effectiveDate))}</td></tr>
             <tr><td class="label">Grade</td><td>${escapeHtml(grade)}</td></tr>
           </table>
           <p>Regards,<br/>HR Department</p>
@@ -2836,7 +4223,12 @@ const SalaryReassessmentPage = () => {
                   ["Department", displayValue(selectedEmployee.department)],
                   ["Joining Date", displayValue(selectedEmployee.joined)],
                   ["Current Salary", money(currentSalary)],
-                  ["Last Increment", lastIncrement?.effectiveDate || "Not provided"],
+                  [
+                    "Last Increment",
+                    lastIncrement?.effectiveDate
+                      ? formatDate(lastIncrement.effectiveDate)
+                      : "Not provided",
+                  ],
                 ].map(([label, value]) => (
                   <div key={label} className="flex justify-between gap-4">
                     <span className="text-slate-500">{label}</span>
@@ -2914,10 +4306,10 @@ const SalaryReassessmentPage = () => {
                   />
                 </Field>
                 <Field label="Review Date">
-                  <Input
-                    type="date"
+                  <DateInput
+                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
                     value={form.reviewDate}
-                    onChange={(event) => updateForm("reviewDate", event.target.value)}
+                    onChange={(value) => updateForm("reviewDate", value)}
                   />
                 </Field>
               </div>
@@ -2985,10 +4377,10 @@ const SalaryReassessmentPage = () => {
                     />
                   </Field>
                   <Field label="Effective Date">
-                    <Input
-                      type="date"
+                    <DateInput
+                      className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
                       value={form.effectiveDate}
-                      onChange={(event) => updateForm("effectiveDate", event.target.value)}
+                      onChange={(value) => updateForm("effectiveDate", value)}
                     />
                   </Field>
                   <Field label="Promotion Recommendation">
@@ -3050,10 +4442,12 @@ const SalaryReassessmentPage = () => {
                   />
                 </Field>
                 <Field label="Promotion Effective Date">
-                  <Input
-                    type="date"
+                  <DateInput
+                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
                     value={form.promotionEffectiveDate}
-                    onChange={(event) => updateForm("promotionEffectiveDate", event.target.value)}
+                    onChange={(value) =>
+                      updateForm("promotionEffectiveDate", value)
+                    }
                   />
                 </Field>
                 <Field label="Department Transfer">
@@ -3123,7 +4517,9 @@ const SalaryReassessmentPage = () => {
                 {employeeHistory.length ? (
                   employeeHistory.slice(0, 5).map((record) => (
                     <div key={record.id} className="grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-[120px_1fr_auto]">
-                      <strong>{record.effectiveDate || record.reviewDate}</strong>
+                      <strong>
+                        {formatDate(record.effectiveDate || record.reviewDate)}
+                      </strong>
                       <span className="text-sm text-slate-600">
                         {money(record.currentSalary)} to {money(record.revisedSalary)} | Grade {record.grade}
                       </span>
@@ -3157,8 +4553,14 @@ const SalaryReassessmentPage = () => {
               <h2 className="text-sm font-bold">Compensation Breakdown</h2>
               <div className="mt-4 grid gap-3 text-sm">
                 {compensationRows.map(([label, value]) => (
-                  <div key={label} className="flex justify-between gap-4 border-b border-slate-100 pb-2">
-                    <span className="text-slate-600">{label}</span>
+                  <div
+                    key={label}
+                    className={[
+                      "flex justify-between gap-4 border-b border-slate-100 pb-2",
+                      label === "Net Salary" ? "font-bold text-blue-800" : "",
+                    ].join(" ")}
+                  >
+                    <span className={label === "Net Salary" ? "" : "text-slate-600"}>{label}</span>
                     <strong>{money(value)}</strong>
                   </div>
                 ))}
@@ -3237,14 +4639,27 @@ const SalaryReassessmentPage = () => {
 
           <Panel>
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="secondary" onClick={() => saveReassessment("Draft", false)}>
-                Save Draft
+              <Button
+                variant="secondary"
+                onClick={() => saveReassessment("Draft", false)}
+                disabled={Boolean(savingAction)}
+              >
+                {savingAction === "Draft" ? "Saving..." : "Save Draft"}
               </Button>
-              <Button variant="secondary" onClick={() => saveReassessment("Approved", false)}>
-                Save Approved Review
+              <Button
+                variant="secondary"
+                onClick={() => saveReassessment("Approved", false)}
+                disabled={Boolean(savingAction)}
+              >
+                {savingAction === "Approved" ? "Saving..." : "Save Approved Review"}
               </Button>
-              <Button onClick={() => saveReassessment("Salary Activated", true)}>
-                Activate Salary
+              <Button
+                onClick={() => saveReassessment("Salary Activated", true)}
+                disabled={Boolean(savingAction)}
+              >
+                {savingAction === "Salary Activated"
+                  ? "Activating..."
+                  : "Activate Salary"}
               </Button>
             </div>
           </Panel>
@@ -3256,7 +4671,7 @@ const SalaryReassessmentPage = () => {
           <div>
             <h2 className="text-base font-bold">Salary Reassessment Register</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Saved drafts, approved reviews, and activated salary revisions from localStorage.
+              Saved drafts, approved reviews, and activated salary revisions from HRMS database.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:w-[520px]">
@@ -3329,7 +4744,7 @@ const SalaryReassessmentPage = () => {
                 >
                   <td className="px-3 py-3">
                     {record.savedAt
-                      ? new Date(record.savedAt).toLocaleString()
+                      ? formatDateTime(record.savedAt)
                       : "Not provided"}
                   </td>
                   <td className="px-3 py-3">
@@ -3363,9 +4778,14 @@ const SalaryReassessmentPage = () => {
                       <Button
                         className="min-h-8 px-2 text-xs"
                         onClick={() => activateRegisterRecord(record)}
-                        disabled={record.salaryStatus === "Salary Activated"}
+                        disabled={
+                          record.salaryStatus === "Salary Activated" ||
+                          Boolean(savingAction)
+                        }
                       >
-                        Activate
+                        {savingAction === `activate-${record.id}`
+                          ? "Activating..."
+                          : "Activate"}
                       </Button>
                       <Button
                         className="min-h-8 px-2 text-xs"
@@ -3378,8 +4798,9 @@ const SalaryReassessmentPage = () => {
                         className="min-h-8 px-2 text-xs"
                         variant="danger"
                         onClick={() => deleteRegisterRecord(record)}
+                        disabled={Boolean(savingAction)}
                       >
-                        Delete
+                        {savingAction === `delete-${record.id}` ? "Deleting..." : "Delete"}
                       </Button>
                     </div>
                   </td>
@@ -3415,7 +4836,7 @@ const SalaryReassessmentPage = () => {
             ["Review Score", `${activeRegisterRecord.reviewScore}%`],
             ["Grade", activeRegisterRecord.grade],
             ["Rating", `${activeRegisterRecord.overallRating || 0} / 5`],
-            ["Effective Date", activeRegisterRecord.effectiveDate],
+            ["Effective Date", formatDate(activeRegisterRecord.effectiveDate)],
           ]}
           tableColumns={["Sl No", "Particulars", "Details"]}
           tableRows={[
@@ -3481,14 +4902,16 @@ const SalaryReassessmentPage = () => {
 
 const AttendancePage = () => {
   const [employees] = useHrmsEmployees();
-  const [records, setRecords] = useStoredList(HRMS_STORAGE_KEYS.attendance, []);
-  const defaultStatuses = ["P", "P", "P", "A", "P", "L", "H", "P", "P", "P", "P", "A", "P", "P", "P", "P", "P", "L", "P", "P", "P", "A", "P", "P", "P", "H", "P", "P", "P", "P", "P"];
+  const [records, setRecords, attendanceState] = useHrmsAttendance();
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(
     employees[0]?.id || ""
   );
-  const [month, setMonth] = useState("May 2024");
-  const [statuses, setStatuses] = useState(defaultStatuses);
+  const [month, setMonth] = useState(getCurrentAttendanceMonth());
+  const [isManualMonthSelection, setIsManualMonthSelection] = useState(false);
+  const [statuses, setStatuses] = useState(DEFAULT_ATTENDANCE_STATUSES);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [activeAttendanceId, setActiveAttendanceId] = useState("");
   const colorMap = {
     P: "bg-emerald-100 text-emerald-700",
@@ -3498,11 +4921,48 @@ const AttendancePage = () => {
   };
   const selectedEmployee =
     employees.find((employee) => employee.id === selectedEmployeeId) || null;
+  const savedAttendanceMonths = useMemo(
+    () =>
+      Array.from(
+        new Set(records.map((record) => normalizeAttendanceMonth(record.month)))
+      ).filter(Boolean),
+    [records]
+  );
+  const latestAttendanceRecord = useMemo(() => {
+    return [...records]
+      .filter((record) => normalizeAttendanceMonth(record.month))
+      .sort((first, second) => {
+        const monthDiff =
+          getAttendanceMonthIndex(second.month) -
+          getAttendanceMonthIndex(first.month);
+        if (monthDiff) return monthDiff;
+        return String(second.savedAt || "").localeCompare(
+          String(first.savedAt || "")
+        );
+      })[0] || null;
+  }, [records]);
+  const latestAttendanceMonth = normalizeAttendanceMonth(
+    latestAttendanceRecord?.month
+  );
+  const monthOptions = useMemo(
+    () => buildAttendanceMonthOptions(latestAttendanceMonth, savedAttendanceMonths),
+    [latestAttendanceMonth, savedAttendanceMonths]
+  );
+  const selectedMonth = normalizeAttendanceMonth(month);
+  const isLatestMonthSelected =
+    latestAttendanceMonth &&
+    areAttendanceMonthsEqual(selectedMonth, latestAttendanceMonth);
   const attendanceRows = useMemo(
     () =>
-      [...records].sort((first, second) =>
-        String(second.savedAt || "").localeCompare(String(first.savedAt || ""))
-      ),
+      [...records].sort((first, second) => {
+        const monthDiff =
+          getAttendanceMonthIndex(second.month) -
+          getAttendanceMonthIndex(first.month);
+        if (monthDiff) return monthDiff;
+        return String(second.savedAt || "").localeCompare(
+          String(first.savedAt || "")
+        );
+      }),
     [records]
   );
   const activeAttendanceRecord =
@@ -3514,27 +4974,78 @@ const AttendancePage = () => {
     }
   }, [employees, selectedEmployeeId]);
 
-  const loadAttendance = () => {
-    if (!selectedEmployee) {
-      setMessage("Add an employee before viewing attendance.");
-      return;
+  useEffect(() => {
+    if (isManualMonthSelection) return;
+    const nextMonth = latestAttendanceMonth || getCurrentAttendanceMonth();
+    if (nextMonth && !areAttendanceMonthsEqual(month, nextMonth)) {
+      setMonth(nextMonth);
     }
+  }, [isManualMonthSelection, latestAttendanceMonth, month]);
 
-    const saved = records.find(
-      (record) =>
-        record.employeeId === selectedEmployeeId && record.month === month
-    );
-    setStatuses(saved?.statuses || defaultStatuses);
-    setActiveAttendanceId(saved?.id || "");
+  const findAttendanceRecord = useCallback(
+    (employeeId, attendanceMonth) =>
+      [...records]
+        .filter(
+          (record) =>
+            record.employeeId === employeeId &&
+            areAttendanceMonthsEqual(record.month, attendanceMonth)
+        )
+        .sort((first, second) =>
+          String(second.savedAt || "").localeCompare(String(first.savedAt || ""))
+        )[0] || null,
+    [records]
+  );
+
+  const loadAttendance = useCallback(
+    ({ silent = false } = {}) => {
+      if (!selectedEmployee) {
+        if (!silent) {
+          setError("Add an employee before viewing attendance.");
+        }
+        return;
+      }
+
+      const saved = findAttendanceRecord(selectedEmployeeId, month);
+      setStatuses(saved?.statuses || DEFAULT_ATTENDANCE_STATUSES);
+      setActiveAttendanceId(saved?.id || "");
+      if (!silent) {
+        setMessage(
+          saved
+            ? `Loaded ${normalizeAttendanceMonth(month)} attendance from HRMS database for ${selectedEmployee.name}.`
+            : `No saved attendance found for ${selectedEmployee.name} in ${normalizeAttendanceMonth(
+                month
+              )}. Showing default grid.`
+        );
+      }
+      setError("");
+    },
+    [findAttendanceRecord, month, selectedEmployee, selectedEmployeeId]
+  );
+
+  useEffect(() => {
+    if (!selectedEmployeeId || !month) return;
+    loadAttendance({ silent: true });
+  }, [loadAttendance, month, selectedEmployeeId]);
+
+  useEffect(() => {
+    if (!latestAttendanceRecord?.employeeId || selectedEmployeeId) return;
+    setSelectedEmployeeId(latestAttendanceRecord.employeeId);
+  }, [latestAttendanceRecord?.employeeId, selectedEmployeeId]);
+
+  const loadRegisterRecord = (record) => {
+    setSelectedEmployeeId(record.employeeId);
+    setMonth(normalizeAttendanceMonth(record.month));
+    setIsManualMonthSelection(true);
+    setStatuses(record.statuses || DEFAULT_ATTENDANCE_STATUSES);
+    setActiveAttendanceId(record.id);
+    setError("");
     setMessage(
-      saved
-        ? `Loaded saved attendance for ${selectedEmployee.name}.`
-        : "No saved attendance found. Showing default grid."
+      `Loaded ${normalizeAttendanceMonth(record.month)} attendance from HRMS database for ${record.employeeName}.`
     );
   };
-  const saveAttendance = () => {
+  const saveAttendance = async () => {
     if (!selectedEmployee) {
-      setMessage("Add an employee before saving attendance.");
+      setError("Add an employee before saving attendance.");
       return;
     }
 
@@ -3546,28 +5057,59 @@ const AttendancePage = () => {
       {}
     );
     const record = {
-      id: `${selectedEmployeeId}-${month}`,
       employeeId: selectedEmployeeId,
       employeeName: selectedEmployee.name,
-      month,
+      month: selectedMonth || month,
       statuses,
       counts,
-      savedAt: new Date().toISOString(),
     };
 
-    setRecords((current) => [
-      record,
-      ...current.filter((item) => item.id !== record.id),
-    ]);
-    setActiveAttendanceId(record.id);
-    setMessage(`Attendance saved locally for ${selectedEmployee.name}.`);
+    try {
+      setSaving(true);
+      setError("");
+      const savedRecord = await saveHrmsAttendance(record);
+      setRecords((current) => [
+        savedRecord,
+        ...current.filter(
+          (item) =>
+            !(
+              item.employeeId === savedRecord.employeeId &&
+              areAttendanceMonthsEqual(item.month, savedRecord.month)
+            )
+        ),
+      ]);
+      setActiveAttendanceId(savedRecord.id);
+      setMessage(`Attendance saved to HRMS database for ${savedRecord.employeeName}.`);
+    } catch (saveError) {
+      setError(
+        getHrmsAttendanceErrorMessage(
+          saveError,
+          "Could not save attendance to the HRMS database."
+        )
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="grid gap-4">
       <Panel>
-        <div className="mb-4">
+        <div className="mb-4 grid gap-2">
           <Notice>{message}</Notice>
+          <Notice>
+            {latestAttendanceMonth
+              ? isLatestMonthSelected
+                ? `Currently showing latest attendance month: ${latestAttendanceMonth}.`
+                : `Manual month selected: ${selectedMonth}. Latest saved attendance month is ${latestAttendanceMonth}.`
+              : "No saved attendance month found yet. Select a month and save attendance to create one."}
+          </Notice>
+          <Notice tone="warning">{error || attendanceState.error}</Notice>
+          <Notice>
+            {attendanceState.loading && !records.length
+              ? "Loading attendance from HRMS database..."
+              : ""}
+          </Notice>
         </div>
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <Field label="Employee">
@@ -3578,6 +5120,7 @@ const AttendancePage = () => {
                 setSelectedEmployeeId(event.target.value);
                 setActiveAttendanceId("");
                 setMessage("");
+                setError("");
               }}
             >
               <option value="">Select Employee</option>
@@ -3594,17 +5137,35 @@ const AttendancePage = () => {
               value={month}
               onChange={(event) => {
                 setMonth(event.target.value);
+                setIsManualMonthSelection(true);
                 setActiveAttendanceId("");
                 setMessage("");
+                setError("");
               }}
             >
-              <option>May 2024</option>
-              <option>June 2024</option>
+              {monthOptions.map((option) => (
+                <option key={option} value={option}>
+                  {areAttendanceMonthsEqual(option, latestAttendanceMonth)
+                    ? `${option} (Latest)`
+                    : option}
+                </option>
+              ))}
             </Input>
           </Field>
           <Button className="self-end" onClick={loadAttendance}>
             View
           </Button>
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-bold">
+            Attendance Overview - {selectedMonth || "Select Month"}
+          </h2>
+          {isLatestMonthSelected && (
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+              Latest
+            </span>
+          )}
         </div>
 
         <div className="mt-6 overflow-x-auto">
@@ -3655,13 +5216,16 @@ const AttendancePage = () => {
           <Button
             variant="secondary"
             onClick={() => {
-              setStatuses(defaultStatuses);
+              loadAttendance({ silent: true });
               setMessage("");
+              setError("");
             }}
           >
             Cancel
           </Button>
-          <Button onClick={saveAttendance}>Save Attendance</Button>
+          <Button onClick={saveAttendance} disabled={saving}>
+            {saving ? "Saving..." : "Save Attendance"}
+          </Button>
         </div>
       </Panel>
 
@@ -3669,7 +5233,7 @@ const AttendancePage = () => {
         <div>
           <h2 className="text-base font-bold">Attendance Register</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Saved monthly attendance details from localStorage.
+            Saved monthly attendance details from HRMS database.
           </p>
         </div>
 
@@ -3697,14 +5261,21 @@ const AttendancePage = () => {
                 >
                   <td className="px-3 py-3">
                     {record.savedAt
-                      ? new Date(record.savedAt).toLocaleString()
+                      ? formatDateTime(record.savedAt)
                       : "Not provided"}
                   </td>
                   <td className="px-3 py-3">
                     <strong>{record.employeeName}</strong>
                     <p className="text-xs text-slate-500">{record.employeeId}</p>
                   </td>
-                  <td className="px-3 py-3">{record.month}</td>
+                  <td className="px-3 py-3">
+                    {normalizeAttendanceMonth(record.month)}
+                    {areAttendanceMonthsEqual(record.month, latestAttendanceMonth) && (
+                      <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                        Latest
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-3">{record.counts?.P || 0}</td>
                   <td className="px-3 py-3">{record.counts?.A || 0}</td>
                   <td className="px-3 py-3">{record.counts?.L || 0}</td>
@@ -3713,12 +5284,7 @@ const AttendancePage = () => {
                     <Button
                       className="min-h-8 px-2 text-xs"
                       variant="secondary"
-                      onClick={() => {
-                        setSelectedEmployeeId(record.employeeId);
-                        setMonth(record.month);
-                        setStatuses(record.statuses || defaultStatuses);
-                        setActiveAttendanceId(record.id);
-                      }}
+                      onClick={() => loadRegisterRecord(record)}
                     >
                       View
                     </Button>
@@ -3740,16 +5306,16 @@ const AttendancePage = () => {
       {activeAttendanceRecord && (
         <RegisterDocumentView
           title="MONTHLY ATTENDANCE"
-          subtitle={`${activeAttendanceRecord.employeeName} | ${activeAttendanceRecord.month}`}
+          subtitle={`${activeAttendanceRecord.employeeName} | ${normalizeAttendanceMonth(activeAttendanceRecord.month)}`}
           onClose={() => setActiveAttendanceId("")}
           leftRows={[
             ["Employee", activeAttendanceRecord.employeeName],
             ["Employee ID", activeAttendanceRecord.employeeId],
-            ["Month", activeAttendanceRecord.month],
+            ["Month", normalizeAttendanceMonth(activeAttendanceRecord.month)],
             [
               "Saved Date",
               activeAttendanceRecord.savedAt
-                ? new Date(activeAttendanceRecord.savedAt).toLocaleString()
+                ? formatDateTime(activeAttendanceRecord.savedAt)
                 : "Not provided",
             ],
           ]}
@@ -3787,11 +5353,9 @@ const AttendancePage = () => {
 
 const PayrollPage = () => {
   const [employees] = useHrmsEmployees();
-  const [payrollBatches, setPayrollBatches] = useStoredList(
-    HRMS_STORAGE_KEYS.payroll,
-    []
-  );
+  const [payrollBatches, setPayrollBatches, payrollState] = useHrmsSalaries();
   const [generated, setGenerated] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [month, setMonth] = useState("May 2024");
   const [department, setDepartment] = useState("All");
   const [message, setMessage] = useState("");
@@ -3803,18 +5367,37 @@ const PayrollPage = () => {
       ? employees
       : employees.filter((employee) => employee.department === department);
   const rows = visibleEmployees.map((employee, index) => {
-    const allowance = [5000, 4000, 3000, 3500, 6000][index] ?? 3000;
-    const deduction = [2000, 1800, 1500, 1700, 2500][index] ?? 1500;
     const edit = payrollEdits[employee.id] || {};
-    const salary = Number(edit.salary ?? employee.salary ?? 0);
-    const rowAllowance = Number(edit.allowance ?? allowance);
-    const rowDeduction = Number(edit.deduction ?? deduction);
+    const salary = toSalaryNumber(edit.salary ?? employee.salary);
+    const employeeBreakup = getSalaryBreakup(employee, salary);
+    const rowDeduction = toSalaryNumber(
+      edit.deduction,
+      employeeBreakup.deduction
+    );
+    const rowPfAmount = toSalaryNumber(
+      edit.pfAmount,
+      employeeBreakup.pfAmount
+    );
+    const rowEsiAmount = toSalaryNumber(
+      edit.esiAmount,
+      employeeBreakup.esiAmount
+    );
+    const totalDeductions = rowDeduction + rowPfAmount + rowEsiAmount;
+
     return {
       ...employee,
       salary,
-      allowance: rowAllowance,
+      basicSalary: salary,
+      allowance: 0,
+      allowances: 0,
       deduction: rowDeduction,
-      net: salary + rowAllowance - rowDeduction,
+      deductions: rowDeduction,
+      esiAmount: rowEsiAmount,
+      net: salary - totalDeductions,
+      netSalary: salary - totalDeductions,
+      pfAmount: rowPfAmount,
+      providentFund: rowPfAmount,
+      totalDeductions,
       status: edit.status || (generated || index < 3 ? "Processed" : "Pending"),
     };
   });
@@ -3822,6 +5405,14 @@ const PayrollPage = () => {
     rows.find((row) => row.id === selectedEmployeeId) || rows[0] || null;
   const selectedPayrollBatch =
     payrollBatches.find((batch) => batch.id === selectedBatchId) || null;
+  const payrollNotice =
+    payrollState.error ||
+    message ||
+    (payrollState.loading ? "Loading payroll from HRMS database..." : "");
+  const payrollNoticeTone =
+    payrollState.error || /^(Add|Could not|No salary)/.test(message)
+      ? "warning"
+      : "success";
 
   useEffect(() => {
     if (rows[0]?.id && !rows.some((row) => row.id === selectedEmployeeId)) {
@@ -3836,8 +5427,9 @@ const PayrollPage = () => {
       const currentEdit = current[selectedPayrollRow.id] || {};
       const nextEdit = {
         salary: selectedPayrollRow.salary,
-        allowance: selectedPayrollRow.allowance,
         deduction: selectedPayrollRow.deduction,
+        esiAmount: selectedPayrollRow.esiAmount,
+        pfAmount: selectedPayrollRow.pfAmount,
         status: selectedPayrollRow.status,
         ...currentEdit,
         [field]: value,
@@ -3851,30 +5443,49 @@ const PayrollPage = () => {
     setGenerated(false);
     setMessage("");
   };
-  const savePayroll = () => {
+  const savePayroll = async () => {
+    if (!rows.length) {
+      setMessage("Add employees before saving payroll.");
+      return;
+    }
+
     const processedRows = rows.map((row) => ({
       ...row,
       status: payrollEdits[row.id]?.status || "Processed",
     }));
-    const batch = {
-      id: `${month}-${department}`,
-      department,
-      month,
-      rows: processedRows,
-      savedAt: new Date().toISOString(),
-    };
 
-    setGenerated(true);
-    setPayrollBatches((current) => [
-      batch,
-      ...current.filter((item) => item.id !== batch.id),
-    ]);
-    setSelectedBatchId(batch.id);
-    setMessage(
-      `Payroll saved locally for ${processedRows.length} employee${
-        processedRows.length === 1 ? "" : "s"
-      }.`
-    );
+    setSaving(true);
+    try {
+      const batch = await saveHrmsSalaryBatch({
+        department,
+        month,
+        rows: processedRows,
+      });
+      if (!batch) {
+        throw new Error("No salary rows were returned from the HRMS database.");
+      }
+
+      setGenerated(true);
+      setPayrollBatches((current) => [
+        batch,
+        ...current.filter((item) => item.id !== batch.id),
+      ]);
+      setSelectedBatchId(batch.id);
+      setMessage(
+        `Payroll saved to HRMS database for ${processedRows.length} employee${
+          processedRows.length === 1 ? "" : "s"
+        }.`
+      );
+    } catch (error) {
+      setMessage(
+        getHrmsSalaryErrorMessage(
+          error,
+          "Could not save payroll to the HRMS database."
+        )
+      );
+    } finally {
+      setSaving(false);
+    }
   };
   const loadPayrollBatch = (batch) => {
     if (!batch) return;
@@ -3887,35 +5498,56 @@ const PayrollPage = () => {
     setPayrollEdits(
       (batch.rows || []).reduce((edits, row) => {
         edits[row.id] = {
-          allowance: Number(row.allowance || 0),
           deduction: Number(row.deduction || 0),
+          esiAmount: Number(row.esiAmount || 0),
+          pfAmount: Number(row.pfAmount || 0),
           salary: Number(row.salary || 0),
           status: row.status || "Processed",
         };
         return edits;
       }, {})
     );
-    setMessage(`Payroll loaded for ${batch.month} / ${batch.department}.`);
+    setMessage(`Payroll loaded from HRMS database for ${batch.month} / ${batch.department}.`);
   };
-  const updatePayrollBatch = (batch) => {
+  const updatePayrollBatch = async (batch) => {
     if (!batch) return;
 
     const updatedRows = rows.map((row) => ({ ...row, status: "Processed" }));
-    const updatedBatch = {
-      ...batch,
-      department,
-      month,
-      rows: updatedRows,
-      updatedAt: new Date().toISOString(),
-    };
 
-    setPayrollBatches((current) =>
-      current.map((item) => (item.id === batch.id ? updatedBatch : item))
-    );
-    setSelectedBatchId(batch.id);
-    setMessage(`Payroll updated for ${month} / ${department}.`);
+    setSaving(true);
+    try {
+      const updatedBatch = await saveHrmsSalaryBatch({
+        department,
+        month,
+        rows: updatedRows,
+      });
+      if (!updatedBatch) {
+        throw new Error("No salary rows were returned from the HRMS database.");
+      }
+      if (batch.month !== month || batch.department !== department) {
+        await deleteHrmsSalaryBatch(batch);
+      }
+
+      setPayrollBatches((current) => [
+        updatedBatch,
+        ...current.filter(
+          (item) => item.id !== batch.id && item.id !== updatedBatch.id
+        ),
+      ]);
+      setSelectedBatchId(updatedBatch.id);
+      setMessage(`Payroll updated in HRMS database for ${month} / ${department}.`);
+    } catch (error) {
+      setMessage(
+        getHrmsSalaryErrorMessage(
+          error,
+          "Could not update payroll in the HRMS database."
+        )
+      );
+    } finally {
+      setSaving(false);
+    }
   };
-  const deletePayrollBatch = (batch) => {
+  const deletePayrollBatch = async (batch) => {
     if (!batch) return;
 
     const confirmed = window.confirm(
@@ -3924,19 +5556,36 @@ const PayrollPage = () => {
 
     if (!confirmed) return;
 
-    setPayrollBatches((current) => current.filter((item) => item.id !== batch.id));
-    if (selectedBatchId === batch.id) {
-      setSelectedBatchId("");
-      setGenerated(false);
+    setSaving(true);
+    try {
+      await deleteHrmsSalaryBatch(batch);
+      setPayrollBatches((current) =>
+        current.filter((item) => item.id !== batch.id)
+      );
+      if (selectedBatchId === batch.id) {
+        setSelectedBatchId("");
+        setGenerated(false);
+      }
+      setMessage(
+        `Payroll deleted from HRMS database for ${batch.month} / ${batch.department}.`
+      );
+    } catch (error) {
+      setMessage(
+        getHrmsSalaryErrorMessage(
+          error,
+          "Could not delete payroll from the HRMS database."
+        )
+      );
+    } finally {
+      setSaving(false);
     }
-    setMessage(`Payroll deleted for ${batch.month} / ${batch.department}.`);
   };
 
   return (
     <div className="grid gap-4">
       <Panel>
         <div className="mb-4">
-          <Notice>{message}</Notice>
+          <Notice tone={payrollNoticeTone}>{payrollNotice}</Notice>
         </div>
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <Field label="Month">
@@ -3974,13 +5623,17 @@ const PayrollPage = () => {
               <option>Marketing</option>
             </Input>
           </Field>
-          <Button onClick={savePayroll} className="self-end">
-            Save Payroll
+          <Button
+            onClick={savePayroll}
+            className="self-end"
+            disabled={saving || !rows.length}
+          >
+            {saving ? "Saving..." : "Save Payroll"}
           </Button>
         </div>
 
         {selectedPayrollRow && (
-          <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto]">
+          <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[repeat(6,minmax(0,1fr))_auto]">
             <Field label="Select Employee">
               <Input
                 as="select"
@@ -3997,7 +5650,7 @@ const PayrollPage = () => {
                 ))}
               </Input>
             </Field>
-            <Field label="Basic Salary">
+            <Field label="Gross Salary">
               <Input
                 type="number"
                 min="0"
@@ -4005,20 +5658,28 @@ const PayrollPage = () => {
                 onChange={(event) => updatePayrollEdit("salary", event.target.value)}
               />
             </Field>
-            <Field label="Allowances">
-              <Input
-                type="number"
-                min="0"
-                value={selectedPayrollRow.allowance}
-                onChange={(event) => updatePayrollEdit("allowance", event.target.value)}
-              />
-            </Field>
-            <Field label="Deductions">
+            <Field label="Deduction">
               <Input
                 type="number"
                 min="0"
                 value={selectedPayrollRow.deduction}
                 onChange={(event) => updatePayrollEdit("deduction", event.target.value)}
+              />
+            </Field>
+            <Field label="PF">
+              <Input
+                type="number"
+                min="0"
+                value={selectedPayrollRow.pfAmount}
+                onChange={(event) => updatePayrollEdit("pfAmount", event.target.value)}
+              />
+            </Field>
+            <Field label="ESI">
+              <Input
+                type="number"
+                min="0"
+                value={selectedPayrollRow.esiAmount}
+                onChange={(event) => updatePayrollEdit("esiAmount", event.target.value)}
               />
             </Field>
             <Field label="Status">
@@ -4031,17 +5692,21 @@ const PayrollPage = () => {
                 <option>Processed</option>
               </Input>
             </Field>
-            <Button onClick={savePayroll} className="self-end">
-              Save Edited Payroll
+            <Button
+              onClick={savePayroll}
+              className="self-end"
+              disabled={saving || !rows.length}
+            >
+              {saving ? "Saving..." : "Save Edited Payroll"}
             </Button>
           </div>
         )}
 
         <div className="mt-5 overflow-x-auto">
-          <table className="min-w-[820px] w-full text-left text-sm">
+          <table className="min-w-[980px] w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
               <tr>
-                {["ID", "Employee", "Basic Salary", "Allowances", "Deductions", "Net Salary", "Status", "Action"].map((heading) => (
+                {["ID", "Employee", "Gross Salary", "Deduction", "PF", "ESI", "Net Salary", "Status", "Action"].map((heading) => (
                   <th key={heading} className="px-3 py-3 font-bold">
                     {heading}
                   </th>
@@ -4057,8 +5722,9 @@ const PayrollPage = () => {
                   <td className="px-3 py-3 font-semibold">{row.id}</td>
                   <td className="px-3 py-3">{row.name}</td>
                   <td className="px-3 py-3">{money(row.salary)}</td>
-                  <td className="px-3 py-3">{money(row.allowance)}</td>
                   <td className="px-3 py-3">{money(row.deduction)}</td>
+                  <td className="px-3 py-3">{money(row.pfAmount)}</td>
+                  <td className="px-3 py-3">{money(row.esiAmount)}</td>
                   <td className="px-3 py-3 font-bold">{money(row.net)}</td>
                   <td className="px-3 py-3">
                     <StatusBadge status={row.status} />
@@ -4076,7 +5742,7 @@ const PayrollPage = () => {
               ))}
               {!rows.length && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
                     No employees found for this payroll selection.
                   </td>
                 </tr>
@@ -4089,7 +5755,7 @@ const PayrollPage = () => {
       <Panel>
         <h2 className="text-base font-bold">Payroll Register</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Saved payroll batches with load, update, and delete options.
+          Saved payroll batches from the HRMS database with load, update, and delete options.
         </p>
 
         <div className="mt-5 overflow-x-auto">
@@ -4117,7 +5783,7 @@ const PayrollPage = () => {
                   >
                     <td className="px-3 py-3">
                       {batch.updatedAt || batch.savedAt
-                        ? new Date(batch.updatedAt || batch.savedAt).toLocaleString()
+                        ? formatDateTime(batch.updatedAt || batch.savedAt)
                         : "Not provided"}
                     </td>
                     <td className="px-3 py-3">{batch.month}</td>
@@ -4125,7 +5791,7 @@ const PayrollPage = () => {
                     <td className="px-3 py-3">{batch.rows?.length || 0}</td>
                     <td className="px-3 py-3 font-bold">{money(netTotal)}</td>
                     <td className="px-3 py-3">
-                      <StatusBadge status="Processed" />
+                      <StatusBadge status={batch.status || "Processed"} />
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap gap-2">
@@ -4139,6 +5805,7 @@ const PayrollPage = () => {
                         <Button
                           className="min-h-8 px-2 text-xs"
                           onClick={() => updatePayrollBatch(batch)}
+                          disabled={saving}
                         >
                           Update
                         </Button>
@@ -4146,6 +5813,7 @@ const PayrollPage = () => {
                           className="min-h-8 px-2 text-xs"
                           variant="danger"
                           onClick={() => deletePayrollBatch(batch)}
+                          disabled={saving}
                         >
                           Delete
                         </Button>
@@ -4157,7 +5825,7 @@ const PayrollPage = () => {
               {!payrollBatches.length && (
                 <tr>
                   <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
-                    No payroll batches saved yet. Generate payroll to create a register entry.
+                    No payroll batches saved in the HRMS database yet. Generate payroll to create a register entry.
                   </td>
                 </tr>
               )}
@@ -4178,7 +5846,7 @@ const PayrollPage = () => {
             [
               "Saved Date",
               selectedPayrollBatch.savedAt
-                ? new Date(selectedPayrollBatch.savedAt).toLocaleString()
+                ? formatDateTime(selectedPayrollBatch.savedAt)
                 : "Not provided",
             ],
           ]}
@@ -4186,11 +5854,11 @@ const PayrollPage = () => {
             [
               "Updated Date",
               selectedPayrollBatch.updatedAt
-                ? new Date(selectedPayrollBatch.updatedAt).toLocaleString()
+                ? formatDateTime(selectedPayrollBatch.updatedAt)
                 : "Not updated",
             ],
             [
-              "Total Basic",
+              "Total Gross",
               money(
                 (selectedPayrollBatch.rows || []).reduce(
                   (sum, row) => sum + Number(row.salary || 0),
@@ -4202,7 +5870,14 @@ const PayrollPage = () => {
               "Total Deductions",
               money(
                 (selectedPayrollBatch.rows || []).reduce(
-                  (sum, row) => sum + Number(row.deduction || 0),
+                  (sum, row) =>
+                    sum +
+                    Number(
+                      row.totalDeductions ??
+                        Number(row.deduction || 0) +
+                          Number(row.pfAmount || 0) +
+                          Number(row.esiAmount || 0)
+                    ),
                   0
                 )
               ),
@@ -4220,9 +5895,10 @@ const PayrollPage = () => {
           tableColumns={[
             "Employee ID",
             "Employee",
-            "Basic Salary",
-            "Allowances",
-            "Deductions",
+            "Gross Salary",
+            "Deduction",
+            "PF",
+            "ESI",
             "Net Pay",
             "Status",
           ]}
@@ -4232,14 +5908,15 @@ const PayrollPage = () => {
               row.id,
               row.name,
               money(row.salary),
-              money(row.allowance),
               money(row.deduction),
+              money(row.pfAmount),
+              money(row.esiAmount),
               money(row.net),
               row.status,
             ],
           }))}
           bottomLeftTitle="Payroll Notes"
-          bottomLeftValue="Registered payroll details saved from the payroll editor."
+          bottomLeftValue="Registered payroll details saved from the HRMS database."
         />
       )}
     </div>
@@ -4248,7 +5925,7 @@ const PayrollPage = () => {
 
 const PayslipPage = () => {
   const [employees] = useHrmsEmployees();
-  const [payrollBatches] = useStoredList(HRMS_STORAGE_KEYS.payroll, []);
+  const [payrollBatches, , payrollState] = useHrmsSalaries();
   const monthOptions = useMemo(
     () =>
       Array.from(
@@ -4265,20 +5942,22 @@ const PayslipPage = () => {
     employees.find((employee) => employee.id === selectedEmployeeId) || null;
   const employee = payslip?.employee || null;
   const payrollRow = payslip?.payrollRow || null;
+  const payrollBreakup = payslip
+    ? getSalaryBreakup(payrollRow || {}, payrollRow?.salary)
+    : null;
   const earnings = payslip
-    ? [
-        ["Basic Salary", Number(payrollRow?.salary || 0)],
-        ["Allowances", Number(payrollRow?.allowance || 0)],
-      ]
+    ? [["Gross Salary", payrollBreakup.grossSalary]]
     : [];
   const deductions = payslip
-    ? [["Deductions", Number(payrollRow?.deduction || 0)]]
+    ? [
+        ["Deduction", payrollBreakup.deduction],
+        ["PF", payrollBreakup.pfAmount],
+        ["ESI", payrollBreakup.esiAmount],
+      ]
     : [];
   const totalEarnings = earnings.reduce((sum, [, value]) => sum + value, 0);
   const totalDeductions = deductions.reduce((sum, [, value]) => sum + value, 0);
-  const netPay = payslip
-    ? Number(payrollRow?.net ?? totalEarnings - totalDeductions)
-    : 0;
+  const netPay = payslip ? payrollBreakup.netSalary : 0;
 
   useEffect(() => {
     if (!selectedEmployeeId && employees[0]?.id) {
@@ -4308,12 +5987,16 @@ const PayslipPage = () => {
     const savedRow = matchingBatch?.rows?.find(
       (row) => row.id === selectedEmployee.id
     );
+    const fallbackBreakup = getSalaryBreakup(selectedEmployee);
     const fallbackRow = {
       ...selectedEmployee,
-      allowance: 5000,
-      deduction: 4000,
-      net: Number(selectedEmployee.salary || 0) + 5000 - 4000,
-      salary: Number(selectedEmployee.salary || 0),
+      allowance: 0,
+      deduction: fallbackBreakup.deduction,
+      esiAmount: fallbackBreakup.esiAmount,
+      net: fallbackBreakup.netSalary,
+      pfAmount: fallbackBreakup.pfAmount,
+      salary: fallbackBreakup.grossSalary,
+      totalDeductions: fallbackBreakup.totalDeductions,
       status: "Pending",
     };
 
@@ -4328,8 +6011,8 @@ const PayslipPage = () => {
     setMessageTone(savedRow ? "success" : "warning");
     setMessage(
       savedRow
-        ? `Payslip created for ${selectedEmployee.name} from saved payroll.`
-        : `No saved payroll found for ${selectedEmployee.name} in ${month}. Showing fallback values. Save payroll first for registered payslip data.`
+        ? `Payslip created for ${selectedEmployee.name} from HRMS database payroll.`
+        : `No saved payroll found in the HRMS database for ${selectedEmployee.name} in ${month}. Showing fallback values. Save payroll first for registered payslip data.`
     );
     return nextPayslip;
   };
@@ -4350,6 +6033,12 @@ const PayslipPage = () => {
       <Panel>
         <div className="mb-4">
           <Notice tone={messageTone}>{message}</Notice>
+          {payrollState.error && (
+            <Notice tone="warning">{payrollState.error}</Notice>
+          )}
+          {payrollState.loading && !payrollBatches.length && (
+            <Notice>Loading payroll from HRMS database...</Notice>
+          )}
           {!employees.length && (
             <Notice tone="warning">Add an employee before generating a payslip.</Notice>
           )}
@@ -4435,7 +6124,7 @@ const PayslipPage = () => {
                   ["Date of Joining", displayValue(employee?.joined)],
                   ["Days Worked", "26"],
                   ["Bank Account", "Not provided"],
-                  ["Payment Date", "31-05-2024"],
+                  ["Payment Date", "31/05/2024"],
                   ["Payroll Status", payrollRow?.status || "Pending"],
                   ["Payroll Ref", payslip.batch?.id || "Not saved"],
                 ].map(([label, value]) => (
@@ -4482,13 +6171,98 @@ const PayrollBox = ({ title, rows, totalLabel, total }) => (
   </div>
 );
 
+const RelievingLetterDocument = ({ record, employee }) => {
+  const letter = getRelievingLetterData(record, employee);
+  const checklist = Array.isArray(record?.checklist) ? record.checklist : [];
+
+  return (
+    <article className="rounded-md border border-slate-300 bg-white p-5 text-sm leading-7 text-slate-800">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-blue-700 pb-4">
+        <div>
+          <h2 className="text-xl font-bold text-slate-950">
+            Bangalore Electronics
+          </h2>
+          <p className="text-xs font-semibold text-slate-500">
+            Human Resources Department
+          </p>
+        </div>
+        <div className="text-right text-xs font-semibold text-slate-600">
+          <p>Date: {letter.letterDate}</p>
+          <p>Ref: {letter.referenceNo}</p>
+        </div>
+      </div>
+
+      <h3 className="mt-6 text-center text-lg font-bold uppercase tracking-wide text-slate-950">
+        Relieving Letter
+      </h3>
+
+      <div className="mt-5 grid gap-2 rounded-md bg-slate-50 p-4 text-xs sm:grid-cols-2">
+        {letter.rows.map(([label, value]) => (
+          <div key={label} className="grid grid-cols-[120px_1fr] gap-2">
+            <span className="font-semibold text-slate-500">{label}</span>
+            <strong className="text-slate-900">{value}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 grid gap-3">
+        {letter.paragraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+      </div>
+
+      <div className="mt-5 overflow-x-auto">
+        <table className="w-full min-w-[520px] border-collapse text-left text-xs">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="border border-slate-200 px-3 py-2">
+                Checklist Item
+              </th>
+              <th className="border border-slate-200 px-3 py-2">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {checklist.map((item) => (
+              <tr key={item.label}>
+                <td className="border border-slate-200 px-3 py-2 font-semibold">
+                  {item.label}
+                </td>
+                <td className="border border-slate-200 px-3 py-2">
+                  <span
+                    className={[
+                      "inline-flex rounded-full px-2 py-1 text-[11px] font-bold",
+                      item.checked
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-700",
+                    ].join(" ")}
+                  >
+                    {item.checked ? "Completed" : "Pending"}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-12 grid gap-8 text-xs font-semibold text-slate-600 sm:grid-cols-2">
+        <div className="border-t border-slate-400 pt-2">Employee Signature</div>
+        <div className="border-t border-slate-400 pt-2 text-right">
+          Authorised HR Signatory
+        </div>
+      </div>
+    </article>
+  );
+};
+
 const RelievingPage = () => {
   const [employees, setEmployees] = useHrmsEmployees();
-  const [, setRelievingRecords] = useStoredList(
-    HRMS_STORAGE_KEYS.relieving,
-    []
-  );
+  const [relievingRecords, setRelievingRecords, relievingState] =
+    useHrmsRelieving();
   const employee = employees[0] || null;
+  const [registeredRelievingRecord, setRegisteredRelievingRecord] =
+    useState(null);
+  const [selectedRelievingRecord, setSelectedRelievingRecord] = useState(null);
   const [items, setItems] = useState([
     ["Handover Documents", true],
     ["Clear Pending Tasks", true],
@@ -4497,36 +6271,105 @@ const RelievingPage = () => {
     ["Final Settlement", true],
   ]);
   const [message, setMessage] = useState("");
-  const processRelieving = () => {
+  const [saving, setSaving] = useState(false);
+  const employeeId = employee?.id;
+
+  const existingRegisteredRecord = useMemo(
+    () =>
+      employeeId
+        ? relievingRecords.find((record) => record.employeeId === employeeId)
+        : null,
+    [employeeId, relievingRecords]
+  );
+  const recentRegisteredRecord =
+    registeredRelievingRecord?.employeeId === employeeId
+      ? registeredRelievingRecord
+      : null;
+  const activeSelectedRelievingRecord =
+    selectedRelievingRecord?.employeeId === employeeId
+      ? selectedRelievingRecord
+      : null;
+  const registeredRecord = recentRegisteredRecord || existingRegisteredRecord;
+  const relievingDetails = registeredRecord || {
+    lastWorkingDate: "10/06/2024",
+    noticePeriod: "30 Days",
+    resignationDate: "10/05/2024",
+  };
+
+  const processRelieving = async () => {
     if (!employee) {
       setMessage("Add an employee before processing relieving.");
       return;
     }
 
-    const record = {
-      id: `REL-${Date.now()}`,
+    const referenceNo = `REL-${Date.now()}`;
+    const payload = {
+      referenceNo,
+      id: referenceNo,
       employeeId: employee.id,
       employeeName: employee.name,
       checklist: items.map(([label, checked]) => ({ label, checked })),
-      lastWorkingDate: "10-06-2024",
+      lastWorkingDate: "10/06/2024",
       noticePeriod: "30 Days",
-      resignationDate: "10-05-2024",
+      resignationDate: "10/05/2024",
       status: "Relieved",
-      savedAt: new Date().toISOString(),
+      letterGenerated: true,
     };
 
-    setRelievingRecords((current) => [record, ...current]);
-    setEmployees((current) =>
-      current.map((item) =>
-        item.id === employee.id ? { ...item, status: "Relieved" } : item
-      )
-    );
-    setMessage(`${employee.name} relieving process saved locally.`);
+    setSaving(true);
+    try {
+      const record = await createHrmsRelieving(payload);
+      setRelievingRecords((current) => [record, ...current]);
+      setRegisteredRelievingRecord(record);
+      setSelectedRelievingRecord(null);
+
+      let employeeStatusMessage = "";
+      try {
+        const updatedEmployee = await updateHrmsEmployee(employee.id, {
+          status: "Relieved",
+        });
+        setEmployees((current) =>
+          current.map((item) =>
+            item.id === employee.id ? { ...item, ...updatedEmployee } : item
+          )
+        );
+      } catch (employeeError) {
+        employeeStatusMessage = ` ${getHrmsEmployeeErrorMessage(
+          employeeError,
+          "Employee status could not be updated."
+        )}`;
+      }
+
+      setMessage(
+        `${employee.name} relieving process saved to HRMS database. Registered form is ready below.${employeeStatusMessage}`
+      );
+    } catch (error) {
+      setMessage(
+        getHrmsRelievingErrorMessage(
+          error,
+          "Could not save relieving record to the HRMS database."
+        )
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="grid gap-4">
-      <Notice>{message}</Notice>
+      <Notice
+        tone={
+          relievingState.error || /^(Add|Could not|Employee status)/.test(message)
+            ? "warning"
+            : "success"
+        }
+      >
+        {relievingState.error ||
+          message ||
+          (relievingState.loading
+            ? "Loading relieving records from HRMS database..."
+            : "")}
+      </Notice>
       {!employee && (
         <Panel>
           <Notice tone="warning">No employee records are available.</Notice>
@@ -4551,9 +6394,9 @@ const RelievingPage = () => {
           </div>
           <div className="grid gap-3 text-sm">
             {[
-              ["Resignation Date", "10-05-2024"],
-              ["Last Working Date", "10-06-2024"],
-              ["Notice Period", "30 Days"],
+              ["Resignation Date", relievingDetails.resignationDate],
+              ["Last Working Date", relievingDetails.lastWorkingDate],
+              ["Notice Period", relievingDetails.noticePeriod],
               ["Relieving Status", employee.status === "Relieved" ? "Relieved" : "Pending"],
             ].map(([label, value]) => (
               <div key={label} className="grid grid-cols-[150px_1fr] gap-3">
@@ -4602,10 +6445,87 @@ const RelievingPage = () => {
           >
             Cancel
           </Button>
-          <Button onClick={processRelieving}>Process Relieving</Button>
+          <Button onClick={processRelieving} disabled={saving}>
+            {saving ? "Processing..." : "Process Relieving"}
+          </Button>
         </div>
       </Panel>
       </div>
+      )}
+      {employee && registeredRecord && (
+        <Panel className="border-emerald-200 bg-emerald-50/70">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="inline-grid h-11 w-11 place-items-center rounded-full bg-emerald-600 text-white">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-6 w-6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2.4"
+                >
+                  <path d="M5 12.5l4 4L19 7" />
+                </svg>
+              </span>
+              <div>
+                <h2 className="text-sm font-bold text-emerald-900">
+                  Relieving processed
+                </h2>
+                <p className="text-sm font-semibold text-emerald-700">
+                  Registered form {registeredRecord.id} is available.
+                </p>
+              </div>
+            </div>
+            <Button onClick={() => setSelectedRelievingRecord(registeredRecord)}>
+              <AppIcon name="file" className="h-4 w-4" />
+              Registered Form
+            </Button>
+          </div>
+        </Panel>
+      )}
+      {employee && activeSelectedRelievingRecord && (
+        <Panel id="relieving-letter-print-area">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold">Relieving Letter</h2>
+              <p className="text-xs font-semibold text-slate-500">
+                {activeSelectedRelievingRecord.employeeName} -{" "}
+                {activeSelectedRelievingRecord.id}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  printRelievingLetter(activeSelectedRelievingRecord, employee)
+                }
+              >
+                <AppIcon name="file" className="h-4 w-4" />
+                Print
+              </Button>
+              <Button
+                onClick={() =>
+                  printRelievingLetter(activeSelectedRelievingRecord, employee)
+                }
+              >
+                <AppIcon name="download" className="h-4 w-4" />
+                PDF
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setSelectedRelievingRecord(null)}
+              >
+                <AppIcon name="x" className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <RelievingLetterDocument
+            record={activeSelectedRelievingRecord}
+            employee={employee}
+          />
+        </Panel>
       )}
     </div>
   );

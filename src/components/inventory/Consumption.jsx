@@ -11,6 +11,7 @@ import { fetchDeliveryChallans } from "../../services/deliveryChallanApi";
 import { fetchLocations } from "../../services/locationsApi";
 import { fetchProjects } from "../../services/projectsApi";
 import { getProjects as getCachedProjects } from "../../services/projectsStore";
+import { fetchReallocateInventory } from "../../services/reallocateInventoryApi";
 import useSettings from "../../hooks/useSettings";
 import DateInput from "../common/DateInput";
 import DocumentViewPanel from "./DocumentViewPanel";
@@ -34,6 +35,10 @@ const issuedByOptions = [
   "Project Manager",
 ];
 const statusOptions = ["Logged", "Reviewed", "Approved"];
+const lookupSourceOptions = [
+  { value: "dc", label: "DC Lookup" },
+  { value: "reallocation", label: "Reallocation Lookup" },
+];
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -400,6 +405,19 @@ const statusPillClass = (status) => {
   return "border-violet-200 bg-violet-50 text-violet-700";
 };
 
+const sourceTypeLabel = (row = {}) => {
+  if (normalizeText(row.sourceRef).startsWith("rel-")) {
+    return "Reallocation";
+  }
+  if (normalizeText(row.sourceType) === "dc") {
+    return "DC";
+  }
+  if (normalizeText(row.sourceType) === "reallocation") {
+    return "Reallocation";
+  }
+  return row.sourceType || "Receive";
+};
+
 const Consumption = () => {
   const navigate = useNavigate();
   const settings = useSettings();
@@ -408,14 +426,17 @@ const Consumption = () => {
   const [projects, setProjects] = useState(() => getCachedProjects());
   const [locations, setLocations] = useState([]);
   const [deliveryChallans, setDeliveryChallans] = useState([]);
+  const [reallocations, setReallocations] = useState([]);
   const [consumptions, setConsumptions] = useState([]);
   const [availableInventory, setAvailableInventory] = useState([]);
 
   const [form, setForm] = useState(() => createEmptyForm({ company }));
   const [itemRows, setItemRows] = useState([]);
   const [selectedDeliveryChallanIds, setSelectedDeliveryChallanIds] = useState([]);
+  const [selectedReallocationIds, setSelectedReallocationIds] = useState([]);
   const [, setLoadedDeliveryChallanIds] = useState([]);
   const [deliveryChallanFilter, setDeliveryChallanFilter] = useState("");
+  const [lookupSource, setLookupSource] = useState("dc");
   const [editingId, setEditingId] = useState(null);
   const [editingConsumption, setEditingConsumption] = useState(null);
 
@@ -457,25 +478,43 @@ const Consumption = () => {
     [deliveryChallans]
   );
 
+  const reallocationMap = useMemo(
+    () =>
+      reallocations.reduce((acc, record) => {
+        acc[String(record.id)] = record;
+        return acc;
+      }, {}),
+    [reallocations]
+  );
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [projectsList, locationsList, challansList, consumptionsList] = await Promise.all([
+      const [
+        projectsList,
+        locationsList,
+        challansList,
+        reallocationsList,
+        consumptionsList,
+      ] = await Promise.all([
         fetchProjects().catch(() => getCachedProjects()),
         fetchLocations().catch(() => []),
         fetchDeliveryChallans().catch(() => []),
+        fetchReallocateInventory().catch(() => []),
         fetchConsumptions().catch(() => []),
       ]);
 
       setProjects(Array.isArray(projectsList) ? projectsList : []);
       setLocations(Array.isArray(locationsList) ? locationsList : []);
       setDeliveryChallans(Array.isArray(challansList) ? challansList : []);
+      setReallocations(Array.isArray(reallocationsList) ? reallocationsList : []);
       setConsumptions(Array.isArray(consumptionsList) ? consumptionsList : []);
 
       return {
         projects: Array.isArray(projectsList) ? projectsList : [],
         locations: Array.isArray(locationsList) ? locationsList : [],
         deliveryChallans: Array.isArray(challansList) ? challansList : [],
+        reallocations: Array.isArray(reallocationsList) ? reallocationsList : [],
         consumptions: Array.isArray(consumptionsList) ? consumptionsList : [],
       };
     } finally {
@@ -493,6 +532,7 @@ const Consumption = () => {
       setAvailableInventory([]);
       setInventoryError("");
       setSelectedDeliveryChallanIds([]);
+      setSelectedReallocationIds([]);
       setLoadedDeliveryChallanIds([]);
       setDeliveryChallanFilter("");
       setForm(() => createEmptyForm({ records: nextRecords, company }));
@@ -511,12 +551,14 @@ const Consumption = () => {
 
     window.addEventListener("consumptions:changed", refresh);
     window.addEventListener("delivery-challans:changed", refresh);
+    window.addEventListener("reallocate-inventory:changed", refresh);
     window.addEventListener("projects:changed", refresh);
     window.addEventListener("locations:changed", refresh);
 
     return () => {
       window.removeEventListener("consumptions:changed", refresh);
       window.removeEventListener("delivery-challans:changed", refresh);
+      window.removeEventListener("reallocate-inventory:changed", refresh);
       window.removeEventListener("projects:changed", refresh);
       window.removeEventListener("locations:changed", refresh);
     };
@@ -631,6 +673,23 @@ const Consumption = () => {
     );
   }, [deliveryChallans, form.projectId]);
 
+  const availableReallocations = useMemo(() => {
+    const selectedProjectId = String(form.projectId || "");
+    const selectedLocationId = String(form.locationId || "");
+    return reallocations.filter((record) => {
+      if (String(record.type || "Reallocate") !== "Reallocate") {
+        return false;
+      }
+      if (selectedProjectId && String(record.projectId ?? "") !== selectedProjectId) {
+        return false;
+      }
+      if (selectedLocationId && String(record.toLocationId ?? "") !== selectedLocationId) {
+        return false;
+      }
+      return true;
+    });
+  }, [form.locationId, form.projectId, reallocations]);
+
   const filteredDeliveryChallansForSelection = useMemo(() => {
     const keyword = normalizeText(deliveryChallanFilter);
     const selectedLocationId = String(form.locationId || "");
@@ -664,6 +723,33 @@ const Consumption = () => {
     });
   }, [availableChallans, deliveryChallanFilter, form.locationId, locationMap]);
 
+  const filteredReallocationsForSelection = useMemo(() => {
+    const keyword = normalizeText(deliveryChallanFilter);
+    return availableReallocations.filter((record) => {
+      if (!keyword) {
+        return true;
+      }
+      const fromLocation =
+        locationMap[String(record.fromLocationId)]?.name || "";
+      const toLocation = locationMap[String(record.toLocationId)]?.name || "";
+      const itemsText = (record.items || [])
+        .map((item) => item.name || item.item || "")
+        .join(" ");
+      return [
+        record.referenceNumber,
+        record.consumptionNumber,
+        fromLocation,
+        toLocation,
+        record.status,
+        record.requestedBy,
+        itemsText,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(keyword);
+    });
+  }, [availableReallocations, deliveryChallanFilter, locationMap]);
+
   const selectedDeliveryChallans = useMemo(
     () =>
       selectedDeliveryChallanIds
@@ -672,9 +758,22 @@ const Consumption = () => {
     [deliveryChallanMap, selectedDeliveryChallanIds]
   );
 
+  const selectedReallocations = useMemo(
+    () =>
+      selectedReallocationIds
+        .map((recordId) => reallocationMap[String(recordId)])
+        .filter(Boolean),
+    [reallocationMap, selectedReallocationIds]
+  );
+
   const selectableFilteredDeliveryChallanIds = useMemo(
     () => filteredDeliveryChallansForSelection.map((challan) => String(challan.id)),
     [filteredDeliveryChallansForSelection]
+  );
+
+  const selectableFilteredReallocationIds = useMemo(
+    () => filteredReallocationsForSelection.map((record) => String(record.id)),
+    [filteredReallocationsForSelection]
   );
 
   const allFilteredDeliveryChallansSelected = useMemo(() => {
@@ -685,6 +784,15 @@ const Consumption = () => {
       selectedDeliveryChallanIds.includes(challanId)
     );
   }, [selectableFilteredDeliveryChallanIds, selectedDeliveryChallanIds]);
+
+  const allFilteredReallocationsSelected = useMemo(() => {
+    if (!selectableFilteredReallocationIds.length) {
+      return false;
+    }
+    return selectableFilteredReallocationIds.every((recordId) =>
+      selectedReallocationIds.includes(recordId)
+    );
+  }, [selectableFilteredReallocationIds, selectedReallocationIds]);
 
   const allSelectableRows = useMemo(
     () => itemRows.filter((row) => row.availableQty > 0),
@@ -747,6 +855,38 @@ const Consumption = () => {
     return locationMap[String(id)]?.name || fallback || "-";
   };
 
+  const getReallocationItemCount = (record = {}) =>
+    Array.isArray(record.items) ? record.items.length : 0;
+
+  const getReallocationTotalQuantity = (record = {}) =>
+    (Array.isArray(record.items) ? record.items : []).reduce(
+      (sum, item) => sum + Math.max(toNumber(item.quantity ?? item.Quantity), 0),
+      0
+    );
+
+  const getReallocationAvailableQuantity = useCallback(
+    (record = {}) => {
+      const reference = normalizeText(record.referenceNumber);
+      if (!reference) {
+        return 0;
+      }
+      return availableInventory.reduce((sum, row) => {
+        return normalizeText(row.sourceRef) === reference
+          ? sum + Math.max(toNumber(row.availableQty), 0)
+          : sum;
+      }, 0);
+    },
+    [availableInventory]
+  );
+
+  const getReallocationLocationLabel = (record = {}, type = "to") => {
+    const id =
+      type === "from"
+        ? record.fromLocationId ?? record.FromLocationId
+        : record.toLocationId ?? record.ToLocationId;
+    return locationMap[String(id)]?.name || "-";
+  };
+
   const selectedDeliveryChallansSummary = useMemo(
     () => ({
       challans: selectedDeliveryChallans.length,
@@ -764,6 +904,25 @@ const Consumption = () => {
       ),
     }),
     [getChallanAvailableQuantity, selectedDeliveryChallans]
+  );
+
+  const selectedReallocationsSummary = useMemo(
+    () => ({
+      records: selectedReallocations.length,
+      items: selectedReallocations.reduce(
+        (sum, record) => sum + getReallocationItemCount(record),
+        0
+      ),
+      quantity: selectedReallocations.reduce(
+        (sum, record) => sum + getReallocationTotalQuantity(record),
+        0
+      ),
+      availableQuantity: selectedReallocations.reduce(
+        (sum, record) => sum + getReallocationAvailableQuantity(record),
+        0
+      ),
+    }),
+    [getReallocationAvailableQuantity, selectedReallocations]
   );
 
   const totalEntries = consumptions.length;
@@ -895,6 +1054,7 @@ const Consumption = () => {
     }));
     setItemRows([]);
     setSelectedDeliveryChallanIds([]);
+    setSelectedReallocationIds([]);
     setLoadedDeliveryChallanIds([]);
     setDeliveryChallanFilter("");
     setAvailableInventory([]);
@@ -913,6 +1073,7 @@ const Consumption = () => {
     }));
     setItemRows([]);
     setSelectedDeliveryChallanIds([]);
+    setSelectedReallocationIds([]);
     setLoadedDeliveryChallanIds([]);
     clearError("locationId");
     clearError("items");
@@ -945,8 +1106,36 @@ const Consumption = () => {
     clearError("deliveryChallanId");
   };
 
+  const toggleReallocationSelection = (recordId) => {
+    const id = String(recordId);
+    if (!reallocationMap[id]) {
+      return;
+    }
+    setSelectedReallocationIds((prev) =>
+      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
+    );
+    clearError("deliveryChallanId");
+  };
+
+  const toggleAllFilteredReallocations = () => {
+    if (!selectableFilteredReallocationIds.length) {
+      return;
+    }
+    setSelectedReallocationIds((prev) => {
+      const allSelected = selectableFilteredReallocationIds.every((id) =>
+        prev.includes(id)
+      );
+      if (allSelected) {
+        return prev.filter((id) => !selectableFilteredReallocationIds.includes(id));
+      }
+      return Array.from(new Set([...prev, ...selectableFilteredReallocationIds]));
+    });
+    clearError("deliveryChallanId");
+  };
+
   const clearDeliveryChallanSelection = () => {
     setSelectedDeliveryChallanIds([]);
+    setSelectedReallocationIds([]);
     setLoadedDeliveryChallanIds([]);
     setItemRows(
       buildRowsFromAvailableInventory({
@@ -999,6 +1188,53 @@ const Consumption = () => {
       deliveryChallanId: primaryChallan.id ? String(primaryChallan.id) : "",
       deliveryChallanRef: selectedDeliveryChallans
         .map((challan) => challan.dcNumber)
+        .filter(Boolean)
+        .join(", "),
+    }));
+    clearError("locationId");
+    clearError("deliveryChallanId");
+    clearError("items");
+  };
+
+  const handleLoadSelectedReallocations = () => {
+    if (!selectedReallocations.length) {
+      clearDeliveryChallanSelection();
+      return;
+    }
+
+    const selectedRefs = new Set(
+      selectedReallocations
+        .map((record) => normalizeText(record.referenceNumber))
+        .filter(Boolean)
+    );
+    const filteredInventoryRows = availableInventory.filter((row) =>
+      selectedRefs.has(normalizeText(row.sourceRef))
+    );
+    const nextRows = buildRowsFromAvailableInventory({
+      rows: filteredInventoryRows,
+      editingConsumption,
+      autoSelectAvailable: true,
+    });
+
+    if (!nextRows.length || !nextRows.some((row) => row.availableQty > 0)) {
+      setErrors((prev) => ({
+        ...prev,
+        items:
+          "Selected reallocation records do not have remaining inventory for this location.",
+      }));
+      return;
+    }
+
+    const primaryRecord = selectedReallocations[0];
+    setLoadedDeliveryChallanIds([]);
+    setItemRows(nextRows);
+    setForm((prev) => ({
+      ...prev,
+      projectId: primaryRecord.projectId ? String(primaryRecord.projectId) : prev.projectId,
+      locationId: primaryRecord.toLocationId ? String(primaryRecord.toLocationId) : prev.locationId,
+      deliveryChallanId: "",
+      deliveryChallanRef: selectedReallocations
+        .map((record) => record.referenceNumber)
         .filter(Boolean)
         .join(", "),
     }));
@@ -1322,6 +1558,7 @@ const Consumption = () => {
     if (linkedChallans.length) {
       const ids = linkedChallans.map((challan) => String(challan.id));
       setSelectedDeliveryChallanIds(ids);
+      setSelectedReallocationIds([]);
       setLoadedDeliveryChallanIds(ids);
       const rows = linkedChallans.flatMap((challan, challanIndex) =>
         buildRowsFromSelectedChallan({
@@ -1346,6 +1583,7 @@ const Consumption = () => {
     }
 
     setSelectedDeliveryChallanIds([]);
+    setSelectedReallocationIds([]);
     setLoadedDeliveryChallanIds([]);
 
     const fallbackRows = (record.items || []).map((item, index) => {
@@ -1652,18 +1890,40 @@ const Consumption = () => {
           <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 className="text-2xl font-semibold text-violet-800">
-                Optional Delivery Challan Lookup
+                Optional DC / Reallocation Lookup
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                Available inventory loads automatically from the selected project and location. Use this lookup only when you want to narrow the list to specific DCs.
+                Available inventory loads automatically from the selected project and location. Use this lookup only when you want to narrow the list to specific DC or reallocation records.
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <select
+                value={lookupSource}
+                onChange={(event) => {
+                  setLookupSource(event.target.value);
+                  setDeliveryChallanFilter("");
+                  setSelectedDeliveryChallanIds([]);
+                  setSelectedReallocationIds([]);
+                  setLoadedDeliveryChallanIds([]);
+                  clearError("deliveryChallanId");
+                }}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100 sm:w-52"
+              >
+                {lookupSourceOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               <input
                 type="search"
                 value={deliveryChallanFilter}
                 onChange={(event) => setDeliveryChallanFilter(event.target.value)}
-                placeholder="Search DC number or location..."
+                placeholder={
+                  lookupSource === "reallocation"
+                    ? "Search reallocation ref or location..."
+                    : "Search DC number or location..."
+                }
                 className="w-full min-w-[260px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
               />
               <button
@@ -1685,13 +1945,29 @@ const Consumption = () => {
                       <th className="w-12 px-3 py-3 text-left">
                         <input
                           type="checkbox"
-                          checked={allFilteredDeliveryChallansSelected}
-                          onChange={toggleAllFilteredDeliveryChallans}
-                          disabled={!filteredDeliveryChallansForSelection.length}
+                          checked={
+                            lookupSource === "reallocation"
+                              ? allFilteredReallocationsSelected
+                              : allFilteredDeliveryChallansSelected
+                          }
+                          onChange={
+                            lookupSource === "reallocation"
+                              ? toggleAllFilteredReallocations
+                              : toggleAllFilteredDeliveryChallans
+                          }
+                          disabled={
+                            lookupSource === "reallocation"
+                              ? !filteredReallocationsForSelection.length
+                              : !filteredDeliveryChallansForSelection.length
+                          }
                         />
                       </th>
-                      <th className="px-3 py-3 text-left">DC Number</th>
-                      <th className="px-3 py-3 text-left">DC Date</th>
+                      <th className="px-3 py-3 text-left">
+                        {lookupSource === "reallocation" ? "Reallocation Ref" : "DC Number"}
+                      </th>
+                      <th className="px-3 py-3 text-left">
+                        {lookupSource === "reallocation" ? "Reallocation Date" : "DC Date"}
+                      </th>
                       <th className="px-3 py-3 text-left">From</th>
                       <th className="px-3 py-3 text-left">To</th>
                       <th className="px-3 py-3 text-right">Item Count</th>
@@ -1703,9 +1979,63 @@ const Consumption = () => {
                     {!form.projectId ? (
                       <tr>
                         <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
-                          Select a project to review delivery challans.
+                          Select a project to review lookup records.
                         </td>
                       </tr>
+                    ) : lookupSource === "reallocation" ? (
+                      filteredReallocationsForSelection.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
+                            No reallocation records found for this project and location.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredReallocationsForSelection.map((record) => {
+                          const id = String(record.id);
+                          const isSelected = selectedReallocationIds.includes(id);
+                          return (
+                            <tr
+                              key={id}
+                              className="border-t border-slate-200 bg-white hover:bg-violet-50/40"
+                            >
+                              <td className="px-3 py-3">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleReallocationSelection(id)}
+                                />
+                              </td>
+                              <td className="px-3 py-3 font-semibold text-slate-800">
+                                {record.referenceNumber || "-"}
+                              </td>
+                              <td className="px-3 py-3 text-slate-700">
+                                {formatDate(record.requestDate || record.transferDate)}
+                              </td>
+                              <td className="px-3 py-3 text-slate-700">
+                                {getReallocationLocationLabel(record, "from")}
+                              </td>
+                              <td className="px-3 py-3 text-slate-700">
+                                {getReallocationLocationLabel(record, "to")}
+                              </td>
+                              <td className="px-3 py-3 text-right text-slate-700">
+                                {getReallocationItemCount(record)}
+                              </td>
+                              <td className="px-3 py-3 text-right font-semibold text-slate-800">
+                                {formatQty(getReallocationTotalQuantity(record))}
+                              </td>
+                              <td className="px-3 py-3 text-slate-700">
+                                <span
+                                  className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusPillClass(
+                                    record.status
+                                  )}`}
+                                >
+                                  {record.status || "Pending"}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )
                     ) : filteredDeliveryChallansForSelection.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
@@ -1764,16 +2094,24 @@ const Consumption = () => {
               </div>
               <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-slate-500">
-                  Showing {filteredDeliveryChallansForSelection.length} of {availableChallans.length} DCs
+                  {lookupSource === "reallocation"
+                    ? `Showing ${filteredReallocationsForSelection.length} of ${availableReallocations.length} reallocations`
+                    : `Showing ${filteredDeliveryChallansForSelection.length} of ${availableChallans.length} DCs`}
                 </p>
                 <div className="flex items-center gap-4">
                   <span className="font-semibold text-violet-800">
-                    {selectedDeliveryChallanIds.length} selected
+                    {lookupSource === "reallocation"
+                      ? selectedReallocationIds.length
+                      : selectedDeliveryChallanIds.length} selected
                   </span>
                   <button
                     type="button"
                     onClick={clearDeliveryChallanSelection}
-                    disabled={!selectedDeliveryChallanIds.length}
+                    disabled={
+                      lookupSource === "reallocation"
+                        ? !selectedReallocationIds.length
+                        : !selectedDeliveryChallanIds.length
+                    }
                     className="text-sm font-semibold text-violet-700 disabled:cursor-not-allowed disabled:text-slate-400"
                   >
                     Clear Selection
@@ -1786,40 +2124,66 @@ const Consumption = () => {
               <p className="text-sm font-semibold text-violet-900">Selection Summary</p>
               <div className="mt-4 space-y-3 text-sm">
                 <div className="flex justify-between gap-3">
-                  <span className="text-slate-600">Total DCs Selected</span>
+                  <span className="text-slate-600">
+                    {lookupSource === "reallocation"
+                      ? "Total Reallocations Selected"
+                      : "Total DCs Selected"}
+                  </span>
                   <span className="font-semibold text-slate-900">
-                    {selectedDeliveryChallansSummary.challans}
+                    {lookupSource === "reallocation"
+                      ? selectedReallocationsSummary.records
+                      : selectedDeliveryChallansSummary.challans}
                   </span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span className="text-slate-600">Total Items</span>
                   <span className="font-semibold text-slate-900">
-                    {selectedDeliveryChallansSummary.items}
+                    {lookupSource === "reallocation"
+                      ? selectedReallocationsSummary.items
+                      : selectedDeliveryChallansSummary.items}
                   </span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span className="text-slate-600">Total Quantity</span>
                   <span className="font-semibold text-slate-900">
-                    {formatQty(selectedDeliveryChallansSummary.quantity)}
+                    {formatQty(
+                      lookupSource === "reallocation"
+                        ? selectedReallocationsSummary.quantity
+                        : selectedDeliveryChallansSummary.quantity
+                    )}
                   </span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span className="text-slate-600">Total Available Qty</span>
                   <span className="font-semibold text-slate-900">
-                    {formatQty(selectedDeliveryChallansSummary.availableQuantity)}
+                    {formatQty(
+                      lookupSource === "reallocation"
+                        ? selectedReallocationsSummary.availableQuantity
+                        : selectedDeliveryChallansSummary.availableQuantity
+                    )}
                   </span>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={handleLoadSelectedDeliveryChallans}
-                disabled={!selectedDeliveryChallanIds.length}
+                onClick={
+                  lookupSource === "reallocation"
+                    ? handleLoadSelectedReallocations
+                    : handleLoadSelectedDeliveryChallans
+                }
+                disabled={
+                  lookupSource === "reallocation"
+                    ? !selectedReallocationIds.length
+                    : !selectedDeliveryChallanIds.length
+                }
                 className="mt-5 w-full rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                Load Selected DCs
+                {lookupSource === "reallocation"
+                  ? "Load Selected Reallocations"
+                  : "Load Selected DCs"}
               </button>
               <p className="mt-3 text-xs text-slate-500">
-                Loading DCs is optional; location inventory is already loaded below.
+                Loading lookup records is optional; location inventory is already loaded below.
               </p>
             </aside>
           </div>
@@ -1939,7 +2303,7 @@ const Consumption = () => {
                     <td className="px-3 py-2 text-slate-700">{index + 1}</td>
                     <td className="px-3 py-2 text-slate-700">
                       <span className="font-semibold uppercase text-slate-600">
-                        {row.sourceType === "dc" ? "DC" : row.sourceType || "Receive"}
+                        {sourceTypeLabel(row)}
                       </span>
                       {row.sourceRef ? (
                         <span className="block text-xs text-slate-500">
@@ -2171,17 +2535,6 @@ const Consumption = () => {
                           className="font-semibold text-violet-700 hover:underline"
                         >
                           Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate("/inventory/reallocate-return", {
-                              state: { consumptionId: record.id },
-                            })
-                          }
-                          className="font-semibold text-indigo-700 hover:underline"
-                        >
-                          Reallocation
                         </button>
                         <button
                           type="button"

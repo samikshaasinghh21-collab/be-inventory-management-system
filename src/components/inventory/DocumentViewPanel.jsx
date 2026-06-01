@@ -32,6 +32,7 @@ const DocumentViewPanel = ({
   bottomLeftValue = "",
   bottomRightTitle = "",
   bottomRightValue = "",
+  bottomFullContent = null,
   bottomLeftContent = null,
   bottomRightContent = null,
   footerNote = "Any changes in GST & taxes are acceptable to you.",
@@ -52,6 +53,7 @@ const DocumentViewPanel = ({
   const hasBottomRight = Boolean(
     bottomRightContent || bottomRightTitle || bottomRightValue
   );
+  const hasBottomFull = Boolean(bottomFullContent);
 
   useEffect(() => {
     setResolvedLogo(normalizedLogo);
@@ -195,6 +197,12 @@ const DocumentViewPanel = ({
           ))}
         </tbody>
       </table>
+
+      {hasBottomFull && (
+        <div className="border-b border-slate-800 p-3 text-[11px]">
+          {bottomFullContent}
+        </div>
+      )}
 
       {(hasBottomLeft || hasBottomRight) && (
         <div className="border-b border-slate-800 text-[11px]">

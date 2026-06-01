@@ -169,7 +169,7 @@ export const NAVIGATION_SECTIONS = [
       }),
       createNavItem({
         id: "invoice",
-        label: "Invoice",
+        label: "Purchase Invoice",
         to: "/inventory/invoice",
         icon: "file",
         matchPrefixes: ["/inventory/invoice"],
@@ -497,15 +497,6 @@ export const NAVIGATION_SECTIONS = [
             searchKeywords: ["switch tool", "tool transfer"],
           }),
           createNavItem({
-            id: "tools-employees",
-            label: "Employees",
-            to: "/inventory/tools/employees",
-            icon: "users",
-            matchPrefixes: ["/inventory/tools/employees", "/inventory/tools/employees/new"],
-            subtitle: "Employee directory for tool assignment workflows.",
-            searchKeywords: ["staff", "tool users"],
-          }),
-          createNavItem({
             id: "tools-analytics",
             label: "Analytics",
             to: "/inventory/tools/analytics",
@@ -530,28 +521,12 @@ export const NAVIGATION_SECTIONS = [
             subtitle: "Assignment history and allocation register.",
           }),
           createNavItem({
-            id: "tools-categories",
-            label: "Categories",
-            to: "/inventory/tools/categories",
-            icon: "layers",
-            matchPrefixes: ["/inventory/tools/categories"],
-            subtitle: "Tool categories and taxonomy setup.",
-          }),
-          createNavItem({
             id: "tools-history",
             label: "History",
             to: "/inventory/tools/history",
             icon: "clock",
             matchPrefixes: ["/inventory/tools/history"],
             subtitle: "Asset movement history and logs.",
-          }),
-          createNavItem({
-            id: "tools-bulk-import",
-            label: "Bulk Import",
-            to: "/inventory/tools/bulk-import",
-            icon: "upload",
-            matchPrefixes: ["/inventory/tools/bulk-import"],
-            subtitle: "Bulk import tool and employee data.",
           }),
           createNavItem({
             id: "tools-map",

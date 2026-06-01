@@ -116,6 +116,94 @@ const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   );
 };
 
+const splitTermsAndConditions = (terms) => {
+  const normalized = String(terms || "-").trim();
+  if (!normalized || normalized === "-") {
+    return [["-"], []];
+  }
+
+  const sections = normalized
+    .split(/\n\s*\n/)
+    .map((section) => section.trim())
+    .filter(Boolean);
+
+  const estimateSectionHeight = (section) => {
+    const lines = section.split(/\n/).filter(Boolean).length;
+    return lines + Math.ceil(section.length / 95);
+  };
+
+  if (sections.length <= 1) {
+    const lines = normalized.split(/\n/).filter(Boolean);
+    const midpoint = Math.ceil(lines.length / 2);
+    return [
+      lines.slice(0, midpoint).join("\n"),
+      lines.slice(midpoint).join("\n"),
+    ].map((column) => (column ? [column] : []));
+  }
+
+  const totalHeight = sections.reduce(
+    (sum, section) => sum + estimateSectionHeight(section),
+    0
+  );
+  let runningHeight = 0;
+  let splitIndex = Math.ceil(sections.length / 2);
+
+  for (let index = 0; index < sections.length - 1; index += 1) {
+    runningHeight += estimateSectionHeight(sections[index]);
+    if (runningHeight >= totalHeight / 2) {
+      const previousDiff = Math.abs(
+        runningHeight - estimateSectionHeight(sections[index]) - totalHeight / 2
+      );
+      const currentDiff = Math.abs(runningHeight - totalHeight / 2);
+      splitIndex = currentDiff <= previousDiff ? index + 1 : index;
+      break;
+    }
+  }
+
+  return [
+    sections.slice(0, Math.max(splitIndex, 1)),
+    sections.slice(Math.max(splitIndex, 1)),
+  ];
+};
+
+const TermsAndConditionsColumns = ({ terms, compact = false }) => {
+  const columns = splitTermsAndConditions(terms);
+  const sectionTextClass = compact
+    ? "text-[11px] leading-5"
+    : "text-sm leading-6";
+
+  return (
+    <div
+      className={`${compact ? "gap-3" : "gap-4"} grid lg:grid-cols-2`}
+      style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
+    >
+      {columns.map((sections, columnIndex) => (
+        <div
+          key={`terms-column-${columnIndex}`}
+          className={[
+            "min-w-0 rounded-md border border-slate-200 bg-white align-top",
+            compact ? "space-y-2 p-2" : "space-y-3 p-3",
+          ].join(" ")}
+        >
+          {sections.length ? (
+            sections.map((section, sectionIndex) => (
+              <p
+                key={`terms-section-${columnIndex}-${sectionIndex}`}
+                className={`whitespace-pre-wrap break-words text-slate-600 ${sectionTextClass}`}
+                style={{ breakInside: "avoid", pageBreakInside: "avoid" }}
+              >
+                {section}
+              </p>
+            ))
+          ) : (
+            <p className="text-sm text-slate-400">-</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const PurchaseOrderRegister = () => {
   const navigate = useNavigate();
   const settings = useSettings();
@@ -798,9 +886,9 @@ const PurchaseOrderRegister = () => {
                               <h4 className="mb-2 font-semibold text-slate-700">
                                 Terms &amp; Conditions
                               </h4>
-                              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
-                                {record.termsAndConditions || "-"}
-                              </p>
+                              <TermsAndConditionsColumns
+                                terms={record.termsAndConditions}
+                              />
                             </div>
 
                             <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -940,26 +1028,35 @@ const PurchaseOrderRegister = () => {
               amount: formatCurrency(amount),
             };
           })}
-          bottomLeftContent={
-            <div className="space-y-3 text-left text-xs">
-              {isLockedPurchaseOrder(viewRecord.status) && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  {getPurchaseOrderLockMessage(viewRecord.status)}
-                </div>
-              )}
-              {viewRecord.notes && (
-                <div>
-                  <p className="font-semibold">Notes</p>
-                  <p className="whitespace-pre-wrap text-slate-700">{viewRecord.notes}</p>
-                </div>
-              )}
-              <div>
-                <p className="font-semibold">Terms &amp; Conditions</p>
-                <p className="whitespace-pre-wrap leading-6 text-slate-700">
-                  {viewRecord.termsAndConditions || "-"}
-                </p>
-              </div>
+          bottomFullContent={
+            <div className="text-left">
+              <p className="mb-2 font-semibold uppercase tracking-wide">
+                Terms &amp; Conditions
+              </p>
+              <TermsAndConditionsColumns
+                terms={viewRecord.termsAndConditions}
+                compact
+              />
             </div>
+          }
+          bottomLeftContent={
+            isLockedPurchaseOrder(viewRecord.status) || viewRecord.notes ? (
+              <div className="space-y-3 text-left text-xs">
+                {isLockedPurchaseOrder(viewRecord.status) && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    {getPurchaseOrderLockMessage(viewRecord.status)}
+                  </div>
+                )}
+                {viewRecord.notes && (
+                  <div>
+                    <p className="font-semibold">Notes</p>
+                    <p className="whitespace-pre-wrap text-slate-700">
+                      {viewRecord.notes}
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : null
           }
           bottomRightContent={
             <GstSummaryBlock

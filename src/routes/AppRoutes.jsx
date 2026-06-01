@@ -7,8 +7,6 @@ import ProjectsHome from "../pages/ProjectsHome";
 import ToolsHome from "../pages/ToolsHome";
 import ToolsAddTool from "../pages/ToolsAddTool";
 import ToolsAssignTool from "../pages/ToolsAssignTool";
-import ToolsEmployees from "../pages/ToolsEmployees";
-import ToolsAddEmployee from "../pages/ToolsAddEmployee";
 import ToolsAnalytics from "../pages/ToolsAnalytics";
 import ToolsMaintenance from "../pages/ToolsMaintenance";
 import ToolsAssignments from "../pages/ToolsAssignments";
@@ -106,8 +104,6 @@ const AppRoutes = () => {
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
       </Route>
-      <Route path="/inventory/tools/map" element={<ToolsMap />} />
-
       <Route element={<MainLayout />}>
         <Route path="/inventory" element={<InventoryHome />} />
         <Route
@@ -122,10 +118,13 @@ const AppRoutes = () => {
           path="/inventory/tools/handover"
           element={<ToolsHandoverTool />}
         />
-        <Route path="/inventory/tools/employees" element={<ToolsEmployees />} />
+        <Route
+          path="/inventory/tools/employees"
+          element={<Navigate replace to="/inventory/tools" />}
+        />
         <Route
           path="/inventory/tools/employees/new"
-          element={<ToolsAddEmployee />}
+          element={<Navigate replace to="/inventory/tools" />}
         />
         <Route path="/inventory/tools/analytics" element={<ToolsAnalytics />} />
         <Route
@@ -145,6 +144,7 @@ const AppRoutes = () => {
           path="/inventory/tools/bulk-import"
           element={<ToolsBulkImport />}
         />
+        <Route path="/inventory/tools/map" element={<ToolsMap />} />
         <Route path="/inventory/projects" element={<ProjectsHome />} />
         <Route path="/inventory/products" element={<Product />} />
 

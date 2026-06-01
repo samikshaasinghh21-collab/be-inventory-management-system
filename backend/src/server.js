@@ -21,7 +21,7 @@ const app = express();
 const port = Number.parseInt(process.env.PORT ?? "5000", 10);
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "25mb" }));
 
 // Basic request logger to surface 2xx/4xx/5xx hits in the terminal
 app.use((req, res, next) => {
@@ -53,6 +53,17 @@ const getLanAddresses = () => {
 };
 
 const toIdentifier = (name) => `[${String(name).replace(/]/g, "]]")}]`;
+const HRMS_DATABASE_NAME =
+  String(process.env.HRMS_DB_NAME || process.env.HRMS_DB_DATABASE || "").trim() ||
+  "HRMS_DB";
+const escapeSqlLiteral = (value) => String(value).replace(/'/g, "''");
+const toQualifiedTable = (databaseName, tableName) =>
+  `${toIdentifier(databaseName)}.${toIdentifier("dbo")}.${toIdentifier(tableName)}`;
+const toObjectNameLiteral = (databaseName, tableName) =>
+  escapeSqlLiteral(`${databaseName}.dbo.${tableName}`);
+const hrmsTable = (tableName) => toQualifiedTable(HRMS_DATABASE_NAME, tableName);
+const hrmsObjectName = (tableName) =>
+  toObjectNameLiteral(HRMS_DATABASE_NAME, tableName);
 
 const getSqlErrorNumber = (error) =>
   error?.number ??
@@ -230,6 +241,20 @@ const parseJsonArray = (value) => {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+};
+
+const parseJsonObject = (value) => {
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
   }
 };
 
@@ -7405,6 +7430,2776 @@ const validateAvailableInventorySelection = async (
     }
   }
 };
+
+let ensureHrmsEmployeesTablePromise = null;
+
+const parseHrmsDateInput = (value) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? NaN : value;
+  }
+
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+  if (isoMatch) {
+    const [, yearText, monthText, dayText] = isoMatch;
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    const isValid =
+      !Number.isNaN(date.getTime()) &&
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day;
+    return isValid ? date : NaN;
+  }
+
+  const dmyMatch = /^(\d{2})[-/](\d{2})[-/](\d{4})$/.exec(trimmed);
+  if (dmyMatch) {
+    const [, dayText, monthText, yearText] = dmyMatch;
+    const day = Number(dayText);
+    const month = Number(monthText);
+    const year = Number(yearText);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    const isValid =
+      !Number.isNaN(date.getTime()) &&
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day;
+    return isValid ? date : NaN;
+  }
+
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? NaN : date;
+};
+
+const formatHrmsDate = (value) => {
+  if (!value) {
+    return "";
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? "" : value.toISOString().slice(0, 10);
+  }
+  const text = String(value);
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
+};
+
+const toHrmsNullableInt = (value) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+  return toNullableInt(text);
+};
+
+const trimToLength = (value, maxLength) => {
+  const normalized = normalizeOptionalString(value);
+  return normalized ? normalized.slice(0, maxLength) : null;
+};
+
+const normalizeHrmsPhotoPath = (value) => {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized || normalized.startsWith("data:") || normalized.length > 255) {
+    return null;
+  }
+  return normalized;
+};
+
+const normalizeHrmsOptionalDecimal = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const ensureHrmsEmployeesTable = async () => {
+  if (ensureHrmsEmployeesTablePromise) {
+    return ensureHrmsEmployeesTablePromise;
+  }
+
+  ensureHrmsEmployeesTablePromise = (async () => {
+    const pool = await getPool();
+    await pool.request().query(`
+      IF DB_ID(N'${escapeSqlLiteral(HRMS_DATABASE_NAME)}') IS NULL
+      BEGIN
+        THROW 51000, 'HRMS database ${escapeSqlLiteral(
+          HRMS_DATABASE_NAME
+        )} was not found on this SQL Server.', 1;
+      END
+
+      IF OBJECT_ID(N'${hrmsObjectName("Departments")}', N'U') IS NULL
+      BEGIN
+        CREATE TABLE ${hrmsTable("Departments")} (
+          DepartmentID INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          Name NVARCHAR(200) NULL
+        );
+      END
+
+      IF OBJECT_ID(N'${hrmsObjectName("Designations")}', N'U') IS NULL
+      BEGIN
+        CREATE TABLE ${hrmsTable("Designations")} (
+          DesignationID INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          Title NVARCHAR(200) NULL
+        );
+      END
+
+      IF OBJECT_ID(N'${hrmsObjectName("Employees")}', N'U') IS NULL
+      BEGIN
+        CREATE TABLE ${hrmsTable("Employees")} (
+          EmployeeID VARCHAR(20) NOT NULL PRIMARY KEY,
+          FullName VARCHAR(150) NOT NULL,
+          DateOfBirth DATE NULL,
+          Gender VARCHAR(20) NULL,
+          DateOfJoining DATE NULL,
+          ReportingManager VARCHAR(100) NULL,
+          Nationality VARCHAR(50) NULL,
+          MaritalStatus VARCHAR(20) NULL,
+          BloodGroup VARCHAR(10) NULL,
+          PhoneNumber VARCHAR(20) NULL,
+          EmergencyContactNumber VARCHAR(20) NULL,
+          Email VARCHAR(150) NULL,
+          DepartmentID INT NULL,
+          DesignationID INT NULL,
+          BasicSalary DECIMAL(18,2) NULL,
+          SalaryDeduction DECIMAL(18,2) NULL,
+          ProvidentFund DECIMAL(18,2) NULL,
+          ESIAmount DECIMAL(18,2) NULL,
+          Address VARCHAR(500) NULL,
+          PhotoPath VARCHAR(255) NULL,
+          DocumentsJson NVARCHAR(MAX) NULL,
+          Status VARCHAR(20) NULL,
+          CreatedAt DATETIME NULL DEFAULT GETDATE()
+        );
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'EmergencyContactNumber') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD EmergencyContactNumber VARCHAR(20) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'DocumentsJson') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD DocumentsJson NVARCHAR(MAX) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'SalaryDeduction') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD SalaryDeduction DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'ProvidentFund') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD ProvidentFund DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'ESIAmount') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD ESIAmount DECIMAL(18,2) NULL;
+      END
+
+      IF OBJECT_ID(N'${hrmsObjectName("EmployeeIdSequences")}', N'U') IS NULL
+      BEGIN
+        CREATE TABLE ${hrmsTable("EmployeeIdSequences")} (
+          Prefix VARCHAR(10) NOT NULL PRIMARY KEY,
+          LastNumber INT NOT NULL,
+          UpdatedAt DATETIME NULL DEFAULT GETDATE()
+        );
+      END
+
+      DECLARE @MaxExistingBENumber INT;
+      SELECT @MaxExistingBENumber = MAX(TRY_CONVERT(INT, SUBSTRING(EmployeeID, 3, 20)))
+      FROM ${hrmsTable("Employees")}
+      WHERE EmployeeID LIKE 'BE%';
+
+      IF NOT EXISTS (
+        SELECT 1 FROM ${hrmsTable("EmployeeIdSequences")} WHERE Prefix = 'BE'
+      )
+      BEGIN
+        INSERT INTO ${hrmsTable("EmployeeIdSequences")} (Prefix, LastNumber, UpdatedAt)
+        VALUES ('BE', ISNULL(@MaxExistingBENumber, 0), GETDATE());
+      END
+      ELSE
+      BEGIN
+        UPDATE ${hrmsTable("EmployeeIdSequences")}
+        SET
+          LastNumber = CASE
+            WHEN LastNumber < ISNULL(@MaxExistingBENumber, 0)
+            THEN ISNULL(@MaxExistingBENumber, 0)
+            ELSE LastNumber
+          END,
+          UpdatedAt = GETDATE()
+        WHERE Prefix = 'BE';
+      END
+    `);
+  })();
+
+  try {
+    await ensureHrmsEmployeesTablePromise;
+  } finally {
+    ensureHrmsEmployeesTablePromise = null;
+  }
+};
+
+const resolveHrmsLookupId = async (
+  tx,
+  tableName,
+  idColumn,
+  valueColumn,
+  value
+) => {
+  const explicitId = toHrmsNullableInt(value);
+  if (explicitId !== null) {
+    return explicitId;
+  }
+
+  const normalized = trimToLength(value, 200);
+  if (!normalized) {
+    return null;
+  }
+
+  const existingResult = await createDbRequest(tx)
+    .input("LookupValue", sql.NVarChar(200), normalized)
+    .query(`
+      SELECT TOP (1) ${toIdentifier(idColumn)} AS id
+      FROM ${hrmsTable(tableName)}
+      WHERE LOWER(LTRIM(RTRIM(${toIdentifier(valueColumn)}))) = LOWER(@LookupValue)
+    `);
+  const existingId = toHrmsNullableInt(existingResult.recordset?.[0]?.id);
+  if (existingId !== null) {
+    return existingId;
+  }
+
+  const insertResult = await createDbRequest(tx)
+    .input("LookupValue", sql.NVarChar(200), normalized)
+    .query(`
+      INSERT INTO ${hrmsTable(tableName)} (${toIdentifier(valueColumn)})
+      OUTPUT INSERTED.${toIdentifier(idColumn)} AS id
+      VALUES (@LookupValue)
+    `);
+  return toHrmsNullableInt(insertResult.recordset?.[0]?.id);
+};
+
+const buildHrmsEmployeePayload = async (source = {}, tx) => {
+  const dateOfBirth = parseHrmsDateInput(
+    source.dateOfBirth ?? source.DateOfBirth
+  );
+  const dateOfJoining = parseHrmsDateInput(
+    source.joined ?? source.dateOfJoining ?? source.DateOfJoining
+  );
+  if (Number.isNaN(dateOfBirth)) {
+    const error = new Error("Invalid date of birth.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (Number.isNaN(dateOfJoining)) {
+    const error = new Error("Invalid date of joining.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const departmentId =
+    toHrmsNullableInt(source.departmentId ?? source.DepartmentID) ??
+    (await resolveHrmsLookupId(
+      tx,
+      "Departments",
+      "DepartmentID",
+      "Name",
+      source.department ?? source.departmentName ?? source.DepartmentName
+    ));
+  const designationId =
+    toHrmsNullableInt(source.designationId ?? source.DesignationID) ??
+    (await resolveHrmsLookupId(
+      tx,
+      "Designations",
+      "DesignationID",
+      "Title",
+      source.designation ??
+        source.designationTitle ??
+        source.DesignationTitle
+    ));
+  const salary = Number(
+    source.salary ?? source.basicSalary ?? source.BasicSalary ?? 0
+  );
+  const salaryDeduction = normalizeHrmsOptionalDecimal(
+    source.salaryDeduction ?? source.deduction ?? source.SalaryDeduction
+  );
+  const providentFund = normalizeHrmsOptionalDecimal(
+    source.pfAmount ?? source.providentFund ?? source.ProvidentFund
+  );
+  const esiAmount = normalizeHrmsOptionalDecimal(
+    source.esiAmount ?? source.esi ?? source.ESIAmount
+  );
+
+  return {
+    employeeId: trimToLength(
+      source.id ?? source.employeeId ?? source.EmployeeID,
+      20
+    ),
+    fullName: trimToLength(
+      source.name ?? source.fullName ?? source.FullName,
+      150
+    ),
+    dateOfBirth,
+    gender: trimToLength(source.gender ?? source.Gender, 20),
+    dateOfJoining,
+    reportingManager: trimToLength(
+      source.manager ?? source.reportingManager ?? source.ReportingManager,
+      100
+    ),
+    nationality: trimToLength(source.nationality ?? source.Nationality, 50),
+    maritalStatus: trimToLength(
+      source.maritalStatus ?? source.MaritalStatus,
+      20
+    ),
+    bloodGroup: trimToLength(source.bloodGroup ?? source.BloodGroup, 10),
+    phoneNumber: trimToLength(
+      source.phone ?? source.phoneNumber ?? source.PhoneNumber,
+      20
+    ),
+    emergencyContactNumber: trimToLength(
+      source.emergencyContactNumber ??
+        source.emergencyPhone ??
+        source.EmergencyContactNumber,
+      20
+    ),
+    email: trimToLength(source.email ?? source.Email, 150),
+    departmentId,
+    designationId,
+    basicSalary: Number.isFinite(salary) ? salary : 0,
+    salaryDeduction,
+    providentFund,
+    esiAmount,
+    address: trimToLength(source.address ?? source.Address, 500),
+    photoPath: normalizeHrmsPhotoPath(
+      source.photoPath ?? source.PhotoPath ?? source.photo
+    ),
+    documentsJson: serializeJson(
+      parseJsonObject(source.documents ?? source.DocumentsJson)
+    ),
+    status: trimToLength(source.status ?? source.Status, 20) ?? "Active",
+  };
+};
+
+const normalizeHrmsEmployeeRow = (row = {}) => ({
+  id: row.EmployeeID ?? "",
+  employeeId: row.EmployeeID ?? "",
+  name: row.FullName ?? "",
+  fullName: row.FullName ?? "",
+  dateOfBirth: formatHrmsDate(row.DateOfBirth),
+  gender: row.Gender ?? "",
+  joined: formatHrmsDate(row.DateOfJoining),
+  dateOfJoining: formatHrmsDate(row.DateOfJoining),
+  manager: row.ReportingManager ?? "",
+  reportingManager: row.ReportingManager ?? "",
+  nationality: row.Nationality ?? "",
+  maritalStatus: row.MaritalStatus ?? "",
+  bloodGroup: row.BloodGroup ?? "",
+  phone: row.PhoneNumber ?? "",
+  phoneNumber: row.PhoneNumber ?? "",
+  emergencyContactNumber: row.EmergencyContactNumber ?? "",
+  emergencyPhone: row.EmergencyContactNumber ?? "",
+  email: row.Email ?? "",
+  departmentId: row.DepartmentID ?? null,
+  department: row.DepartmentName ?? "",
+  designationId: row.DesignationID ?? null,
+  designation: row.DesignationTitle ?? "",
+  salary: Number(row.BasicSalary ?? 0),
+  basicSalary: Number(row.BasicSalary ?? 0),
+  salaryDeduction: normalizeHrmsOptionalDecimal(row.SalaryDeduction),
+  deduction: normalizeHrmsOptionalDecimal(row.SalaryDeduction),
+  pfAmount: normalizeHrmsOptionalDecimal(row.ProvidentFund),
+  providentFund: normalizeHrmsOptionalDecimal(row.ProvidentFund),
+  esiAmount: normalizeHrmsOptionalDecimal(row.ESIAmount),
+  esi: normalizeHrmsOptionalDecimal(row.ESIAmount),
+  address: row.Address ?? "",
+  photo: row.PhotoPath ?? "",
+  photoPath: row.PhotoPath ?? "",
+  documents: parseJsonObject(row.DocumentsJson),
+  status: row.Status ?? "Active",
+  createdAt: row.CreatedAt ?? null,
+});
+
+const loadHrmsEmployeeById = async (source, employeeId) => {
+  const result = await createDbRequest(source)
+    .input("EmployeeID", sql.VarChar(20), employeeId)
+    .query(`
+      SELECT
+        e.EmployeeID,
+        e.FullName,
+        e.DateOfBirth,
+        e.Gender,
+        e.DateOfJoining,
+        e.ReportingManager,
+        e.Nationality,
+        e.MaritalStatus,
+        e.BloodGroup,
+        e.PhoneNumber,
+        e.EmergencyContactNumber,
+        e.Email,
+        e.DepartmentID,
+        d.Name AS DepartmentName,
+        e.DesignationID,
+        g.Title AS DesignationTitle,
+        e.BasicSalary,
+        e.SalaryDeduction,
+        e.ProvidentFund,
+        e.ESIAmount,
+        e.Address,
+        e.PhotoPath,
+        e.DocumentsJson,
+        e.Status,
+        e.CreatedAt
+      FROM ${hrmsTable("Employees")} e
+      LEFT JOIN ${hrmsTable("Departments")} d
+        ON e.DepartmentID = d.DepartmentID
+      LEFT JOIN ${hrmsTable("Designations")} g
+        ON e.DesignationID = g.DesignationID
+      WHERE e.EmployeeID = @EmployeeID
+    `);
+  const row = result.recordset?.[0];
+  return row ? normalizeHrmsEmployeeRow(row) : null;
+};
+
+const getNextHrmsEmployeeId = async (source) => {
+  const result = await createDbRequest(source).query(`
+    UPDATE ${hrmsTable("EmployeeIdSequences")} WITH (UPDLOCK, HOLDLOCK)
+    SET
+      LastNumber = LastNumber + 1,
+      UpdatedAt = GETDATE()
+    OUTPUT INSERTED.LastNumber AS nextNumber
+    WHERE Prefix = 'BE'
+  `);
+  const nextNumber = Number(result.recordset?.[0]?.nextNumber ?? 1);
+  return `BE${String(nextNumber).padStart(2, "0")}`;
+};
+
+let ensureHrmsReviewsTablePromise = null;
+
+const ensureHrmsReviewsTable = async () => {
+  if (ensureHrmsReviewsTablePromise) {
+    return ensureHrmsReviewsTablePromise;
+  }
+
+  ensureHrmsReviewsTablePromise = (async () => {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    await pool.request().query(`
+      IF OBJECT_ID(N'${hrmsObjectName("Reviews")}', N'U') IS NULL
+      BEGIN
+        CREATE TABLE ${hrmsTable("Reviews")} (
+          Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          EmployeeID VARCHAR(20) NULL,
+          ReviewPeriod VARCHAR(100) NULL,
+          ReviewType VARCHAR(50) NULL,
+          Reviewer VARCHAR(150) NULL,
+          OverallRating INT NULL,
+          Strengths VARCHAR(1000) NULL,
+          AreasOfImprovement VARCHAR(1000) NULL,
+          Comments VARCHAR(1000) NULL,
+          SavedDate DATETIME NULL
+        );
+      END
+    `);
+  })();
+
+  try {
+    await ensureHrmsReviewsTablePromise;
+  } finally {
+    ensureHrmsReviewsTablePromise = null;
+  }
+};
+
+const normalizeHrmsReviewRating = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Math.min(5, Math.max(0, Math.trunc(parsed)));
+};
+
+const buildHrmsReviewPayload = (source = {}) => ({
+  employeeId: trimToLength(
+    source.employeeId ?? source.EmployeeID,
+    20
+  ),
+  period: trimToLength(source.period ?? source.ReviewPeriod, 100),
+  type: trimToLength(source.type ?? source.ReviewType, 50),
+  reviewer: trimToLength(source.reviewer ?? source.Reviewer, 150),
+  rating: normalizeHrmsReviewRating(
+    source.rating ?? source.OverallRating
+  ),
+  strengths: trimToLength(source.strengths ?? source.Strengths, 1000),
+  improvement: trimToLength(
+    source.improvement ?? source.AreasOfImprovement,
+    1000
+  ),
+  comments: trimToLength(source.comments ?? source.Comments, 1000),
+});
+
+const normalizeHrmsReviewRow = (row = {}) => ({
+  id: String(row.Id ?? ""),
+  employeeId: row.EmployeeID ?? "",
+  employeeName: row.EmployeeName ?? row.FullName ?? row.EmployeeID ?? "",
+  period: row.ReviewPeriod ?? "",
+  type: row.ReviewType ?? "",
+  reviewer: row.Reviewer ?? "",
+  rating: Number(row.OverallRating ?? 0) || 0,
+  strengths: row.Strengths ?? "",
+  improvement: row.AreasOfImprovement ?? "",
+  comments: row.Comments ?? "",
+  savedAt: row.SavedDate ?? null,
+});
+
+const loadHrmsReviewById = async (source, reviewId) => {
+  const result = await createDbRequest(source)
+    .input("ReviewId", sql.Int, reviewId)
+    .query(`
+      SELECT
+        r.Id,
+        r.EmployeeID,
+        COALESCE(e.FullName, r.EmployeeID) AS EmployeeName,
+        r.ReviewPeriod,
+        r.ReviewType,
+        r.Reviewer,
+        r.OverallRating,
+        r.Strengths,
+        r.AreasOfImprovement,
+        r.Comments,
+        r.SavedDate
+      FROM ${hrmsTable("Reviews")} r
+      LEFT JOIN ${hrmsTable("Employees")} e
+        ON r.EmployeeID = e.EmployeeID
+      WHERE r.Id = @ReviewId
+    `);
+  const row = result.recordset?.[0];
+  return row ? normalizeHrmsReviewRow(row) : null;
+};
+
+app.get("/api/hrms/reviews", async (_req, res) => {
+  try {
+    await ensureHrmsReviewsTable();
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        r.Id,
+        r.EmployeeID,
+        COALESCE(e.FullName, r.EmployeeID) AS EmployeeName,
+        r.ReviewPeriod,
+        r.ReviewType,
+        r.Reviewer,
+        r.OverallRating,
+        r.Strengths,
+        r.AreasOfImprovement,
+        r.Comments,
+        r.SavedDate
+      FROM ${hrmsTable("Reviews")} r
+      LEFT JOIN ${hrmsTable("Employees")} e
+        ON r.EmployeeID = e.EmployeeID
+      ORDER BY r.SavedDate DESC, r.Id DESC
+    `);
+
+    return res.json({
+      ok: true,
+      reviews: (result.recordset ?? []).map(normalizeHrmsReviewRow),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch HRMS reviews",
+    });
+  }
+});
+
+app.post("/api/hrms/reviews", async (req, res) => {
+  try {
+    await ensureHrmsReviewsTable();
+    const payload = buildHrmsReviewPayload(req.body);
+
+    if (!payload.employeeId) {
+      return res.status(400).json({
+        ok: false,
+        error: "employeeId is required.",
+      });
+    }
+
+    const pool = await getPool();
+    const insertResult = await pool
+      .request()
+      .input("EmployeeID", sql.VarChar(20), payload.employeeId)
+      .input("ReviewPeriod", sql.VarChar(100), payload.period)
+      .input("ReviewType", sql.VarChar(50), payload.type)
+      .input("Reviewer", sql.VarChar(150), payload.reviewer)
+      .input("OverallRating", sql.Int, payload.rating)
+      .input("Strengths", sql.VarChar(1000), payload.strengths)
+      .input("AreasOfImprovement", sql.VarChar(1000), payload.improvement)
+      .input("Comments", sql.VarChar(1000), payload.comments)
+      .query(`
+        INSERT INTO ${hrmsTable("Reviews")} (
+          EmployeeID,
+          ReviewPeriod,
+          ReviewType,
+          Reviewer,
+          OverallRating,
+          Strengths,
+          AreasOfImprovement,
+          Comments,
+          SavedDate
+        )
+        OUTPUT INSERTED.Id AS id
+        VALUES (
+          @EmployeeID,
+          @ReviewPeriod,
+          @ReviewType,
+          @Reviewer,
+          @OverallRating,
+          @Strengths,
+          @AreasOfImprovement,
+          @Comments,
+          GETDATE()
+        )
+      `);
+
+    const reviewId = toNullableInt(insertResult.recordset?.[0]?.id);
+    const review = await loadHrmsReviewById(pool, reviewId);
+    return res.status(201).json({ ok: true, review });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to create HRMS review",
+    });
+  }
+});
+
+let ensureHrmsSalaryReassessmentsTablePromise = null;
+
+const ensureHrmsSalaryReassessmentsTable = async () => {
+  if (ensureHrmsSalaryReassessmentsTablePromise) {
+    return ensureHrmsSalaryReassessmentsTablePromise;
+  }
+
+  ensureHrmsSalaryReassessmentsTablePromise = (async () => {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    await pool.request().query(`
+      IF OBJECT_ID(N'${hrmsObjectName("SalaryReassessments")}', N'U') IS NULL
+      BEGIN
+        CREATE TABLE ${hrmsTable("SalaryReassessments")} (
+          Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          EmployeeID VARCHAR(20) NOT NULL,
+          ReviewPeriod VARCHAR(100) NULL,
+          ReviewerName VARCHAR(150) NULL,
+          ReviewDate DATE NULL,
+          KPIScore INT NULL,
+          AttendanceScore INT NULL,
+          BehaviorScore INT NULL,
+          ProductivityScore INT NULL,
+          WorkQuality INT NULL,
+          Communication INT NULL,
+          Teamwork INT NULL,
+          Leadership INT NULL,
+          Punctuality INT NULL,
+          TaskCompletion INT NULL,
+          Innovation INT NULL,
+          ClientFeedback INT NULL,
+          Reporting INT NULL,
+          SkillDevelopment INT NULL,
+          CurrentSalary DECIMAL(18,2) NULL,
+          RecommendedIncrementPercent DECIMAL(5,2) NULL,
+          Bonus DECIMAL(18,2) NULL,
+          RevisedSalary DECIMAL(18,2) NULL,
+          SalaryDeduction DECIMAL(18,2) NULL,
+          ProvidentFund DECIMAL(18,2) NULL,
+          ESIAmount DECIMAL(18,2) NULL,
+          TotalDeductions DECIMAL(18,2) NULL,
+          NetSalary DECIMAL(18,2) NULL,
+          CurrentRole VARCHAR(100) NULL,
+          ProposedRole VARCHAR(100) NULL,
+          PromotionEffectiveDate DATE NULL,
+          DepartmentTransfer VARCHAR(100) NULL,
+          EmployeeStrengths VARCHAR(1000) NULL,
+          AreasOfImprovement VARCHAR(1000) NULL,
+          HRComments VARCHAR(1000) NULL,
+          ManagerComments VARCHAR(1000) NULL,
+          EmployeeSelfReview VARCHAR(1000) NULL,
+          ManagerReviewStatus VARCHAR(50) NULL,
+          HRApprovalStatus VARCHAR(50) NULL,
+          DirectorApprovalStatus VARCHAR(50) NULL,
+          SalaryActivatedStatus VARCHAR(50) NULL,
+          AcknowledgementStatus VARCHAR(50) NULL,
+          EmployeeComments VARCHAR(1000) NULL,
+          DigitalSignature VARCHAR(150) NULL,
+          Status VARCHAR(50) NULL,
+          SavedDate DATETIME NULL
+        );
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'Reporting') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD Reporting INT NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'SkillDevelopment') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD SkillDevelopment INT NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'SalaryDeduction') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD SalaryDeduction DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'ProvidentFund') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD ProvidentFund DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'ESIAmount') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD ESIAmount DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'TotalDeductions') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD TotalDeductions DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'NetSalary') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD NetSalary DECIMAL(18,2) NULL;
+      END
+    `);
+  })();
+
+  try {
+    await ensureHrmsSalaryReassessmentsTablePromise;
+  } finally {
+    ensureHrmsSalaryReassessmentsTablePromise = null;
+  }
+};
+
+const normalizeHrmsScore = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, Math.trunc(parsed)));
+};
+
+const normalizeHrmsDecimal = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const calculateHrmsPfAmount = (grossSalary) =>
+  Math.round(normalizeHrmsDecimal(grossSalary) * 0.12);
+
+const calculateHrmsEsiAmount = (grossSalary) =>
+  Math.round(normalizeHrmsDecimal(grossSalary) * 0.015);
+
+const buildHrmsSalaryReassessmentPayload = (source = {}) => {
+  const reviewDate = parseHrmsDateInput(source.reviewDate ?? source.ReviewDate);
+  const promotionEffectiveDate = parseHrmsDateInput(
+    source.promotionEffectiveDate ??
+      source.PromotionEffectiveDate ??
+      source.effectiveDate
+  );
+  if (Number.isNaN(reviewDate)) {
+    const error = new Error("Invalid review date.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (Number.isNaN(promotionEffectiveDate)) {
+    const error = new Error("Invalid promotion effective date.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const metrics = source.metrics ?? {};
+  const salaryStatus =
+    trimToLength(
+      source.salaryStatus ??
+        source.status ??
+        source.SalaryActivatedStatus ??
+        source.Status,
+      50
+    ) ?? "Pending";
+  const revisedSalary = normalizeHrmsDecimal(
+    source.revisedSalary ?? source.RevisedSalary
+  );
+  const salaryDeduction = normalizeHrmsDecimal(
+    source.salaryDeduction ?? source.deduction ?? source.SalaryDeduction
+  );
+  const providedPfAmount =
+    source.pfAmount ?? source.providentFund ?? source.ProvidentFund;
+  const pfAmount =
+    providedPfAmount === undefined ||
+    providedPfAmount === null ||
+    providedPfAmount === ""
+      ? calculateHrmsPfAmount(revisedSalary)
+      : normalizeHrmsDecimal(providedPfAmount);
+  const providedEsiAmount = source.esiAmount ?? source.esi ?? source.ESIAmount;
+  const esiAmount =
+    providedEsiAmount === undefined ||
+    providedEsiAmount === null ||
+    providedEsiAmount === ""
+      ? calculateHrmsEsiAmount(revisedSalary)
+      : normalizeHrmsDecimal(providedEsiAmount);
+  const totalDeductions = salaryDeduction + pfAmount + esiAmount;
+  const netSalary = revisedSalary - totalDeductions;
+
+  return {
+    employeeId: trimToLength(source.employeeId ?? source.EmployeeID, 20),
+    reviewPeriod: trimToLength(source.reviewPeriod ?? source.ReviewPeriod, 100),
+    reviewerName: trimToLength(source.reviewerName ?? source.ReviewerName, 150),
+    reviewDate,
+    kpiScore: normalizeHrmsScore(source.kpiScore ?? source.KPIScore),
+    attendanceScore: normalizeHrmsScore(
+      source.attendanceScore ?? source.AttendanceScore
+    ),
+    behaviorScore: normalizeHrmsScore(
+      source.behaviorScore ?? source.BehaviorScore
+    ),
+    productivityScore: normalizeHrmsScore(
+      source.productivityScore ?? source.ProductivityScore
+    ),
+    workQuality: normalizeHrmsScore(
+      metrics.workQuality ?? source.workQuality ?? source.WorkQuality
+    ),
+    communication: normalizeHrmsScore(
+      metrics.communication ?? source.communication ?? source.Communication
+    ),
+    teamwork: normalizeHrmsScore(
+      metrics.teamwork ?? source.teamwork ?? source.Teamwork
+    ),
+    leadership: normalizeHrmsScore(
+      metrics.leadership ?? source.leadership ?? source.Leadership
+    ),
+    punctuality: normalizeHrmsScore(
+      metrics.punctuality ?? source.punctuality ?? source.Punctuality
+    ),
+    taskCompletion: normalizeHrmsScore(
+      metrics.taskCompletion ?? source.taskCompletion ?? source.TaskCompletion
+    ),
+    innovation: normalizeHrmsScore(
+      metrics.innovation ?? source.innovation ?? source.Innovation
+    ),
+    clientFeedback: normalizeHrmsScore(
+      metrics.clientFeedback ?? source.clientFeedback ?? source.ClientFeedback
+    ),
+    reporting: normalizeHrmsScore(
+      metrics.reporting ?? source.reporting ?? source.Reporting
+    ),
+    skillDevelopment: normalizeHrmsScore(
+      metrics.skillDevelopment ??
+        source.skillDevelopment ??
+        source.SkillDevelopment
+    ),
+    currentSalary: normalizeHrmsDecimal(
+      source.currentSalary ?? source.CurrentSalary
+    ),
+    incrementPercent: normalizeHrmsDecimal(
+      source.incrementPercent ??
+        source.recommendedIncrementPercent ??
+        source.RecommendedIncrementPercent
+    ),
+    bonus: normalizeHrmsDecimal(source.bonus ?? source.Bonus),
+    revisedSalary,
+    salaryDeduction,
+    providentFund: pfAmount,
+    esiAmount,
+    totalDeductions,
+    netSalary,
+    currentRole: trimToLength(source.currentRole ?? source.CurrentRole, 100),
+    proposedRole: trimToLength(source.proposedRole ?? source.ProposedRole, 100),
+    promotionEffectiveDate,
+    departmentTransfer: trimToLength(
+      source.departmentTransfer ?? source.DepartmentTransfer,
+      100
+    ),
+    strengths: trimToLength(
+      source.strengths ?? source.EmployeeStrengths,
+      1000
+    ),
+    improvement: trimToLength(
+      source.improvement ?? source.AreasOfImprovement,
+      1000
+    ),
+    hrComments: trimToLength(source.hrComments ?? source.HRComments, 1000),
+    managerComments: trimToLength(
+      source.managerComments ?? source.ManagerComments,
+      1000
+    ),
+    employeeSelfReview: trimToLength(
+      source.employeeSelfReview ?? source.EmployeeSelfReview,
+      1000
+    ),
+    managerStatus:
+      trimToLength(source.managerStatus ?? source.ManagerReviewStatus, 50) ??
+      "Pending",
+    hrStatus:
+      trimToLength(source.hrStatus ?? source.HRApprovalStatus, 50) ?? "Pending",
+    directorStatus:
+      trimToLength(source.directorStatus ?? source.DirectorApprovalStatus, 50) ??
+      "Pending",
+    salaryActivationStatus:
+      trimToLength(
+        source.salaryActivationStatus ?? source.SalaryActivatedStatus,
+        50
+      ) ?? salaryStatus,
+    acknowledgement:
+      trimToLength(
+        source.acknowledgement ?? source.AcknowledgementStatus,
+        50
+      ) ?? "Pending",
+    employeeComment: trimToLength(
+      source.employeeComment ?? source.EmployeeComments,
+      1000
+    ),
+    digitalSignature: trimToLength(
+      source.digitalSignature ?? source.DigitalSignature,
+      150
+    ),
+    status: salaryStatus,
+  };
+};
+
+const normalizeHrmsSalaryReassessmentRow = (row = {}) => ({
+  id: String(row.Id ?? ""),
+  employeeId: row.EmployeeID ?? "",
+  employeeName: row.EmployeeName ?? row.FullName ?? row.EmployeeID ?? "",
+  reviewPeriod: row.ReviewPeriod ?? "",
+  reviewerName: row.ReviewerName ?? "",
+  reviewDate: formatHrmsDate(row.ReviewDate),
+  kpiScore: Number(row.KPIScore ?? 0),
+  attendanceScore: Number(row.AttendanceScore ?? 0),
+  behaviorScore: Number(row.BehaviorScore ?? 0),
+  productivityScore: Number(row.ProductivityScore ?? 0),
+  metrics: {
+    workQuality: Number(row.WorkQuality ?? 0),
+    communication: Number(row.Communication ?? 0),
+    teamwork: Number(row.Teamwork ?? 0),
+    leadership: Number(row.Leadership ?? 0),
+    punctuality: Number(row.Punctuality ?? 0),
+    taskCompletion: Number(row.TaskCompletion ?? 0),
+    innovation: Number(row.Innovation ?? 0),
+    clientFeedback: Number(row.ClientFeedback ?? 0),
+    reporting: Number(row.Reporting ?? 0),
+    skillDevelopment: Number(row.SkillDevelopment ?? 0),
+  },
+  currentSalary: Number(row.CurrentSalary ?? 0),
+  incrementPercent: Number(row.RecommendedIncrementPercent ?? 0),
+  bonus: Number(row.Bonus ?? 0),
+  revisedSalary: Number(row.RevisedSalary ?? 0),
+  salaryDeduction: Number(row.SalaryDeduction ?? 0),
+  deduction: Number(row.SalaryDeduction ?? 0),
+  pfAmount:
+    normalizeHrmsOptionalDecimal(row.ProvidentFund) ??
+    calculateHrmsPfAmount(row.RevisedSalary),
+  providentFund:
+    normalizeHrmsOptionalDecimal(row.ProvidentFund) ??
+    calculateHrmsPfAmount(row.RevisedSalary),
+  esiAmount:
+    normalizeHrmsOptionalDecimal(row.ESIAmount) ??
+    calculateHrmsEsiAmount(row.RevisedSalary),
+  esi:
+    normalizeHrmsOptionalDecimal(row.ESIAmount) ??
+    calculateHrmsEsiAmount(row.RevisedSalary),
+  totalDeductions:
+    normalizeHrmsOptionalDecimal(row.TotalDeductions) ??
+    Number(row.SalaryDeduction ?? 0) +
+      (normalizeHrmsOptionalDecimal(row.ProvidentFund) ??
+        calculateHrmsPfAmount(row.RevisedSalary)) +
+      (normalizeHrmsOptionalDecimal(row.ESIAmount) ??
+        calculateHrmsEsiAmount(row.RevisedSalary)),
+  netSalary:
+    normalizeHrmsOptionalDecimal(row.NetSalary) ??
+    Number(row.RevisedSalary ?? 0) -
+      (Number(row.SalaryDeduction ?? 0) +
+        (normalizeHrmsOptionalDecimal(row.ProvidentFund) ??
+          calculateHrmsPfAmount(row.RevisedSalary)) +
+        (normalizeHrmsOptionalDecimal(row.ESIAmount) ??
+          calculateHrmsEsiAmount(row.RevisedSalary))),
+  currentRole: row.CurrentRole ?? "",
+  proposedRole: row.ProposedRole ?? "",
+  effectiveDate: formatHrmsDate(row.PromotionEffectiveDate),
+  promotionEffectiveDate: formatHrmsDate(row.PromotionEffectiveDate),
+  departmentTransfer: row.DepartmentTransfer ?? "",
+  strengths: row.EmployeeStrengths ?? "",
+  improvement: row.AreasOfImprovement ?? "",
+  hrComments: row.HRComments ?? "",
+  managerComments: row.ManagerComments ?? "",
+  employeeSelfReview: row.EmployeeSelfReview ?? "",
+  managerStatus: row.ManagerReviewStatus ?? "Pending",
+  hrStatus: row.HRApprovalStatus ?? "Pending",
+  directorStatus: row.DirectorApprovalStatus ?? "Pending",
+  salaryActivationStatus: row.SalaryActivatedStatus ?? "Pending",
+  salaryStatus: row.Status ?? row.SalaryActivatedStatus ?? "Pending",
+  acknowledgement: row.AcknowledgementStatus ?? "Pending",
+  employeeComment: row.EmployeeComments ?? "",
+  digitalSignature: row.DigitalSignature ?? "",
+  status: row.Status ?? "Pending",
+  savedAt: row.SavedDate ?? null,
+});
+
+const loadHrmsSalaryReassessmentById = async (source, id) => {
+  const result = await createDbRequest(source)
+    .input("Id", sql.Int, id)
+    .query(`
+      SELECT
+        s.*,
+        COALESCE(e.FullName, s.EmployeeID) AS EmployeeName
+      FROM ${hrmsTable("SalaryReassessments")} s
+      LEFT JOIN ${hrmsTable("Employees")} e
+        ON s.EmployeeID = e.EmployeeID
+      WHERE s.Id = @Id
+    `);
+  const row = result.recordset?.[0];
+  return row ? normalizeHrmsSalaryReassessmentRow(row) : null;
+};
+
+const bindHrmsSalaryReassessmentInputs = (request, payload) =>
+  request
+    .input("EmployeeID", sql.VarChar(20), payload.employeeId)
+    .input("ReviewPeriod", sql.VarChar(100), payload.reviewPeriod)
+    .input("ReviewerName", sql.VarChar(150), payload.reviewerName)
+    .input("ReviewDate", sql.Date, payload.reviewDate)
+    .input("KPIScore", sql.Int, payload.kpiScore)
+    .input("AttendanceScore", sql.Int, payload.attendanceScore)
+    .input("BehaviorScore", sql.Int, payload.behaviorScore)
+    .input("ProductivityScore", sql.Int, payload.productivityScore)
+    .input("WorkQuality", sql.Int, payload.workQuality)
+    .input("Communication", sql.Int, payload.communication)
+    .input("Teamwork", sql.Int, payload.teamwork)
+    .input("Leadership", sql.Int, payload.leadership)
+    .input("Punctuality", sql.Int, payload.punctuality)
+    .input("TaskCompletion", sql.Int, payload.taskCompletion)
+    .input("Innovation", sql.Int, payload.innovation)
+    .input("ClientFeedback", sql.Int, payload.clientFeedback)
+    .input("Reporting", sql.Int, payload.reporting)
+    .input("SkillDevelopment", sql.Int, payload.skillDevelopment)
+    .input("CurrentSalary", sql.Decimal(18, 2), payload.currentSalary)
+    .input(
+      "RecommendedIncrementPercent",
+      sql.Decimal(5, 2),
+      payload.incrementPercent
+    )
+    .input("Bonus", sql.Decimal(18, 2), payload.bonus)
+    .input("RevisedSalary", sql.Decimal(18, 2), payload.revisedSalary)
+    .input("SalaryDeduction", sql.Decimal(18, 2), payload.salaryDeduction)
+    .input("ProvidentFund", sql.Decimal(18, 2), payload.providentFund)
+    .input("ESIAmount", sql.Decimal(18, 2), payload.esiAmount)
+    .input("TotalDeductions", sql.Decimal(18, 2), payload.totalDeductions)
+    .input("NetSalary", sql.Decimal(18, 2), payload.netSalary)
+    .input("CurrentRole", sql.VarChar(100), payload.currentRole)
+    .input("ProposedRole", sql.VarChar(100), payload.proposedRole)
+    .input("PromotionEffectiveDate", sql.Date, payload.promotionEffectiveDate)
+    .input("DepartmentTransfer", sql.VarChar(100), payload.departmentTransfer)
+    .input("EmployeeStrengths", sql.VarChar(1000), payload.strengths)
+    .input("AreasOfImprovement", sql.VarChar(1000), payload.improvement)
+    .input("HRComments", sql.VarChar(1000), payload.hrComments)
+    .input("ManagerComments", sql.VarChar(1000), payload.managerComments)
+    .input("EmployeeSelfReview", sql.VarChar(1000), payload.employeeSelfReview)
+    .input("ManagerReviewStatus", sql.VarChar(50), payload.managerStatus)
+    .input("HRApprovalStatus", sql.VarChar(50), payload.hrStatus)
+    .input("DirectorApprovalStatus", sql.VarChar(50), payload.directorStatus)
+    .input(
+      "SalaryActivatedStatus",
+      sql.VarChar(50),
+      payload.salaryActivationStatus
+    )
+    .input("AcknowledgementStatus", sql.VarChar(50), payload.acknowledgement)
+    .input("EmployeeComments", sql.VarChar(1000), payload.employeeComment)
+    .input("DigitalSignature", sql.VarChar(150), payload.digitalSignature)
+    .input("Status", sql.VarChar(50), payload.status);
+
+app.get("/api/hrms/salary-reassessments", async (_req, res) => {
+  try {
+    await ensureHrmsSalaryReassessmentsTable();
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        s.*,
+        COALESCE(e.FullName, s.EmployeeID) AS EmployeeName
+      FROM ${hrmsTable("SalaryReassessments")} s
+      LEFT JOIN ${hrmsTable("Employees")} e
+        ON s.EmployeeID = e.EmployeeID
+      ORDER BY s.SavedDate DESC, s.Id DESC
+    `);
+
+    return res.json({
+      ok: true,
+      salaryReassessments: (result.recordset ?? []).map(
+        normalizeHrmsSalaryReassessmentRow
+      ),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch HRMS salary reassessments",
+    });
+  }
+});
+
+app.post("/api/hrms/salary-reassessments", async (req, res) => {
+  try {
+    await ensureHrmsSalaryReassessmentsTable();
+    const payload = buildHrmsSalaryReassessmentPayload(req.body);
+    if (!payload.employeeId) {
+      return res.status(400).json({
+        ok: false,
+        error: "employeeId is required.",
+      });
+    }
+
+    const pool = await getPool();
+    const insertRequest = bindHrmsSalaryReassessmentInputs(
+      pool.request(),
+      payload
+    );
+    const insertResult = await insertRequest.query(`
+      INSERT INTO ${hrmsTable("SalaryReassessments")} (
+        EmployeeID,
+        ReviewPeriod,
+        ReviewerName,
+        ReviewDate,
+        KPIScore,
+        AttendanceScore,
+        BehaviorScore,
+        ProductivityScore,
+        WorkQuality,
+        Communication,
+        Teamwork,
+        Leadership,
+        Punctuality,
+        TaskCompletion,
+        Innovation,
+        ClientFeedback,
+        Reporting,
+        SkillDevelopment,
+        CurrentSalary,
+        RecommendedIncrementPercent,
+        Bonus,
+        RevisedSalary,
+        SalaryDeduction,
+        ProvidentFund,
+        ESIAmount,
+        TotalDeductions,
+        NetSalary,
+        CurrentRole,
+        ProposedRole,
+        PromotionEffectiveDate,
+        DepartmentTransfer,
+        EmployeeStrengths,
+        AreasOfImprovement,
+        HRComments,
+        ManagerComments,
+        EmployeeSelfReview,
+        ManagerReviewStatus,
+        HRApprovalStatus,
+        DirectorApprovalStatus,
+        SalaryActivatedStatus,
+        AcknowledgementStatus,
+        EmployeeComments,
+        DigitalSignature,
+        Status,
+        SavedDate
+      )
+      OUTPUT INSERTED.Id AS id
+      VALUES (
+        @EmployeeID,
+        @ReviewPeriod,
+        @ReviewerName,
+        @ReviewDate,
+        @KPIScore,
+        @AttendanceScore,
+        @BehaviorScore,
+        @ProductivityScore,
+        @WorkQuality,
+        @Communication,
+        @Teamwork,
+        @Leadership,
+        @Punctuality,
+        @TaskCompletion,
+        @Innovation,
+        @ClientFeedback,
+        @Reporting,
+        @SkillDevelopment,
+        @CurrentSalary,
+        @RecommendedIncrementPercent,
+        @Bonus,
+        @RevisedSalary,
+        @SalaryDeduction,
+        @ProvidentFund,
+        @ESIAmount,
+        @TotalDeductions,
+        @NetSalary,
+        @CurrentRole,
+        @ProposedRole,
+        @PromotionEffectiveDate,
+        @DepartmentTransfer,
+        @EmployeeStrengths,
+        @AreasOfImprovement,
+        @HRComments,
+        @ManagerComments,
+        @EmployeeSelfReview,
+        @ManagerReviewStatus,
+        @HRApprovalStatus,
+        @DirectorApprovalStatus,
+        @SalaryActivatedStatus,
+        @AcknowledgementStatus,
+        @EmployeeComments,
+        @DigitalSignature,
+        @Status,
+        GETDATE()
+      )
+    `);
+
+    const id = toNullableInt(insertResult.recordset?.[0]?.id);
+    const salaryReassessment = await loadHrmsSalaryReassessmentById(pool, id);
+    return res.status(201).json({ ok: true, salaryReassessment });
+  } catch (error) {
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to create HRMS salary reassessment",
+    });
+  }
+});
+
+app.put("/api/hrms/salary-reassessments/:id", async (req, res) => {
+  const id = toNullableInt(req.params.id);
+  if (id === null) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid salary reassessment id.",
+    });
+  }
+
+  try {
+    await ensureHrmsSalaryReassessmentsTable();
+    const pool = await getPool();
+    const existing = await loadHrmsSalaryReassessmentById(pool, id);
+    if (!existing) {
+      return res.status(404).json({
+        ok: false,
+        error: "Salary reassessment not found.",
+      });
+    }
+
+    const payload = buildHrmsSalaryReassessmentPayload({
+      ...existing,
+      ...req.body,
+      employeeId: req.body?.employeeId ?? existing.employeeId,
+    });
+    if (!payload.employeeId) {
+      return res.status(400).json({
+        ok: false,
+        error: "employeeId is required.",
+      });
+    }
+
+    const updateRequest = bindHrmsSalaryReassessmentInputs(
+      pool.request().input("Id", sql.Int, id),
+      payload
+    );
+    await updateRequest.query(`
+      UPDATE ${hrmsTable("SalaryReassessments")}
+      SET
+        EmployeeID = @EmployeeID,
+        ReviewPeriod = @ReviewPeriod,
+        ReviewerName = @ReviewerName,
+        ReviewDate = @ReviewDate,
+        KPIScore = @KPIScore,
+        AttendanceScore = @AttendanceScore,
+        BehaviorScore = @BehaviorScore,
+        ProductivityScore = @ProductivityScore,
+        WorkQuality = @WorkQuality,
+        Communication = @Communication,
+        Teamwork = @Teamwork,
+        Leadership = @Leadership,
+        Punctuality = @Punctuality,
+        TaskCompletion = @TaskCompletion,
+        Innovation = @Innovation,
+        ClientFeedback = @ClientFeedback,
+        Reporting = @Reporting,
+        SkillDevelopment = @SkillDevelopment,
+        CurrentSalary = @CurrentSalary,
+        RecommendedIncrementPercent = @RecommendedIncrementPercent,
+        Bonus = @Bonus,
+        RevisedSalary = @RevisedSalary,
+        SalaryDeduction = @SalaryDeduction,
+        ProvidentFund = @ProvidentFund,
+        ESIAmount = @ESIAmount,
+        TotalDeductions = @TotalDeductions,
+        NetSalary = @NetSalary,
+        CurrentRole = @CurrentRole,
+        ProposedRole = @ProposedRole,
+        PromotionEffectiveDate = @PromotionEffectiveDate,
+        DepartmentTransfer = @DepartmentTransfer,
+        EmployeeStrengths = @EmployeeStrengths,
+        AreasOfImprovement = @AreasOfImprovement,
+        HRComments = @HRComments,
+        ManagerComments = @ManagerComments,
+        EmployeeSelfReview = @EmployeeSelfReview,
+        ManagerReviewStatus = @ManagerReviewStatus,
+        HRApprovalStatus = @HRApprovalStatus,
+        DirectorApprovalStatus = @DirectorApprovalStatus,
+        SalaryActivatedStatus = @SalaryActivatedStatus,
+        AcknowledgementStatus = @AcknowledgementStatus,
+        EmployeeComments = @EmployeeComments,
+        DigitalSignature = @DigitalSignature,
+        Status = @Status
+      WHERE Id = @Id
+    `);
+
+    const salaryReassessment = await loadHrmsSalaryReassessmentById(pool, id);
+    return res.json({ ok: true, salaryReassessment });
+  } catch (error) {
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to update HRMS salary reassessment",
+    });
+  }
+});
+
+app.delete("/api/hrms/salary-reassessments/:id", async (req, res) => {
+  const id = toNullableInt(req.params.id);
+  if (id === null) {
+    return res.status(400).json({
+      ok: false,
+      error: "Invalid salary reassessment id.",
+    });
+  }
+
+  try {
+    await ensureHrmsSalaryReassessmentsTable();
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .query(`
+        DELETE FROM ${hrmsTable("SalaryReassessments")}
+        WHERE Id = @Id
+      `);
+
+    if ((result.rowsAffected?.[0] ?? 0) === 0) {
+      return res.status(404).json({
+        ok: false,
+        error: "Salary reassessment not found.",
+      });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to delete HRMS salary reassessment",
+    });
+  }
+});
+
+let ensureHrmsAttendanceTablePromise = null;
+
+const ensureHrmsAttendanceTable = async () => {
+  if (ensureHrmsAttendanceTablePromise) {
+    return ensureHrmsAttendanceTablePromise;
+  }
+
+  ensureHrmsAttendanceTablePromise = (async () => {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    await pool.request().query(`
+      IF OBJECT_ID(N'${hrmsObjectName("Attendance")}', N'U') IS NULL
+      BEGIN
+        CREATE TABLE ${hrmsTable("Attendance")} (
+          Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          EmployeeID VARCHAR(20) NOT NULL,
+          AttendanceMonth VARCHAR(50) NOT NULL,
+          DayStatusJson VARCHAR(MAX) NULL,
+          PresentCount INT NULL,
+          AbsentCount INT NULL,
+          LeaveCount INT NULL,
+          HolidayCount INT NULL,
+          SavedDate DATETIME NULL
+        );
+      END
+    `);
+  })();
+
+  try {
+    await ensureHrmsAttendanceTablePromise;
+  } finally {
+    ensureHrmsAttendanceTablePromise = null;
+  }
+};
+
+const hrmsAttendanceStatuses = new Set(["P", "A", "L", "H"]);
+
+const normalizeHrmsAttendanceStatus = (value) => {
+  const status = String(value || "P").trim().toUpperCase();
+  return hrmsAttendanceStatuses.has(status) ? status : "P";
+};
+
+const parseHrmsAttendanceStatuses = (value) => {
+  let parsed = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      parsed = [];
+    }
+  }
+
+  if (Array.isArray(parsed)) {
+    return Array.from({ length: 31 }, (_, index) =>
+      normalizeHrmsAttendanceStatus(parsed[index])
+    );
+  }
+
+  if (parsed && typeof parsed === "object") {
+    return Array.from({ length: 31 }, (_, index) =>
+      normalizeHrmsAttendanceStatus(
+        parsed[String(index + 1)] ?? parsed[index + 1]
+      )
+    );
+  }
+
+  return Array.from({ length: 31 }, () => "P");
+};
+
+const buildHrmsAttendanceStatusMap = (statuses = []) =>
+  Array.from({ length: 31 }, (_, index) => [
+    String(index + 1),
+    normalizeHrmsAttendanceStatus(statuses[index]),
+  ]).reduce(
+    (statusMap, [day, status]) => ({
+      ...statusMap,
+      [day]: status,
+    }),
+    {}
+  );
+
+const countHrmsAttendanceStatuses = (statuses = []) =>
+  statuses.reduce(
+    (counts, status) => {
+      const key = normalizeHrmsAttendanceStatus(status);
+      counts[key] += 1;
+      return counts;
+    },
+    { A: 0, H: 0, L: 0, P: 0 }
+  );
+
+const buildHrmsAttendancePayload = (source = {}) => {
+  const statuses = parseHrmsAttendanceStatuses(
+    source.statuses ?? source.DayStatusJson ?? source.dayStatusJson
+  );
+  const counts = countHrmsAttendanceStatuses(statuses);
+
+  return {
+    employeeId: trimToLength(source.employeeId ?? source.EmployeeID, 20),
+    month: trimToLength(
+      source.month ?? source.AttendanceMonth ?? source.attendanceMonth,
+      50
+    ),
+    statuses,
+    dayStatusJson: serializeJson(buildHrmsAttendanceStatusMap(statuses)),
+    counts,
+  };
+};
+
+const normalizeHrmsAttendanceRow = (row = {}) => {
+  const statuses = parseHrmsAttendanceStatuses(row.DayStatusJson);
+  const calculatedCounts = countHrmsAttendanceStatuses(statuses);
+
+  return {
+    id: String(row.Id ?? ""),
+    employeeId: row.EmployeeID ?? "",
+    employeeName: row.EmployeeName ?? row.FullName ?? row.EmployeeID ?? "",
+    month: row.AttendanceMonth ?? "",
+    statuses,
+    counts: {
+      P: Number(row.PresentCount ?? calculatedCounts.P ?? 0),
+      A: Number(row.AbsentCount ?? calculatedCounts.A ?? 0),
+      L: Number(row.LeaveCount ?? calculatedCounts.L ?? 0),
+      H: Number(row.HolidayCount ?? calculatedCounts.H ?? 0),
+    },
+    savedAt: row.SavedDate ?? null,
+  };
+};
+
+const loadHrmsAttendanceById = async (source, id) => {
+  const result = await createDbRequest(source)
+    .input("Id", sql.Int, id)
+    .query(`
+      SELECT
+        a.*,
+        COALESCE(e.FullName, a.EmployeeID) AS EmployeeName
+      FROM ${hrmsTable("Attendance")} a
+      LEFT JOIN ${hrmsTable("Employees")} e
+        ON a.EmployeeID = e.EmployeeID
+      WHERE a.Id = @Id
+    `);
+  const row = result.recordset?.[0];
+  return row ? normalizeHrmsAttendanceRow(row) : null;
+};
+
+app.get("/api/hrms/attendance", async (_req, res) => {
+  try {
+    await ensureHrmsAttendanceTable();
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        a.*,
+        COALESCE(e.FullName, a.EmployeeID) AS EmployeeName
+      FROM ${hrmsTable("Attendance")} a
+      LEFT JOIN ${hrmsTable("Employees")} e
+        ON a.EmployeeID = e.EmployeeID
+      ORDER BY a.SavedDate DESC, a.Id DESC
+    `);
+
+    return res.json({
+      ok: true,
+      attendance: (result.recordset ?? []).map(normalizeHrmsAttendanceRow),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch HRMS attendance",
+    });
+  }
+});
+
+app.post("/api/hrms/attendance", async (req, res) => {
+  try {
+    await ensureHrmsAttendanceTable();
+    const payload = buildHrmsAttendancePayload(req.body);
+
+    if (!payload.employeeId) {
+      return res.status(400).json({
+        ok: false,
+        error: "employeeId is required.",
+      });
+    }
+
+    if (!payload.month) {
+      return res.status(400).json({
+        ok: false,
+        error: "month is required.",
+      });
+    }
+
+    const pool = await getPool();
+    const existingResult = await pool
+      .request()
+      .input("EmployeeID", sql.VarChar(20), payload.employeeId)
+      .input("AttendanceMonth", sql.VarChar(50), payload.month)
+      .query(`
+        SELECT TOP (1) Id
+        FROM ${hrmsTable("Attendance")}
+        WHERE EmployeeID = @EmployeeID
+          AND AttendanceMonth = @AttendanceMonth
+        ORDER BY Id DESC
+      `);
+    const existingId = toNullableInt(existingResult.recordset?.[0]?.Id);
+
+    const saveRequest = pool
+      .request()
+      .input("EmployeeID", sql.VarChar(20), payload.employeeId)
+      .input("AttendanceMonth", sql.VarChar(50), payload.month)
+      .input("DayStatusJson", sql.VarChar(sql.MAX), payload.dayStatusJson)
+      .input("PresentCount", sql.Int, payload.counts.P)
+      .input("AbsentCount", sql.Int, payload.counts.A)
+      .input("LeaveCount", sql.Int, payload.counts.L)
+      .input("HolidayCount", sql.Int, payload.counts.H);
+
+    let id = existingId;
+    if (existingId !== null) {
+      await saveRequest.input("Id", sql.Int, existingId).query(`
+        UPDATE ${hrmsTable("Attendance")}
+        SET
+          DayStatusJson = @DayStatusJson,
+          PresentCount = @PresentCount,
+          AbsentCount = @AbsentCount,
+          LeaveCount = @LeaveCount,
+          HolidayCount = @HolidayCount,
+          SavedDate = GETDATE()
+        WHERE Id = @Id
+      `);
+    } else {
+      const insertResult = await saveRequest.query(`
+        INSERT INTO ${hrmsTable("Attendance")} (
+          EmployeeID,
+          AttendanceMonth,
+          DayStatusJson,
+          PresentCount,
+          AbsentCount,
+          LeaveCount,
+          HolidayCount,
+          SavedDate
+        )
+        OUTPUT INSERTED.Id AS id
+        VALUES (
+          @EmployeeID,
+          @AttendanceMonth,
+          @DayStatusJson,
+          @PresentCount,
+          @AbsentCount,
+          @LeaveCount,
+          @HolidayCount,
+          GETDATE()
+        )
+      `);
+      id = toNullableInt(insertResult.recordset?.[0]?.id);
+    }
+
+    const attendanceRecord = await loadHrmsAttendanceById(pool, id);
+    return res.status(existingId !== null ? 200 : 201).json({
+      ok: true,
+      attendanceRecord,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to save HRMS attendance",
+    });
+  }
+});
+
+let ensureHrmsSalariesTablePromise = null;
+
+const ensureHrmsSalariesTable = async () => {
+  if (ensureHrmsSalariesTablePromise) {
+    return ensureHrmsSalariesTablePromise;
+  }
+
+  ensureHrmsSalariesTablePromise = (async () => {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    await pool.request().query(`
+      IF OBJECT_ID(N'${hrmsObjectName("Salaries")}', N'U') IS NULL
+      BEGIN
+        CREATE TABLE ${hrmsTable("Salaries")} (
+          Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          EmployeeID VARCHAR(20) NOT NULL,
+          PayrollMonth VARCHAR(50) NOT NULL,
+          Department VARCHAR(100) NULL,
+          BasicSalary DECIMAL(12,2) NULL,
+          Allowances DECIMAL(12,2) NULL,
+          Deductions DECIMAL(12,2) NULL,
+          PFAmount DECIMAL(12,2) NULL,
+          ESIAmount DECIMAL(12,2) NULL,
+          NetSalary AS (ISNULL(BasicSalary, 0) - ISNULL(Deductions, 0) - ISNULL(PFAmount, 0) - ISNULL(ESIAmount, 0)),
+          Status VARCHAR(50) NULL,
+          SavedDate DATETIME NULL
+        );
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'PFAmount') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Salaries")} ADD PFAmount DECIMAL(12,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'ESIAmount') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Salaries")} ADD ESIAmount DECIMAL(12,2) NULL;
+      END
+    `);
+  })();
+
+  try {
+    await ensureHrmsSalariesTablePromise;
+  } finally {
+    ensureHrmsSalariesTablePromise = null;
+  }
+};
+
+const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
+  const basicSalary = normalizeHrmsDecimal(
+    source.salary ?? source.basicSalary ?? source.BasicSalary
+  );
+  const allowances = 0;
+  const deductions = normalizeHrmsDecimal(
+    source.deduction ?? source.deductions ?? source.Deductions
+  );
+  const providedPfAmount =
+    source.pfAmount ?? source.providentFund ?? source.PFAmount;
+  const pfAmount =
+    providedPfAmount === undefined ||
+    providedPfAmount === null ||
+    providedPfAmount === ""
+      ? calculateHrmsPfAmount(basicSalary)
+      : normalizeHrmsDecimal(providedPfAmount);
+  const providedEsiAmount = source.esiAmount ?? source.esi ?? source.ESIAmount;
+  const esiAmount =
+    providedEsiAmount === undefined ||
+    providedEsiAmount === null ||
+    providedEsiAmount === ""
+      ? calculateHrmsEsiAmount(basicSalary)
+      : normalizeHrmsDecimal(providedEsiAmount);
+  const netSalary = basicSalary - deductions - pfAmount - esiAmount;
+
+  return {
+    employeeId: trimToLength(
+      source.employeeId ?? source.EmployeeID ?? source.id,
+      20
+    ),
+    month: trimToLength(
+      inherited.month ??
+        inherited.PayrollMonth ??
+        source.month ??
+        source.payrollMonth ??
+        source.PayrollMonth,
+      50
+    ),
+    department:
+      trimToLength(
+        inherited.department ??
+          inherited.Department ??
+          source.department ??
+          source.Department,
+        100
+      ) ?? "All",
+    basicSalary,
+    allowances,
+    deductions,
+    esiAmount,
+    netSalary,
+    pfAmount,
+    status:
+      trimToLength(source.status ?? source.Status, 50) ?? "Processed",
+  };
+};
+
+const normalizeHrmsSalaryRow = (row = {}) => {
+  const basicSalary = Number(row.BasicSalary ?? 0);
+  const allowances = 0;
+  const deductions = Number(row.Deductions ?? 0);
+  const pfAmount =
+    normalizeHrmsOptionalDecimal(row.PFAmount) ?? calculateHrmsPfAmount(basicSalary);
+  const esiAmount =
+    normalizeHrmsOptionalDecimal(row.ESIAmount) ?? calculateHrmsEsiAmount(basicSalary);
+  const totalDeductions = deductions + pfAmount + esiAmount;
+  const netSalary = basicSalary - totalDeductions;
+
+  return {
+    id: String(row.Id ?? ""),
+    employeeId: row.EmployeeID ?? "",
+    employeeName: row.EmployeeName ?? row.FullName ?? row.EmployeeID ?? "",
+    name: row.EmployeeName ?? row.FullName ?? row.EmployeeID ?? "",
+    month: row.PayrollMonth ?? "",
+    payrollMonth: row.PayrollMonth ?? "",
+    department: row.Department ?? "All",
+    salary: basicSalary,
+    basicSalary,
+    allowance: allowances,
+    allowances,
+    deduction: deductions,
+    deductions,
+    esi: esiAmount,
+    esiAmount,
+    net: netSalary,
+    netSalary,
+    pfAmount,
+    providentFund: pfAmount,
+    totalDeductions,
+    status: row.Status ?? "Processed",
+    savedAt: row.SavedDate ?? null,
+  };
+};
+
+const loadHrmsSalaryRowsByIds = async (source, ids = []) => {
+  const normalizedIds = ids
+    .map((id) => toNullableInt(id))
+    .filter((id) => id !== null);
+  if (!normalizedIds.length) {
+    return [];
+  }
+
+  const request = createDbRequest(source);
+  const idParams = normalizedIds.map((id, index) => {
+    const name = `Id${index}`;
+    request.input(name, sql.Int, id);
+    return `@${name}`;
+  });
+
+  const result = await request.query(`
+    SELECT
+      s.*,
+      COALESCE(e.FullName, s.EmployeeID) AS EmployeeName
+    FROM ${hrmsTable("Salaries")} s
+    LEFT JOIN ${hrmsTable("Employees")} e
+      ON s.EmployeeID = e.EmployeeID
+    WHERE s.Id IN (${idParams.join(", ")})
+    ORDER BY s.SavedDate DESC, s.Id DESC
+  `);
+
+  return (result.recordset ?? []).map(normalizeHrmsSalaryRow);
+};
+
+const isHrmsSalariesIdIdentity = async (source) => {
+  const result = await createDbRequest(source).query(`
+    SELECT CASE WHEN EXISTS (
+      SELECT 1
+      FROM ${toIdentifier(HRMS_DATABASE_NAME)}.sys.identity_columns ic
+      INNER JOIN ${toIdentifier(HRMS_DATABASE_NAME)}.sys.tables t
+        ON ic.object_id = t.object_id
+      INNER JOIN ${toIdentifier(HRMS_DATABASE_NAME)}.sys.schemas s
+        ON t.schema_id = s.schema_id
+      WHERE s.name = N'dbo'
+        AND t.name = N'Salaries'
+        AND ic.name = N'Id'
+    ) THEN 1 ELSE 0 END AS isIdentity
+  `);
+
+  return Number(result.recordset?.[0]?.isIdentity ?? 0) === 1;
+};
+
+const getNextHrmsSalaryId = async (source) => {
+  const result = await createDbRequest(source).query(`
+    SELECT COALESCE(MAX(Id), 0) + 1 AS nextId
+    FROM ${hrmsTable("Salaries")}
+  `);
+  return toNullableInt(result.recordset?.[0]?.nextId) ?? 1;
+};
+
+const bindHrmsSalaryInputs = (request, payload) =>
+  request
+    .input("EmployeeID", sql.VarChar(20), payload.employeeId)
+    .input("PayrollMonth", sql.VarChar(50), payload.month)
+    .input("Department", sql.VarChar(100), payload.department)
+    .input("BasicSalary", sql.Decimal(12, 2), payload.basicSalary)
+    .input("Allowances", sql.Decimal(12, 2), payload.allowances)
+    .input("Deductions", sql.Decimal(12, 2), payload.deductions)
+    .input("PFAmount", sql.Decimal(12, 2), payload.pfAmount)
+    .input("ESIAmount", sql.Decimal(12, 2), payload.esiAmount)
+    .input("Status", sql.VarChar(50), payload.status);
+
+const saveHrmsSalaryRow = async (source, payload) => {
+  const existingResult = await createDbRequest(source)
+    .input("EmployeeID", sql.VarChar(20), payload.employeeId)
+    .input("PayrollMonth", sql.VarChar(50), payload.month)
+    .input("Department", sql.VarChar(100), payload.department)
+    .query(`
+      SELECT TOP (1) Id
+      FROM ${hrmsTable("Salaries")}
+      WHERE EmployeeID = @EmployeeID
+        AND PayrollMonth = @PayrollMonth
+        AND COALESCE(Department, '') = COALESCE(@Department, '')
+      ORDER BY Id DESC
+    `);
+  const existingId = toNullableInt(existingResult.recordset?.[0]?.Id);
+
+  if (existingId !== null) {
+    await bindHrmsSalaryInputs(
+      createDbRequest(source).input("Id", sql.Int, existingId),
+      payload
+    ).query(`
+      UPDATE ${hrmsTable("Salaries")}
+      SET
+        PayrollMonth = @PayrollMonth,
+        Department = @Department,
+        BasicSalary = @BasicSalary,
+        Allowances = @Allowances,
+        Deductions = @Deductions,
+        PFAmount = @PFAmount,
+        ESIAmount = @ESIAmount,
+        Status = @Status,
+        SavedDate = GETDATE()
+      WHERE Id = @Id
+    `);
+    return { created: false, id: existingId };
+  }
+
+  const hasIdentityId = await isHrmsSalariesIdIdentity(source);
+  if (hasIdentityId) {
+    const insertResult = await bindHrmsSalaryInputs(
+      createDbRequest(source),
+      payload
+    ).query(`
+      INSERT INTO ${hrmsTable("Salaries")} (
+        EmployeeID,
+        PayrollMonth,
+        Department,
+        BasicSalary,
+        Allowances,
+        Deductions,
+        PFAmount,
+        ESIAmount,
+        Status,
+        SavedDate
+      )
+      OUTPUT INSERTED.Id AS id
+      VALUES (
+        @EmployeeID,
+        @PayrollMonth,
+        @Department,
+        @BasicSalary,
+        @Allowances,
+        @Deductions,
+        @PFAmount,
+        @ESIAmount,
+        @Status,
+        GETDATE()
+      )
+    `);
+    return {
+      created: true,
+      id: toNullableInt(insertResult.recordset?.[0]?.id),
+    };
+  }
+
+  const nextId = await getNextHrmsSalaryId(source);
+  await bindHrmsSalaryInputs(
+    createDbRequest(source).input("Id", sql.Int, nextId),
+    payload
+  ).query(`
+    INSERT INTO ${hrmsTable("Salaries")} (
+      Id,
+      EmployeeID,
+      PayrollMonth,
+      Department,
+      BasicSalary,
+      Allowances,
+      Deductions,
+      PFAmount,
+      ESIAmount,
+      Status,
+      SavedDate
+    )
+    VALUES (
+      @Id,
+      @EmployeeID,
+      @PayrollMonth,
+      @Department,
+      @BasicSalary,
+      @Allowances,
+      @Deductions,
+      @PFAmount,
+      @ESIAmount,
+      @Status,
+      GETDATE()
+    )
+  `);
+  return { created: true, id: nextId };
+};
+
+app.get("/api/hrms/salaries", async (req, res) => {
+  try {
+    await ensureHrmsSalariesTable();
+    const month = trimToLength(req.query?.month, 50);
+    const department = trimToLength(req.query?.department, 100);
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("PayrollMonth", sql.VarChar(50), month)
+      .input("Department", sql.VarChar(100), department)
+      .query(`
+        SELECT
+          s.*,
+          COALESCE(e.FullName, s.EmployeeID) AS EmployeeName
+        FROM ${hrmsTable("Salaries")} s
+        LEFT JOIN ${hrmsTable("Employees")} e
+          ON s.EmployeeID = e.EmployeeID
+        WHERE (@PayrollMonth IS NULL OR s.PayrollMonth = @PayrollMonth)
+          AND (@Department IS NULL OR COALESCE(s.Department, '') = COALESCE(@Department, ''))
+        ORDER BY s.SavedDate DESC, s.Id DESC
+      `);
+
+    return res.json({
+      ok: true,
+      salaries: (result.recordset ?? []).map(normalizeHrmsSalaryRow),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch HRMS salaries",
+    });
+  }
+});
+
+app.post("/api/hrms/salaries", async (req, res) => {
+  let tx;
+  try {
+    await ensureHrmsSalariesTable();
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [req.body ?? {}];
+    if (!rows.length) {
+      return res.status(400).json({
+        ok: false,
+        error: "At least one salary row is required.",
+      });
+    }
+
+    const inherited = {
+      month: req.body?.month ?? req.body?.payrollMonth ?? req.body?.PayrollMonth,
+      department: req.body?.department ?? req.body?.Department,
+    };
+    const payloads = rows.map((row) => buildHrmsSalaryPayload(row, inherited));
+    const invalidPayload = payloads.find(
+      (payload) => !payload.employeeId || !payload.month
+    );
+    if (invalidPayload) {
+      return res.status(400).json({
+        ok: false,
+        error: invalidPayload.employeeId
+          ? "month is required."
+          : "employeeId is required.",
+      });
+    }
+
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const savedRows = [];
+    for (const payload of payloads) {
+      savedRows.push(await saveHrmsSalaryRow(tx, payload));
+    }
+
+    await tx.commit();
+    const salaryRows = await loadHrmsSalaryRowsByIds(
+      pool,
+      savedRows.map((row) => row.id)
+    );
+
+    return res.status(savedRows.some((row) => row.created) ? 201 : 200).json({
+      ok: true,
+      salaryRows,
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to save HRMS salaries",
+    });
+  }
+});
+
+app.delete("/api/hrms/salaries", async (req, res) => {
+  try {
+    await ensureHrmsSalariesTable();
+    const month = trimToLength(
+      req.body?.month ?? req.query?.month ?? req.body?.PayrollMonth,
+      50
+    );
+    const department =
+      trimToLength(
+        req.body?.department ?? req.query?.department ?? req.body?.Department,
+        100
+      ) ?? "All";
+
+    if (!month) {
+      return res.status(400).json({
+        ok: false,
+        error: "month is required.",
+      });
+    }
+
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("PayrollMonth", sql.VarChar(50), month)
+      .input("Department", sql.VarChar(100), department)
+      .query(`
+        DELETE FROM ${hrmsTable("Salaries")}
+        WHERE PayrollMonth = @PayrollMonth
+          AND COALESCE(Department, '') = COALESCE(@Department, '')
+      `);
+
+    return res.json({
+      ok: true,
+      deleted: result.rowsAffected?.[0] ?? 0,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to delete HRMS salary batch",
+    });
+  }
+});
+
+let ensureHrmsRelievingTablePromise = null;
+
+const ensureHrmsRelievingTable = async () => {
+  if (ensureHrmsRelievingTablePromise) {
+    return ensureHrmsRelievingTablePromise;
+  }
+
+  ensureHrmsRelievingTablePromise = (async () => {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    await pool.request().query(`
+      IF OBJECT_ID(N'${hrmsObjectName("Relieving")}', N'U') IS NULL
+      BEGIN
+        CREATE TABLE ${hrmsTable("Relieving")} (
+          Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          EmployeeID VARCHAR(20) NOT NULL,
+          ReferenceNo VARCHAR(100) NOT NULL,
+          ResignationDate DATE NULL,
+          LastWorkingDate DATE NULL,
+          NoticePeriod VARCHAR(50) NULL,
+          HandoverDocuments BIT NULL,
+          ClearPendingTasks BIT NULL,
+          ReturnCompanyAssets BIT NULL,
+          ExitInterview BIT NULL,
+          FinalSettlement BIT NULL,
+          RelievingStatus VARCHAR(50) NULL,
+          LetterGenerated BIT NULL,
+          PdfPath VARCHAR(500) NULL,
+          CreatedAt DATETIME NULL
+        );
+      END
+    `);
+  })();
+
+  try {
+    await ensureHrmsRelievingTablePromise;
+  } finally {
+    ensureHrmsRelievingTablePromise = null;
+  }
+};
+
+const hrmsRelievingChecklistColumns = [
+  ["Handover Documents", "HandoverDocuments"],
+  ["Clear Pending Tasks", "ClearPendingTasks"],
+  ["Return Company Assets", "ReturnCompanyAssets"],
+  ["Exit Interview", "ExitInterview"],
+  ["Final Settlement", "FinalSettlement"],
+];
+
+const normalizeHrmsBit = (value) =>
+  value === true || value === 1 || value === "1";
+
+const buildHrmsRelievingChecklistValues = (source = {}) => {
+  if (Array.isArray(source.checklist)) {
+    const byLabel = new Map(
+      source.checklist.map((item) => [
+        String(item?.label ?? "").trim().toLowerCase(),
+        Boolean(item?.checked),
+      ])
+    );
+
+    return hrmsRelievingChecklistColumns.reduce(
+      (values, [label, column]) => ({
+        ...values,
+        [column]: Boolean(byLabel.get(label.toLowerCase())),
+      }),
+      {}
+    );
+  }
+
+  return {
+    HandoverDocuments: normalizeHrmsBit(
+      source.handoverDocuments ?? source.HandoverDocuments
+    ),
+    ClearPendingTasks: normalizeHrmsBit(
+      source.clearPendingTasks ?? source.ClearPendingTasks
+    ),
+    ReturnCompanyAssets: normalizeHrmsBit(
+      source.returnCompanyAssets ?? source.ReturnCompanyAssets
+    ),
+    ExitInterview: normalizeHrmsBit(
+      source.exitInterview ?? source.ExitInterview
+    ),
+    FinalSettlement: normalizeHrmsBit(
+      source.finalSettlement ?? source.FinalSettlement
+    ),
+  };
+};
+
+const buildHrmsRelievingPayload = (source = {}) => {
+  const resignationDate = parseHrmsDateInput(
+    source.resignationDate ?? source.ResignationDate
+  );
+  const lastWorkingDate = parseHrmsDateInput(
+    source.lastWorkingDate ?? source.LastWorkingDate
+  );
+
+  if (Number.isNaN(resignationDate)) {
+    const error = new Error("Invalid resignation date.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (Number.isNaN(lastWorkingDate)) {
+    const error = new Error("Invalid last working date.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    employeeId: trimToLength(source.employeeId ?? source.EmployeeID, 20),
+    referenceNo:
+      trimToLength(
+        source.referenceNo ?? source.ReferenceNo ?? source.id,
+        100
+      ) ?? `REL-${Date.now()}`,
+    resignationDate,
+    lastWorkingDate,
+    noticePeriod: trimToLength(source.noticePeriod ?? source.NoticePeriod, 50),
+    checklist: buildHrmsRelievingChecklistValues(source),
+    status:
+      trimToLength(
+        source.status ?? source.relievingStatus ?? source.RelievingStatus,
+        50
+      ) ?? "Relieved",
+    letterGenerated: normalizeHrmsBit(
+      source.letterGenerated ?? source.LetterGenerated ?? true
+    ),
+    pdfPath: trimToLength(source.pdfPath ?? source.PdfPath, 500),
+  };
+};
+
+const normalizeHrmsRelievingRow = (row = {}) => ({
+  id: row.ReferenceNo ?? String(row.Id ?? ""),
+  relievingId: String(row.Id ?? ""),
+  employeeId: row.EmployeeID ?? "",
+  employeeName: row.EmployeeName ?? row.FullName ?? row.EmployeeID ?? "",
+  referenceNo: row.ReferenceNo ?? "",
+  resignationDate: formatHrmsDate(row.ResignationDate),
+  lastWorkingDate: formatHrmsDate(row.LastWorkingDate),
+  noticePeriod: row.NoticePeriod ?? "",
+  checklist: hrmsRelievingChecklistColumns.map(([label, column]) => ({
+    label,
+    checked: Boolean(row[column]),
+  })),
+  handoverDocuments: Boolean(row.HandoverDocuments),
+  clearPendingTasks: Boolean(row.ClearPendingTasks),
+  returnCompanyAssets: Boolean(row.ReturnCompanyAssets),
+  exitInterview: Boolean(row.ExitInterview),
+  finalSettlement: Boolean(row.FinalSettlement),
+  status: row.RelievingStatus ?? "Relieved",
+  relievingStatus: row.RelievingStatus ?? "Relieved",
+  letterGenerated: Boolean(row.LetterGenerated),
+  pdfPath: row.PdfPath ?? "",
+  savedAt: row.CreatedAt ?? null,
+});
+
+const isHrmsRelievingIdIdentity = async (source) => {
+  const result = await createDbRequest(source).query(`
+    SELECT CASE WHEN EXISTS (
+      SELECT 1
+      FROM ${toIdentifier(HRMS_DATABASE_NAME)}.sys.identity_columns ic
+      INNER JOIN ${toIdentifier(HRMS_DATABASE_NAME)}.sys.tables t
+        ON ic.object_id = t.object_id
+      INNER JOIN ${toIdentifier(HRMS_DATABASE_NAME)}.sys.schemas s
+        ON t.schema_id = s.schema_id
+      WHERE s.name = N'dbo'
+        AND t.name = N'Relieving'
+        AND ic.name = N'Id'
+    ) THEN 1 ELSE 0 END AS isIdentity
+  `);
+
+  return Number(result.recordset?.[0]?.isIdentity ?? 0) === 1;
+};
+
+const getNextHrmsRelievingId = async (source) => {
+  const result = await createDbRequest(source).query(`
+    SELECT COALESCE(MAX(Id), 0) + 1 AS nextId
+    FROM ${hrmsTable("Relieving")}
+  `);
+  return toNullableInt(result.recordset?.[0]?.nextId) ?? 1;
+};
+
+const bindHrmsRelievingInputs = (request, payload) =>
+  request
+    .input("EmployeeID", sql.VarChar(20), payload.employeeId)
+    .input("ReferenceNo", sql.VarChar(100), payload.referenceNo)
+    .input("ResignationDate", sql.Date, payload.resignationDate)
+    .input("LastWorkingDate", sql.Date, payload.lastWorkingDate)
+    .input("NoticePeriod", sql.VarChar(50), payload.noticePeriod)
+    .input("HandoverDocuments", sql.Bit, payload.checklist.HandoverDocuments)
+    .input("ClearPendingTasks", sql.Bit, payload.checklist.ClearPendingTasks)
+    .input(
+      "ReturnCompanyAssets",
+      sql.Bit,
+      payload.checklist.ReturnCompanyAssets
+    )
+    .input("ExitInterview", sql.Bit, payload.checklist.ExitInterview)
+    .input("FinalSettlement", sql.Bit, payload.checklist.FinalSettlement)
+    .input("RelievingStatus", sql.VarChar(50), payload.status)
+    .input("LetterGenerated", sql.Bit, payload.letterGenerated)
+    .input("PdfPath", sql.VarChar(500), payload.pdfPath);
+
+const loadHrmsRelievingById = async (source, id) => {
+  const result = await createDbRequest(source)
+    .input("Id", sql.Int, id)
+    .query(`
+      SELECT
+        r.*,
+        COALESCE(e.FullName, r.EmployeeID) AS EmployeeName
+      FROM ${hrmsTable("Relieving")} r
+      LEFT JOIN ${hrmsTable("Employees")} e
+        ON r.EmployeeID = e.EmployeeID
+      WHERE r.Id = @Id
+    `);
+  const row = result.recordset?.[0];
+  return row ? normalizeHrmsRelievingRow(row) : null;
+};
+
+app.get("/api/hrms/relieving", async (_req, res) => {
+  try {
+    await ensureHrmsRelievingTable();
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        r.*,
+        COALESCE(e.FullName, r.EmployeeID) AS EmployeeName
+      FROM ${hrmsTable("Relieving")} r
+      LEFT JOIN ${hrmsTable("Employees")} e
+        ON r.EmployeeID = e.EmployeeID
+      ORDER BY r.CreatedAt DESC, r.Id DESC
+    `);
+
+    return res.json({
+      ok: true,
+      relieving: (result.recordset ?? []).map(normalizeHrmsRelievingRow),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch HRMS relieving records",
+    });
+  }
+});
+
+app.post("/api/hrms/relieving", async (req, res) => {
+  try {
+    await ensureHrmsRelievingTable();
+    const payload = buildHrmsRelievingPayload(req.body);
+
+    if (!payload.employeeId) {
+      return res.status(400).json({
+        ok: false,
+        error: "employeeId is required.",
+      });
+    }
+
+    if (!payload.referenceNo) {
+      return res.status(400).json({
+        ok: false,
+        error: "referenceNo is required.",
+      });
+    }
+
+    const pool = await getPool();
+    const hasIdentityId = await isHrmsRelievingIdIdentity(pool);
+    let id = null;
+
+    if (hasIdentityId) {
+      const insertResult = await bindHrmsRelievingInputs(
+        pool.request(),
+        payload
+      ).query(`
+        INSERT INTO ${hrmsTable("Relieving")} (
+          EmployeeID,
+          ReferenceNo,
+          ResignationDate,
+          LastWorkingDate,
+          NoticePeriod,
+          HandoverDocuments,
+          ClearPendingTasks,
+          ReturnCompanyAssets,
+          ExitInterview,
+          FinalSettlement,
+          RelievingStatus,
+          LetterGenerated,
+          PdfPath,
+          CreatedAt
+        )
+        OUTPUT INSERTED.Id AS id
+        VALUES (
+          @EmployeeID,
+          @ReferenceNo,
+          @ResignationDate,
+          @LastWorkingDate,
+          @NoticePeriod,
+          @HandoverDocuments,
+          @ClearPendingTasks,
+          @ReturnCompanyAssets,
+          @ExitInterview,
+          @FinalSettlement,
+          @RelievingStatus,
+          @LetterGenerated,
+          @PdfPath,
+          GETDATE()
+        )
+      `);
+      id = toNullableInt(insertResult.recordset?.[0]?.id);
+    } else {
+      id = await getNextHrmsRelievingId(pool);
+      await bindHrmsRelievingInputs(
+        pool.request().input("Id", sql.Int, id),
+        payload
+      ).query(`
+        INSERT INTO ${hrmsTable("Relieving")} (
+          Id,
+          EmployeeID,
+          ReferenceNo,
+          ResignationDate,
+          LastWorkingDate,
+          NoticePeriod,
+          HandoverDocuments,
+          ClearPendingTasks,
+          ReturnCompanyAssets,
+          ExitInterview,
+          FinalSettlement,
+          RelievingStatus,
+          LetterGenerated,
+          PdfPath,
+          CreatedAt
+        )
+        VALUES (
+          @Id,
+          @EmployeeID,
+          @ReferenceNo,
+          @ResignationDate,
+          @LastWorkingDate,
+          @NoticePeriod,
+          @HandoverDocuments,
+          @ClearPendingTasks,
+          @ReturnCompanyAssets,
+          @ExitInterview,
+          @FinalSettlement,
+          @RelievingStatus,
+          @LetterGenerated,
+          @PdfPath,
+          GETDATE()
+        )
+      `);
+    }
+
+    const relievingRecord = await loadHrmsRelievingById(pool, id);
+    return res.status(201).json({ ok: true, relievingRecord });
+  } catch (error) {
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to create HRMS relieving record",
+    });
+  }
+});
+
+app.get("/api/hrms/employees", async (_req, res) => {
+  try {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT
+        e.EmployeeID,
+        e.FullName,
+        e.DateOfBirth,
+        e.Gender,
+        e.DateOfJoining,
+        e.ReportingManager,
+        e.Nationality,
+        e.MaritalStatus,
+        e.BloodGroup,
+        e.PhoneNumber,
+        e.EmergencyContactNumber,
+        e.Email,
+        e.DepartmentID,
+        d.Name AS DepartmentName,
+        e.DesignationID,
+        g.Title AS DesignationTitle,
+        e.BasicSalary,
+        e.SalaryDeduction,
+        e.ProvidentFund,
+        e.ESIAmount,
+        e.Address,
+        e.PhotoPath,
+        e.DocumentsJson,
+        e.Status,
+        e.CreatedAt
+      FROM ${hrmsTable("Employees")} e
+      LEFT JOIN ${hrmsTable("Departments")} d
+        ON e.DepartmentID = d.DepartmentID
+      LEFT JOIN ${hrmsTable("Designations")} g
+        ON e.DesignationID = g.DesignationID
+      ORDER BY e.CreatedAt DESC, e.EmployeeID DESC
+    `);
+
+    res.json({
+      ok: true,
+      employees: (result.recordset ?? []).map(normalizeHrmsEmployeeRow),
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch HRMS employees",
+    });
+  }
+});
+
+app.get("/api/hrms/employees/:id", async (req, res) => {
+  try {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    const employee = await loadHrmsEmployeeById(pool, req.params.id);
+    if (!employee) {
+      return res.status(404).json({
+        ok: false,
+        error: "Employee not found",
+      });
+    }
+    return res.json({ ok: true, employee });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch HRMS employee",
+    });
+  }
+});
+
+app.post("/api/hrms/employees", async (req, res) => {
+  let tx;
+  try {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const payload = await buildHrmsEmployeePayload(req.body, tx);
+    if (!payload.fullName) {
+      await tx.rollback();
+      return res.status(400).json({
+        ok: false,
+        error: "Full name is required.",
+      });
+    }
+
+    const employeeId = await getNextHrmsEmployeeId(tx);
+    const existingEmployee = await loadHrmsEmployeeById(tx, employeeId);
+    if (existingEmployee) {
+      await tx.rollback();
+      return res.status(409).json({
+        ok: false,
+        error: `Employee ID ${employeeId} already exists.`,
+      });
+    }
+
+    await createDbRequest(tx)
+      .input("EmployeeID", sql.VarChar(20), employeeId)
+      .input("FullName", sql.VarChar(150), payload.fullName)
+      .input("DateOfBirth", sql.Date, payload.dateOfBirth)
+      .input("Gender", sql.VarChar(20), payload.gender)
+      .input("DateOfJoining", sql.Date, payload.dateOfJoining)
+      .input("ReportingManager", sql.VarChar(100), payload.reportingManager)
+      .input("Nationality", sql.VarChar(50), payload.nationality)
+      .input("MaritalStatus", sql.VarChar(20), payload.maritalStatus)
+      .input("BloodGroup", sql.VarChar(10), payload.bloodGroup)
+      .input("PhoneNumber", sql.VarChar(20), payload.phoneNumber)
+      .input("EmergencyContactNumber", sql.VarChar(20), payload.emergencyContactNumber)
+      .input("Email", sql.VarChar(150), payload.email)
+      .input("DepartmentID", sql.Int, payload.departmentId)
+      .input("DesignationID", sql.Int, payload.designationId)
+      .input("BasicSalary", sql.Decimal(18, 2), payload.basicSalary)
+      .input("SalaryDeduction", sql.Decimal(18, 2), payload.salaryDeduction)
+      .input("ProvidentFund", sql.Decimal(18, 2), payload.providentFund)
+      .input("ESIAmount", sql.Decimal(18, 2), payload.esiAmount)
+      .input("Address", sql.VarChar(500), payload.address)
+      .input("PhotoPath", sql.VarChar(255), payload.photoPath)
+      .input("DocumentsJson", sql.NVarChar(sql.MAX), payload.documentsJson)
+      .input("Status", sql.VarChar(20), payload.status)
+      .query(`
+        INSERT INTO ${hrmsTable("Employees")} (
+          EmployeeID,
+          FullName,
+          DateOfBirth,
+          Gender,
+          DateOfJoining,
+          ReportingManager,
+          Nationality,
+          MaritalStatus,
+          BloodGroup,
+          PhoneNumber,
+          EmergencyContactNumber,
+          Email,
+          DepartmentID,
+          DesignationID,
+          BasicSalary,
+          SalaryDeduction,
+          ProvidentFund,
+          ESIAmount,
+          Address,
+          PhotoPath,
+          DocumentsJson,
+          Status,
+          CreatedAt
+        )
+        VALUES (
+          @EmployeeID,
+          @FullName,
+          @DateOfBirth,
+          @Gender,
+          @DateOfJoining,
+          @ReportingManager,
+          @Nationality,
+          @MaritalStatus,
+          @BloodGroup,
+          @PhoneNumber,
+          @EmergencyContactNumber,
+          @Email,
+          @DepartmentID,
+          @DesignationID,
+          @BasicSalary,
+          @SalaryDeduction,
+          @ProvidentFund,
+          @ESIAmount,
+          @Address,
+          @PhotoPath,
+          @DocumentsJson,
+          @Status,
+          GETDATE()
+        )
+      `);
+
+    await tx.commit();
+    const employee = await loadHrmsEmployeeById(pool, employeeId);
+    return res.status(201).json({ ok: true, employee });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to create HRMS employee",
+    });
+  }
+});
+
+app.put("/api/hrms/employees/:id", async (req, res) => {
+  let tx;
+  try {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const existingEmployee = await loadHrmsEmployeeById(tx, req.params.id);
+    if (!existingEmployee) {
+      await tx.rollback();
+      return res.status(404).json({
+        ok: false,
+        error: "Employee not found",
+      });
+    }
+
+    const payload = await buildHrmsEmployeePayload(
+      { ...existingEmployee, ...req.body, employeeId: req.params.id },
+      tx
+    );
+    if (!payload.fullName) {
+      await tx.rollback();
+      return res.status(400).json({
+        ok: false,
+        error: "Full name is required.",
+      });
+    }
+
+    await createDbRequest(tx)
+      .input("EmployeeID", sql.VarChar(20), req.params.id)
+      .input("FullName", sql.VarChar(150), payload.fullName)
+      .input("DateOfBirth", sql.Date, payload.dateOfBirth)
+      .input("Gender", sql.VarChar(20), payload.gender)
+      .input("DateOfJoining", sql.Date, payload.dateOfJoining)
+      .input("ReportingManager", sql.VarChar(100), payload.reportingManager)
+      .input("Nationality", sql.VarChar(50), payload.nationality)
+      .input("MaritalStatus", sql.VarChar(20), payload.maritalStatus)
+      .input("BloodGroup", sql.VarChar(10), payload.bloodGroup)
+      .input("PhoneNumber", sql.VarChar(20), payload.phoneNumber)
+      .input("EmergencyContactNumber", sql.VarChar(20), payload.emergencyContactNumber)
+      .input("Email", sql.VarChar(150), payload.email)
+      .input("DepartmentID", sql.Int, payload.departmentId)
+      .input("DesignationID", sql.Int, payload.designationId)
+      .input("BasicSalary", sql.Decimal(18, 2), payload.basicSalary)
+      .input("SalaryDeduction", sql.Decimal(18, 2), payload.salaryDeduction)
+      .input("ProvidentFund", sql.Decimal(18, 2), payload.providentFund)
+      .input("ESIAmount", sql.Decimal(18, 2), payload.esiAmount)
+      .input("Address", sql.VarChar(500), payload.address)
+      .input("PhotoPath", sql.VarChar(255), payload.photoPath)
+      .input("DocumentsJson", sql.NVarChar(sql.MAX), payload.documentsJson)
+      .input("Status", sql.VarChar(20), payload.status)
+      .query(`
+        UPDATE ${hrmsTable("Employees")}
+        SET
+          FullName = @FullName,
+          DateOfBirth = @DateOfBirth,
+          Gender = @Gender,
+          DateOfJoining = @DateOfJoining,
+          ReportingManager = @ReportingManager,
+          Nationality = @Nationality,
+          MaritalStatus = @MaritalStatus,
+          BloodGroup = @BloodGroup,
+          PhoneNumber = @PhoneNumber,
+          EmergencyContactNumber = @EmergencyContactNumber,
+          Email = @Email,
+          DepartmentID = @DepartmentID,
+          DesignationID = @DesignationID,
+          BasicSalary = @BasicSalary,
+          SalaryDeduction = @SalaryDeduction,
+          ProvidentFund = @ProvidentFund,
+          ESIAmount = @ESIAmount,
+          Address = @Address,
+          PhotoPath = @PhotoPath,
+          DocumentsJson = @DocumentsJson,
+          Status = @Status
+        WHERE EmployeeID = @EmployeeID
+      `);
+
+    await tx.commit();
+    const employee = await loadHrmsEmployeeById(pool, req.params.id);
+    return res.json({ ok: true, employee });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to update HRMS employee",
+    });
+  }
+});
+
+app.delete("/api/hrms/employees/:id", async (req, res) => {
+  try {
+    await ensureHrmsEmployeesTable();
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("EmployeeID", sql.VarChar(20), req.params.id)
+      .query(`
+        DELETE FROM ${hrmsTable("Employees")}
+        WHERE EmployeeID = @EmployeeID
+      `);
+
+    if ((result.rowsAffected?.[0] ?? 0) === 0) {
+      return res.status(404).json({
+        ok: false,
+        error: "Employee not found",
+      });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    const status = isSqlForeignKeyViolation(error) ? 409 : 500;
+    return res.status(status).json({
+      ok: false,
+      error:
+        status === 409
+          ? "Employee cannot be deleted because linked HRMS records exist."
+          : error?.message ?? "Failed to delete HRMS employee",
+    });
+  }
+});
 
 app.get("/api/health", async (_req, res) => {
   try {
