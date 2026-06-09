@@ -1,4 +1,4 @@
-import { formatDate } from "../../../utils/dateFormat";
+import { formatDate, parseDateValue } from "../../../utils/dateFormat";
 
 export const REPORT_ACTIVITY_TYPES = [
   {
@@ -58,12 +58,13 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const pad = (value) => String(value).padStart(2, "0");
+
 const toDateObject = (value) => {
   if (!value) {
     return null;
   }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return parseDateValue(value);
 };
 
 const toDateKey = (value) => {
@@ -71,7 +72,7 @@ const toDateKey = (value) => {
   if (!date) {
     return "";
   }
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 };
 
 const getTimeValue = (value) => {

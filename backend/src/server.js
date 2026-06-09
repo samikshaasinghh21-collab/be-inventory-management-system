@@ -5,6 +5,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { checkDbConnection, getPool, sql } from "./config/db.js";
+import version from "../../scripts/getVersion.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,6 +20,8 @@ loadEnv(path.resolve(__dirname, "../../../backend/.env"));
 
 const app = express();
 const port = Number.parseInt(process.env.PORT ?? "5000", 10);
+process.env.APP_VERSION = process.env.APP_VERSION || version;
+console.log(`Backend starting with app version: ${process.env.APP_VERSION}`);
 
 app.use(cors());
 app.use(express.json({ limit: "25mb" }));
@@ -5499,7 +5502,7 @@ const loadReceiveGoodsItemsForConsumption = async (
   const request = new sql.Request(tx);
   const inClause = buildPurchaseOrderItemInClause(request, ids, "ReceiveGoodsItemId");
   const result = await request.query(`
-    SELECT ${toIdentifier(receiveItemsPk)} AS Id, ReceiveGoodsId, ItemId, ItemName, ReceivedQty, BalanceQty
+    SELECT *, ${toIdentifier(receiveItemsPk)} AS Id
     FROM dbo.ReceiveGoodsItems
     WHERE ${toIdentifier(receiveItemsPk)} IN (${inClause})
   `);
@@ -5556,14 +5559,7 @@ const loadReceiveGoodsItemsForConsumption = async (
     }
   }
 
-  return rows.map((row) => ({
-    id: row.Id ?? null,
-    receiveGoodsId: row.ReceiveGoodsId ?? null,
-    itemId: row.ItemId ?? null,
-    name: row.ItemName ?? "",
-    receivedQty: Number(row.ReceivedQty ?? 0) || 0,
-    balanceQty: Number(row.BalanceQty ?? 0) || 0,
-  }));
+  return rows.map(normalizeReceiveGoodsItem);
 };
 
 let deliveryChallanPk = "DeliveryChallanId";
@@ -6408,13 +6404,7 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
 
   let receiptItems = [];
 
-  if (requestedReceiveGoodsItemIds.length) {
-    receiptItems = await loadReceiveGoodsItemsForConsumption(tx, {
-      receiveGoodsId: safeReceiveGoodsId,
-      receiveGoodsIds: safeReceiveGoodsIds,
-      receiveGoodsItemIds: requestedReceiveGoodsItemIds,
-    });
-  } else if (safeReceiveGoodsIds.length) {
+  if (safeReceiveGoodsIds.length) {
     const receiptItemsReq = new sql.Request(tx);
     const receiptIdsClause = buildPurchaseOrderItemInClause(
       receiptItemsReq,
@@ -6427,6 +6417,12 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
       WHERE ReceiveGoodsId IN (${receiptIdsClause})
     `);
     receiptItems = (receiptItemsResult.recordset ?? []).map(normalizeReceiveGoodsItem);
+  } else if (requestedReceiveGoodsItemIds.length) {
+    receiptItems = await loadReceiveGoodsItemsForConsumption(tx, {
+      receiveGoodsId: safeReceiveGoodsId,
+      receiveGoodsIds: safeReceiveGoodsIds,
+      receiveGoodsItemIds: requestedReceiveGoodsItemIds,
+    });
   } else if (safeReceiveGoodsId !== null) {
     const receiptItemsResult = await new sql.Request(tx)
       .input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId)
@@ -6441,6 +6437,22 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
   if (!receiptItems.length) {
     const error = new Error(
       "A receive receipt is required to validate the delivery challan items."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const receiptItemIdSet = new Set(
+    receiptItems
+      .map((item) => toNullableInt(item.id ?? item.receiveGoodsItemId))
+      .filter((id) => id !== null)
+  );
+  if (
+    safeReceiveGoodsIds.length &&
+    requestedReceiveGoodsItemIds.some((id) => !receiptItemIdSet.has(id))
+  ) {
+    const error = new Error(
+      "The selected receive receipt references do not match the linked receipt items."
     );
     error.statusCode = 400;
     throw error;
@@ -6540,7 +6552,7 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
     }
 
     const itemId = toNullableInt(item.itemId ?? item.ItemId);
-    if (itemId !== null && !itemIdToMaterialKey.has(itemId)) {
+    if (itemId !== null && itemId > 0 && !itemIdToMaterialKey.has(itemId)) {
       itemIdToMaterialKey.set(itemId, materialKey);
     }
   });
@@ -6567,7 +6579,7 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
     }
 
     const itemId = toNullableInt(item.itemId ?? item.ItemId);
-    if (itemId !== null && itemIdToMaterialKey.has(itemId)) {
+    if (itemId !== null && itemId > 0 && itemIdToMaterialKey.has(itemId)) {
       return itemIdToMaterialKey.get(itemId);
     }
 

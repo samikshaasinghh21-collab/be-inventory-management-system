@@ -26,6 +26,25 @@ const ICONS = {
       <path d="M10.5 18a1.5 1.5 0 0 0 3 0" />
     </>
   ),
+  briefcase: (
+    <>
+      <path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7" />
+      <rect x="4" y="7" width="16" height="13" rx="2" />
+      <path d="M4 12h16" />
+      <path d="M10 12v2h4v-2" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="4" y="5" width="16" height="16" rx="2" />
+      <path d="M8 3v4" />
+      <path d="M16 3v4" />
+      <path d="M4 10h16" />
+      <path d="M8 14h2" />
+      <path d="M14 14h2" />
+      <path d="M8 17h2" />
+    </>
+  ),
   chart: (
     <>
       <path d="M5 19V9" />

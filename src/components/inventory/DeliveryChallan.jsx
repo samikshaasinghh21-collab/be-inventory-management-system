@@ -129,6 +129,11 @@ const fmtQty = (value) =>
 
 const toQuantity = (value) => Number(value) || 0;
 
+const parseNumberValue = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const normalizeLookupText = (value = "") => String(value ?? "").trim().toLowerCase();
 const normalizePreselectedReceiptIds = (value = []) =>
   Array.from(
@@ -138,6 +143,17 @@ const normalizePreselectedReceiptIds = (value = []) =>
         .filter(Boolean)
     )
   );
+
+const areReceiptSelectionsEqual = (left = [], right = []) => {
+  const normalize = (value = []) =>
+    normalizePreselectedReceiptIds(value).sort((a, b) => a.localeCompare(b));
+  const leftIds = normalize(left);
+  const rightIds = normalize(right);
+  return (
+    leftIds.length === rightIds.length &&
+    leftIds.every((id, index) => id === rightIds[index])
+  );
+};
 
 const DeliveryChallan = () => {
   const location = useLocation();
@@ -218,7 +234,9 @@ const DeliveryChallan = () => {
       const nextNumber = await fetchNextDeliveryChallanNumber();
       if (nextNumber) {
         setForm((prev) =>
-          editingId ? prev : { ...prev, dcNumber: nextNumber }
+          editingId || String(prev.dcNumber).trim()
+            ? prev
+            : { ...prev, dcNumber: nextNumber }
         );
       }
     } catch {
@@ -636,17 +654,65 @@ const DeliveryChallan = () => {
     if (!form.toLocationId && !form.toLocation.trim()) {
       nextErrors.toLocationId = "Select destination.";
     }
-    const hasValidItem = items.some(
+
+    const validItems = items.filter(
       (item) => item.name.trim() && Number(item.quantity) > 0
     );
-    if (!hasValidItem) {
+    if (!validItems.length) {
       nextErrors.items = "Add at least one line item.";
     }
-    const invalidQuantityItem = items.find(
-      (item) => Number(item.quantity) > Number(item.availableQty ?? item.quantity)
-    );
+
+    const invalidQuantityItem = validItems.find((item) => {
+      const itemAvailableQty = getReceiptItemAvailableQty(item);
+      const quantity = Number(item.quantity) || 0;
+      return quantity > itemAvailableQty;
+    });
     if (invalidQuantityItem) {
-      nextErrors.items = `DC quantity for ${invalidQuantityItem.name || "an item"} cannot exceed available quantity.`;
+      nextErrors.items = `DC quantity for ${invalidQuantityItem.name || "an item"} cannot exceed available quantity (${getReceiptItemAvailableQty(invalidQuantityItem)}).`;
+    }
+
+    const aggregatedItems = validItems.reduce((map, item) => {
+      const normalizedName = String(item.name ?? item.ItemName ?? item.item ?? item.Item ?? "")
+        .trim()
+        .toLowerCase();
+      const normalizedUnit = String(item.unit ?? item.Unit ?? "PCS")
+        .trim()
+        .toLowerCase() || "pcs";
+      const materialKey = `${normalizedName}::${normalizedUnit}`;
+      const key =
+        item.receiveGoodsItemId ??
+        item.poItemId ??
+        item.itemId ??
+        materialKey;
+      const quantity = Number(item.quantity) || 0;
+      const availableQty = getReceiptItemAvailableQty(item);
+      const existing = map.get(key) || {
+        name: item.name || "an item",
+        quantity: 0,
+        availableQty,
+      };
+      existing.quantity += quantity;
+      existing.availableQty = Math.max(existing.availableQty, availableQty);
+      map.set(key, existing);
+      return map;
+    }, new Map());
+
+    const duplicateExceeded = Array.from(aggregatedItems.values()).find(
+      (group) => group.quantity > group.availableQty
+    );
+    if (duplicateExceeded) {
+      nextErrors.items = `Total DC quantity for ${duplicateExceeded.name || "an item"} cannot exceed available quantity (${duplicateExceeded.availableQty}).`;
+    }
+    if (!nextErrors.items && selectedReceiptIds.length && !loadedReceiptIds.length) {
+      nextErrors.items = "Please load selected receipts before saving the delivery challan.";
+    }
+    if (
+      !nextErrors.items &&
+      loadedReceiptIds.length &&
+      !areReceiptSelectionsEqual(selectedReceiptIds, loadedReceiptIds)
+    ) {
+      nextErrors.items =
+        "Receipt selection changed after loading. Load selected receipts again before saving.";
     }
 
     setErrors(nextErrors);
@@ -657,6 +723,11 @@ const DeliveryChallan = () => {
     event.preventDefault();
     setReceiptError("");
     if (!validate()) {
+      console.debug("Delivery challan validation failed", {
+        items,
+        selectedReceiptIds,
+        loadedReceiptIds,
+      });
       return;
     }
 
@@ -666,17 +737,48 @@ const DeliveryChallan = () => {
         name: String(item.name ?? "").trim(),
         hsn: String(item.hsn ?? "").trim(),
         gst: String(item.gst ?? "").trim(),
+        quantity: Number(item.quantity) || 0,
+        rate: Number(item.rate) || 0,
       }))
       .filter((item) => item.name && Number(item.quantity) > 0);
 
+    const receiptIdsForPayload = loadedReceiptIds.length
+      ? loadedReceiptIds
+      : selectedReceiptIds;
+
     const payload = {
-      ...form,
-      receiveGoodsId: form.receiveGoodsId ? Number(form.receiveGoodsId) : null,
-      receiveGoodsIds: selectedReceiptIds
-        .map((receiptId) => Number(receiptId))
-        .filter((receiptId) => Number.isFinite(receiptId) && receiptId > 0),
+      dcNumber: String(form.dcNumber ?? "").trim(),
+      projectId: parseNumberValue(form.projectId),
+      receiveGoodsId: parseNumberValue(form.receiveGoodsId),
+      receiveGoodsIds: receiptIdsForPayload
+        .map((receiptId) => parseNumberValue(receiptId))
+        .filter((receiptId) => receiptId !== null && receiptId > 0),
+      fromLocationId: parseNumberValue(form.fromLocationId),
+      toLocationId: parseNumberValue(form.toLocationId),
+      toLocation: String(form.toLocation ?? "").trim(),
+      vehicleNumber: String(form.vehicleNumber ?? "").trim() || null,
+      eWayBillNumber: String(form.eWayBillNumber ?? "").trim() || null,
+      issueDate: String(form.issueDate ?? "").trim() || null,
+      status: String(form.status ?? "Draft").trim(),
+      podStatus: String(form.podStatus ?? "Pending").trim(),
+      podReference: String(form.podReference ?? "").trim() || null,
+      podDate: String(form.podDate ?? "").trim() || null,
+      notes: String(form.notes ?? "").trim() || null,
       items: cleanedItems,
     };
+
+    console.debug("Delivery challan submit payload", payload);
+    cleanedItems.forEach((item, index) => {
+      console.debug(`Item ${index + 1}:`, {
+        name: item.name,
+        receiveGoodsItemId: item.receiveGoodsItemId,
+        poItemId: item.poItemId,
+        itemId: item.itemId,
+        availableQty: item.availableQty,
+        enteredQuantity: item.quantity,
+        rate: item.rate,
+      });
+    });
 
     try {
       if (editingId) {
@@ -739,6 +841,7 @@ const DeliveryChallan = () => {
       ])
     ).map((value) => String(value));
     setSelectedReceiptIds(recordReceiptIds);
+    setLoadedReceiptIds(recordReceiptIds);
     setErrors({});
     setReceiptFilters((prev) => ({
       ...prev,
@@ -920,7 +1023,7 @@ const DeliveryChallan = () => {
         quantity: Number(item.quantity ?? item.availableQty ?? 0) || 0,
       }))
     );
-    setLoadedReceiptIds(selectedReceiptIds);
+    setLoadedReceiptIds([...selectedReceiptIds]);
     setForm((prev) => ({
       ...prev,
       receiveGoodsId: primaryReceipt?.id ? String(primaryReceipt.id) : "",
@@ -1037,12 +1140,13 @@ const DeliveryChallan = () => {
               <input
                 type="text"
                 value={form.dcNumber}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, dcNumber: event.target.value }))
-                }
-                placeholder="DC-2026-001"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                readOnly
+                placeholder="Auto-generated by system"
+                className="w-full mt-1 border border-slate-200 rounded-lg bg-slate-100 px-3 py-2"
               />
+              <p className="text-xs text-slate-500 mt-1">
+                The system assigns a DC number automatically and it cannot be edited.
+              </p>
               {errors.dcNumber && (
                 <p className="text-xs text-red-600 mt-1">{errors.dcNumber}</p>
               )}

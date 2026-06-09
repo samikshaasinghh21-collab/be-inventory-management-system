@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import DateInput from "../components/common/DateInput";
+import useSettings from "../hooks/useSettings";
 import AppIcon from "../components/layout/AppIcon";
 import {
   createHrmsEmployee,
@@ -210,6 +211,16 @@ const useHrmsEmployees = () => {
       refresh: refreshEmployees,
     },
   ];
+};
+
+const buildPageNumbers = (currentPage, totalPages) => {
+  const start = Math.max(1, currentPage - 2);
+  const end = Math.min(totalPages, Math.max(start + 4, currentPage));
+  const normalizedStart = Math.max(1, end - 4);
+  return Array.from(
+    { length: end - normalizedStart + 1 },
+    (_, index) => normalizedStart + index
+  );
 };
 
 const useHrmsReviews = () => {
@@ -717,6 +728,16 @@ const normalizeAttendanceMonth = (value) => {
   return text;
 };
 
+const toAttendanceMonthInputValue = (value) => {
+  const normalized = normalizeAttendanceMonth(value);
+  if (!normalized) return "";
+
+  const parsed = new Date(`1 ${normalized}`);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  return `${parsed.getFullYear()}-${padDatePart(parsed.getMonth() + 1)}`;
+};
+
 const getAttendanceMonthIndex = (value) => {
   const normalized = normalizeAttendanceMonth(value);
   const parsed = new Date(`1 ${normalized}`);
@@ -728,29 +749,6 @@ const getAttendanceMonthIndex = (value) => {
 
 const areAttendanceMonthsEqual = (left, right) =>
   normalizeAttendanceMonth(left) === normalizeAttendanceMonth(right);
-
-const buildAttendanceMonthOptions = (latestMonth, savedMonths = []) => {
-  const baseMonth = normalizeAttendanceMonth(latestMonth) || getCurrentAttendanceMonth();
-  const baseDate = new Date(`1 ${baseMonth}`);
-  const options = new Set(savedMonths.map(normalizeAttendanceMonth).filter(Boolean));
-
-  if (!Number.isNaN(baseDate.getTime())) {
-    for (let index = 0; index < 24; index += 1) {
-      options.add(
-        monthNameFormatter.format(
-          new Date(baseDate.getFullYear(), baseDate.getMonth() - index, 1)
-        )
-      );
-    }
-  } else {
-    options.add(baseMonth);
-  }
-
-  return Array.from(options).sort(
-    (first, second) =>
-      getAttendanceMonthIndex(second) - getAttendanceMonthIndex(first)
-  );
-};
 
 const toDateInputValue = (value = "") => {
   const text = String(value || "");
@@ -782,12 +780,16 @@ const buildEmployeeForm = (employee) => {
     documents: normalizeEmployeeDocuments(source.documents),
     email: source.email || "",
     emergencyContactNumber: source.emergencyContactNumber || "",
+    emergencyContactRelation: source.emergencyContactRelation || "",
     fullName: source.name || "",
     gender: source.gender || "",
     joined: toDateInputValue(source.joined),
     manager: source.manager || "",
     maritalStatus: source.maritalStatus || "",
     nationality: source.nationality || "",
+    panNumber: source.panNumber || "",
+    bankAccountNumber: source.bankAccountNumber || "",
+    bankIfsc: source.bankIfsc || "",
     phone: source.phone || "",
     photo: source.photo || "",
     salary: String(source.salary || ""),
@@ -931,6 +933,7 @@ const printEmployeeProfile = (employee) => {
     ["Email", displayValue(employee.email)],
     ["Phone", displayValue(employee.phone)],
     ["Emergency Contact", displayValue(employee.emergencyContactNumber)],
+    ["Contact Relation", displayValue(employee.emergencyContactRelation)],
     ["Status", displayValue(employee.status)],
     ["Reporting To", displayValue(employee.manager)],
     ["Date of Joining", displayValue(employee.joined)],
@@ -938,6 +941,9 @@ const printEmployeeProfile = (employee) => {
     ["Marital Status", displayValue(employee.maritalStatus)],
     ["Nationality", displayValue(employee.nationality)],
     ["Blood Group", displayValue(employee.bloodGroup)],
+    ["PAN Number", displayValue(employee.panNumber)],
+    ["Bank Account", displayValue(employee.bankAccountNumber)],
+    ["Bank IFSC", displayValue(employee.bankIfsc)],
     ["Salary", money(employee.salary)],
     ["Address", displayValue(employee.address)],
   ];
@@ -2120,8 +2126,12 @@ const DashboardPage = () => {
 };
 
 const EmployeeListPage = () => {
+  const settings = useSettings();
+  const isAdmin = String(settings?.profile?.role || "").toLowerCase() === "admin";
   const [employees, , employeesState] = useHrmsEmployees();
   const [query, setQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+
   const filteredEmployees = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return employees;
@@ -2138,7 +2148,20 @@ const EmployeeListPage = () => {
         .toLowerCase()
         .includes(needle)
     );
-  }, [query]);
+  }, [query, employees]);
+
+  const pageSize = 10;
+  const pageCount = Math.max(1, Math.ceil(filteredEmployees.length / pageSize));
+  const safePage = Math.min(currentPage, pageCount);
+  const pagedEmployees = filteredEmployees.slice(
+    (safePage - 1) * pageSize,
+    safePage * pageSize
+  );
+  const pageNumbers = buildPageNumbers(safePage, pageCount);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filteredEmployees]);
 
   return (
     <Panel>
@@ -2179,66 +2202,97 @@ const EmployeeListPage = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filteredEmployees.map((employee) => (
-              <tr key={employee.id} className="hover:bg-slate-50">
-                <td className="px-3 py-3 font-semibold">{employee.id}</td>
-                <td className="px-3 py-3">
-                  <Avatar
-                    initials={employee.avatar}
-                    size="sm"
-                    src={employee.photo}
-                  />
-                </td>
-                <td className="px-3 py-3">{employee.name}</td>
-                <td className="px-3 py-3">{employee.department}</td>
-                <td className="px-3 py-3">{employee.designation}</td>
-                <td className="px-3 py-3">{employee.email}</td>
-                <td className="px-3 py-3">
-                  <StatusBadge status={employee.status} />
-                </td>
-                <td className="px-3 py-3">
-                  <div className="flex flex-wrap gap-2">
-                    <Link
-                      to={`/employees/profile/${employee.id}`}
-                      aria-label={`View ${employee.name}`}
-                    >
-                      <Button className="min-h-8 px-2 text-xs" variant="secondary">
-                        <AppIcon name="user" className="h-4 w-4" />
-                        View
-                      </Button>
-                    </Link>
-                    <Link
-                      to={`/employees/edit/${employee.id}`}
-                      aria-label={`Edit ${employee.name}`}
-                    >
-                      <Button className="min-h-8 px-2 text-xs" variant="secondary">
-                        <AppIcon name="edit" className="h-4 w-4" />
-                        Edit
-                      </Button>
-                    </Link>
-                  </div>
+            {pagedEmployees.length ? (
+              pagedEmployees.map((employee) => (
+                <tr key={employee.id} className="hover:bg-slate-50">
+                  <td className="px-3 py-3 font-semibold">{employee.id}</td>
+                  <td className="px-3 py-3">
+                    <Avatar
+                      initials={employee.avatar}
+                      size="sm"
+                      src={employee.photo}
+                    />
+                  </td>
+                  <td className="px-3 py-3">{employee.name}</td>
+                  <td className="px-3 py-3">{employee.department}</td>
+                  <td className="px-3 py-3">{employee.designation}</td>
+                  <td className="px-3 py-3">{employee.email}</td>
+                  <td className="px-3 py-3">
+                    <StatusBadge status={employee.status} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        to={`/employees/profile/${employee.id}`}
+                        aria-label={`View ${employee.name}`}
+                      >
+                        <Button className="min-h-8 px-2 text-xs" variant="secondary">
+                          <AppIcon name="user" className="h-4 w-4" />
+                          View
+                        </Button>
+                      </Link>
+                      {isAdmin ? (
+                        <Link
+                          to={`/employees/edit/${employee.id}`}
+                          aria-label={`Edit ${employee.name}`}
+                        >
+                          <Button className="min-h-8 px-2 text-xs" variant="secondary">
+                            <AppIcon name="edit" className="h-4 w-4" />
+                            Edit
+                          </Button>
+                        </Link>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
+                  No employees match your search.
                 </td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </div>
 
-      <div className="mt-5 flex justify-center gap-2">
-        {[1, 2, 3, 4, 5].map((page) => (
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-500">
+          Showing {pagedEmployees.length ? (safePage - 1) * pageSize + 1 : 0} - {safePage * pageSize > filteredEmployees.length ? filteredEmployees.length : safePage * pageSize} of {filteredEmployees.length} employees
+        </p>
+        <div className="flex flex-wrap gap-2">
           <button
-            key={page}
             type="button"
-            className={[
-              "grid h-8 w-8 place-items-center rounded-md border text-xs font-bold",
-              page === 1
-                ? "border-blue-700 bg-blue-700 text-white"
-                : "border-slate-200 bg-white text-slate-600",
-            ].join(" ")}
+            onClick={() => setCurrentPage(Math.max(1, safePage - 1))}
+            disabled={safePage <= 1}
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 transition hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {page}
+            Previous
           </button>
-        ))}
+          {pageNumbers.map((page) => (
+            <button
+              key={page}
+              type="button"
+              onClick={() => setCurrentPage(page)}
+              className={
+                page === safePage
+                  ? "grid h-8 w-8 place-items-center rounded-md border border-blue-700 bg-blue-700 text-white text-xs font-bold"
+                  : "grid h-8 w-8 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 text-xs font-bold hover:border-slate-300"
+              }
+            >
+              {page}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setCurrentPage(Math.min(pageCount, safePage + 1))}
+            disabled={safePage >= pageCount}
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 transition hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
       </div>
     </Panel>
   );
@@ -2260,12 +2314,16 @@ const AddEmployeePage = () => {
     documents: emptyEmployeeDocuments(),
     email: "",
     emergencyContactNumber: "",
+    emergencyContactRelation: "",
     fullName: "",
     gender: "",
     joined: "",
     manager: "",
     maritalStatus: "",
     nationality: "",
+    panNumber: "",
+    bankAccountNumber: "",
+    bankIfsc: "",
     phone: "",
     photo: "",
     pfAmount: "",
@@ -2303,6 +2361,18 @@ const AddEmployeePage = () => {
       return;
     }
 
+    const normalizedPan = form.panNumber.trim().toUpperCase();
+    if (normalizedPan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(normalizedPan)) {
+      setError("PAN number must use the format AAAAA1234A.");
+      return;
+    }
+
+    const normalizedIfsc = form.bankIfsc.trim().toUpperCase();
+    if (normalizedIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(normalizedIfsc)) {
+      setError("IFSC code must be 11 characters in the format AAAA0AAAAA.");
+      return;
+    }
+
     const salaryBreakup = getFormSalaryBreakup(form);
     const newEmployee = {
       name: form.fullName.trim(),
@@ -2310,6 +2380,10 @@ const AddEmployeePage = () => {
       designation: form.designation,
       email: form.email.trim(),
       emergencyContactNumber: form.emergencyContactNumber.trim(),
+      emergencyContactRelation: form.emergencyContactRelation.trim(),
+      panNumber: normalizedPan,
+      bankAccountNumber: form.bankAccountNumber.trim(),
+      bankIfsc: normalizedIfsc,
       phone: form.phone.trim(),
       status: form.status,
       manager: form.manager.trim(),
@@ -2445,6 +2519,15 @@ const AddEmployeePage = () => {
                   placeholder="Enter emergency contact number"
                 />
               </Field>
+              <Field label="Contact Relation">
+                <Input
+                  value={form.emergencyContactRelation}
+                  onChange={(event) =>
+                    updateForm("emergencyContactRelation", event.target.value)
+                  }
+                  placeholder="Enter emergency contact relation"
+                />
+              </Field>
               <Field label="Email">
                 <Input
                   type="email"
@@ -2513,6 +2596,29 @@ const AddEmployeePage = () => {
                 value={form.designation}
                 onChange={(event) => updateForm("designation", event.target.value)}
                 placeholder="Enter designation"
+              />
+            </Field>
+            <Field label="PAN Number">
+              <Input
+                value={form.panNumber}
+                onChange={(event) => updateForm("panNumber", event.target.value.toUpperCase())}
+                placeholder="Enter PAN number"
+                maxLength={10}
+              />
+            </Field>
+            <Field label="Bank Account Number">
+              <Input
+                value={form.bankAccountNumber}
+                onChange={(event) => updateForm("bankAccountNumber", event.target.value)}
+                placeholder="Enter bank account number"
+              />
+            </Field>
+            <Field label="IFSC Code">
+              <Input
+                value={form.bankIfsc}
+                onChange={(event) => updateForm("bankIfsc", event.target.value.toUpperCase())}
+                placeholder="Enter IFSC code"
+                maxLength={11}
               />
             </Field>
             <Field label="Status">
@@ -2603,6 +2709,8 @@ const AddEmployeePage = () => {
 };
 
 const EditEmployeePage = () => {
+  const settings = useSettings();
+  const isAdmin = String(settings?.profile?.role || "").toLowerCase() === "admin";
   const { employeeId } = useParams();
   const [employees, setEmployees] = useHrmsEmployees();
   const navigate = useNavigate();
@@ -2658,6 +2766,18 @@ const EditEmployeePage = () => {
       return;
     }
 
+    const normalizedPan = form.panNumber.trim().toUpperCase();
+    if (normalizedPan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(normalizedPan)) {
+      setError("PAN number must use the format AAAAA1234A.");
+      return;
+    }
+
+    const normalizedIfsc = form.bankIfsc.trim().toUpperCase();
+    if (normalizedIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(normalizedIfsc)) {
+      setError("IFSC code must be 11 characters in the format AAAA0AAAAA.");
+      return;
+    }
+
     const salaryBreakup = getFormSalaryBreakup(form);
     const updatedEmployee = {
       ...employee,
@@ -2666,6 +2786,10 @@ const EditEmployeePage = () => {
       designation: form.designation.trim(),
       email: form.email.trim(),
       emergencyContactNumber: form.emergencyContactNumber.trim(),
+      emergencyContactRelation: form.emergencyContactRelation.trim(),
+      panNumber: normalizedPan,
+      bankAccountNumber: form.bankAccountNumber.trim(),
+      bankIfsc: normalizedIfsc,
       phone: form.phone.trim(),
       status: form.status,
       manager: form.manager.trim(),
@@ -2715,6 +2839,19 @@ const EditEmployeePage = () => {
       <Panel>
         <Notice tone="warning">No employee record found to edit.</Notice>
         <Button className="mt-4" onClick={() => navigate("/employees")}>
+          Back to Employees
+        </Button>
+      </Panel>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <Panel>
+        <Notice tone="warning">
+          You do not have permission to edit employee records. Please contact an Admin.
+        </Notice>
+        <Button className="mt-4" onClick={() => navigate("/employees")}> 
           Back to Employees
         </Button>
       </Panel>
@@ -2822,6 +2959,15 @@ const EditEmployeePage = () => {
                   placeholder="Enter emergency contact number"
                 />
               </Field>
+              <Field label="Contact Relation">
+                <Input
+                  value={form.emergencyContactRelation}
+                  onChange={(event) =>
+                    updateForm("emergencyContactRelation", event.target.value)
+                  }
+                  placeholder="Enter emergency contact relation"
+                />
+              </Field>
               <Field label="Email">
                 <Input
                   type="email"
@@ -2890,6 +3036,29 @@ const EditEmployeePage = () => {
                 value={form.designation}
                 onChange={(event) => updateForm("designation", event.target.value)}
                 placeholder="Enter designation"
+              />
+            </Field>
+            <Field label="PAN Number">
+              <Input
+                value={form.panNumber}
+                onChange={(event) => updateForm("panNumber", event.target.value.toUpperCase())}
+                placeholder="Enter PAN number"
+                maxLength={10}
+              />
+            </Field>
+            <Field label="Bank Account Number">
+              <Input
+                value={form.bankAccountNumber}
+                onChange={(event) => updateForm("bankAccountNumber", event.target.value)}
+                placeholder="Enter bank account number"
+              />
+            </Field>
+            <Field label="IFSC Code">
+              <Input
+                value={form.bankIfsc}
+                onChange={(event) => updateForm("bankIfsc", event.target.value.toUpperCase())}
+                placeholder="Enter IFSC code"
+                maxLength={11}
               />
             </Field>
             <Field label="Status">
@@ -2981,6 +3150,8 @@ const EditEmployeePage = () => {
 };
 
 const EmployeeProfilePage = () => {
+  const settings = useSettings();
+  const isAdmin = String(settings?.profile?.role || "").toLowerCase() === "admin";
   const { employeeId } = useParams();
   const [employees, setEmployees] = useHrmsEmployees();
   const [, setAttendanceRecords] = useStoredList(HRMS_STORAGE_KEYS.attendance, []);
@@ -3175,25 +3346,35 @@ const EmployeeProfilePage = () => {
             )}
           </div>
           <div className="flex flex-wrap items-end justify-start gap-2 xl:justify-end">
-            <Link to={`/employees/edit/${employee.id}`}>
-              <Button>
-                <AppIcon name="edit" className="h-4 w-4" />
-                Edit Employee
-              </Button>
-            </Link>
-            <Button variant="danger" onClick={deleteEmployee}>
-              <AppIcon name="x" className="h-4 w-4" />
-              Delete Employee
-            </Button>
+            {isAdmin ? (
+              <>
+                <Link to={`/employees/edit/${employee.id}`}>
+                  <Button>
+                    <AppIcon name="edit" className="h-4 w-4" />
+                    Edit Employee
+                  </Button>
+                </Link>
+                <Button variant="danger" onClick={deleteEmployee}>
+                  <AppIcon name="x" className="h-4 w-4" />
+                  Delete Employee
+                </Button>
+              </>
+            ) : (
+              <span className="text-sm text-slate-500">
+                Employee updates and print access are restricted to Admin.
+              </span>
+            )}
           </div>
         </div>
       </Panel>
 
       <div className="flex justify-end">
-        <Button onClick={() => printEmployeeProfile(employee)}>
-          <AppIcon name="file" className="h-4 w-4" />
-          Print
-        </Button>
+        {isAdmin ? (
+          <Button onClick={() => printEmployeeProfile(employee)}>
+            <AppIcon name="file" className="h-4 w-4" />
+            Print
+          </Button>
+        ) : null}
       </div>
 
       <RegisterDocumentView
@@ -3211,9 +3392,13 @@ const EmployeeProfilePage = () => {
           ["Email", displayValue(employee.email)],
           ["Phone", displayValue(employee.phone)],
           ["Emergency Contact", displayValue(employee.emergencyContactNumber)],
+          ["Contact Relation", displayValue(employee.emergencyContactRelation)],
           ["Reporting To", displayValue(employee.manager)],
           ["Joining Date", displayValue(employee.joined)],
           ["Gross Salary", money(employee.salary)],
+          ["PAN Number", displayValue(employee.panNumber)],
+          ["Bank Account", displayValue(employee.bankAccountNumber)],
+          ["Bank IFSC", displayValue(employee.bankIfsc)],
         ]}
         tableColumns={["Sl No", "Particulars", "Details"]}
         tableRows={[
@@ -4919,15 +5104,9 @@ const AttendancePage = () => {
     L: "bg-amber-100 text-amber-700",
     H: "bg-blue-100 text-blue-700",
   };
+  const currentAttendanceMonth = getCurrentAttendanceMonth();
   const selectedEmployee =
     employees.find((employee) => employee.id === selectedEmployeeId) || null;
-  const savedAttendanceMonths = useMemo(
-    () =>
-      Array.from(
-        new Set(records.map((record) => normalizeAttendanceMonth(record.month)))
-      ).filter(Boolean),
-    [records]
-  );
   const latestAttendanceRecord = useMemo(() => {
     return [...records]
       .filter((record) => normalizeAttendanceMonth(record.month))
@@ -4944,11 +5123,10 @@ const AttendancePage = () => {
   const latestAttendanceMonth = normalizeAttendanceMonth(
     latestAttendanceRecord?.month
   );
-  const monthOptions = useMemo(
-    () => buildAttendanceMonthOptions(latestAttendanceMonth, savedAttendanceMonths),
-    [latestAttendanceMonth, savedAttendanceMonths]
-  );
   const selectedMonth = normalizeAttendanceMonth(month);
+  const isCurrentMonthSelected =
+    selectedMonth &&
+    areAttendanceMonthsEqual(selectedMonth, currentAttendanceMonth);
   const isLatestMonthSelected =
     latestAttendanceMonth &&
     areAttendanceMonthsEqual(selectedMonth, latestAttendanceMonth);
@@ -4976,11 +5154,11 @@ const AttendancePage = () => {
 
   useEffect(() => {
     if (isManualMonthSelection) return;
-    const nextMonth = latestAttendanceMonth || getCurrentAttendanceMonth();
+    const nextMonth = currentAttendanceMonth;
     if (nextMonth && !areAttendanceMonthsEqual(month, nextMonth)) {
       setMonth(nextMonth);
     }
-  }, [isManualMonthSelection, latestAttendanceMonth, month]);
+  }, [currentAttendanceMonth, isManualMonthSelection, month]);
 
   const findAttendanceRecord = useCallback(
     (employeeId, attendanceMonth) =>
@@ -5098,11 +5276,13 @@ const AttendancePage = () => {
         <div className="mb-4 grid gap-2">
           <Notice>{message}</Notice>
           <Notice>
-            {latestAttendanceMonth
-              ? isLatestMonthSelected
-                ? `Currently showing latest attendance month: ${latestAttendanceMonth}.`
-                : `Manual month selected: ${selectedMonth}. Latest saved attendance month is ${latestAttendanceMonth}.`
-              : "No saved attendance month found yet. Select a month and save attendance to create one."}
+            {selectedMonth
+              ? isCurrentMonthSelected
+                ? `Current attendance month selected: ${selectedMonth}.`
+                : latestAttendanceMonth
+                  ? `Manual month selected: ${selectedMonth}. Latest saved attendance month is ${latestAttendanceMonth}.`
+                  : `Manual month selected: ${selectedMonth}.`
+              : "Select a month to view or save attendance."}
           </Notice>
           <Notice tone="warning">{error || attendanceState.error}</Notice>
           <Notice>
@@ -5133,24 +5313,16 @@ const AttendancePage = () => {
           </Field>
           <Field label="Month">
             <Input
-              as="select"
-              value={month}
+              type="month"
+              value={toAttendanceMonthInputValue(month)}
               onChange={(event) => {
-                setMonth(event.target.value);
+                setMonth(normalizeAttendanceMonth(event.target.value));
                 setIsManualMonthSelection(true);
                 setActiveAttendanceId("");
                 setMessage("");
                 setError("");
               }}
-            >
-              {monthOptions.map((option) => (
-                <option key={option} value={option}>
-                  {areAttendanceMonthsEqual(option, latestAttendanceMonth)
-                    ? `${option} (Latest)`
-                    : option}
-                </option>
-              ))}
-            </Input>
+            />
           </Field>
           <Button className="self-end" onClick={loadAttendance}>
             View
@@ -5161,9 +5333,14 @@ const AttendancePage = () => {
           <h2 className="text-base font-bold">
             Attendance Overview - {selectedMonth || "Select Month"}
           </h2>
-          {isLatestMonthSelected && (
+          {isCurrentMonthSelected && (
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-              Latest
+              Current
+            </span>
+          )}
+          {!isCurrentMonthSelected && isLatestMonthSelected && (
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+              Latest Saved
             </span>
           )}
         </div>

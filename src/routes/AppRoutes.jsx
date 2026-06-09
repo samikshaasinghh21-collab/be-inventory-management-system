@@ -16,6 +16,9 @@ import ToolsBulkImport from "../pages/ToolsBulkImport";
 import ToolsHandoverTool from "../pages/ToolsHandoverTool";
 import ToolsMap from "../pages/ToolsMap";
 import HrmsPlaceholder from "../pages/HrmsPlaceholder";
+import ProjectDashboard from "../pages/projectManagement/ProjectDashboard";
+import ProjectManagementPlaceholder from "../pages/projectManagement/ProjectManagementPlaceholder";
+import { projectManagementPlaceholderPages } from "../pages/projectManagement/projectManagementData";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
 import CreateAccount from "../pages/CreateAccount";
@@ -180,6 +183,21 @@ const AppRoutes = () => {
             key={screen.path}
             path={screen.path}
             element={<HrmsPlaceholder page={screen.page} />}
+          />
+        ))}
+        <Route
+          path="/project-management"
+          element={<Navigate replace to="/project-management/dashboard" />}
+        />
+        <Route
+          path="/project-management/dashboard"
+          element={<ProjectDashboard />}
+        />
+        {projectManagementPlaceholderPages.map((screen) => (
+          <Route
+            key={screen.path}
+            path={screen.path}
+            element={<ProjectManagementPlaceholder page={screen.key} />}
           />
         ))}
 
