@@ -629,9 +629,6 @@ const ReallocateReturn = () => {
  
   const validate = () => {
     const nextErrors = {};
-    if (!form.referenceNumber.trim()) {
-      nextErrors.referenceNumber = "Reference number is required.";
-    }
     if (!form.projectId) {
       nextErrors.projectId = "Select a project.";
     }
@@ -689,7 +686,6 @@ const ReallocateReturn = () => {
  
     const source = consumptionMap[String(form.consumptionId)] || null;
     const payload = {
-      referenceNumber: form.referenceNumber.trim(),
       type: form.type,
       consumptionId: form.consumptionId ? Number(form.consumptionId) : null,
       consumptionNumber: source ? getReceiveReference(source) : "Project inventory",
@@ -884,7 +880,7 @@ const ReallocateReturn = () => {
           </h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
-              <label className="text-sm font-medium text-slate-700">Reference *</label>
+              <label className="text-sm font-medium text-slate-700">Reference</label>
               <input
                 type="text"
                 value={form.referenceNumber}

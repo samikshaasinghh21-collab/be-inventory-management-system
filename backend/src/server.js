@@ -1383,7 +1383,7 @@ const normalizeReallocateInventoryItem = (row = {}) => ({
   unit: row.Unit ?? row.unit ?? "PCS",
   quantity: Number(row.Quantity ?? row.quantity ?? 0) || 0,
 });
-
+const generateReallocateReferenceNumber = (id) => `REL-${id}`;
 const buildReallocateNotesPayload = ({
   referenceNumber = null,
   type = "Reallocate",
@@ -16104,7 +16104,6 @@ app.get("/api/reallocate-inventory/:id", async (req, res) => {
 
 app.post("/api/reallocate-inventory", async (req, res) => {
   const {
-    referenceNumber = null,
     type = "Reallocate",
     consumptionId = null,
     consumptionNumber = "",
@@ -16122,7 +16121,6 @@ app.post("/api/reallocate-inventory", async (req, res) => {
   const safeType = String(type ?? "Reallocate").trim() === "Return"
     ? "Return"
     : "Reallocate";
-  const safeReferenceNumber = normalizeOptionalString(referenceNumber);
   const safeConsumptionId = toNullableInt(consumptionId);
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
   const safeProjectId = toNullableInt(projectId);
@@ -16218,8 +16216,8 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     });
 
     const now = new Date().toISOString();
-    const notesPayload = buildReallocateNotesPayload({
-      referenceNumber: safeReferenceNumber,
+    const initialNotesPayload = buildReallocateNotesPayload({
+      referenceNumber: null,
       type: safeType,
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
@@ -16237,7 +16235,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     insertHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
     insertHeaderReq.input("ToLocationId", sql.Int, safeToLocationId);
     insertHeaderReq.input("TransferDate", sql.DateTime, parsedRequestDate ?? null);
-    insertHeaderReq.input("Notes", sql.NVarChar(sql.MAX), notesPayload);
+    insertHeaderReq.input("Notes", sql.NVarChar(sql.MAX), initialNotesPayload);
     const headerResult = await insertHeaderReq.query(`
       INSERT INTO dbo.ReallocateInventory
         (FromLocationId, ToLocationId, TransferDate, Notes)
@@ -16246,13 +16244,44 @@ app.post("/api/reallocate-inventory", async (req, res) => {
         (@FromLocationId, @ToLocationId, @TransferDate, @Notes)
     `);
 
-    const headerRow = headerResult.recordset?.[0];
+    const createdHeaderRow = headerResult.recordset?.[0];
     const transferId =
-      headerRow?.[pkCol] ??
-      headerRow?.Id ??
-      headerRow?.TransferId ??
+      createdHeaderRow?.[pkCol] ??
+      createdHeaderRow?.Id ??
+      createdHeaderRow?.TransferId ??
       null;
     if (!transferId) {
+      throw new Error("Failed to create reallocation");
+    }
+
+    const generatedReferenceNumber = generateReallocateReferenceNumber(transferId);
+    const finalNotesPayload = buildReallocateNotesPayload({
+      referenceNumber: generatedReferenceNumber,
+      type: safeType,
+      consumptionId: safeConsumptionId,
+      consumptionNumber: safeConsumptionNumber,
+      projectId: safeProjectId,
+      returnVendorId: safeReturnVendorId,
+      requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
+      requestedBy: safeRequestedBy,
+      status: safeStatus,
+      notes: safeNotes,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const updateHeaderReq = new sql.Request(tx);
+    updateHeaderReq.input("TransferId", sql.Int, transferId);
+    updateHeaderReq.input("Notes", sql.NVarChar(sql.MAX), finalNotesPayload);
+    const updateHeaderResult = await updateHeaderReq.query(`
+      UPDATE dbo.ReallocateInventory
+      SET Notes = @Notes
+      OUTPUT INSERTED.*
+      WHERE ${toIdentifier(pkCol)} = @TransferId
+    `);
+
+    const headerRow = updateHeaderResult.recordset?.[0];
+    if (!headerRow) {
       throw new Error("Failed to create reallocation");
     }
 
@@ -16312,7 +16341,6 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
   }
 
   const {
-    referenceNumber = null,
     type = "Reallocate",
     consumptionId = null,
     consumptionNumber = "",
@@ -16330,7 +16358,6 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
   const safeType = String(type ?? "Reallocate").trim() === "Return"
     ? "Return"
     : "Reallocate";
-  const safeReferenceNumber = normalizeOptionalString(referenceNumber);
   const safeConsumptionId = toNullableInt(consumptionId);
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
   const safeProjectId = toNullableInt(projectId);
@@ -16444,7 +16471,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     });
 
     const notesPayload = buildReallocateNotesPayload({
-      referenceNumber: safeReferenceNumber,
+      referenceNumber: previousRecord.referenceNumber || generateReallocateReferenceNumber(id),
       type: safeType,
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
