@@ -3,6 +3,9 @@ import api from "./api";
 const emitDeliveryChallanChange = () => {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("delivery-challans:changed"));
+    window.dispatchEvent(new Event("receive-goods:changed"));
+    window.dispatchEvent(new Event("consumptions:changed"));
+    window.dispatchEvent(new Event("reallocate-inventory:changed"));
   }
 };
 

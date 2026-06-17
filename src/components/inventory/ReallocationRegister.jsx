@@ -38,7 +38,7 @@ const err = (error, fallback) =>
   error?.response?.data?.error || error?.message || fallback;
  
 const getMovementTypeLabel = (type) =>
-  type === "Reallocate" ? "DC (Delivery Challan)" : type || "-";
+  type === "Reallocate" ? "Reallocation" : type || "-";
  
 const ReallocationRegister = () => {
   const navigate = useNavigate();
@@ -192,7 +192,7 @@ const ReallocationRegister = () => {
         (lr.status === "rejected" ? err(lr.reason, "Failed to load locations.") : "") ||
         (vr.status === "rejected" ? err(vr.reason, "Failed to load vendors.") : "") ||
         (rr.status === "rejected"
-          ? err(rr.reason, "Failed to load delivery challans.")
+          ? err(rr.reason, "Failed to load reallocations.")
           : "");
       if (loadError) setErrorMessage(loadError);
       setLoading(false);
@@ -230,7 +230,7 @@ const ReallocationRegister = () => {
   const printRegister = () => {
     printSection({
       selector: "#reallocation-register",
-      title: "DC Register",
+      title: "Reallocation",
       subtitle: "Inventory movement ledger",
       metaRows: [
         { label: "Total Entries", value: sortedRecords.length },
@@ -247,7 +247,7 @@ const ReallocationRegister = () => {
     setTimeout(() => {
       printSection({
         selector: "#reallocation-view-panel",
-        title: "Delivery Challan Details",
+        title: "Reallocation Details",
         logoUrl,
         brandName,
         brandDescription,
@@ -263,11 +263,11 @@ const ReallocationRegister = () => {
             D
           </span>
           <h1 className="text-4xl font-semibold tracking-tight text-slate-800">
-            DC Register
+            Reallocation
           </h1>
         </div>
         <p className="text-sm uppercase tracking-[0.2em] text-slate-500">
-          PROJECTS / Delivery Challan
+          PROJECTS / Reallocation
         </p>
       </section>
  
@@ -294,7 +294,7 @@ const ReallocationRegister = () => {
             onClick={() => navigate("/inventory/reallocate-return")}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
           >
-            + New Delivery Challan
+            + New Reallocation
           </button>
         </div>
       </section>
@@ -308,14 +308,14 @@ const ReallocationRegister = () => {
       <section id="reallocation-register" className={panel}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <h2 className="text-3xl font-semibold text-slate-800">
-            DC Register
+            Reallocation
           </h2>
           <button
             type="button"
             onClick={printRegister}
             className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-slate-400"
           >
-            Post register
+            Print Reallocation
           </button>
         </div>
         <div className="grid gap-2 border-b border-slate-200 px-4 py-3 md:grid-cols-[1fr_210px]">
@@ -323,7 +323,7 @@ const ReallocationRegister = () => {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search reference, item, date, project..."
+            placeholder="Search reallocation reference, item, date, project..."
             className={field}
           />
           <select
@@ -341,7 +341,7 @@ const ReallocationRegister = () => {
           <table className="min-w-full text-sm">
             <thead className="bg-[#eceff8] text-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left font-semibold min-w-[140px]">Reference</th>
+                <th className="px-4 py-3 text-left font-semibold min-w-[140px]">Reallocation Reference</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Type</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Receive Ref</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[180px]">Project</th>
@@ -358,8 +358,8 @@ const ReallocationRegister = () => {
                 <tr>
                   <td colSpan="10" className="px-4 py-10 text-center text-slate-500">
                     {loading
-                      ? "Loading delivery challans..."
-                      : "No delivery challans found."}
+                      ? "Loading reallocations..."
+                      : "No reallocations found."}
                   </td>
                 </tr>
               )}
@@ -434,7 +434,7 @@ const ReallocationRegister = () => {
       {activeViewRecord && (
   <DocumentViewPanel
     id="reallocation-view-panel"
-    title="DELIVERY CHALLAN DETAILS"
+    title="REALLOCATION DETAILS"
     onClose={() => setViewRecord(null)}
     companyName={brandName}
     companyAddress={brandDescription}

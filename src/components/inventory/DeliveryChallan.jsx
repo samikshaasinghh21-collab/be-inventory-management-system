@@ -129,6 +129,28 @@ const fmtQty = (value) =>
 
 const toQuantity = (value) => Number(value) || 0;
 
+const getDeliveryChallanRegisterStatus = (record = {}) => {
+  const rawStatus = String(record.podStatus || record.status || "")
+    .trim()
+    .toLowerCase();
+  if (rawStatus.includes("partial")) {
+    return "Partially Received";
+  }
+  if (rawStatus === "received" || rawStatus === "delivered") {
+    return "Received";
+  }
+  const deliveredQty = toQuantity(record.deliveredQty);
+  const consumedQty = toQuantity(record.consumedQty);
+  const balanceQty = toQuantity(record.balanceQty);
+  if (deliveredQty > 0 && consumedQty > 0 && balanceQty > 0) {
+    return "Partially Received";
+  }
+  if (deliveredQty > 0 && balanceQty <= 0) {
+    return "Received";
+  }
+  return "Pending";
+};
+
 const parseNumberValue = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -173,6 +195,8 @@ const DeliveryChallan = () => {
   const [errors, setErrors] = useState({});
   const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [receiptError, setReceiptError] = useState("");
+  const [updateProof, setUpdateProof] = useState("");
+  const [dcStatusFilter, setDcStatusFilter] = useState("all");
   const [editingId, setEditingId] = useState(null);
   const [selectedChallan, setSelectedChallan] = useState(null);
   const settings = useSettings();
@@ -781,13 +805,19 @@ const DeliveryChallan = () => {
     });
 
     try {
+      let savedChallan;
       if (editingId) {
-        await updateDeliveryChallan(editingId, payload);
+        savedChallan = await updateDeliveryChallan(editingId, payload);
       } else {
-        await createDeliveryChallan(payload);
+        savedChallan = await createDeliveryChallan(payload);
       }
       await loadRecords();
       resetForm();
+      setUpdateProof(
+        `${editingId ? "Delivery challan updated" : "Delivery challan saved"}: ${
+          savedChallan?.dcNumber || payload.dcNumber || "-"
+        } | Status: ${savedChallan?.podStatus || savedChallan?.status || payload.podStatus || "Pending"}`
+      );
     } catch (error) {
       const apiErrorMessage =
         error?.response?.data?.error ||
@@ -870,6 +900,16 @@ const DeliveryChallan = () => {
     ];
   }, [records]);
 
+  const filteredRecords = useMemo(() => {
+    if (dcStatusFilter === "all") {
+      return records;
+    }
+    return records.filter(
+      (record) =>
+        getDeliveryChallanRegisterStatus(record).toLowerCase() === dcStatusFilter
+    );
+  }, [dcStatusFilter, records]);
+
   const handlePrint = (record) => {
     if (!record) return;
     setSelectedChallan(record);
@@ -893,13 +933,20 @@ const DeliveryChallan = () => {
         : record.podDate || "";
     try {
       setReceiptError("");
-      await updateDeliveryChallan(record.id, {
+      const updatedChallan = await updateDeliveryChallan(record.id, {
         ...record,
         podStatus: nextPodStatus,
         podDate: nextPodDate,
         items: record.items || [],
       });
       await loadRecords();
+      setUpdateProof(
+        `POD status updated: ${
+          updatedChallan?.dcNumber || record.dcNumber || "-"
+        } | Status: ${nextPodStatus}${
+          nextPodDate ? ` | Date: ${formatDate(nextPodDate)}` : ""
+        }`
+      );
       if (selectedChallan && String(selectedChallan.id) === String(record.id)) {
         setSelectedChallan((prev) =>
           prev
@@ -1126,6 +1173,12 @@ const DeliveryChallan = () => {
           </p>
         </div>
       </div>
+
+      {updateProof && (
+        <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {updateProof}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4 mb-6">
         <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
@@ -1631,23 +1684,35 @@ const DeliveryChallan = () => {
           <h3 className="text-lg font-semibold text-slate-800">
             Delivery Challan Register
           </h3>
-          <button
-            type="button"
-            onClick={() =>
-              printSection({
-                selector: "#delivery-challan-register",
-                title: "Delivery Challan Register",
-                subtitle: "Dispatch trail for the project",
-                metaRows: challanMetaRows,
-                logoUrl: companyLogo,
-                brandName: companyName,
-                brandDescription: company.address,
-              })
-            }
-            className="px-3 py-1.5 border border-slate-200 rounded-md text-xs text-slate-600 bg-white"
-          >
-            Print register
-          </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={dcStatusFilter}
+              onChange={(event) => setDcStatusFilter(event.target.value)}
+              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700"
+            >
+              <option value="all">All Status</option>
+              <option value="received">Received</option>
+              <option value="pending">Pending</option>
+              <option value="partially received">Partially Received</option>
+            </select>
+            <button
+              type="button"
+              onClick={() =>
+                printSection({
+                  selector: "#delivery-challan-register",
+                  title: "Delivery Challan Register",
+                  subtitle: "Dispatch trail for the project",
+                  metaRows: challanMetaRows,
+                  logoUrl: companyLogo,
+                  brandName: companyName,
+                  brandDescription: company.address,
+                })
+              }
+              className="px-3 py-1.5 border border-slate-200 rounded-md text-xs text-slate-600 bg-white"
+            >
+              Print register
+            </button>
+          </div>
         </div>
         <table className="min-w-[1450px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
@@ -1665,14 +1730,16 @@ const DeliveryChallan = () => {
             </tr>
           </thead>
           <tbody>
-            {records.length === 0 && (
+            {filteredRecords.length === 0 && (
               <tr>
                 <td colSpan="10" className="p-6 text-center text-slate-500">
-                  No delivery challans created yet.
+                  {records.length === 0
+                    ? "No delivery challans created yet."
+                    : "No delivery challans match the selected status."}
                 </td>
               </tr>
             )}
-            {records.map((record) => (
+            {filteredRecords.map((record) => (
               <tr key={record.id} className="border-t hover:bg-slate-50">
                 <td className="p-3 font-medium text-slate-800">
                   {record.dcNumber || "-"}
@@ -1693,7 +1760,7 @@ const DeliveryChallan = () => {
                 <td className="p-3">
                   {locationMap[String(record.toLocationId)]?.name || record.toLocation || "-"}
                 </td>
-                <td className="p-3">{record.status || "-"}</td>
+                <td className="p-3">{getDeliveryChallanRegisterStatus(record)}</td>
                 <td className="p-3">{record.items?.length || 0}</td>
                 <td className="p-3 text-right font-medium text-slate-800">
                   {fmtQty(record.balanceQty)}
@@ -1798,6 +1865,12 @@ const DeliveryChallan = () => {
               </div>
               <div className="p-3">
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <p className="text-slate-600">RE No.:</p>
+                  <p className="font-semibold">
+                    {selectedChallan.id
+                      ? `RE-${String(selectedChallan.id).padStart(5, "0")}`
+                      : "-"}
+                  </p>
                   <p className="text-slate-600">Our Ref:</p>
                   <p className="font-semibold">{selectedChallan.dcNumber || "-"}</p>
                   <p className="text-slate-600">Receipt Ref:</p>

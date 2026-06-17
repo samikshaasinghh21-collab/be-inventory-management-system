@@ -159,7 +159,7 @@ export const NAVIGATION_SECTIONS = [
           }),
           createNavItem({
             id: "reallocation-register",
-            label: "Reallocation Register",
+            label: "Reallocation",
             to: "/inventory/reallocation-register",
             icon: "table",
             matchPrefixes: ["/inventory/reallocation-register"],

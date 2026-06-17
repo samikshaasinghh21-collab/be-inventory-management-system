@@ -3,6 +3,11 @@ import api from "./api";
 const emitConsumptionChange = () => {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("consumptions:changed"));
+    window.dispatchEvent(new Event("delivery-challans:changed"));
+    window.dispatchEvent(new Event("receive-goods:changed"));
+    window.dispatchEvent(new Event("products:changed"));
+    window.dispatchEvent(new Event("boqs:changed"));
+    window.dispatchEvent(new Event("reallocate-inventory:changed"));
   }
 };
 
@@ -27,7 +32,7 @@ const normalizeConsumptionItem = (item = {}) => ({
     item.consumptionId ?? item.ConsumptionId ?? item.ConsumptionID ?? null,
   boqItemId:
     item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId ?? null,
-  itemId: item.itemId ?? item.ItemId ?? item.BoqItemId ?? item.BOQItemId ?? null,
+  itemId: item.itemId ?? item.ItemId ?? null,
   deliveryChallanId:
     item.deliveryChallanId ??
     item.DeliveryChallanId ??

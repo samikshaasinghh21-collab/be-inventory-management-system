@@ -12,6 +12,13 @@ const emptyForm = {
   Phone: "",
   Email: "",
   GSTNumber: "",
+  PANNumber: "",
+  BankAccountName: "",
+  BankAccountNumber: "",
+  BankName: "",
+  IFSCCode: "",
+  BankBranch: "",
+  Documents: [],
   Address: "",
   City: "",
   State: "",
@@ -25,6 +32,33 @@ const createEmptyContact = () => ({
   designation: "",
   phone: "",
 });
+
+const MAX_VENDOR_DOCUMENT_SIZE = 5 * 1024 * 1024;
+
+const readVendorDocument = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error("Select a valid file."));
+      return;
+    }
+    if (file.size > MAX_VENDOR_DOCUMENT_SIZE) {
+      reject(new Error(`${file.name} is larger than 5 MB.`));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve({
+        id: `${Date.now()}-${Math.random()}`,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        uploadedAt: new Date().toISOString(),
+        dataUrl: reader.result,
+      });
+    };
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
 
 const formatVendorLocation = (vendor = {}) =>
   [vendor.city, vendor.state, vendor.pincode]
@@ -83,6 +117,12 @@ const Vendors = () => {
         vendor.phone,
         vendor.email,
         vendor.gstNumber,
+        vendor.panNumber,
+        vendor.bankAccountName,
+        vendor.bankAccountNumber,
+        vendor.bankName,
+        vendor.ifscCode,
+        vendor.bankBranch,
         vendor.address,
         vendor.city,
         vendor.state,
@@ -106,6 +146,16 @@ const Vendors = () => {
       Phone: vendor.phone ?? "",
       Email: vendor.email ?? "",
       GSTNumber: vendor.gstNumber ?? "",
+      PANNumber: vendor.panNumber ?? "",
+      BankAccountName: vendor.bankAccountName ?? "",
+      BankAccountNumber: vendor.bankAccountNumber ?? "",
+      BankName: vendor.bankName ?? "",
+      IFSCCode: vendor.ifscCode ?? "",
+      BankBranch: vendor.bankBranch ?? "",
+      Documents: (vendor.documents ?? []).map((document, index) => ({
+        ...document,
+        id: document.id ?? `${vendor.id || "vendor"}-document-${index}`,
+      })),
       Address: vendor.address ?? "",
       City: vendor.city ?? "",
       State: vendor.state ?? "",
@@ -160,6 +210,29 @@ const Vendors = () => {
     });
   };
 
+  const handleEditDocumentUpload = async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) {
+      return;
+    }
+    try {
+      const documents = await Promise.all(files.map(readVendorDocument));
+      updateEditField("Documents", [...(editForm.Documents || []), ...documents]);
+      setEditError("");
+    } catch (error) {
+      setEditError(error?.message || "Failed to upload vendor document.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const removeEditDocument = (id) => {
+    updateEditField(
+      "Documents",
+      (editForm.Documents || []).filter((document) => document.id !== id)
+    );
+  };
+
   const validateEdit = () => {
     const nextErrors = {};
     if (!editForm.VendorName.trim()) {
@@ -207,6 +280,13 @@ const Vendors = () => {
         phone: editForm.Phone.trim(),
         email: editForm.Email.trim() || undefined,
         gstNumber: editForm.GSTNumber.trim() || undefined,
+        panNumber: editForm.PANNumber.trim() || undefined,
+        bankAccountName: editForm.BankAccountName.trim() || undefined,
+        bankAccountNumber: editForm.BankAccountNumber.trim() || undefined,
+        bankName: editForm.BankName.trim() || undefined,
+        ifscCode: editForm.IFSCCode.trim() || undefined,
+        bankBranch: editForm.BankBranch.trim() || undefined,
+        documents: editForm.Documents || [],
         address: editForm.Address.trim() || undefined,
         city: editForm.City.trim() || undefined,
         state: editForm.State.trim() || undefined,
@@ -334,6 +414,8 @@ const Vendors = () => {
               <th className="p-3 text-left min-w-[150px]">Phone</th>
               <th className="p-3 text-left min-w-[180px]">Email</th>
               <th className="p-3 text-left min-w-[150px]">GST</th>
+              <th className="p-3 text-left min-w-[150px]">PAN</th>
+              <th className="p-3 text-left min-w-[200px]">Bank</th>
               <th className="p-3 text-left min-w-[220px]">Primary Contact</th>
               <th className="p-3 text-left min-w-[120px]">Contacts</th>
               <th className="p-3 text-left min-w-[180px]">Actions</th>
@@ -342,7 +424,7 @@ const Vendors = () => {
           <tbody>
             {filteredVendors.length === 0 && (
               <tr>
-                <td colSpan="7" className="p-6 text-center text-slate-500">
+                <td colSpan="9" className="p-6 text-center text-slate-500">
                   {vendors.length === 0
                     ? "No vendors added yet."
                     : "No vendors match your search."}
@@ -367,6 +449,18 @@ const Vendors = () => {
                   <td className="p-3">{vendor.phone || "-"}</td>
                   <td className="p-3">{vendor.email || "-"}</td>
                   <td className="p-3">{vendor.gstNumber || "-"}</td>
+                  <td className="p-3">{vendor.panNumber || "-"}</td>
+                  <td className="p-3">
+                    <div>{vendor.bankName || "-"}</div>
+                    <div className="text-xs text-slate-500">
+                      {vendor.bankAccountNumber || "No account"}
+                    </div>
+                    {vendor.documents?.length ? (
+                      <div className="text-xs text-slate-500">
+                        {vendor.documents.length} file(s)
+                      </div>
+                    ) : null}
+                  </td>
                   <td className="p-3">
                     {primaryContact ? (
                       <>
@@ -510,6 +604,117 @@ const Vendors = () => {
                         }
                         className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        PAN Number
+                      </label>
+                      <input
+                        value={editForm.PANNumber}
+                        onChange={(event) =>
+                          updateEditField("PANNumber", event.target.value.toUpperCase())
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Bank Account Name
+                      </label>
+                      <input
+                        value={editForm.BankAccountName}
+                        onChange={(event) =>
+                          updateEditField("BankAccountName", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Bank Account Number
+                      </label>
+                      <input
+                        value={editForm.BankAccountNumber}
+                        onChange={(event) =>
+                          updateEditField("BankAccountNumber", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Bank Name
+                      </label>
+                      <input
+                        value={editForm.BankName}
+                        onChange={(event) =>
+                          updateEditField("BankName", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        IFSC Code
+                      </label>
+                      <input
+                        value={editForm.IFSCCode}
+                        onChange={(event) =>
+                          updateEditField("IFSCCode", event.target.value.toUpperCase())
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-slate-700">
+                        Bank Branch
+                      </label>
+                      <input
+                        value={editForm.BankBranch}
+                        onChange={(event) =>
+                          updateEditField("BankBranch", event.target.value)
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
+
+                    <div className="lg:col-span-2">
+                      <label className="text-sm font-medium text-slate-700">
+                        Upload Documents
+                      </label>
+                      <input
+                        type="file"
+                        multiple
+                        onChange={handleEditDocumentUpload}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                      {(editForm.Documents || []).length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {editForm.Documents.map((document) => (
+                            <div
+                              key={document.id}
+                              className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            >
+                              <span className="truncate text-slate-700">
+                                {document.name}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeEditDocument(document.id)}
+                                className="text-xs font-medium text-red-600"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="lg:col-span-2">

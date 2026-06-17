@@ -799,6 +799,19 @@ const normalizeVendor = (row = {}) => ({
   phone: row.Phone ?? row.phone ?? "",
   email: row.Email ?? row.email ?? "",
   gstNumber: row.GSTNumber ?? row.gstNumber ?? "",
+  panNumber: row.PANNumber ?? row.PanNumber ?? row.panNumber ?? "",
+  bankAccountName:
+    row.BankAccountName ?? row.AccountHolderName ?? row.bankAccountName ?? "",
+  bankAccountNumber:
+    row.BankAccountNumber ?? row.AccountNumber ?? row.bankAccountNumber ?? "",
+  bankName: row.BankName ?? row.bankName ?? "",
+  ifscCode: row.IFSCCode ?? row.IfscCode ?? row.ifscCode ?? "",
+  bankBranch: row.BankBranch ?? row.bankBranch ?? "",
+  documents: Array.isArray(row.documents)
+    ? row.documents
+    : Array.isArray(row.Documents)
+    ? row.Documents
+    : parseJsonArray(row.DocumentsJson ?? row.documentsJson),
   address: row.Address ?? row.address ?? "",
   city: row.City ?? row.city ?? "",
   state: row.State ?? row.state ?? "",
@@ -963,6 +976,20 @@ const normalizeBoq = (row = {}) => ({
 const normalizeBoqItem = (row = {}) => {
   const quantity = Number(row.Quantity ?? row.quantity ?? 0) || 0;
   const rate = Number(row.Rate ?? row.rate ?? 0) || 0;
+  const itemId = toNullableInt(
+    row.ItemId ?? row.itemId ?? row.InventoryItemId ?? row.inventoryItemId
+  );
+  const inventoryQtyRaw =
+    row.InventoryQty ??
+    row.inventoryQty ??
+    row.CurrentStock ??
+    row.currentStock ??
+    row.Stock ??
+    row.stock ??
+    null;
+  const inventoryQty = Number.isFinite(Number(inventoryQtyRaw))
+    ? Number(inventoryQtyRaw)
+    : null;
   const rawConsumed =
     row.ConsumedQty ??
     row.consumedQty ??
@@ -980,6 +1007,7 @@ const normalizeBoqItem = (row = {}) => {
   return {
     id: row.LineItemId ?? row.lineItemId ?? null,
     boqId: row.BOQId ?? row.boqId ?? null,
+    itemId,
     name: row.ItemName ?? row.name ?? "",
     description: row.Description ?? row.description ?? "",
     serialNumber: row.SerialNumber ?? row.serialNumber ?? "",
@@ -997,12 +1025,81 @@ const normalizeBoqItem = (row = {}) => {
       ) ?? 0,
     quantity,
     consumedQty,
-    availableQty,
+    availableQty: inventoryQty ?? availableQty,
+    inventoryQty,
+    currentStock: inventoryQty,
+    stock: inventoryQty,
     rate,
     unitPrice: rate,
     notes: row.Notes ?? row.notes ?? "",
     amount: quantity * rate,
   };
+};
+
+const hydrateBoqItemsWithInventoryStock = async (items = []) => {
+  if (!Array.isArray(items) || !items.length) {
+    return items;
+  }
+
+  const itemSchema = await resolveItemsSchema();
+  if (!itemSchema.idColumn || !itemSchema.stockColumns.length) {
+    return items;
+  }
+
+  const pool = await getPool();
+  const result = await pool.request().query(`
+    SELECT
+      ${buildIdCoalesceExpr(itemSchema.idColumns)} AS [id],
+      ${buildTextCoalesceExpr(itemSchema.nameColumns)} AS [name],
+      ${buildTextCoalesceExpr(itemSchema.unitColumns, "N'PCS'")} AS [unit],
+      ${buildNumberCoalesceExpr(itemSchema.stockColumns)} AS [stock]
+    FROM dbo.Items
+  `);
+
+  const inventoryRows = (result.recordset ?? []).map(normalizeItem);
+  const byId = new Map();
+  const byNameUnit = new Map();
+  const byName = new Map();
+  inventoryRows.forEach((item) => {
+    const id = toNullableInt(item.id);
+    if (id !== null) {
+      byId.set(String(id), item);
+    }
+    const name = String(item.name ?? "").trim().toLowerCase();
+    const unit = String(item.unit ?? "").trim().toLowerCase();
+    if (name && unit && !byNameUnit.has(`${name}|${unit}`)) {
+      byNameUnit.set(`${name}|${unit}`, item);
+    }
+    if (name && !byName.has(name)) {
+      byName.set(name, item);
+    }
+  });
+
+  return items.map((item) => {
+    const itemId = toNullableInt(item.itemId);
+    const name = String(item.name ?? "").trim().toLowerCase();
+    const unit = String(item.unit ?? "").trim().toLowerCase();
+    const inventoryItem =
+      (itemId !== null ? byId.get(String(itemId)) : null) ??
+      (name && unit ? byNameUnit.get(`${name}|${unit}`) : null) ??
+      (name ? byName.get(name) : null);
+
+    if (!inventoryItem) {
+      return item;
+    }
+
+    const stock = Number(inventoryItem.stock ?? inventoryItem.currentStock ?? 0) || 0;
+    return {
+      ...item,
+      itemId: item.itemId ?? inventoryItem.id ?? null,
+      inventoryQty: stock,
+      currentStock: stock,
+      stock,
+      quantity: stock,
+      availableQty: stock,
+      amount: stock * (Number(item.rate ?? item.unitPrice ?? 0) || 0),
+    };
+  });
 };
 
 const normalizeDeliveryChallan = (row = {}) => {
@@ -1290,7 +1387,7 @@ const normalizeConsumptionItem = (row = {}) => ({
     row.ParentId ??
     null,
   boqItemId: row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null,
-  itemId: row.ItemId ?? row.itemId ?? row.BoqItemId ?? row.boqItemId ?? null,
+  itemId: row.ItemId ?? row.itemId ?? null,
   deliveryChallanId:
     row.DeliveryChallanId ?? row.deliveryChallanId ?? row.ChallanId ?? null,
   deliveryChallanItemId:
@@ -1900,8 +1997,6 @@ const buildReceivePoItemKey = (row = {}, index = 0) => {
     row.POItemId ??
     row.PurchaseOrderItemId ??
     row.purchaseOrderItemId ??
-    row.Id ??
-    row.id ??
     null;
   if (Number.isFinite(Number(poItemId))) {
     return `po:${Number(poItemId)}`;
@@ -1922,10 +2017,16 @@ const buildReceiveItemSource = (items = []) => {
   };
 
   (Array.isArray(items) ? items : []).forEach((item, index) => {
-    const key = buildReceivePoItemKey(item, index);
-    if (!source.byKey.has(key)) {
-      source.byKey.set(key, item);
+    const keys = [buildReceivePoItemKey(item, index)];
+    const itemId = item.itemId ?? item.ItemId ?? null;
+    if (Number.isFinite(Number(itemId))) {
+      keys.push(`item:${Number(itemId)}`);
     }
+    keys.forEach((key) => {
+      if (key && !source.byKey.has(key)) {
+        source.byKey.set(key, item);
+      }
+    });
     source.ordered.push(item);
   });
 
@@ -1946,8 +2047,6 @@ const findMatchingReceiveItemIndex = (
     receiptItem.POItemId ??
     receiptItem.PurchaseOrderItemId ??
     receiptItem.purchaseOrderItemId ??
-    receiptItem.Id ??
-    receiptItem.id ??
     null;
   if (Number.isFinite(Number(receiptPoItemId))) {
     const exactIndex = purchaseOrderItems.findIndex(
@@ -2541,6 +2640,13 @@ const ensureVendorsTable = async () => {
         Phone NVARCHAR(20) NOT NULL,
         Email NVARCHAR(255) NULL,
         GSTNumber NVARCHAR(30) NULL,
+        PANNumber NVARCHAR(20) NULL,
+        BankAccountName NVARCHAR(255) NULL,
+        BankAccountNumber NVARCHAR(80) NULL,
+        BankName NVARCHAR(255) NULL,
+        IFSCCode NVARCHAR(30) NULL,
+        BankBranch NVARCHAR(255) NULL,
+        DocumentsJson NVARCHAR(MAX) NULL,
         Address NVARCHAR(MAX) NULL,
         City NVARCHAR(120) NULL,
         State NVARCHAR(120) NULL,
@@ -2567,6 +2673,34 @@ const ensureVendorsTable = async () => {
     IF COL_LENGTH('dbo.Vendors', 'GSTNumber') IS NULL
     BEGIN
       ALTER TABLE dbo.Vendors ADD GSTNumber NVARCHAR(30) NULL;
+    END;
+    IF COL_LENGTH('dbo.Vendors', 'PANNumber') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Vendors ADD PANNumber NVARCHAR(20) NULL;
+    END;
+    IF COL_LENGTH('dbo.Vendors', 'BankAccountName') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Vendors ADD BankAccountName NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.Vendors', 'BankAccountNumber') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Vendors ADD BankAccountNumber NVARCHAR(80) NULL;
+    END;
+    IF COL_LENGTH('dbo.Vendors', 'BankName') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Vendors ADD BankName NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.Vendors', 'IFSCCode') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Vendors ADD IFSCCode NVARCHAR(30) NULL;
+    END;
+    IF COL_LENGTH('dbo.Vendors', 'BankBranch') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Vendors ADD BankBranch NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.Vendors', 'DocumentsJson') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Vendors ADD DocumentsJson NVARCHAR(MAX) NULL;
     END;
     IF COL_LENGTH('dbo.Vendors', 'Address') IS NULL
     BEGIN
@@ -3265,10 +3399,72 @@ const validatePurchaseOrderItemsInput = (items = []) => {
   }
 };
 
+const validatePurchaseOrderBoqItemsAvailable = async (
+  tx,
+  { items = [], excludePurchaseOrderId = null } = {}
+) => {
+  const boqItemIds = Array.from(
+    new Set(
+      (Array.isArray(items) ? items : [])
+        .map((item) => toNullableInt(item.boqItemId ?? item.BoqItemId ?? item.BOQItemId))
+        .filter((value) => value !== null)
+    )
+  );
+  if (!boqItemIds.length) {
+    return;
+  }
+
+  const config = await loadPurchaseOrderItemsConfig(tx);
+  if (!config.hasPoId || !config.boqItemIdCol) {
+    return;
+  }
+
+  const request = new sql.Request(tx);
+  request.input("ExcludePurchaseOrderId", sql.Int, toNullableInt(excludePurchaseOrderId));
+  const inClause = buildPurchaseOrderItemInClause(
+    request,
+    boqItemIds,
+    "ExistingBoqItemId"
+  );
+  const result = await request.query(`
+    SELECT TOP 1
+      poi.${toIdentifier(config.boqItemIdCol)} AS BoqItemId,
+      poi.PurchaseOrderId,
+      po.PONumber,
+      bi.ItemName
+    FROM dbo.PurchaseOrderItems poi
+    INNER JOIN dbo.PurchaseOrders po
+      ON po.Id = poi.PurchaseOrderId
+    LEFT JOIN dbo.BOQLineItems bi
+      ON bi.LineItemId = poi.${toIdentifier(config.boqItemIdCol)}
+    WHERE poi.${toIdentifier(config.boqItemIdCol)} IN (${inClause})
+      AND (
+        @ExcludePurchaseOrderId IS NULL
+        OR poi.PurchaseOrderId <> @ExcludePurchaseOrderId
+      )
+      AND LOWER(LTRIM(RTRIM(COALESCE(po.Status, '')))) NOT IN ('cancelled', 'canceled')
+    ORDER BY poi.PurchaseOrderId DESC
+  `);
+
+  const conflict = result.recordset?.[0] ?? null;
+  if (conflict) {
+    const label = conflict.ItemName || "this BOQ item";
+    const poNumber = conflict.PONumber || conflict.PurchaseOrderId;
+    const error = new Error(
+      `A purchase order already exists for ${label} from this BOQ (${poNumber}). Edit the existing PO instead of creating another PO for the same quantity.`
+    );
+    error.statusCode = 409;
+    throw error;
+  }
+};
+
 const normalizeBoqItemsInput = (items = []) =>
   (Array.isArray(items) ? items : [])
     .map((item) => ({
       id: toNullableInt(item.id ?? item.Id ?? item.LineItemId ?? item.lineItemId),
+      itemId: toNullableInt(
+        item.itemId ?? item.ItemId ?? item.inventoryItemId ?? item.InventoryItemId
+      ),
       name: String(item.name ?? item.Name ?? item.ItemName ?? "").trim(),
       description: normalizeOptionalString(item.description ?? item.Description) ?? "",
       serialNumber:
@@ -4131,6 +4327,72 @@ const applyReceiveStockDelta = async (tx, beforeTotals = new Map(), afterTotals 
   }
 };
 
+const buildConsumptionStockTotals = (items = []) => {
+  const totals = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const itemId = toNullableInt(item.itemId ?? item.ItemId);
+    if (itemId === null) {
+      return;
+    }
+    const quantity = Math.max(
+      Number(item.quantity ?? item.Quantity ?? item.consumeQty ?? item.ConsumeQty ?? 0) || 0,
+      0
+    );
+    if (!quantity) {
+      return;
+    }
+    totals.set(itemId, (Number(totals.get(itemId)) || 0) + quantity);
+  });
+  return totals;
+};
+
+const applyConsumptionStockDelta = async (tx, beforeItems = [], afterItems = []) => {
+  const itemSchema = await resolveItemsSchema();
+  if (!itemSchema.idColumn || !itemSchema.stockColumns.length) {
+    return;
+  }
+
+  const beforeTotals = buildConsumptionStockTotals(beforeItems);
+  const afterTotals = buildConsumptionStockTotals(afterItems);
+  const impactedIds = new Set([...beforeTotals.keys(), ...afterTotals.keys()]);
+  if (!impactedIds.size) {
+    return;
+  }
+
+  const stockSetClauses = uniqueColumnNames(itemSchema.stockColumns).map(
+    (column) =>
+      `${toIdentifier(column)} = COALESCE(TRY_CONVERT(DECIMAL(18, 2), ${toIdentifier(
+        column
+      )}), 0) + @Delta`
+  );
+  const timestampSetClauses = uniqueColumnNames(itemSchema.updatedAtColumns).map(
+    (column) => `${toIdentifier(column)} = @Now`
+  );
+  const setClauses = [...stockSetClauses, ...timestampSetClauses];
+  if (!setClauses.length) {
+    return;
+  }
+
+  for (const itemId of impactedIds) {
+    const beforeQty = Number(beforeTotals.get(itemId)) || 0;
+    const afterQty = Number(afterTotals.get(itemId)) || 0;
+    const delta = beforeQty - afterQty;
+    if (!delta) {
+      continue;
+    }
+
+    await new sql.Request(tx)
+      .input("ItemId", sql.Int, itemId)
+      .input("Delta", sql.Decimal(18, 2), delta)
+      .input("Now", sql.DateTime2, new Date())
+      .query(`
+        UPDATE dbo.Items
+        SET ${setClauses.join(", ")}
+        WHERE ${toIdentifier(itemSchema.idColumn)} = @ItemId
+      `);
+  }
+};
+
 const buildRequestedReceiveTotalsBeforeReceipt = (
   purchaseOrderItems = [],
   headers = [],
@@ -4695,6 +4957,7 @@ const ensureBoqTables = async () => {
       CREATE TABLE dbo.BOQLineItems (
         LineItemId INT IDENTITY(1,1) PRIMARY KEY,
         BOQId INT NOT NULL,
+        ItemId INT NULL,
         ItemName NVARCHAR(200) NOT NULL,
         Description NVARCHAR(MAX) NULL,
         SerialNumber NVARCHAR(255) NULL,
@@ -4716,6 +4979,10 @@ const ensureBoqTables = async () => {
     IF COL_LENGTH('dbo.BOQLineItems', 'Notes') IS NULL
     BEGIN
       ALTER TABLE dbo.BOQLineItems ADD Notes NVARCHAR(MAX) NULL;
+    END;
+    IF COL_LENGTH('dbo.BOQLineItems', 'ItemId') IS NULL
+    BEGIN
+      ALTER TABLE dbo.BOQLineItems ADD ItemId INT NULL;
     END;
     IF COL_LENGTH('dbo.BOQLineItems', 'HSN') IS NULL
     BEGIN
@@ -5285,8 +5552,11 @@ const loadReceiveProgressMetricsByItemId = async (db, rows = []) => {
     return new Map();
   }
 
-  const receivePk = await refreshReceiveGoodsPk();
-  const receiveItemsPk = await refreshReceiveGoodsItemsPk();
+  const [receivePk, receiveItemsPk, receiveItemsFk] = await Promise.all([
+    refreshReceiveGoodsPk(),
+    refreshReceiveGoodsItemsPk(),
+    refreshReceiveGoodsItemsFk(),
+  ]);
   const request = new sql.Request(db);
   const purchaseOrderInClause = buildPurchaseOrderItemInClause(
     request,
@@ -5317,7 +5587,12 @@ const loadReceiveProgressMetricsByItemId = async (db, rows = []) => {
 
   const itemsByReceiptId = (itemsResult.recordset ?? []).reduce((acc, row) => {
     const receiptId = toNullableInt(
-      row.ReceiveGoodsId ?? row.ReceiveGoodsID ?? row.ReceivegoodsId ?? row.Id
+      row?.[receiveItemsFk] ??
+        row.ReceiveGoodsId ??
+        row.ReceiveGoodsID ??
+        row.ReceivegoodsId ??
+        row.ReceiptId ??
+        row.ReceiveId
     );
     if (receiptId === null) {
       return acc;
@@ -10738,6 +11013,13 @@ app.post("/api/vendors", async (req, res) => {
       phone,
       email,
       gstNumber,
+      panNumber,
+      bankAccountName,
+      bankAccountNumber,
+      bankName,
+      ifscCode,
+      bankBranch,
+      documents,
       address,
       city,
       state,
@@ -10746,6 +11028,13 @@ app.post("/api/vendors", async (req, res) => {
       Phone,
       Email,
       GSTNumber,
+      PANNumber,
+      BankAccountName,
+      BankAccountNumber,
+      BankName,
+      IFSCCode,
+      BankBranch,
+      Documents,
       Address,
       City,
       State,
@@ -10757,6 +11046,17 @@ app.post("/api/vendors", async (req, res) => {
     const nextPhone = String(phone ?? Phone ?? "").trim();
     const nextEmail = String(email ?? Email ?? "").trim();
     const nextGstNumber = String(gstNumber ?? GSTNumber ?? "").trim();
+    const nextPanNumber = String(panNumber ?? PANNumber ?? "").trim();
+    const nextBankAccountName = String(bankAccountName ?? BankAccountName ?? "").trim();
+    const nextBankAccountNumber = String(bankAccountNumber ?? BankAccountNumber ?? "").trim();
+    const nextBankName = String(bankName ?? BankName ?? "").trim();
+    const nextIfscCode = String(ifscCode ?? IFSCCode ?? "").trim();
+    const nextBankBranch = String(bankBranch ?? BankBranch ?? "").trim();
+    const nextDocuments = Array.isArray(documents)
+      ? documents
+      : Array.isArray(Documents)
+      ? Documents
+      : [];
     const nextAddress = String(address ?? Address ?? "").trim();
     const nextCity = String(city ?? City ?? "").trim();
     const nextState = String(state ?? State ?? "").trim();
@@ -10798,14 +11098,21 @@ app.post("/api/vendors", async (req, res) => {
         .input("Phone", sql.NVarChar(20), nextPhone)
         .input("Email", sql.NVarChar(255), nextEmail)
         .input("GSTNumber", sql.NVarChar(30), nextGstNumber)
+        .input("PANNumber", sql.NVarChar(20), nextPanNumber || null)
+        .input("BankAccountName", sql.NVarChar(255), nextBankAccountName || null)
+        .input("BankAccountNumber", sql.NVarChar(80), nextBankAccountNumber || null)
+        .input("BankName", sql.NVarChar(255), nextBankName || null)
+        .input("IFSCCode", sql.NVarChar(30), nextIfscCode || null)
+        .input("BankBranch", sql.NVarChar(255), nextBankBranch || null)
+        .input("DocumentsJson", sql.NVarChar(sql.MAX), serializeJson(nextDocuments))
         .input("Address", sql.NVarChar(sql.MAX), nextAddress)
         .input("City", sql.NVarChar(120), nextCity || null)
         .input("State", sql.NVarChar(120), nextState || null)
         .input("Pincode", sql.NVarChar(20), nextPincode || null)
         .query(
-          `INSERT INTO dbo.Vendors (VendorName, Phone, Email, GSTNumber, Address, City, State, Pincode)
+          `INSERT INTO dbo.Vendors (VendorName, Phone, Email, GSTNumber, PANNumber, BankAccountName, BankAccountNumber, BankName, IFSCCode, BankBranch, DocumentsJson, Address, City, State, Pincode)
            OUTPUT INSERTED.*
-           VALUES (@VendorName, @Phone, @Email, @GSTNumber, @Address, @City, @State, @Pincode)`
+           VALUES (@VendorName, @Phone, @Email, @GSTNumber, @PANNumber, @BankAccountName, @BankAccountNumber, @BankName, @IFSCCode, @BankBranch, @DocumentsJson, @Address, @City, @State, @Pincode)`
         );
 
       const vendor = normalizeVendor(result.recordset?.[0] ?? {});
@@ -10862,6 +11169,13 @@ app.put("/api/vendors/:id", async (req, res) => {
       phone,
       email,
       gstNumber,
+      panNumber,
+      bankAccountName,
+      bankAccountNumber,
+      bankName,
+      ifscCode,
+      bankBranch,
+      documents,
       address,
       city,
       state,
@@ -10870,6 +11184,13 @@ app.put("/api/vendors/:id", async (req, res) => {
       Phone,
       Email,
       GSTNumber,
+      PANNumber,
+      BankAccountName,
+      BankAccountNumber,
+      BankName,
+      IFSCCode,
+      BankBranch,
+      Documents,
       Address,
       City,
       State,
@@ -10881,6 +11202,17 @@ app.put("/api/vendors/:id", async (req, res) => {
     const nextPhone = String(phone ?? Phone ?? "").trim();
     const nextEmail = String(email ?? Email ?? "").trim();
     const nextGstNumber = String(gstNumber ?? GSTNumber ?? "").trim();
+    const nextPanNumber = String(panNumber ?? PANNumber ?? "").trim();
+    const nextBankAccountName = String(bankAccountName ?? BankAccountName ?? "").trim();
+    const nextBankAccountNumber = String(bankAccountNumber ?? BankAccountNumber ?? "").trim();
+    const nextBankName = String(bankName ?? BankName ?? "").trim();
+    const nextIfscCode = String(ifscCode ?? IFSCCode ?? "").trim();
+    const nextBankBranch = String(bankBranch ?? BankBranch ?? "").trim();
+    const nextDocuments = Array.isArray(documents)
+      ? documents
+      : Array.isArray(Documents)
+      ? Documents
+      : [];
     const nextAddress = String(address ?? Address ?? "").trim();
     const nextCity = String(city ?? City ?? "").trim();
     const nextState = String(state ?? State ?? "").trim();
@@ -10928,6 +11260,13 @@ app.put("/api/vendors/:id", async (req, res) => {
         .input("Phone", sql.NVarChar(20), nextPhone)
         .input("Email", sql.NVarChar(255), nextEmail)
         .input("GSTNumber", sql.NVarChar(30), nextGstNumber)
+        .input("PANNumber", sql.NVarChar(20), nextPanNumber || null)
+        .input("BankAccountName", sql.NVarChar(255), nextBankAccountName || null)
+        .input("BankAccountNumber", sql.NVarChar(80), nextBankAccountNumber || null)
+        .input("BankName", sql.NVarChar(255), nextBankName || null)
+        .input("IFSCCode", sql.NVarChar(30), nextIfscCode || null)
+        .input("BankBranch", sql.NVarChar(255), nextBankBranch || null)
+        .input("DocumentsJson", sql.NVarChar(sql.MAX), serializeJson(nextDocuments))
         .input("Address", sql.NVarChar(sql.MAX), nextAddress)
         .input("City", sql.NVarChar(120), nextCity || null)
         .input("State", sql.NVarChar(120), nextState || null)
@@ -10938,6 +11277,13 @@ app.put("/api/vendors/:id", async (req, res) => {
               Phone = @Phone,
               Email = @Email,
               GSTNumber = @GSTNumber,
+              PANNumber = @PANNumber,
+              BankAccountName = @BankAccountName,
+              BankAccountNumber = @BankAccountNumber,
+              BankName = @BankName,
+              IFSCCode = @IFSCCode,
+              BankBranch = @BankBranch,
+              DocumentsJson = @DocumentsJson,
               Address = @Address,
               City = @City,
               State = @State,
@@ -12397,6 +12743,10 @@ app.post("/api/purchase-orders", async (req, res) => {
     const safeShipToLocationId = toNullableInt(shipToLocationId ?? locationId);
     const safeLocationId = toNullableInt(locationId ?? shipToLocationId);
 
+    await validatePurchaseOrderBoqItemsAvailable(tx, {
+      items: normalizedItems,
+    });
+
     const insertOrder = new sql.Request(tx);
     insertOrder.input("PONumber", sql.NVarChar(100), poNumValue || null);
     insertOrder.input("ProjectId", sql.Int, projectId ?? null);
@@ -12504,6 +12854,12 @@ app.post("/api/purchase-orders", async (req, res) => {
     });
   } catch (error) {
     await rollbackTx(tx);
+    if (error?.statusCode >= 400 && error?.statusCode < 500) {
+      return res.status(error.statusCode).json({
+        ok: false,
+        error: error?.message ?? "Failed to create purchase order",
+      });
+    }
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to create purchase order",
@@ -12575,6 +12931,11 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
         error: getLockedPurchaseOrderError(existingOrder.Status),
       });
     }
+
+    await validatePurchaseOrderBoqItemsAvailable(tx, {
+      items: normalizedItems,
+      excludePurchaseOrderId: id,
+    });
 
     const finalPONumber =
       normalizeOptionalString(existingOrder.PONumber) ??
@@ -13702,10 +14063,13 @@ app.get("/api/boqs", async (_req, res) => {
     const itemsResult = await pool.request().query(`
       SELECT * FROM dbo.BOQLineItems
     `);
-    const itemsByBoq = itemsResult.recordset.reduce((acc, row) => {
-      const key = row.BOQId;
+    const hydratedItems = await hydrateBoqItemsWithInventoryStock(
+      (itemsResult.recordset ?? []).map(normalizeBoqItem)
+    );
+    const itemsByBoq = hydratedItems.reduce((acc, item) => {
+      const key = item.boqId;
       if (!acc[key]) acc[key] = [];
-      acc[key].push(normalizeBoqItem(row));
+      acc[key].push(item);
       return acc;
     }, {});
 
@@ -13748,7 +14112,9 @@ app.get("/api/boqs/:id", async (req, res) => {
       .input("BOQId", sql.Int, id)
       .query(`SELECT * FROM dbo.BOQLineItems WHERE BOQId = @BOQId`);
 
-    const items = (itemsResult.recordset ?? []).map(normalizeBoqItem);
+    const items = await hydrateBoqItemsWithInventoryStock(
+      (itemsResult.recordset ?? []).map(normalizeBoqItem)
+    );
     const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
     return res.json({
@@ -13838,6 +14204,7 @@ app.post("/api/boqs", async (req, res) => {
 
       const insertItem = new sql.Request(tx);
       insertItem.input("BOQId", sql.Int, boqId);
+      insertItem.input("ItemId", sql.Int, item.itemId ?? null);
       insertItem.input("ItemName", sql.NVarChar(200), item.name);
       insertItem.input("Description", sql.NVarChar(sql.MAX), item.description);
       insertItem.input("SerialNumber", sql.NVarChar(255), item.serialNumber);
@@ -13851,9 +14218,9 @@ app.post("/api/boqs", async (req, res) => {
       insertItem.input("Notes", sql.NVarChar(sql.MAX), item.notes);
       await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
-          (BOQId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
+          (BOQId, ItemId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
         VALUES
-          (@BOQId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
+          (@BOQId, @ItemId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
       `);
     }
 
@@ -13868,7 +14235,9 @@ app.post("/api/boqs", async (req, res) => {
       ok: true,
       boq: {
         ...normalizeBoq(boqRow),
-        items: (itemsResult.recordset ?? []).map(normalizeBoqItem),
+        items: await hydrateBoqItemsWithInventoryStock(
+          (itemsResult.recordset ?? []).map(normalizeBoqItem)
+        ),
         total,
       },
     });
@@ -14033,6 +14402,7 @@ app.put("/api/boqs/:id", async (req, res) => {
 
         await new sql.Request(tx)
           .input("LineItemId", sql.Int, item.id)
+          .input("ItemId", sql.Int, item.itemId ?? null)
           .input("ItemName", sql.NVarChar(200), item.name)
           .input("Description", sql.NVarChar(sql.MAX), item.description)
           .input("SerialNumber", sql.NVarChar(255), item.serialNumber)
@@ -14045,7 +14415,8 @@ app.put("/api/boqs/:id", async (req, res) => {
           .input("Notes", sql.NVarChar(sql.MAX), item.notes)
           .query(`
             UPDATE dbo.BOQLineItems
-            SET ItemName = @ItemName,
+            SET ItemId = @ItemId,
+                ItemName = @ItemName,
                 Description = @Description,
                 SerialNumber = @SerialNumber,
                 Unit = @Unit,
@@ -14067,6 +14438,7 @@ app.put("/api/boqs/:id", async (req, res) => {
 
       const insertItem = new sql.Request(tx);
       insertItem.input("BOQId", sql.Int, id);
+      insertItem.input("ItemId", sql.Int, item.itemId ?? null);
       insertItem.input("ItemName", sql.NVarChar(200), item.name);
       insertItem.input("Description", sql.NVarChar(sql.MAX), item.description);
       insertItem.input("SerialNumber", sql.NVarChar(255), item.serialNumber);
@@ -14080,10 +14452,10 @@ app.put("/api/boqs/:id", async (req, res) => {
       insertItem.input("Notes", sql.NVarChar(sql.MAX), item.notes);
       const insertResult = await insertItem.query(`
         INSERT INTO dbo.BOQLineItems
-          (BOQId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
+          (BOQId, ItemId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
         OUTPUT INSERTED.LineItemId
         VALUES
-          (@BOQId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
+          (@BOQId, @ItemId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
       `);
       const insertedItemId = toNullableInt(insertResult.recordset?.[0]?.LineItemId);
       if (insertedItemId !== null) {
@@ -14124,7 +14496,9 @@ app.put("/api/boqs/:id", async (req, res) => {
       ok: true,
       boq: {
         ...normalizeBoq(boqRow),
-        items: (itemsResult.recordset ?? []).map(normalizeBoqItem),
+        items: await hydrateBoqItemsWithInventoryStock(
+          (itemsResult.recordset ?? []).map(normalizeBoqItem)
+        ),
         total,
       },
     });
@@ -15445,7 +15819,7 @@ app.post("/api/consumptions", async (req, res) => {
       const name = String(item.name ?? item.Item ?? "").trim();
       const quantity = Number(item.consumeQty ?? item.ConsumeQty ?? item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
-      const itemId = toNullableInt(item.itemId ?? item.ItemId ?? item.boqItemId ?? item.BoqItemId);
+      const itemId = toNullableInt(item.itemId ?? item.ItemId);
       const boqItemId = toNullableInt(
         item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId
       );
@@ -15614,6 +15988,8 @@ app.post("/api/consumptions", async (req, res) => {
       `);
     }
 
+    await applyConsumptionStockDelta(tx, [], mappedItems);
+
     await tx.commit();
 
     const itemsResult = await pool
@@ -15710,7 +16086,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
       const name = String(item.name ?? item.Item ?? "").trim();
       const quantity = Number(item.consumeQty ?? item.ConsumeQty ?? item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
-      const itemId = toNullableInt(item.itemId ?? item.ItemId ?? item.boqItemId ?? item.BoqItemId);
+      const itemId = toNullableInt(item.itemId ?? item.ItemId);
       const boqItemId = toNullableInt(
         item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? item.LineItemId
       );
@@ -15786,6 +16162,15 @@ app.put("/api/consumptions/:id", async (req, res) => {
       await tx.rollback();
       return res.status(404).json({ ok: false, error: "Consumption not found" });
     }
+
+    const currentItemsResult = await new sql.Request(tx)
+      .input("ConsumptionId", sql.Int, id)
+      .query(`
+        SELECT *
+        FROM dbo.ConsumptionItems
+        WHERE ${fkCol} = @ConsumptionId
+      `);
+    const currentItems = (currentItemsResult.recordset ?? []).map(normalizeConsumptionItem);
 
     const currentDeliveryChallanIds = parseJsonArray(
       currentConsumptionRow?.DeliveryChallanIds
@@ -15924,6 +16309,8 @@ app.put("/api/consumptions/:id", async (req, res) => {
       `);
     }
 
+    await applyConsumptionStockDelta(tx, currentItems, mappedItems);
+
     await tx.commit();
 
     const itemsResult = await pool
@@ -15968,8 +16355,9 @@ app.delete("/api/consumptions/:id", async (req, res) => {
     const existingItemsResult = await new sql.Request(tx)
       .input("ConsumptionId", sql.Int, id)
       .query(`
-        SELECT BoqItemId FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
+        SELECT * FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
       `);
+    const existingItems = (existingItemsResult.recordset ?? []).map(normalizeConsumptionItem);
     const existingBoqItemIds = (existingItemsResult.recordset ?? []).map(
       (row) => row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null
     );
@@ -15987,6 +16375,7 @@ app.delete("/api/consumptions/:id", async (req, res) => {
     `);
 
     await refreshBoqAvailability(tx, existingBoqItemIds);
+    await applyConsumptionStockDelta(tx, existingItems, []);
 
     await tx.commit();
 

@@ -22,6 +22,19 @@ export const normalizeVendor = (vendor = {}) => {
   const phone = vendor.phone ?? vendor.Phone ?? "";
   const email = vendor.email ?? vendor.Email ?? "";
   const gstNumber = vendor.gstNumber ?? vendor.GSTNumber ?? "";
+  const panNumber = vendor.panNumber ?? vendor.PANNumber ?? vendor.PanNumber ?? "";
+  const bankAccountName =
+    vendor.bankAccountName ?? vendor.BankAccountName ?? vendor.AccountHolderName ?? "";
+  const bankAccountNumber =
+    vendor.bankAccountNumber ?? vendor.BankAccountNumber ?? vendor.AccountNumber ?? "";
+  const bankName = vendor.bankName ?? vendor.BankName ?? "";
+  const ifscCode = vendor.ifscCode ?? vendor.IFSCCode ?? vendor.IfscCode ?? "";
+  const bankBranch = vendor.bankBranch ?? vendor.BankBranch ?? "";
+  const documents = Array.isArray(vendor.documents)
+    ? vendor.documents
+    : Array.isArray(vendor.Documents)
+    ? vendor.Documents
+    : [];
   const address = vendor.address ?? vendor.Address ?? "";
   const city = vendor.city ?? vendor.City ?? "";
   const state = vendor.state ?? vendor.State ?? "";
@@ -39,6 +52,13 @@ export const normalizeVendor = (vendor = {}) => {
     phone,
     email,
     gstNumber,
+    panNumber,
+    bankAccountName,
+    bankAccountNumber,
+    bankName,
+    ifscCode,
+    bankBranch,
+    documents,
     address,
     city,
     state,
@@ -49,6 +69,13 @@ export const normalizeVendor = (vendor = {}) => {
     Phone: vendor.Phone ?? phone,
     Email: vendor.Email ?? email,
     GSTNumber: vendor.GSTNumber ?? gstNumber,
+    PANNumber: vendor.PANNumber ?? panNumber,
+    BankAccountName: vendor.BankAccountName ?? bankAccountName,
+    BankAccountNumber: vendor.BankAccountNumber ?? bankAccountNumber,
+    BankName: vendor.BankName ?? bankName,
+    IFSCCode: vendor.IFSCCode ?? ifscCode,
+    BankBranch: vendor.BankBranch ?? bankBranch,
+    Documents: vendor.Documents ?? documents,
     Address: vendor.Address ?? address,
     City: vendor.City ?? city,
     State: vendor.State ?? state,

@@ -69,7 +69,7 @@ const statusClass = (status) => {
 };
  
 const getMovementTypeLabel = (type) =>
-  type === "Reallocate" ? "DC (Delivery Challan)" : type || "-";
+  type === "Reallocate" ? "Reallocation" : type || "-";
  
 const getReceiveReference = (record = {}) =>
   record.consumptionNumber ??
@@ -171,7 +171,7 @@ const ReallocateReturn = () => {
       setSaveError(
         error?.response?.data?.error ||
           error?.message ||
-          "Failed to load delivery challans."
+          "Failed to load reallocations."
       );
     }
   };
@@ -737,7 +737,7 @@ const ReallocateReturn = () => {
       setSaveError(
         error?.response?.data?.error ||
           error?.message ||
-          "Failed to save delivery challan."
+          "Failed to save reallocation."
       );
     } finally {
       setSaving(false);
@@ -779,7 +779,7 @@ const ReallocateReturn = () => {
       setSaveError(
         error?.response?.data?.error ||
           error?.message ||
-          "Failed to delete delivery challan."
+          "Failed to delete reallocation."
       );
     }
   };
@@ -802,7 +802,7 @@ const ReallocateReturn = () => {
   const printRegister = () => {
     printSection({
       selector: "#reallocation-register",
-      title: "DC Register",
+      title: "Reallocation",
       subtitle: "Inventory movement ledger",
       metaRows: [
         { label: "Total Entries", value: sortedRecords.length },
@@ -819,7 +819,7 @@ const ReallocateReturn = () => {
     setTimeout(() => {
       printSection({
         selector: "#reallocation-view-panel",
-        title: "Delivery Challan Details",
+        title: "Reallocation Details",
         logoUrl,
         brandName,
         brandDescription,
@@ -833,10 +833,10 @@ const ReallocateReturn = () => {
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Projects</p>
           <h1 className="text-3xl font-semibold text-slate-800">
-            Delivery Challan
+            Reallocation
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Create delivery challans using receive-inventory records and track stock movement.
+            Create reallocations using live inventory records and track stock movement.
           </p>
         </div>
         <button
@@ -876,19 +876,17 @@ const ReallocateReturn = () => {
       <form onSubmit={handleSubmit} className="mb-6 space-y-4">
         <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 text-lg font-semibold text-slate-800">
-            Delivery Challan Details
+            Reallocation Details
           </h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
-              <label className="text-sm font-medium text-slate-700">Reference</label>
+              <label className="text-sm font-medium text-slate-700">Reallocation Reference *</label>
               <input
                 type="text"
-                value={form.referenceNumber}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, referenceNumber: event.target.value }))
-                }
-                placeholder="DC-2026-002"
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                value={form.referenceNumber || (editingId ? `REL-${editingId}` : "Auto-generated on save")}
+                readOnly
+                placeholder="Auto-generated on save"
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-slate-700"
               />
               {errors.referenceNumber && (
                 <p className="mt-1 text-xs text-red-600">{errors.referenceNumber}</p>
@@ -904,7 +902,7 @@ const ReallocateReturn = () => {
                 }
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
               >
-                <option value="Reallocate">DC (Delivery Challan)</option>
+                <option value="Reallocate">Reallocation</option>
                 <option value="Return">Return</option>
               </select>
             </div>
@@ -1186,8 +1184,8 @@ const ReallocateReturn = () => {
             {saving
               ? "Saving..."
               : editingId
-              ? "Update Delivery Challan"
-              : "Save Delivery Challan"}
+              ? "Update Reallocation"
+              : "Save Reallocation"}
           </button>
         </div>
       </form>
@@ -1195,14 +1193,14 @@ const ReallocateReturn = () => {
       <section id="reallocation-register" className={panel}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <h2 className="text-3xl font-semibold text-slate-800">
-            DC Register
+            Reallocation
           </h2>
           <button
             type="button"
             onClick={printRegister}
             className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-slate-400"
           >
-            Post register
+            Print Reallocation
           </button>
         </div>
         <div className="grid gap-2 border-b border-slate-200 px-4 py-3 md:grid-cols-[1fr_210px]">
@@ -1210,7 +1208,7 @@ const ReallocateReturn = () => {
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search reference, PO, BOQ, e-way bill, item, date..."
+            placeholder="Search reallocation reference, PO, BOQ, e-way bill, item, date..."
             className={field}
           />
           <select
@@ -1228,7 +1226,7 @@ const ReallocateReturn = () => {
           <table className="min-w-full text-sm">
             <thead className="bg-[#eceff8] text-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left font-semibold min-w-[140px]">Reference</th>
+                <th className="px-4 py-3 text-left font-semibold min-w-[140px]">Reallocation Reference</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Type</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Receive Ref</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">E-Way Bill</th>
@@ -1246,8 +1244,8 @@ const ReallocateReturn = () => {
                 <tr>
                   <td colSpan="11" className="px-4 py-10 text-center text-slate-500">
                     {records.length
-                      ? "No matching delivery challans found."
-                      : "No delivery challans created yet."}
+                      ? "No matching reallocations found."
+                      : "No reallocations created yet."}
                   </td>
                 </tr>
               )}
@@ -1355,7 +1353,7 @@ const ReallocateReturn = () => {
       {activeViewRecord && (
         <DocumentViewPanel
           id="reallocation-view-panel"
-          title="DELIVERY CHALLAN DETAILS"
+          title="REALLOCATION DETAILS"
           onClose={() => setViewRecord(null)}
           companyName={brandName}
           companyAddress={brandDescription}
@@ -1365,7 +1363,7 @@ const ReallocateReturn = () => {
           logoUrl={logoUrl}
           primaryPairs={[
             {
-              label: "Reference",
+              label: "Reallocation Reference",
               value: activeViewRecord.referenceNumber || `REL-${activeViewRecord.id}`,
             },
             { label: "Receipt Ref", value: activeViewRecord.consumptionNumber || "-" },

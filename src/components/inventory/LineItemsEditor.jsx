@@ -17,6 +17,11 @@ const createEmptyItem = (extraFieldKey = "notes") => {
     hsn: "",
     gst: "",
     serialNumber: "",
+    itemId: null,
+    availableQty: null,
+    inventoryQty: null,
+    currentStock: null,
+    stock: null,
     quantity: "",
     rate: "",
     notes: "",
@@ -33,6 +38,15 @@ const sanitizeNumericValue = (value) => String(value ?? "").replace(/\D/g, "");
 
 const normalizeCatalogItem = (item = {}) => {
   const rate = roundUnitPrice(item.rate ?? item.price ?? item.salesPrice ?? item.unitPrice ?? 0);
+  const rawStock =
+    item.availableQty ??
+    item.AvailableQty ??
+    item.currentStock ??
+    item.CurrentStock ??
+    item.stock ??
+    item.Stock ??
+    null;
+  const availableQty = Number.isFinite(Number(rawStock)) ? Number(rawStock) : null;
   const taxPercentage = parseTaxPercentage(
     item.taxPercentage ?? item.gst ?? item.GST ?? 0
   );
@@ -48,6 +62,10 @@ const normalizeCatalogItem = (item = {}) => {
       formatTaxPercentage(taxPercentage),
     taxPercentage,
     rate,
+    availableQty,
+    inventoryQty: availableQty,
+    currentStock: availableQty,
+    stock: availableQty,
     serialRequired:
       item.serialRequired ?? item.SerialRequired ?? item.IsSerialTracked ?? false,
     serialNumber:
@@ -94,6 +112,7 @@ const LineItemsEditor = ({
   hiddenCatalogItemNames = [],
   hideSelectedCatalogItems = false,
   unitNumericOnly = false,
+  useInventoryQuantityForQuantity = false,
 }) => {
   const [catalogItems, setCatalogItems] = useState(() =>
     mergeCatalogItems(getProducts(), [])
@@ -295,6 +314,15 @@ const LineItemsEditor = ({
           matchedCatalogItem.rate || matchedCatalogItem.rate === 0
             ? roundUnitPrice(matchedCatalogItem.rate)
             : item.rate,
+        availableQty: matchedCatalogItem.availableQty ?? item.availableQty ?? null,
+        inventoryQty: matchedCatalogItem.inventoryQty ?? item.inventoryQty ?? null,
+        currentStock: matchedCatalogItem.currentStock ?? item.currentStock ?? null,
+        stock: matchedCatalogItem.stock ?? item.stock ?? null,
+        quantity:
+          useInventoryQuantityForQuantity &&
+          Number.isFinite(Number(matchedCatalogItem.availableQty))
+            ? Number(matchedCatalogItem.availableQty)
+            : item.quantity,
         serialRequired:
           matchedCatalogItem.serialRequired ?? item.serialRequired ?? false,
         serialNumber: matchedCatalogItem.serialNumber || item.serialNumber,

@@ -21,6 +21,7 @@ import { getGstTaxMode } from "../../utils/gstUtils";
 import { generateNextPurchaseOrderNumber } from "../../utils/purchaseOrderNumber";
 import {
   getPurchaseOrderLockMessage,
+  isCancelledPurchaseOrder,
   isLockedPurchaseOrder,
 } from "../../utils/purchaseOrderStatus";
 import PasswordPromptModal from "../common/PasswordPromptModal";
@@ -135,7 +136,7 @@ const PurchaseOrder = () => {
       });
       const mappedItems = (record.items ?? []).map((item) => ({
         id: item.id ?? Date.now() + Math.random(),
-        itemId: item.itemId ?? item.id ?? null,
+        itemId: item.itemId ?? item.ItemId ?? null,
         boqItemId: item.boqItemId ?? null,
         name: item.name ?? "",
         description: item.description ?? "",
@@ -323,6 +324,7 @@ const PurchaseOrder = () => {
         .filter((product) => (product.quantity ?? product.qty ?? 0) > 0)
         .map((product) => ({
           id: Date.now() + Math.random(),
+          itemId: product.itemId ?? product.ItemId ?? product.id ?? null,
           name: product.name || "",
           description: product.description || "",
           unit: product.unit || "PCS",
@@ -369,6 +371,36 @@ const PurchaseOrder = () => {
       (boq) => String(boq.projectId) === String(form.projectId)
     );
   }, [boqs, form.projectId]);
+
+  const orderedBoqItemIds = useMemo(() => {
+    const ids = new Set();
+    records.forEach((record) => {
+      if (String(record.id ?? "") === String(editingId ?? "")) {
+        return;
+      }
+      if (isCancelledPurchaseOrder(record.status)) {
+        return;
+      }
+      (record.items || []).forEach((item) => {
+        const boqItemId = item.boqItemId ?? item.BoqItemId ?? item.BOQItemId;
+        if (boqItemId !== null && boqItemId !== undefined && boqItemId !== "") {
+          ids.add(String(boqItemId));
+        }
+      });
+    });
+    return ids;
+  }, [records, editingId]);
+
+  const getAvailableBoqItems = (boq = {}) =>
+    (Array.isArray(boq.items) ? boq.items : []).filter((item) => {
+      const boqItemId = item.id ?? item.boqItemId ?? item.BoqItemId ?? item.BOQItemId;
+      return (
+        boqItemId === null ||
+        boqItemId === undefined ||
+        boqItemId === "" ||
+        !orderedBoqItemIds.has(String(boqItemId))
+      );
+    });
 
   const vendorMap = useMemo(
     () =>
@@ -449,6 +481,22 @@ const PurchaseOrder = () => {
         }
         seen.add(identityKey);
 
+      }
+      if (!nextErrors.items) {
+        const usedBoqItem = items.find((item) => {
+          const boqItemId = item.boqItemId ?? item.BoqItemId ?? item.BOQItemId;
+          return (
+            boqItemId !== null &&
+            boqItemId !== undefined &&
+            boqItemId !== "" &&
+            orderedBoqItemIds.has(String(boqItemId))
+          );
+        });
+        if (usedBoqItem) {
+          nextErrors.items = `${
+            usedBoqItem.name || "This BOQ item"
+          } is already linked to an active purchase order. Edit the existing PO instead of creating another PO for the same quantity.`;
+        }
       }
     }
     setErrors(nextErrors);
@@ -531,7 +579,16 @@ const PurchaseOrder = () => {
       return;
     }
 
-    const mapped = boq.items.map((item) => {
+    const availableItems = getAvailableBoqItems(boq);
+    const skippedCount = (Array.isArray(boq.items) ? boq.items.length : 0) - availableItems.length;
+    if (!availableItems.length) {
+      setBoqError(
+        "All items in this BOQ are already linked to an active purchase order. Edit the existing PO instead of creating another PO for the same quantity."
+      );
+      return;
+    }
+
+    const mapped = availableItems.map((item) => {
       const qty = Number(item.quantity ?? 0) || 0;
       const directRate = Number(item.rate ?? item.Rate);
       const rate =
@@ -567,7 +624,11 @@ const PurchaseOrder = () => {
     }
 
     setItems(mapped);
-    setBoqError("");
+    setBoqError(
+      skippedCount > 0
+        ? `${skippedCount} BOQ item${skippedCount === 1 ? "" : "s"} already linked to active purchase orders were skipped.`
+        : ""
+    );
   };
 
   const goPickProducts = () => {
@@ -813,7 +874,7 @@ const PurchaseOrder = () => {
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
-                Expected Date
+                Date of Delivery
               </label>
               <DateInput
                 value={form.expectedDate}
@@ -894,11 +955,25 @@ const PurchaseOrder = () => {
                           : "No BOQs for this project"
                         : "Select a project first"}
                     </option>
-                    {boqsForProject.map((boq) => (
-                      <option key={boq.id} value={boq.id}>
-                        {boq.boqNumber} | v{boq.version} | {boq.status || "Draft"}
-                      </option>
-                    ))}
+                    {boqsForProject.map((boq) => {
+                      const totalLines = Array.isArray(boq.items) ? boq.items.length : 0;
+                      const availableLines = getAvailableBoqItems(boq).length;
+                      const isFullyOrdered = totalLines > 0 && availableLines === 0;
+                      return (
+                        <option
+                          key={boq.id}
+                          value={boq.id}
+                          disabled={isFullyOrdered}
+                        >
+                          {boq.boqNumber} | v{boq.version} | {boq.status || "Draft"}
+                          {isFullyOrdered
+                            ? " | all items already in PO"
+                            : totalLines
+                            ? ` | ${availableLines}/${totalLines} items available`
+                            : ""}
+                        </option>
+                      );
+                    })}
                   </select>
                   <button
                     type="button"

@@ -12,6 +12,11 @@ const commonStyles = `
     padding: 24px;
     background: #fff;
   }
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
   h1, h2, h3 {
     margin: 0;
     font-weight: 600;
@@ -111,6 +116,11 @@ const commonStyles = `
     width: 100%;
     border-collapse: collapse;
     margin-top: 1rem;
+    table-layout: auto;
+    page-break-inside: auto;
+  }
+  tr {
+    page-break-inside: avoid;
   }
   th, td {
     border: 1px solid #e2e8f0;
@@ -332,7 +342,7 @@ export const printSection = async ({
   clone.querySelectorAll(".print-hidden, button").forEach((element) => {
     element.remove();
   });
-  const bodyHtml = isPanelPrint ? clone.outerHTML : node.innerHTML;
+  const bodyHtml = isPanelPrint ? clone.outerHTML : clone.innerHTML;
   const printWindow = safeOpen();
   if (!printWindow) {
     return;

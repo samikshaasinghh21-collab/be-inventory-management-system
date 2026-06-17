@@ -66,6 +66,52 @@ const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+const getExplicitQuantity = (...values) => {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+};
+const getReceiptLineReceivedQty = (item = {}) => {
+  const source = item ?? {};
+  return toNumber(
+    source.receiptReceivedQty ??
+      source.ReceiptReceivedQty ??
+      source.receivedQty ??
+      source.ReceivedQty
+  );
+};
+const getPoLineReceivedQty = (item = {}) => {
+  const source = item ?? {};
+  return toNumber(
+    source.totalReceivedQty ??
+      source.TotalReceivedQty ??
+      source.receivedQty ??
+      source.ReceivedQty
+  );
+};
+const getPoLineRemainingQty = (item = {}, orderedQty = 0) => {
+  const source = item ?? {};
+  const explicitBalance = getExplicitQuantity(
+    source.totalPoBalanceQty,
+    source.TotalPoBalanceQty,
+    source.poBalanceQty,
+    source.PoBalanceQty,
+    source.balanceQty,
+    source.BalanceQty
+  );
+
+  return Math.max(
+    explicitBalance ?? orderedQty - getPoLineReceivedQty(source),
+    0
+  );
+};
 const formatAddressLine = (vendor) => {
   const {
     address = "",
@@ -112,8 +158,6 @@ const findMatchingReceiptItem = (
             item.POItemId ??
             item.PurchaseOrderItemId ??
             item.purchaseOrderItemId ??
-            item.Id ??
-            item.id ??
             NaN
         ) === Number(receiptPoItemId)
     );
@@ -147,8 +191,6 @@ const findMatchingPoItemIndex = (purchaseOrder, receiptItem = {}, index = 0) => 
     receiptItem.POItemId ??
     receiptItem.PurchaseOrderItemId ??
     receiptItem.purchaseOrderItemId ??
-    receiptItem.Id ??
-    receiptItem.id ??
     null;
   if (Number.isFinite(Number(receiptPoItemId))) {
     const exactIndex = poItems.findIndex(
@@ -287,13 +329,7 @@ const buildReceivedTotalsBeforeReceipt = (
           return;
         }
         const key = getItemKey(poItems[matchedIndex], matchedIndex);
-        totals[key] =
-          (totals[key] || 0) +
-          toNumber(
-            receiptItem.receiptReceivedQty ??
-              receiptItem.ReceiptReceivedQty ??
-              receiptItem.receivedQty
-          );
+        totals[key] = (totals[key] || 0) + getReceiptLineReceivedQty(receiptItem);
       });
       return false;
     });
@@ -320,13 +356,7 @@ const buildReceivedTotalsExcludingReceipt = (
         return;
       }
       const key = getItemKey(poItems[matchedIndex], matchedIndex);
-      totals[key] =
-        (totals[key] || 0) +
-        toNumber(
-          receiptItem.receiptReceivedQty ??
-            receiptItem.ReceiptReceivedQty ??
-            receiptItem.receivedQty
-        );
+      totals[key] = (totals[key] || 0) + getReceiptLineReceivedQty(receiptItem);
     });
   });
 
@@ -385,17 +415,36 @@ const buildReceiveItems = (purchaseOrder, receiptHistory = [], receipt = null) =
   return poItems.map((item, index) => {
     const matched = findMatchingReceiptItem(purchaseOrder, receiptItems, item, index);
     const orderedQty = toNumber(item.quantity ?? item.orderedQty);
-    const pendingQty = Math.max(
-      orderedQty - toNumber(priorTotals[getItemKey(item, index)]),
+    const itemKey = getItemKey(item, index);
+    const hasHistoryTotal = Object.prototype.hasOwnProperty.call(
+      priorTotals,
+      itemKey
+    );
+    const matchedReceivedQty = getReceiptLineReceivedQty(matched);
+    const matchedAvailableBeforeQty = getExplicitQuantity(
+      matched?.availableBalanceQty,
+      matched?.AvailableBalanceQty
+    );
+    const fallbackPriorReceivedQty = receipt
+      ? matchedAvailableBeforeQty !== null
+        ? orderedQty - matchedAvailableBeforeQty
+        : getPoLineReceivedQty(item) - matchedReceivedQty
+      : Math.max(
+          getPoLineReceivedQty(item),
+          orderedQty - getPoLineRemainingQty(item, orderedQty)
+        );
+    const previouslyReceivedQty = Math.max(
+      Math.min(
+        orderedQty,
+        hasHistoryTotal
+          ? toNumber(priorTotals[itemKey])
+          : fallbackPriorReceivedQty
+      ),
       0
     );
-    const previouslyReceivedQty = Math.max(orderedQty - pendingQty, 0);
+    const pendingQty = Math.max(orderedQty - previouslyReceivedQty, 0);
     const receivedQty = Math.min(
-      toNumber(
-        matched?.receiptReceivedQty ??
-          matched?.ReceiptReceivedQty ??
-          matched?.receivedQty
-      ),
+      Math.max(matchedReceivedQty, 0),
       pendingQty
     );
     const savedSerialNumbers = normalizeSerialNumbers(matched?.serialNumbers);
@@ -407,7 +456,7 @@ const buildReceiveItems = (purchaseOrder, receiptHistory = [], receipt = null) =
     return {
       id: item.id ?? item.itemId ?? index,
       poItemId: item.poItemId ?? item.id ?? null,
-      itemId: item.itemId ?? item.id ?? null,
+      itemId: item.itemId ?? item.ItemId ?? null,
       name: item.name ?? matched?.name ?? "",
       description: item.description ?? matched?.description ?? "",
       unit: item.unit ?? matched?.unit ?? "PCS",
@@ -986,20 +1035,25 @@ const ReceiveGoods = () => {
       if (isReceiveReadOnly) {
         return prev;
       }
-      const nextItems = prev.items.map((item, index) =>
-        getReceiveLineKey(item, index) === itemKey
-          ? {
-              ...item,
-              receivedQty: Math.max(
-                0,
-                Math.min(
-                  Number.parseInt(value, 10) || 0,
-                  toNumber(item.pendingQty ?? item.orderedQty)
-                )
-              ),
-            }
-          : item
-      );
+      const nextItems = prev.items.map((item, index) => {
+        if (getReceiveLineKey(item, index) !== itemKey) {
+          return item;
+        }
+
+        const availableQty = toNumber(
+          item.availableBalanceQty ?? item.pendingQty ?? item.orderedQty
+        );
+        const receivedQty = Math.max(
+          0,
+          Math.min(Number.parseInt(value, 10) || 0, availableQty)
+        );
+
+        return {
+          ...item,
+          receivedQty,
+          balanceQty: Math.max(availableQty - receivedQty, 0),
+        };
+      });
 
       return {
         ...prev,
@@ -1093,11 +1147,15 @@ const ReceiveGoods = () => {
       return;
     }
     const invalidQtyItem = positiveItems.find(
-      (item) => toNumber(item.receivedQty) > toNumber(item.pendingQty)
+      (item) =>
+        toNumber(item.receivedQty) >
+        toNumber(item.availableBalanceQty ?? item.pendingQty)
     );
     if (invalidQtyItem) {
       setApiError(
-        `Received quantity for ${invalidQtyItem.name || "item"} cannot exceed pending quantity (${toNumber(invalidQtyItem.pendingQty)}).`
+        `Received quantity for ${invalidQtyItem.name || "item"} cannot exceed available quantity (${toNumber(
+          invalidQtyItem.availableBalanceQty ?? invalidQtyItem.pendingQty
+        )}).`
       );
       return;
     }
@@ -1122,7 +1180,7 @@ const ReceiveGoods = () => {
         status: receiveForm.status || nextStatusPreview,
         items: receiveItems.map((item) => ({
           poItemId: item.poItemId ?? item.id ?? null,
-          itemId: item.itemId ?? item.id ?? null,
+          itemId: item.itemId ?? null,
           name: item.name || "",
           description: item.description || "",
           unit: item.unit || "PCS",
@@ -1321,7 +1379,7 @@ const ReceiveGoods = () => {
                 <th className="p-3 text-left min-w-[170px]">Vendor</th>
                 <th className="p-3 text-left min-w-[130px]">Status</th>
                 <th className="p-3 text-left min-w-[120px]">Items</th>
-                <th className="p-3 text-left min-w-[140px]">Expected</th>
+                <th className="p-3 text-left min-w-[140px]">Date of Delivery</th>
                 <th className="p-3 text-left min-w-[120px]">Actions</th>
               </tr>
             </thead>
@@ -1604,7 +1662,7 @@ const ReceiveGoods = () => {
                             </div>
                             <div>
                               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                                Ordered Balance
+                                Available Qty
                               </p>
                               <p className="mt-1 font-semibold text-slate-900">
                                 {historyTotals.available}
@@ -1846,8 +1904,8 @@ const ReceiveGoods = () => {
                         <tr>
                           <th className="p-3 text-left min-w-[160px]">Item</th>
                           <th className="p-3 text-left min-w-[90px]">Unit</th>
-                          <th className="p-3 text-left min-w-[100px]">Ordered</th>
-                          <th className="p-3 text-left min-w-[110px]">Receive Now</th>
+                          <th className="p-3 text-left min-w-[100px]">Available Qty</th>
+                          <th className="p-3 text-left min-w-[110px]">Receive Qty</th>
                           <th className="p-3 text-left min-w-[100px]">PO Balance</th>
                         </tr>
                       </thead>
@@ -1887,7 +1945,7 @@ const ReceiveGoods = () => {
                                   <input
                                     type="number"
                                     min="0"
-                                    max={item.pendingQty}
+                                    max={item.availableBalanceQty}
                                     step="1"
                                     value={item.receivedQty}
                                     onChange={(event) =>
@@ -1992,7 +2050,7 @@ const ReceiveGoods = () => {
 
                   <div className="mt-4 flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex flex-wrap gap-4">
-                      <span>Ordered: {totals.pending}</span>
+                      <span>Available Qty: {totals.pending}</span>
                       <span>Received: {totals.received}</span>
                       <span>PO Balance: {totals.balance}</span>
                     </div>
@@ -2033,7 +2091,7 @@ const ReceiveGoods = () => {
           primaryPairs={[
             { label: "PO No", value: purchaseOrderPreview.poNumber || purchaseOrderPreview.id },
             { label: "Date", value: formatDate(purchaseOrderPreview.orderDate) },
-            { label: "Expected", value: formatDate(purchaseOrderPreview.expectedDate) },
+            { label: "Date of Delivery", value: formatDate(purchaseOrderPreview.expectedDate) },
             { label: "Status", value: purchaseOrderPreview.status },
           ]}
           leftBlockTitle="Vendor"
@@ -2119,7 +2177,7 @@ const ReceiveGoods = () => {
             { key: "name", label: "Item" },
             { key: "serialNumbers", label: "Serial Numbers", widthClass: "w-32" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
-            { key: "ordered", label: "Ordered", align: "right", widthClass: "w-24" },
+            { key: "ordered", label: "Available Qty", align: "right", widthClass: "w-24" },
             { key: "received", label: "Received", align: "right", widthClass: "w-24" },
             { key: "balance", label: "PO Balance", align: "right", widthClass: "w-24" },
           ]}

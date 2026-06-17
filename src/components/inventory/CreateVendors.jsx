@@ -14,11 +14,45 @@ const createEmptyContact = () => ({
   phone: "",
 });
 
+const MAX_VENDOR_DOCUMENT_SIZE = 5 * 1024 * 1024;
+
+const readVendorDocument = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error("Select a valid file."));
+      return;
+    }
+    if (file.size > MAX_VENDOR_DOCUMENT_SIZE) {
+      reject(new Error(`${file.name} is larger than 5 MB.`));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve({
+        id: `${Date.now()}-${Math.random()}`,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        uploadedAt: new Date().toISOString(),
+        dataUrl: reader.result,
+      });
+    };
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+
 const initialForm = {
   VendorName: "",
   Phone: "",
   Email: "",
   GSTNumber: "",
+  PANNumber: "",
+  BankAccountName: "",
+  BankAccountNumber: "",
+  BankName: "",
+  IFSCCode: "",
+  BankBranch: "",
+  Documents: [],
   Address: "",
   City: "",
   State: "",
@@ -57,6 +91,29 @@ const CreateVendors = () => {
       const next = prev.filter((contact) => contact.id !== id);
       return next.length ? next : [createEmptyContact()];
     });
+  };
+
+  const handleDocumentUpload = async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) {
+      return;
+    }
+    try {
+      const documents = await Promise.all(files.map(readVendorDocument));
+      updateField("Documents", [...(form.Documents || []), ...documents]);
+      setSubmitError("");
+    } catch (error) {
+      setSubmitError(error?.message || "Failed to upload vendor document.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const removeDocument = (id) => {
+    updateField(
+      "Documents",
+      (form.Documents || []).filter((document) => document.id !== id)
+    );
   };
 
   const validate = () => {
@@ -108,6 +165,13 @@ const CreateVendors = () => {
         phone: form.Phone.trim(),
         email: form.Email.trim() || undefined,
         gstNumber: form.GSTNumber.trim() || undefined,
+        panNumber: form.PANNumber.trim() || undefined,
+        bankAccountName: form.BankAccountName.trim() || undefined,
+        bankAccountNumber: form.BankAccountNumber.trim() || undefined,
+        bankName: form.BankName.trim() || undefined,
+        ifscCode: form.IFSCCode.trim() || undefined,
+        bankBranch: form.BankBranch.trim() || undefined,
+        documents: form.Documents || [],
         address: form.Address.trim() || undefined,
         city: form.City.trim() || undefined,
         state: form.State.trim() || undefined,
@@ -237,6 +301,111 @@ const CreateVendors = () => {
                     }
                     className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                   />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    PAN Number
+                  </label>
+                  <input
+                    value={form.PANNumber}
+                    onChange={(event) =>
+                      updateField("PANNumber", event.target.value.toUpperCase())
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Bank Account Name
+                  </label>
+                  <input
+                    value={form.BankAccountName}
+                    onChange={(event) =>
+                      updateField("BankAccountName", event.target.value)
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Bank Account Number
+                  </label>
+                  <input
+                    value={form.BankAccountNumber}
+                    onChange={(event) =>
+                      updateField("BankAccountNumber", event.target.value)
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Bank Name
+                  </label>
+                  <input
+                    value={form.BankName}
+                    onChange={(event) => updateField("BankName", event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    IFSC Code
+                  </label>
+                  <input
+                    value={form.IFSCCode}
+                    onChange={(event) =>
+                      updateField("IFSCCode", event.target.value.toUpperCase())
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Bank Branch
+                  </label>
+                  <input
+                    value={form.BankBranch}
+                    onChange={(event) => updateField("BankBranch", event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                </div>
+
+                <div className="lg:col-span-2">
+                  <label className="text-sm font-medium text-slate-700">
+                    Upload Documents
+                  </label>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={handleDocumentUpload}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                  />
+                  {(form.Documents || []).length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {form.Documents.map((document) => (
+                        <div
+                          key={document.id}
+                          className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        >
+                          <span className="truncate text-slate-700">{document.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeDocument(document.id)}
+                            className="text-xs font-medium text-red-600"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="lg:col-span-2">

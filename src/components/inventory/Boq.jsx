@@ -23,9 +23,14 @@ import {
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
+  itemId: null,
   name: "",
   description: "",
   serialNumber: "",
+  availableQty: null,
+  inventoryQty: null,
+  currentStock: null,
+  stock: null,
   unit: "PCS",
   hsn: "",
   gst: "",
@@ -237,13 +242,30 @@ const Boq = () => {
               : prev;
           const mapped = selected.map((item) => ({
             id: item.id ?? Date.now() + Math.random(),
+            itemId: item.itemId ?? item.ItemId ?? item.id ?? null,
             name: item.name ?? "",
             description: item.description ?? "",
             serialNumber: item.serialNumber ?? "",
             unit: item.unit ?? "PCS",
             hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
             gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
-            quantity: item.quantity ?? item.qty ?? 1,
+            availableQty:
+              item.availableQty ??
+              item.currentStock ??
+              item.stock ??
+              item.quantity ??
+              item.qty ??
+              null,
+            inventoryQty: item.inventoryQty ?? item.currentStock ?? item.stock ?? null,
+            currentStock: item.currentStock ?? item.stock ?? null,
+            stock: item.stock ?? item.currentStock ?? null,
+            quantity:
+              item.availableQty ??
+              item.currentStock ??
+              item.stock ??
+              item.quantity ??
+              item.qty ??
+              1,
             rate: roundUnitPrice(item.rate ?? 0),
             notes: item.notes ?? "",
           }));
@@ -330,6 +352,7 @@ const Boq = () => {
       notes: form.notes,
       items: cleanedItems.map((item) => ({
         id: item.id ?? null,
+        itemId: item.itemId ?? null,
         name: item.name,
         description: item.description,
         serialNumber: item.serialNumber,
@@ -337,6 +360,9 @@ const Boq = () => {
         hsn: item.hsn,
         gst: item.gst,
         quantity: Number(item.quantity) || 0,
+        availableQty:
+          Number(item.availableQty ?? item.inventoryQty ?? item.currentStock ?? item.stock ?? 0) ||
+          0,
         rate: roundUnitPrice(item.rate),
         notes: item.notes,
       })),
@@ -377,12 +403,17 @@ const Boq = () => {
       record.items?.length
         ? record.items.map((item) => ({
             id: item.id ?? Date.now() + Math.random(),
+            itemId: item.itemId ?? null,
             name: item.name ?? "",
             description: item.description ?? "",
             serialNumber: item.serialNumber ?? "",
             unit: item.unit ?? "PCS",
             hsn: item.hsn ?? item.HSN ?? "",
             gst: item.gst ?? item.GST ?? "",
+            availableQty: item.availableQty ?? item.inventoryQty ?? item.currentStock ?? item.stock ?? null,
+            inventoryQty: item.inventoryQty ?? item.currentStock ?? item.stock ?? null,
+            currentStock: item.currentStock ?? item.stock ?? null,
+            stock: item.stock ?? item.currentStock ?? null,
             quantity: item.quantity ?? "",
             rate: item.rate || item.rate === 0 ? roundUnitPrice(item.rate) : "",
             notes: item.notes ?? "",
@@ -623,6 +654,7 @@ const Boq = () => {
           pickLabel="Pick from Products"
           showHsnGst
           showSerialNumber
+          useInventoryQuantityForQuantity
           priceLabel="Unit Price"
         />
         {errors.items && (

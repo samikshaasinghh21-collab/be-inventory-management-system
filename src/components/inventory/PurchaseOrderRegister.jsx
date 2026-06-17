@@ -658,7 +658,7 @@ const PurchaseOrderRegister = () => {
               <th className="p-3 text-left min-w-[140px]">Subtotal</th>
               <th className="p-3 text-left min-w-[140px]">GST</th>
               <th className="p-3 text-left min-w-[140px]">Total Value</th>
-              <th className="p-3 text-left min-w-[140px]">Expected</th>
+              <th className="p-3 text-left min-w-[140px]">Date of Delivery</th>
               <th className="p-3 text-left min-w-[120px]">Actions</th>
             </tr>
           </thead>
@@ -861,7 +861,7 @@ const PurchaseOrderRegister = () => {
                                 <strong>Order Date:</strong> {formatDate(record.orderDate) || "-"}
                               </p>
                               <p>
-                                <strong>Expected Date:</strong>{" "}
+                                <strong>Date of Delivery:</strong>{" "}
                                 {formatDate(record.expectedDate) || "-"}
                               </p>
                               <p>
@@ -983,7 +983,7 @@ const PurchaseOrderRegister = () => {
           primaryPairs={[
             { label: "PO No", value: viewRecord.poNumber || viewRecord.id },
             { label: "Date", value: formatDate(viewRecord.orderDate) },
-            { label: "Expected", value: formatDate(viewRecord.expectedDate) },
+            { label: "Date of Delivery", value: formatDate(viewRecord.expectedDate) },
             { label: "Status", value: viewRecord.status },
           ]}
           leftBlockTitle="Vendor"
