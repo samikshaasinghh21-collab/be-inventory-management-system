@@ -1,4 +1,12 @@
 import api from "./api";
+import { 
+  validatePAN, 
+  validateUAN, 
+  validateEmail, 
+  validatePhoneNumber,
+  formatDateToMMDDYYYY,
+  calculateGrossSalary as calcGrossSalary
+} from "../utils/hrmsValidation";
 
 const emitHrmsEmployeesChange = () => {
   if (typeof window !== "undefined") {
@@ -64,6 +72,15 @@ export const normalizeHrmsEmployee = (employee = {}) => {
   const esiAmount = toOptionalNumber(
     employee.esiAmount ?? employee.esi ?? employee.ESIAmount
   );
+  const grossSalary = toOptionalNumber(
+    employee.grossSalary ?? employee.GrossSalary
+  );
+  const tds = toOptionalNumber(
+    employee.tds ?? employee.TDS
+  );
+  const pt = toOptionalNumber(
+    employee.pt ?? employee.professionalTax ?? employee.ProfessionalTax
+  );
 
   return {
     ...employee,
@@ -108,6 +125,9 @@ export const normalizeHrmsEmployee = (employee = {}) => {
     providentFund: pfAmount,
     esiAmount,
     esi: esiAmount,
+    grossSalary,
+    tds,
+    pt,
     avatar: employee.avatar ?? getInitials(name),
     address: employee.address ?? employee.Address ?? "",
     bloodGroup: employee.bloodGroup ?? employee.BloodGroup ?? "",
@@ -115,6 +135,9 @@ export const normalizeHrmsEmployee = (employee = {}) => {
     gender: employee.gender ?? employee.Gender ?? "",
     maritalStatus: employee.maritalStatus ?? employee.MaritalStatus ?? "",
     nationality: employee.nationality ?? employee.Nationality ?? "",
+    panNumber: employee.panNumber ?? employee.PANNumber ?? "",
+    uanNumber: employee.uanNumber ?? employee.UANNumber ?? "",
+    relation: employee.relation ?? employee.Relation ?? "",
     photo: employee.photo ?? employee.photoPath ?? employee.PhotoPath ?? "",
     photoPath: employee.photoPath ?? employee.photo ?? employee.PhotoPath ?? "",
     documents:
@@ -125,14 +148,50 @@ export const normalizeHrmsEmployee = (employee = {}) => {
   };
 };
 
-export const fetchHrmsEmployees = async () => {
-  const response = await api.get("/hrms/employees");
-  const list = Array.isArray(response.data?.employees)
-    ? response.data.employees
-    : Array.isArray(response.data)
-      ? response.data
-      : [];
-  return list.map(normalizeHrmsEmployee);
+export const fetchHrmsEmployees = async (page = 1, pageSize = 50, filters = {}) => {
+  try {
+    const params = new URLSearchParams({
+      page,
+      pageSize,
+      ...filters
+    });
+    
+    const response = await api.get(`/hrms/employees?${params}`);
+    const { data } = response.data;
+    
+    if (data && data.data) {
+      return {
+        employees: data.data.map(normalizeHrmsEmployee),
+        pagination: data.pagination || {},
+        total: data.pagination?.totalRecords || data.data.length
+      };
+    }
+    
+    // Fallback for backward compatibility
+    const list = Array.isArray(response.data?.employees)
+      ? response.data.employees
+      : Array.isArray(response.data)
+        ? response.data
+        : [];
+    return {
+      employees: list.map(normalizeHrmsEmployee),
+      pagination: {},
+      total: list.length
+    };
+  } catch (error) {
+    console.error('Error fetching employees:', error);
+    throw error;
+  }
+};
+
+export const fetchHrmsEmployee = async (id) => {
+  try {
+    const response = await api.get(`/hrms/employees/${id}`);
+    return normalizeHrmsEmployee(response.data?.data || response.data);
+  } catch (error) {
+    console.error('Error fetching employee:', error);
+    throw error;
+  }
 };
 
 export const createHrmsEmployee = async (payload) => {

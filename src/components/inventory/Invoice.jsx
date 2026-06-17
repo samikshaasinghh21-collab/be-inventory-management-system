@@ -76,7 +76,7 @@ const defaultPayment = {
 
 const uploadedFiles = [
   { id: "supplier-invoice", name: "Supplier Invoice.pdf", size: "1.2 MB", type: "PDF" },
-  { id: "delivery-challan", name: "Delivery Challan.pdf", size: "850 KB", type: "PDF" },
+  { id: "delivery-challan", name: "Delivery Challan.pdf", size: "2 MB", type: "PDF" },
 ];
 
 const workflowSteps = [

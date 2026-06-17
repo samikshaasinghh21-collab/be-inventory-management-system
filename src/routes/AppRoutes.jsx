@@ -17,6 +17,8 @@ import ToolsHandoverTool from "../pages/ToolsHandoverTool";
 import ToolsMap from "../pages/ToolsMap";
 import HrmsPlaceholder from "../pages/HrmsPlaceholder";
 import ProjectDashboard from "../pages/projectManagement/ProjectDashboard";
+import ProjectManagementProjects from "../pages/projectManagement/ProjectManagementProjects";
+import ProjectManagementTasks from "../pages/projectManagement/ProjectManagementTasks";
 import ProjectManagementPlaceholder from "../pages/projectManagement/ProjectManagementPlaceholder";
 import { projectManagementPlaceholderPages } from "../pages/projectManagement/projectManagementData";
 import Settings from "../pages/Settings";
@@ -193,7 +195,17 @@ const AppRoutes = () => {
           path="/project-management/dashboard"
           element={<ProjectDashboard />}
         />
-        {projectManagementPlaceholderPages.map((screen) => (
+        <Route
+          path="/project-management/projects"
+          element={<ProjectManagementProjects />}
+        />
+        <Route
+          path="/project-management/tasks"
+          element={<ProjectManagementTasks />}
+        />
+        {projectManagementPlaceholderPages
+          .filter((screen) => !["projects", "tasks"].includes(screen.key))
+          .map((screen) => (
           <Route
             key={screen.path}
             path={screen.path}

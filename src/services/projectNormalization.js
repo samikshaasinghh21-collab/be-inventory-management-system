@@ -79,6 +79,56 @@ export const normalizeProjectRecord = (project = {}) => ({
   startDate: normalizeProjectDate(project.startDate ?? project.StartDate),
   endDate: normalizeProjectDate(project.endDate ?? project.EndDate),
   notes: project.notes ?? project.Notes ?? "",
+  projectCategory:
+    project.projectCategory ?? project.ProjectCategory ?? project.category ?? "",
+  description:
+    project.description ?? project.ProjectDescription ?? project.notes ?? project.Notes ?? "",
+  priority: project.priority ?? project.Priority ?? "Medium",
+  projectManager:
+    project.projectManager ?? project.ProjectManager ?? project.manager ?? "",
+  siteEngineer: project.siteEngineer ?? project.SiteEngineer ?? "",
+  teamLead: project.teamLead ?? project.TeamLead ?? "",
+  department: project.department ?? project.Department ?? "",
+  actualEndDate: normalizeProjectDate(
+    project.actualEndDate ?? project.ActualEndDate
+  ),
+  milestoneTemplate:
+    project.milestoneTemplate ?? project.MilestoneTemplate ?? "",
+  estimatedBudget: Number(project.estimatedBudget ?? project.EstimatedBudget ?? 0) || 0,
+  approvedBudget: Number(project.approvedBudget ?? project.ApprovedBudget ?? 0) || 0,
+  materialBudget: Number(project.materialBudget ?? project.MaterialBudget ?? 0) || 0,
+  labourBudget: Number(project.labourBudget ?? project.LabourBudget ?? 0) || 0,
+  otherCostBudget: Number(project.otherCostBudget ?? project.OtherCostBudget ?? 0) || 0,
+  expenses: Number(project.expenses ?? project.Expenses ?? 0) || 0,
+  progress: Number(project.progress ?? project.Progress ?? 0) || 0,
+  teamSize: Number(project.teamSize ?? project.TeamSize ?? 0) || 0,
+  resourceUtilization:
+    Number(project.resourceUtilization ?? project.ResourceUtilization ?? 0) || 0,
+  siteName: project.siteName ?? project.SiteName ?? "",
+  siteAddress: project.siteAddress ?? project.SiteAddress ?? project.address ?? "",
+  city: project.city ?? project.City ?? "",
+  state: project.state ?? project.State ?? "",
+  siteContactPerson:
+    project.siteContactPerson ?? project.SiteContactPerson ?? project.contactPerson ?? "",
+  siteContactNumber:
+    project.siteContactNumber ?? project.SiteContactNumber ?? project.phone ?? "",
+  tasks: Array.isArray(project.tasks) ? project.tasks : [],
+  teamAllocations: Array.isArray(project.teamAllocations)
+    ? project.teamAllocations
+    : [],
+  milestones: Array.isArray(project.milestones) ? project.milestones : [],
+  inventoryAllocations: Array.isArray(project.inventoryAllocations)
+    ? project.inventoryAllocations
+    : [],
+  purchases: Array.isArray(project.purchases) ? project.purchases : [],
+  financials: Array.isArray(project.financials) ? project.financials : [],
+  documents: Array.isArray(project.documents) ? project.documents : [],
+  activities: Array.isArray(project.activities) ? project.activities : [],
+  openIssues: Number(project.openIssues ?? project.OpenIssues ?? 0) || 0,
+  pendingInvoices:
+    Number(project.pendingInvoices ?? project.PendingInvoices ?? 0) || 0,
+  createdAt: project.createdAt ?? project.CreatedAt ?? null,
+  updatedAt: project.updatedAt ?? project.UpdatedAt ?? null,
 });
 
 export const normalizeProjectsList = (projects = []) =>
