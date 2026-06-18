@@ -1102,6 +1102,123 @@ const hydrateBoqItemsWithInventoryStock = async (items = []) => {
   });
 };
 
+const POD_STATUS = Object.freeze({
+  PENDING: "POD_PENDING",
+  UPLOADED: "POD_UPLOADED",
+  UNDER_VERIFICATION: "POD_UNDER_VERIFICATION",
+  VERIFIED: "POD_VERIFIED",
+  REJECTED: "POD_REJECTED",
+  DISPUTED: "POD_DISPUTED",
+  WAIVED: "POD_WAIVED",
+});
+
+const POD_STATUS_ALIASES = new Map([
+  ["", POD_STATUS.PENDING],
+  ["pending", POD_STATUS.PENDING],
+  ["pod pending", POD_STATUS.PENDING],
+  ["pod_pending", POD_STATUS.PENDING],
+  ["uploaded", POD_STATUS.UPLOADED],
+  ["pod uploaded", POD_STATUS.UPLOADED],
+  ["pod_uploaded", POD_STATUS.UPLOADED],
+  ["under verification", POD_STATUS.UNDER_VERIFICATION],
+  ["pod under verification", POD_STATUS.UNDER_VERIFICATION],
+  ["pod_under_verification", POD_STATUS.UNDER_VERIFICATION],
+  ["verified", POD_STATUS.VERIFIED],
+  ["pod verified", POD_STATUS.VERIFIED],
+  ["pod_verified", POD_STATUS.VERIFIED],
+  ["received", POD_STATUS.VERIFIED],
+  ["delivered", POD_STATUS.VERIFIED],
+  ["rejected", POD_STATUS.REJECTED],
+  ["pod rejected", POD_STATUS.REJECTED],
+  ["pod_rejected", POD_STATUS.REJECTED],
+  ["disputed", POD_STATUS.DISPUTED],
+  ["pod disputed", POD_STATUS.DISPUTED],
+  ["pod_disputed", POD_STATUS.DISPUTED],
+  ["waived", POD_STATUS.WAIVED],
+  ["pod waived", POD_STATUS.WAIVED],
+  ["not required", POD_STATUS.WAIVED],
+  ["pod_waived", POD_STATUS.WAIVED],
+]);
+
+const normalizePodStatus = (value) => {
+  const raw = String(value ?? "").trim();
+  if (Object.values(POD_STATUS).includes(raw)) {
+    return raw;
+  }
+  const key = raw.replace(/\s+/g, " ").toLowerCase();
+  return POD_STATUS_ALIASES.get(key) ?? POD_STATUS.PENDING;
+};
+
+const isPodReviewerRole = (role) =>
+  ["admin", "manager"].includes(String(role ?? "").trim().toLowerCase());
+
+const buildPodActor = (body = {}) => ({
+  name:
+    normalizeOptionalString(
+      body.auditBy ?? body.performedBy ?? body.userName ?? body.uploadedBy
+    ) ?? "System",
+  role: normalizeOptionalString(body.auditRole ?? body.performedRole ?? body.role) ?? "User",
+});
+
+const ensurePodReviewer = (actor) => {
+  if (!isPodReviewerRole(actor?.role)) {
+    const error = new Error("Only Admin or Manager users can approve POD workflow actions.");
+    error.statusCode = 403;
+    throw error;
+  }
+};
+
+const hasPodDocument = (row = {}) =>
+  Boolean(
+    normalizeOptionalString(row.PODDocumentData ?? row.podDocumentData) ||
+      normalizeOptionalString(row.PODDocumentName ?? row.podDocumentName)
+  );
+
+const normalizeDeliveryChallanPodAuditEntry = (row = {}) => ({
+  id: row.AuditId ?? row.id ?? null,
+  auditId: row.AuditId ?? row.auditId ?? null,
+  deliveryChallanId: row.DeliveryChallanId ?? row.deliveryChallanId ?? null,
+  actionName: row.ActionName ?? row.actionName ?? "",
+  action: row.ActionName ?? row.action ?? "",
+  fromStatus: normalizePodStatus(row.FromStatus ?? row.fromStatus),
+  toStatus: normalizePodStatus(row.ToStatus ?? row.toStatus),
+  performedBy: row.PerformedBy ?? row.performedBy ?? "",
+  performedRole: row.PerformedRole ?? row.performedRole ?? "",
+  remarks: row.Remarks ?? row.remarks ?? "",
+  snapshotJson: row.SnapshotJson ?? row.snapshotJson ?? null,
+  createdAt: row.CreatedAt ?? row.createdAt ?? null,
+});
+
+const writeDeliveryChallanPodAuditLog = async (
+  tx,
+  {
+    deliveryChallanId,
+    actionName,
+    fromStatus,
+    toStatus,
+    performedBy,
+    performedRole,
+    remarks = null,
+    snapshot = null,
+  }
+) => {
+  await new sql.Request(tx)
+    .input("DeliveryChallanId", sql.BigInt, toNullableInt(deliveryChallanId))
+    .input("ActionName", sql.NVarChar(50), normalizeOptionalString(actionName) ?? "POD_UPDATE")
+    .input("FromStatus", sql.NVarChar(50), normalizePodStatus(fromStatus))
+    .input("ToStatus", sql.NVarChar(50), normalizePodStatus(toStatus))
+    .input("PerformedBy", sql.NVarChar(255), normalizeOptionalString(performedBy) ?? null)
+    .input("PerformedRole", sql.NVarChar(100), normalizeOptionalString(performedRole) ?? null)
+    .input("Remarks", sql.NVarChar(sql.MAX), normalizeOptionalString(remarks) ?? null)
+    .input("Snapshot", sql.NVarChar(sql.MAX), serializeJson(snapshot))
+    .query(`
+      INSERT INTO dbo.DeliveryChallanPODAuditLog
+        (DeliveryChallanId, ActionName, FromStatus, ToStatus, PerformedBy, PerformedRole, Remarks, SnapshotJson)
+      VALUES
+        (@DeliveryChallanId, @ActionName, @FromStatus, @ToStatus, @PerformedBy, @PerformedRole, @Remarks, @Snapshot)
+    `);
+};
+
 const normalizeDeliveryChallan = (row = {}) => {
   const id =
     row.DeliveryChallanId ??
@@ -1133,9 +1250,33 @@ const normalizeDeliveryChallan = (row = {}) => {
       "",
     issueDate: row.IssueDate ?? row.issueDate ?? null,
     status: row.Status ?? row.status ?? "Draft",
-    podStatus: row.PODStatus ?? row.podStatus ?? "Pending",
+    podStatus: normalizePodStatus(row.PODStatus ?? row.podStatus),
     podReference: row.PODReference ?? row.podReference ?? "",
     podDate: row.PODDate ?? row.podDate ?? null,
+    podDocumentName: row.PODDocumentName ?? row.podDocumentName ?? "",
+    podDocumentType: row.PODDocumentType ?? row.podDocumentType ?? "",
+    podDocumentSize: Number(row.PODDocumentSize ?? row.podDocumentSize ?? 0) || 0,
+    podDocumentData: row.PODDocumentData ?? row.podDocumentData ?? "",
+    podUploadedAt: row.PODUploadedAt ?? row.podUploadedAt ?? null,
+    podUploadedBy: row.PODUploadedBy ?? row.podUploadedBy ?? "",
+    podVerifiedAt: row.PODVerifiedAt ?? row.podVerifiedAt ?? null,
+    podVerifiedBy: row.PODVerifiedBy ?? row.podVerifiedBy ?? "",
+    podRejectedAt: row.PODRejectedAt ?? row.podRejectedAt ?? null,
+    podRejectedBy: row.PODRejectedBy ?? row.podRejectedBy ?? "",
+    podRejectionRemarks:
+      row.PODRejectionRemarks ?? row.podRejectionRemarks ?? "",
+    podDisputedAt: row.PODDisputedAt ?? row.podDisputedAt ?? null,
+    podDisputedBy: row.PODDisputedBy ?? row.podDisputedBy ?? "",
+    podDisputeRemarks: row.PODDisputeRemarks ?? row.podDisputeRemarks ?? "",
+    podResolvedAt: row.PODResolvedAt ?? row.podResolvedAt ?? null,
+    podResolvedBy: row.PODResolvedBy ?? row.podResolvedBy ?? "",
+    podResolutionRemarks:
+      row.PODResolutionRemarks ?? row.podResolutionRemarks ?? "",
+    podWaivedAt: row.PODWaivedAt ?? row.podWaivedAt ?? null,
+    podWaivedBy: row.PODWaivedBy ?? row.podWaivedBy ?? "",
+    podWaiverReason: row.PODWaiverReason ?? row.podWaiverReason ?? "",
+    podWaiverApprovedBy:
+      row.PODWaiverApprovedBy ?? row.podWaiverApprovedBy ?? "",
     notes: row.Notes ?? row.notes ?? "",
     deliveredQty: Number(row.DeliveredQty ?? row.deliveredQty ?? 0) || 0,
     consumedQty: Number(row.ConsumedQty ?? row.consumedQty ?? 0) || 0,
@@ -5973,6 +6114,27 @@ const ensureDeliveryChallanTables = async () => {
           PODStatus NVARCHAR(50) NULL,
           PODReference NVARCHAR(100) NULL,
           PODDate DATE NULL,
+          PODDocumentName NVARCHAR(255) NULL,
+          PODDocumentType NVARCHAR(100) NULL,
+          PODDocumentSize BIGINT NULL,
+          PODDocumentData NVARCHAR(MAX) NULL,
+          PODUploadedAt DATETIME2 NULL,
+          PODUploadedBy NVARCHAR(255) NULL,
+          PODVerifiedAt DATETIME2 NULL,
+          PODVerifiedBy NVARCHAR(255) NULL,
+          PODRejectedAt DATETIME2 NULL,
+          PODRejectedBy NVARCHAR(255) NULL,
+          PODRejectionRemarks NVARCHAR(MAX) NULL,
+          PODDisputedAt DATETIME2 NULL,
+          PODDisputedBy NVARCHAR(255) NULL,
+          PODDisputeRemarks NVARCHAR(MAX) NULL,
+          PODResolvedAt DATETIME2 NULL,
+          PODResolvedBy NVARCHAR(255) NULL,
+          PODResolutionRemarks NVARCHAR(MAX) NULL,
+          PODWaivedAt DATETIME2 NULL,
+          PODWaivedBy NVARCHAR(255) NULL,
+          PODWaiverReason NVARCHAR(MAX) NULL,
+          PODWaiverApprovedBy NVARCHAR(255) NULL,
           Notes NVARCHAR(MAX) NULL,
           CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
           UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -6056,6 +6218,90 @@ const ensureDeliveryChallanTables = async () => {
       BEGIN
         ALTER TABLE dbo.DeliveryChallan ADD PODDate DATE NULL;
       END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODDocumentName') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODDocumentName NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODDocumentType') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODDocumentType NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODDocumentSize') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODDocumentSize BIGINT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODDocumentData') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODDocumentData NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODUploadedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODUploadedAt DATETIME2 NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODUploadedBy') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODUploadedBy NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODVerifiedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODVerifiedAt DATETIME2 NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODVerifiedBy') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODVerifiedBy NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODRejectedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODRejectedAt DATETIME2 NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODRejectedBy') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODRejectedBy NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODRejectionRemarks') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODRejectionRemarks NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODDisputedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODDisputedAt DATETIME2 NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODDisputedBy') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODDisputedBy NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODDisputeRemarks') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODDisputeRemarks NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODResolvedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODResolvedAt DATETIME2 NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODResolvedBy') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODResolvedBy NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODResolutionRemarks') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODResolutionRemarks NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODWaivedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODWaivedAt DATETIME2 NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODWaivedBy') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODWaivedBy NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODWaiverReason') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODWaiverReason NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'PODWaiverApprovedBy') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD PODWaiverApprovedBy NVARCHAR(255) NULL;
+      END;
       IF COL_LENGTH('dbo.DeliveryChallan', 'Notes') IS NULL
       BEGIN
         ALTER TABLE dbo.DeliveryChallan ADD Notes NVARCHAR(MAX) NULL;
@@ -6083,6 +6329,62 @@ const ensureDeliveryChallanTables = async () => {
         CREATE UNIQUE INDEX UX_DeliveryChallan_DCNumber
           ON dbo.DeliveryChallan(DCNumber)
           WHERE DCNumber IS NOT NULL;
+      END
+    `);
+
+    await pool.request().query(`
+      UPDATE dbo.DeliveryChallan
+      SET PODStatus = CASE
+        WHEN PODStatus IS NULL OR LTRIM(RTRIM(PODStatus)) = '' THEN N'POD_PENDING'
+        WHEN LOWER(LTRIM(RTRIM(PODStatus))) IN (N'pending', N'pod pending', N'pod_pending') THEN N'POD_PENDING'
+        WHEN LOWER(LTRIM(RTRIM(PODStatus))) IN (N'uploaded', N'pod uploaded', N'pod_uploaded') THEN N'POD_UPLOADED'
+        WHEN LOWER(LTRIM(RTRIM(PODStatus))) IN (N'under verification', N'pod under verification', N'pod_under_verification') THEN N'POD_UNDER_VERIFICATION'
+        WHEN LOWER(LTRIM(RTRIM(PODStatus))) IN (N'verified', N'pod verified', N'pod_verified', N'received', N'delivered') THEN N'POD_VERIFIED'
+        WHEN LOWER(LTRIM(RTRIM(PODStatus))) IN (N'rejected', N'pod rejected', N'pod_rejected') THEN N'POD_REJECTED'
+        WHEN LOWER(LTRIM(RTRIM(PODStatus))) IN (N'disputed', N'pod disputed', N'pod_disputed') THEN N'POD_DISPUTED'
+        WHEN LOWER(LTRIM(RTRIM(PODStatus))) IN (N'waived', N'pod waived', N'pod_waived', N'not required') THEN N'POD_WAIVED'
+        ELSE N'POD_PENDING'
+      END
+      WHERE PODStatus IS NULL
+        OR PODStatus NOT IN (
+          N'POD_PENDING',
+          N'POD_UPLOADED',
+          N'POD_UNDER_VERIFICATION',
+          N'POD_VERIFIED',
+          N'POD_REJECTED',
+          N'POD_DISPUTED',
+          N'POD_WAIVED'
+        );
+
+      UPDATE dbo.DeliveryChallan
+      SET PODVerifiedAt = COALESCE(PODVerifiedAt, TRY_CONVERT(DATETIME2, PODDate), UpdatedAt, CreatedAt),
+          PODVerifiedBy = COALESCE(PODVerifiedBy, N'Legacy POD')
+      WHERE PODStatus = N'POD_VERIFIED'
+        AND PODVerifiedAt IS NULL;
+
+      UPDATE dbo.DeliveryChallan
+      SET PODWaivedAt = COALESCE(PODWaivedAt, UpdatedAt, CreatedAt),
+          PODWaiverApprovedBy = COALESCE(PODWaiverApprovedBy, N'Legacy POD'),
+          PODWaiverReason = COALESCE(PODWaiverReason, N'Legacy Not Required status')
+      WHERE PODStatus = N'POD_WAIVED'
+        AND PODWaivedAt IS NULL;
+    `);
+
+    await pool.request().query(`
+      IF OBJECT_ID('dbo.DeliveryChallanPODAuditLog', 'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.DeliveryChallanPODAuditLog (
+          AuditId BIGINT IDENTITY(1,1) PRIMARY KEY,
+          DeliveryChallanId BIGINT NOT NULL,
+          ActionName NVARCHAR(50) NOT NULL,
+          FromStatus NVARCHAR(50) NULL,
+          ToStatus NVARCHAR(50) NULL,
+          PerformedBy NVARCHAR(255) NULL,
+          PerformedRole NVARCHAR(100) NULL,
+          Remarks NVARCHAR(MAX) NULL,
+          SnapshotJson NVARCHAR(MAX) NULL,
+          CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        )
       END
     `);
 
@@ -14671,6 +14973,7 @@ app.get("/api/delivery-challans", async (_req, res) => {
       );
       return {
         ...challan,
+        podDocumentData: "",
         receiveGoodsIds,
         receiveGoodsId:
           toNullableInt(challan.receiveGoodsId) ??
@@ -14876,9 +15179,6 @@ app.post("/api/delivery-challans", async (req, res) => {
     eWayBillNumber = null,
     issueDate = null,
     status = "Draft",
-    podStatus = "Pending",
-    podReference = null,
-    podDate = null,
     notes = null,
     items = [],
   } = req.body ?? {};
@@ -14898,11 +15198,8 @@ app.post("/api/delivery-challans", async (req, res) => {
   const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? null;
   const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? null;
   const safeStatus = normalizeOptionalString(status) ?? "Draft";
-  const safePodStatus = normalizeOptionalString(podStatus) ?? "Pending";
-  const safePodReference = normalizeOptionalString(podReference) ?? null;
   const safeNotes = normalizeOptionalString(notes) ?? null;
   const parsedIssueDate = parseDateInput(issueDate);
-  const parsedPodDate = parseDateInput(podDate);
 
   if (!safeProjectId) {
     return res.status(400).json({ ok: false, error: "projectId is required" });
@@ -14919,10 +15216,6 @@ app.post("/api/delivery-challans", async (req, res) => {
   if (Number.isNaN(parsedIssueDate)) {
     return res.status(400).json({ ok: false, error: "Invalid issueDate" });
   }
-  if (Number.isNaN(parsedPodDate)) {
-    return res.status(400).json({ ok: false, error: "Invalid podDate" });
-  }
-
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
       const name = String(item.name ?? item.Item ?? "").trim();
@@ -14992,9 +15285,9 @@ app.post("/api/delivery-challans", async (req, res) => {
     insertHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
     insertHeaderReq.input("IssueDate", sql.Date, parsedIssueDate ?? null);
     insertHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
-    insertHeaderReq.input("PODStatus", sql.NVarChar(50), safePodStatus);
-    insertHeaderReq.input("PODReference", sql.NVarChar(100), safePodReference);
-    insertHeaderReq.input("PODDate", sql.Date, parsedPodDate ?? null);
+    insertHeaderReq.input("PODStatus", sql.NVarChar(50), POD_STATUS.PENDING);
+    insertHeaderReq.input("PODReference", sql.NVarChar(100), null);
+    insertHeaderReq.input("PODDate", sql.Date, null);
     insertHeaderReq.input("Notes", sql.NVarChar(sql.MAX), safeNotes);
 
     const headerResult = await insertHeaderReq.query(`
@@ -15088,9 +15381,6 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     eWayBillNumber = null,
     issueDate = null,
     status = "Draft",
-    podStatus = "Pending",
-    podReference = null,
-    podDate = null,
     notes = null,
     items = [],
   } = req.body ?? {};
@@ -15110,11 +15400,8 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
   const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? null;
   const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? null;
   const safeStatus = normalizeOptionalString(status) ?? "Draft";
-  const safePodStatus = normalizeOptionalString(podStatus) ?? "Pending";
-  const safePodReference = normalizeOptionalString(podReference) ?? null;
   const safeNotes = normalizeOptionalString(notes) ?? null;
   const parsedIssueDate = parseDateInput(issueDate);
-  const parsedPodDate = parseDateInput(podDate);
 
   if (!safeProjectId) {
     return res.status(400).json({ ok: false, error: "projectId is required" });
@@ -15131,10 +15418,6 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
   if (Number.isNaN(parsedIssueDate)) {
     return res.status(400).json({ ok: false, error: "Invalid issueDate" });
   }
-  if (Number.isNaN(parsedPodDate)) {
-    return res.status(400).json({ ok: false, error: "Invalid podDate" });
-  }
-
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
       const name = String(item.name ?? item.Item ?? "").trim();
@@ -15190,6 +15473,15 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       await tx.rollback();
       return res.status(404).json({ ok: false, error: "Delivery challan not found" });
     }
+    const actor = buildPodActor(req.body ?? {});
+    const existingPodStatus = normalizePodStatus(existingHeader.PODStatus);
+    if (existingPodStatus === POD_STATUS.VERIFIED && !isPodReviewerRole(actor.role)) {
+      const error = new Error(
+        "Verified POD challans are locked from normal editing."
+      );
+      error.statusCode = 403;
+      throw error;
+    }
     const resolvedDcNumber =
       safeDcNumber ??
       normalizeOptionalString(existingHeader.DCNumber ?? existingHeader.dcNumber) ??
@@ -15219,9 +15511,13 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     updateHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
     updateHeaderReq.input("IssueDate", sql.Date, parsedIssueDate ?? null);
     updateHeaderReq.input("Status", sql.NVarChar(50), safeStatus);
-    updateHeaderReq.input("PODStatus", sql.NVarChar(50), safePodStatus);
-    updateHeaderReq.input("PODReference", sql.NVarChar(100), safePodReference);
-    updateHeaderReq.input("PODDate", sql.Date, parsedPodDate ?? null);
+    updateHeaderReq.input("PODStatus", sql.NVarChar(50), existingPodStatus);
+    updateHeaderReq.input(
+      "PODReference",
+      sql.NVarChar(100),
+      normalizeOptionalString(existingHeader.PODReference) ?? null
+    );
+    updateHeaderReq.input("PODDate", sql.Date, existingHeader.PODDate ?? null);
     updateHeaderReq.input("Notes", sql.NVarChar(sql.MAX), safeNotes);
 
     const headerResult = await updateHeaderReq.query(`
@@ -15310,6 +15606,359 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       error: isDuplicateDcNumber
         ? "Delivery challan number already exists. Retry to get the next auto-generated number."
         : error?.message ?? "Failed to update delivery challan",
+    });
+  }
+});
+
+app.post("/api/delivery-challans/:id/pod/upload", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid delivery challan id" });
+  }
+
+  const {
+    podReference = null,
+    podDate = null,
+    remarks = null,
+    fileName = null,
+    fileType = null,
+    fileSize = 0,
+    fileData = null,
+  } = req.body ?? {};
+
+  const actor = buildPodActor(req.body ?? {});
+  const safeFileName = normalizeOptionalString(fileName);
+  const safeFileType = normalizeOptionalString(fileType) ?? "application/octet-stream";
+  const safeFileSize = Number(fileSize) || 0;
+  const safeFileData = normalizeOptionalString(fileData);
+  const safeReference = normalizeOptionalString(podReference) ?? null;
+  const safeRemarks = normalizeOptionalString(remarks) ?? null;
+  const parsedPodDate = parseDateInput(podDate);
+
+  if (!safeFileName || !safeFileData) {
+    return res.status(400).json({ ok: false, error: "POD document is required" });
+  }
+  if (safeFileSize > 5 * 1024 * 1024) {
+    return res.status(400).json({ ok: false, error: "POD document must be 5 MB or smaller" });
+  }
+  if (Number.isNaN(parsedPodDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid podDate" });
+  }
+
+  let tx;
+  try {
+    await ensureDeliveryChallanTables();
+    const pkCol = await refreshDeliveryChallanPk();
+    const fkCol = await refreshDeliveryChallanItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const existingResult = await new sql.Request(tx)
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.DeliveryChallan
+        WHERE ${pkCol} = @DeliveryChallanId
+      `);
+    const existing = existingResult.recordset?.[0] ?? null;
+    if (!existing) {
+      await tx.rollback();
+      return res.status(404).json({ ok: false, error: "Delivery challan not found" });
+    }
+
+    const fromStatus = normalizePodStatus(existing.PODStatus);
+    if (![POD_STATUS.PENDING, POD_STATUS.REJECTED].includes(fromStatus)) {
+      const error = new Error("POD can only be uploaded while pending or rejected.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const updateResult = await new sql.Request(tx)
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .input("PODStatus", sql.NVarChar(50), POD_STATUS.UPLOADED)
+      .input("PODReference", sql.NVarChar(100), safeReference)
+      .input("PODDate", sql.Date, parsedPodDate ?? null)
+      .input("PODDocumentName", sql.NVarChar(255), safeFileName)
+      .input("PODDocumentType", sql.NVarChar(100), safeFileType)
+      .input("PODDocumentSize", sql.BigInt, Math.max(Math.trunc(safeFileSize), 0))
+      .input("PODDocumentData", sql.NVarChar(sql.MAX), safeFileData)
+      .input("PODUploadedBy", sql.NVarChar(255), actor.name)
+      .query(`
+        UPDATE dbo.DeliveryChallan
+        SET PODStatus = @PODStatus,
+            PODReference = @PODReference,
+            PODDate = @PODDate,
+            PODDocumentName = @PODDocumentName,
+            PODDocumentType = @PODDocumentType,
+            PODDocumentSize = @PODDocumentSize,
+            PODDocumentData = @PODDocumentData,
+            PODUploadedAt = SYSUTCDATETIME(),
+            PODUploadedBy = @PODUploadedBy,
+            PODVerifiedAt = NULL,
+            PODVerifiedBy = NULL,
+            PODRejectedAt = NULL,
+            PODRejectedBy = NULL,
+            PODRejectionRemarks = NULL,
+            PODDisputedAt = NULL,
+            PODDisputedBy = NULL,
+            PODDisputeRemarks = NULL,
+            PODResolvedAt = NULL,
+            PODResolvedBy = NULL,
+            PODResolutionRemarks = NULL,
+            PODWaivedAt = NULL,
+            PODWaivedBy = NULL,
+            PODWaiverReason = NULL,
+            PODWaiverApprovedBy = NULL,
+            UpdatedAt = SYSUTCDATETIME()
+        OUTPUT INSERTED.*
+        WHERE ${pkCol} = @DeliveryChallanId
+      `);
+
+    const headerRow = updateResult.recordset?.[0];
+    await writeDeliveryChallanPodAuditLog(tx, {
+      deliveryChallanId: id,
+      actionName: "POD_UPLOAD",
+      fromStatus,
+      toStatus: POD_STATUS.UPLOADED,
+      performedBy: actor.name,
+      performedRole: actor.role,
+      remarks: safeRemarks,
+      snapshot: {
+        fileName: safeFileName,
+        fileType: safeFileType,
+        fileSize: safeFileSize,
+        podReference: safeReference,
+      },
+    });
+
+    await tx.commit();
+
+    const itemsResult = await pool
+      .request()
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .query(`
+        SELECT * FROM dbo.DeliveryChallanItems WHERE ${fkCol} = @DeliveryChallanId
+      `);
+
+    return res.json({
+      ok: true,
+      deliveryChallan: {
+        ...normalizeDeliveryChallan(headerRow),
+        items: (itemsResult.recordset ?? []).map(normalizeDeliveryChallanItem),
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to upload POD",
+    });
+  }
+});
+
+app.post("/api/delivery-challans/:id/pod/status", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid delivery challan id" });
+  }
+
+  const action = String(req.body?.action ?? "").trim().toLowerCase();
+  const remarks = normalizeOptionalString(req.body?.remarks) ?? null;
+  const actor = buildPodActor(req.body ?? {});
+  const requiresRemarks = ["reject", "dispute", "waive", "resolve"].includes(action);
+
+  if (!["verify", "reject", "dispute", "waive", "resolve"].includes(action)) {
+    return res.status(400).json({ ok: false, error: "Invalid POD action" });
+  }
+  if (requiresRemarks && !remarks) {
+    return res.status(400).json({ ok: false, error: "Remarks are required for this POD action" });
+  }
+
+  let tx;
+  try {
+    ensurePodReviewer(actor);
+    await ensureDeliveryChallanTables();
+    const pkCol = await refreshDeliveryChallanPk();
+    const fkCol = await refreshDeliveryChallanItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin();
+
+    const existingResult = await new sql.Request(tx)
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.DeliveryChallan
+        WHERE ${pkCol} = @DeliveryChallanId
+      `);
+    const existing = existingResult.recordset?.[0] ?? null;
+    if (!existing) {
+      await tx.rollback();
+      return res.status(404).json({ ok: false, error: "Delivery challan not found" });
+    }
+
+    const fromStatus = normalizePodStatus(existing.PODStatus);
+    let toStatus = fromStatus;
+    let actionName = "POD_UPDATE";
+    let updateSql = "";
+
+    if (["verify", "reject", "dispute"].includes(action)) {
+      if (![POD_STATUS.UPLOADED, POD_STATUS.UNDER_VERIFICATION].includes(fromStatus)) {
+        const error = new Error("POD must be uploaded before it can be reviewed.");
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!hasPodDocument(existing)) {
+        const error = new Error("POD document must be uploaded before verification.");
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+
+    if (action === "verify") {
+      toStatus = POD_STATUS.VERIFIED;
+      actionName = "POD_VERIFY";
+      updateSql = `
+        PODStatus = @ToStatus,
+        PODVerifiedAt = SYSUTCDATETIME(),
+        PODVerifiedBy = @ActorName,
+        PODRejectedAt = NULL,
+        PODRejectedBy = NULL,
+        PODRejectionRemarks = NULL,
+        PODDisputedAt = NULL,
+        PODDisputedBy = NULL,
+        PODDisputeRemarks = NULL
+      `;
+    } else if (action === "reject") {
+      toStatus = POD_STATUS.REJECTED;
+      actionName = "POD_REJECT";
+      updateSql = `
+        PODStatus = @ToStatus,
+        PODRejectedAt = SYSUTCDATETIME(),
+        PODRejectedBy = @ActorName,
+        PODRejectionRemarks = @Remarks
+      `;
+    } else if (action === "dispute") {
+      toStatus = POD_STATUS.DISPUTED;
+      actionName = "POD_DISPUTE";
+      updateSql = `
+        PODStatus = @ToStatus,
+        PODDisputedAt = SYSUTCDATETIME(),
+        PODDisputedBy = @ActorName,
+        PODDisputeRemarks = @Remarks
+      `;
+    } else if (action === "waive") {
+      if (fromStatus !== POD_STATUS.PENDING) {
+        const error = new Error("Only pending POD can be waived.");
+        error.statusCode = 400;
+        throw error;
+      }
+      toStatus = POD_STATUS.WAIVED;
+      actionName = "POD_WAIVE";
+      updateSql = `
+        PODStatus = @ToStatus,
+        PODWaivedAt = SYSUTCDATETIME(),
+        PODWaivedBy = @ActorName,
+        PODWaiverApprovedBy = @ActorName,
+        PODWaiverReason = @Remarks
+      `;
+    } else if (action === "resolve") {
+      if (fromStatus !== POD_STATUS.DISPUTED) {
+        const error = new Error("Only disputed POD can be resolved.");
+        error.statusCode = 400;
+        throw error;
+      }
+      toStatus = POD_STATUS.UNDER_VERIFICATION;
+      actionName = "POD_RESOLVE";
+      updateSql = `
+        PODStatus = @ToStatus,
+        PODResolvedAt = SYSUTCDATETIME(),
+        PODResolvedBy = @ActorName,
+        PODResolutionRemarks = @Remarks
+      `;
+    }
+
+    const updateResult = await new sql.Request(tx)
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .input("ToStatus", sql.NVarChar(50), toStatus)
+      .input("ActorName", sql.NVarChar(255), actor.name)
+      .input("Remarks", sql.NVarChar(sql.MAX), remarks)
+      .query(`
+        UPDATE dbo.DeliveryChallan
+        SET ${updateSql},
+            UpdatedAt = SYSUTCDATETIME()
+        OUTPUT INSERTED.*
+        WHERE ${pkCol} = @DeliveryChallanId
+      `);
+    const headerRow = updateResult.recordset?.[0];
+
+    await writeDeliveryChallanPodAuditLog(tx, {
+      deliveryChallanId: id,
+      actionName,
+      fromStatus,
+      toStatus,
+      performedBy: actor.name,
+      performedRole: actor.role,
+      remarks,
+      snapshot: {
+        action,
+        dcNumber: existing.DCNumber,
+        priorStatus: fromStatus,
+      },
+    });
+
+    await tx.commit();
+
+    const itemsResult = await pool
+      .request()
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .query(`
+        SELECT * FROM dbo.DeliveryChallanItems WHERE ${fkCol} = @DeliveryChallanId
+      `);
+
+    return res.json({
+      ok: true,
+      deliveryChallan: {
+        ...normalizeDeliveryChallan(headerRow),
+        items: (itemsResult.recordset ?? []).map(normalizeDeliveryChallanItem),
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to update POD workflow",
+    });
+  }
+});
+
+app.get("/api/delivery-challans/:id/pod/audit", async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ ok: false, error: "Invalid delivery challan id" });
+  }
+
+  try {
+    await ensureDeliveryChallanTables();
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("DeliveryChallanId", sql.BigInt, id)
+      .query(`
+        SELECT *
+        FROM dbo.DeliveryChallanPODAuditLog
+        WHERE DeliveryChallanId = @DeliveryChallanId
+        ORDER BY AuditId DESC
+      `);
+    return res.json({
+      ok: true,
+      auditLog: (result.recordset ?? []).map(normalizeDeliveryChallanPodAuditEntry),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch POD audit log",
     });
   }
 });

@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import {
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
+  Eye,
+  FileCheck2,
+  History,
+  RefreshCw,
+  ShieldCheck,
+  UploadCloud,
+  XCircle,
+} from "lucide-react";
 import useSettings from "../../hooks/useSettings";
 import { getProjects } from "../../services/projectsStore";
 import { fetchLocations } from "../../services/locationsApi";
@@ -8,9 +20,16 @@ import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import {
   createDeliveryChallan,
   deleteDeliveryChallan,
+  fetchDeliveryChallan,
+  fetchDeliveryChallanPodAudit,
   fetchDeliveryChallans,
   fetchNextDeliveryChallanNumber,
+  getPodStatusLabel,
+  normalizePodStatus,
+  POD_STATUS,
+  updateDeliveryChallanPodStatus,
   updateDeliveryChallan,
+  uploadDeliveryChallanPod,
 } from "../../services/deliveryChallanApi";
 import DateInput from "../common/DateInput";
 import { formatDate } from "../../utils/dateFormat";
@@ -45,11 +64,128 @@ const createFormState = () => ({
   eWayBillNumber: "",
   issueDate: new Date().toISOString().slice(0, 10),
   status: "Draft",
-  podStatus: "Pending",
+  podStatus: POD_STATUS.PENDING,
   podReference: "",
   podDate: "",
   notes: "",
 });
+
+const POD_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
+
+const createPodFormState = () => ({
+  reference: "",
+  podDate: "",
+  remarks: "",
+  fileName: "",
+  fileType: "",
+  fileSize: 0,
+  fileData: "",
+});
+
+const podStatusTone = (status) => {
+  switch (normalizePodStatus(status)) {
+    case POD_STATUS.UPLOADED:
+      return "border-blue-200 bg-blue-50 text-blue-700";
+    case POD_STATUS.UNDER_VERIFICATION:
+      return "border-indigo-200 bg-indigo-50 text-indigo-700";
+    case POD_STATUS.VERIFIED:
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case POD_STATUS.REJECTED:
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    case POD_STATUS.DISPUTED:
+      return "border-orange-200 bg-orange-50 text-orange-700";
+    case POD_STATUS.WAIVED:
+      return "border-slate-300 bg-slate-100 text-slate-700";
+    default:
+      return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+};
+
+const formatDateTime = (value) => {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return formatDate(value);
+  }
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+};
+
+const getPodTimestamp = (record = {}) => {
+  const status = normalizePodStatus(record.podStatus);
+  if (status === POD_STATUS.VERIFIED) {
+    return record.podVerifiedAt || record.podDate || record.updatedAt;
+  }
+  if (status === POD_STATUS.REJECTED) {
+    return record.podRejectedAt || record.updatedAt;
+  }
+  if (status === POD_STATUS.DISPUTED) {
+    return record.podDisputedAt || record.updatedAt;
+  }
+  if (status === POD_STATUS.WAIVED) {
+    return record.podWaivedAt || record.updatedAt;
+  }
+  return record.podUploadedAt || record.podDate || null;
+};
+
+const getPodActor = (record = {}) => {
+  const status = normalizePodStatus(record.podStatus);
+  if (status === POD_STATUS.VERIFIED) {
+    return record.podVerifiedBy;
+  }
+  if (status === POD_STATUS.REJECTED) {
+    return record.podRejectedBy;
+  }
+  if (status === POD_STATUS.DISPUTED) {
+    return record.podDisputedBy;
+  }
+  if (status === POD_STATUS.WAIVED) {
+    return record.podWaiverApprovedBy || record.podWaivedBy;
+  }
+  return record.podUploadedBy;
+};
+
+const isPodReviewerRole = (role) =>
+  ["admin", "manager"].includes(String(role ?? "").trim().toLowerCase());
+
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Failed to read file."));
+    reader.readAsDataURL(file);
+  });
+
+const POD_ACTION_TITLES = {
+  verify: "Verify POD",
+  reject: "Reject POD",
+  dispute: "Dispute POD",
+  waive: "Waive POD",
+  resolve: "Resolve POD Issue",
+};
+
+const POD_ACTION_CONFIRM_LABELS = {
+  verify: "Verify",
+  reject: "Reject",
+  dispute: "Mark Disputed",
+  waive: "Approve Waiver",
+  resolve: "Resolve",
+};
+
+const POD_DETAIL_TITLES = {
+  details: "POD Details",
+  reason: "Rejection Reason",
+  issue: "Dispute Issue",
+  approval: "Waiver Approval",
+  audit: "POD Audit Log",
+};
 
 const getReceiptReference = (receipt = {}) =>
   `RG-${String(receipt.receiveGoodsId ?? receipt.id ?? "").padStart(3, "0")}`;
@@ -130,13 +266,13 @@ const fmtQty = (value) =>
 const toQuantity = (value) => Number(value) || 0;
 
 const getDeliveryChallanRegisterStatus = (record = {}) => {
-  const rawStatus = String(record.podStatus || record.status || "")
+  const rawStatus = String(record.status || "")
     .trim()
     .toLowerCase();
   if (rawStatus.includes("partial")) {
     return "Partially Received";
   }
-  if (rawStatus === "received" || rawStatus === "delivered") {
+  if (rawStatus === "received" || rawStatus === "delivered" || rawStatus === "closed") {
     return "Received";
   }
   const deliveredQty = toQuantity(record.deliveredQty);
@@ -199,10 +335,19 @@ const DeliveryChallan = () => {
   const [dcStatusFilter, setDcStatusFilter] = useState("all");
   const [editingId, setEditingId] = useState(null);
   const [selectedChallan, setSelectedChallan] = useState(null);
+  const [podModal, setPodModal] = useState({ type: "", record: null });
+  const [podForm, setPodForm] = useState(createPodFormState);
+  const [podAuditEntries, setPodAuditEntries] = useState([]);
+  const [podAuditLoading, setPodAuditLoading] = useState(false);
+  const [podActionLoading, setPodActionLoading] = useState(false);
+  const [podActionError, setPodActionError] = useState("");
   const settings = useSettings();
   const company = settings?.company || {};
   const companyLogo = resolveBrandLogo(company.logo || "");
   const companyName = company.name || "Bangalore Electronics";
+  const profileName = settings?.profile?.fullName || "Current user";
+  const profileRole = settings?.profile?.role || "Viewer";
+  const isPodReviewer = isPodReviewerRole(profileRole);
 
   const loadRecords = async () => {
     try {
@@ -784,10 +929,12 @@ const DeliveryChallan = () => {
       eWayBillNumber: String(form.eWayBillNumber ?? "").trim() || null,
       issueDate: String(form.issueDate ?? "").trim() || null,
       status: String(form.status ?? "Draft").trim(),
-      podStatus: String(form.podStatus ?? "Pending").trim(),
-      podReference: String(form.podReference ?? "").trim() || null,
-      podDate: String(form.podDate ?? "").trim() || null,
+      podStatus: POD_STATUS.PENDING,
+      podReference: null,
+      podDate: null,
       notes: String(form.notes ?? "").trim() || null,
+      auditBy: profileName,
+      auditRole: profileRole,
       items: cleanedItems,
     };
 
@@ -830,6 +977,13 @@ const DeliveryChallan = () => {
   };
 
   const handleEdit = (record) => {
+    if (
+      normalizePodStatus(record?.podStatus) === POD_STATUS.VERIFIED &&
+      !isPodReviewer
+    ) {
+      setReceiptError("POD verified challans are locked for non-manager edits.");
+      return;
+    }
     const matchedToLocation =
       (record.toLocationId && locationMap[String(record.toLocationId)]) ||
       locations.find(
@@ -850,7 +1004,7 @@ const DeliveryChallan = () => {
       eWayBillNumber: record.eWayBillNumber || "",
       issueDate: record.issueDate || new Date().toISOString().slice(0, 10),
       status: record.status || "Draft",
-      podStatus: record.podStatus || "Pending",
+      podStatus: normalizePodStatus(record.podStatus),
       podReference: record.podReference || "",
       podDate: record.podDate || "",
       notes: record.notes || "",
@@ -923,43 +1077,196 @@ const DeliveryChallan = () => {
     setSelectedChallan(record);
   };
 
-  const handlePodStatusChange = async (record, nextPodStatus) => {
+  const closePodModal = () => {
+    setPodModal({ type: "", record: null });
+    setPodForm(createPodFormState());
+    setPodAuditEntries([]);
+    setPodAuditLoading(false);
+    setPodActionError("");
+  };
+
+  const openPodUploadModal = (record) => {
+    setPodModal({ type: "upload", record });
+    setPodForm({
+      ...createPodFormState(),
+      reference: record?.podReference || "",
+      podDate: record?.podDate ? String(record.podDate).slice(0, 16) : "",
+    });
+    setPodActionError("");
+  };
+
+  const openPodDetailsModal = async (record, type = "details") => {
+    setPodModal({ type, record });
+    setPodForm(createPodFormState());
+    setPodActionError("");
+    if (
+      type === "details" &&
+      record?.id &&
+      record.podDocumentName &&
+      !record.podDocumentData
+    ) {
+      try {
+        setPodActionLoading(true);
+        const freshRecord = await fetchDeliveryChallan(record.id);
+        setPodModal((prev) =>
+          prev.type === type && String(prev.record?.id) === String(record.id)
+            ? { ...prev, record: { ...record, ...freshRecord } }
+            : prev
+        );
+      } catch (error) {
+        setPodActionError(
+          error?.response?.data?.error ||
+            error?.message ||
+            "Failed to load POD document."
+        );
+      } finally {
+        setPodActionLoading(false);
+      }
+    }
+  };
+
+  const openPodActionModal = (record, type) => {
+    if (!isPodReviewer) {
+      setReceiptError("Only Admin or Manager users can approve POD workflow actions.");
+      return;
+    }
+    setPodModal({ type, record });
+    setPodForm(createPodFormState());
+    setPodActionError("");
+  };
+
+  const openPodAuditModal = async (record) => {
+    setPodModal({ type: "audit", record });
+    setPodForm(createPodFormState());
+    setPodActionError("");
+    setPodAuditEntries([]);
     if (!record?.id) {
       return;
     }
-    const nextPodDate =
-      nextPodStatus === "Received"
-        ? record.podDate || new Date().toISOString().slice(0, 10)
-        : record.podDate || "";
     try {
-      setReceiptError("");
-      const updatedChallan = await updateDeliveryChallan(record.id, {
-        ...record,
-        podStatus: nextPodStatus,
-        podDate: nextPodDate,
-        items: record.items || [],
-      });
-      await loadRecords();
-      setUpdateProof(
-        `POD status updated: ${
-          updatedChallan?.dcNumber || record.dcNumber || "-"
-        } | Status: ${nextPodStatus}${
-          nextPodDate ? ` | Date: ${formatDate(nextPodDate)}` : ""
-        }`
-      );
-      if (selectedChallan && String(selectedChallan.id) === String(record.id)) {
-        setSelectedChallan((prev) =>
-          prev
-            ? { ...prev, podStatus: nextPodStatus, podDate: nextPodDate }
-            : prev
-        );
-      }
+      setPodAuditLoading(true);
+      const entries = await fetchDeliveryChallanPodAudit(record.id);
+      setPodAuditEntries(Array.isArray(entries) ? entries : []);
     } catch (error) {
-      setReceiptError(
+      setPodActionError(
         error?.response?.data?.error ||
           error?.message ||
-          "Failed to update POD status."
+          "Failed to load POD audit log."
       );
+    } finally {
+      setPodAuditLoading(false);
+    }
+  };
+
+  const handlePodFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    if (file.size > POD_UPLOAD_LIMIT_BYTES) {
+      setPodActionError("POD file must be 5 MB or smaller.");
+      event.target.value = "";
+      return;
+    }
+    try {
+      setPodActionError("");
+      const fileData = await readFileAsDataUrl(file);
+      setPodForm((prev) => ({
+        ...prev,
+        fileName: file.name,
+        fileType: file.type || "application/octet-stream",
+        fileSize: file.size,
+        fileData,
+      }));
+    } catch (error) {
+      setPodActionError(error?.message || "Failed to read POD file.");
+    }
+  };
+
+  const syncPodRecord = (updatedChallan) => {
+    if (!updatedChallan?.id) {
+      return;
+    }
+    if (selectedChallan && String(selectedChallan.id) === String(updatedChallan.id)) {
+      setSelectedChallan(updatedChallan);
+    }
+  };
+
+  const handlePodUploadSubmit = async (event) => {
+    event.preventDefault();
+    const record = podModal.record;
+    if (!record?.id) {
+      return;
+    }
+    if (!podForm.fileData || !podForm.fileName) {
+      setPodActionError("Upload a POD document before saving.");
+      return;
+    }
+    try {
+      setPodActionLoading(true);
+      setPodActionError("");
+      const updatedChallan = await uploadDeliveryChallanPod(record.id, {
+        podReference: podForm.reference.trim() || null,
+        podDate: podForm.podDate || null,
+        remarks: podForm.remarks.trim() || null,
+        fileName: podForm.fileName,
+        fileType: podForm.fileType,
+        fileSize: podForm.fileSize,
+        fileData: podForm.fileData,
+        auditBy: profileName,
+        auditRole: profileRole,
+      });
+      await loadRecords();
+      syncPodRecord(updatedChallan);
+      setUpdateProof(
+        `POD uploaded: ${updatedChallan?.dcNumber || record.dcNumber || "-"}`
+      );
+      closePodModal();
+    } catch (error) {
+      setPodActionError(
+        error?.response?.data?.error || error?.message || "Failed to upload POD."
+      );
+    } finally {
+      setPodActionLoading(false);
+    }
+  };
+
+  const handlePodActionSubmit = async (event) => {
+    event.preventDefault();
+    const record = podModal.record;
+    const action = podModal.type;
+    if (!record?.id || !action) {
+      return;
+    }
+    const remarks = podForm.remarks.trim();
+    const needsRemarks = ["reject", "dispute", "waive", "resolve"].includes(action);
+    if (needsRemarks && !remarks) {
+      setPodActionError("Remarks are required for this POD action.");
+      return;
+    }
+    try {
+      setPodActionLoading(true);
+      setPodActionError("");
+      const updatedChallan = await updateDeliveryChallanPodStatus(record.id, {
+        action,
+        remarks: remarks || null,
+        auditBy: profileName,
+        auditRole: profileRole,
+      });
+      await loadRecords();
+      syncPodRecord(updatedChallan);
+      setUpdateProof(
+        `POD updated: ${updatedChallan?.dcNumber || record.dcNumber || "-"} | ${getPodStatusLabel(updatedChallan?.podStatus)}`
+      );
+      closePodModal();
+    } catch (error) {
+      setPodActionError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Failed to update POD workflow."
+      );
+    } finally {
+      setPodActionLoading(false);
     }
   };
 
@@ -1115,6 +1422,184 @@ const DeliveryChallan = () => {
     selectableFilteredReceiptIds.every((receiptId) =>
       selectedReceiptIds.includes(receiptId)
     );
+
+  const podButtonClass =
+    "inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60";
+  const podDangerButtonClass =
+    "inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-medium text-rose-700 hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60";
+  const podSuccessButtonClass =
+    "inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60";
+
+  const renderPodWorkflowCell = (record) => {
+    const status = normalizePodStatus(record.podStatus);
+    const timestamp = getPodTimestamp(record);
+    const actor = getPodActor(record);
+    const canUpload = [POD_STATUS.PENDING, POD_STATUS.REJECTED].includes(status);
+    const canReview = isPodReviewer && [
+      POD_STATUS.UPLOADED,
+      POD_STATUS.UNDER_VERIFICATION,
+    ].includes(status);
+    const hasDocument = Boolean(record.podDocumentData || record.podDocumentName);
+
+    return (
+      <div className="min-w-[240px] space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${podStatusTone(
+              status
+            )}`}
+          >
+            {getPodStatusLabel(status)}
+          </span>
+        </div>
+        {timestamp && timestamp !== "-" ? (
+          <p className="text-[11px] text-slate-500">{formatDateTime(timestamp)}</p>
+        ) : null}
+        {status === POD_STATUS.VERIFIED && actor ? (
+          <p className="text-[11px] text-slate-500">Verified by {actor}</p>
+        ) : null}
+        {status === POD_STATUS.WAIVED ? (
+          <p className="text-[11px] text-slate-500">
+            {[record.podWaiverApprovedBy || record.podWaivedBy, record.podWaiverReason]
+              .filter(Boolean)
+              .join(" | ")}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap gap-1.5">
+          {canUpload ? (
+            <button
+              type="button"
+              onClick={() => openPodUploadModal(record)}
+              className={podButtonClass}
+              title={status === POD_STATUS.REJECTED ? "Re-upload POD" : "Upload POD"}
+            >
+              {status === POD_STATUS.REJECTED ? (
+                <RefreshCw className="h-3.5 w-3.5" />
+              ) : (
+                <UploadCloud className="h-3.5 w-3.5" />
+              )}
+              {status === POD_STATUS.REJECTED ? "Re-upload POD" : "Upload POD"}
+            </button>
+          ) : null}
+          {status === POD_STATUS.PENDING && isPodReviewer ? (
+            <button
+              type="button"
+              onClick={() => openPodActionModal(record, "waive")}
+              className={podButtonClass}
+              title="Waive POD"
+            >
+              <Ban className="h-3.5 w-3.5" />
+              Waive
+            </button>
+          ) : null}
+          {hasDocument &&
+          [
+            POD_STATUS.UPLOADED,
+            POD_STATUS.UNDER_VERIFICATION,
+            POD_STATUS.VERIFIED,
+          ].includes(status) ? (
+            <button
+              type="button"
+              onClick={() => openPodDetailsModal(record, "details")}
+              className={podButtonClass}
+              title="View POD"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              View POD
+            </button>
+          ) : null}
+          {canReview ? (
+            <>
+              <button
+                type="button"
+                onClick={() => openPodActionModal(record, "verify")}
+                className={podSuccessButtonClass}
+                title="Verify POD"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Verify
+              </button>
+              <button
+                type="button"
+                onClick={() => openPodActionModal(record, "reject")}
+                className={podDangerButtonClass}
+                title="Reject POD"
+              >
+                <XCircle className="h-3.5 w-3.5" />
+                Reject
+              </button>
+              <button
+                type="button"
+                onClick={() => openPodActionModal(record, "dispute")}
+                className={podButtonClass}
+                title="Dispute POD"
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Dispute
+              </button>
+            </>
+          ) : null}
+          {status === POD_STATUS.REJECTED ? (
+            <button
+              type="button"
+              onClick={() => openPodDetailsModal(record, "reason")}
+              className={podDangerButtonClass}
+              title="View rejection reason"
+            >
+              <FileCheck2 className="h-3.5 w-3.5" />
+              View Reason
+            </button>
+          ) : null}
+          {status === POD_STATUS.DISPUTED ? (
+            <>
+              <button
+                type="button"
+                onClick={() => openPodDetailsModal(record, "issue")}
+                className={podButtonClass}
+                title="View dispute issue"
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                View Issue
+              </button>
+              {isPodReviewer ? (
+                <button
+                  type="button"
+                  onClick={() => openPodActionModal(record, "resolve")}
+                  className={podSuccessButtonClass}
+                  title="Resolve POD dispute"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Resolve
+                </button>
+              ) : null}
+            </>
+          ) : null}
+          {status === POD_STATUS.WAIVED ? (
+            <button
+              type="button"
+              onClick={() => openPodDetailsModal(record, "approval")}
+              className={podButtonClass}
+              title="View waiver approval"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              View Approval
+            </button>
+          ) : null}
+          {[POD_STATUS.VERIFIED, POD_STATUS.WAIVED].includes(status) ? (
+            <button
+              type="button"
+              onClick={() => openPodAuditModal(record)}
+              className={podButtonClass}
+              title="View POD audit log"
+            >
+              <History className="h-3.5 w-3.5" />
+              Audit Log
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 
   const selectedProject = selectedChallan
     ? projectMap[String(selectedChallan.projectId)] || {}
@@ -1348,58 +1833,6 @@ const DeliveryChallan = () => {
                 <option value="Delivered">Delivered</option>
                 <option value="Closed">Closed</option>
               </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">
-                POD Status
-              </label>
-              <select
-                value={form.podStatus}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    podStatus: event.target.value,
-                    podDate:
-                      event.target.value === "Received" && !prev.podDate
-                        ? new Date().toISOString().slice(0, 10)
-                        : prev.podDate,
-                  }))
-                }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
-              >
-                <option value="Pending">Pending</option>
-                <option value="Received">Received</option>
-                <option value="Not Required">Not Required</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">
-                POD Reference
-              </label>
-              <input
-                type="text"
-                value={form.podReference}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    podReference: event.target.value,
-                  }))
-                }
-                placeholder="POD reference"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">
-                POD Date
-              </label>
-              <DateInput
-                value={form.podDate}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, podDate: value || "" }))
-                }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
-              />
             </div>
             <div className="md:col-span-3">
               <label className="text-sm font-medium text-slate-700">
@@ -1714,7 +2147,7 @@ const DeliveryChallan = () => {
             </button>
           </div>
         </div>
-        <table className="min-w-[1450px] text-sm">
+        <table className="min-w-[1580px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">DC No</th>
@@ -1725,7 +2158,7 @@ const DeliveryChallan = () => {
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
               <th className="p-3 text-right min-w-[140px]">Balance Qty</th>
-              <th className="p-3 text-left min-w-[170px]">POD</th>
+              <th className="p-3 text-left min-w-[260px]">POD</th>
               <th className="p-3 text-left min-w-[120px]">Actions</th>
             </tr>
           </thead>
@@ -1765,26 +2198,7 @@ const DeliveryChallan = () => {
                 <td className="p-3 text-right font-medium text-slate-800">
                   {fmtQty(record.balanceQty)}
                 </td>
-                <td className="p-3">
-                  <select
-                    value={record.podStatus || "Pending"}
-                    onChange={(event) =>
-                      handlePodStatusChange(record, event.target.value)
-                    }
-                    className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700"
-                  >
-                    <option value="Pending">Pending</option>
-                    <option value="Received">Received</option>
-                    <option value="Not Required">Not Required</option>
-                  </select>
-                  {record.podReference || record.podDate ? (
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      {[record.podReference, formatDate(record.podDate)]
-                        .filter((value) => value && value !== "-")
-                        .join(" | ")}
-                    </p>
-                  ) : null}
-                </td>
+                <td className="p-3">{renderPodWorkflowCell(record)}</td>
                 <td className="p-3 flex gap-3">
                   <button
                     type="button"
@@ -1796,7 +2210,11 @@ const DeliveryChallan = () => {
                   <button
                     type="button"
                     onClick={() => handleEdit(record)}
-                    className="text-indigo-600 text-sm"
+                    disabled={
+                      normalizePodStatus(record.podStatus) === POD_STATUS.VERIFIED &&
+                      !isPodReviewer
+                    }
+                    className="text-indigo-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
                   >
                     Edit
                   </button>
@@ -1820,6 +2238,375 @@ const DeliveryChallan = () => {
           </tbody>
         </table>
       </div>
+
+      {podModal.type === "upload" && podModal.record ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <form
+            onSubmit={handlePodUploadSubmit}
+            className="w-full max-w-xl rounded-lg border border-slate-200 bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Upload POD</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {podModal.record.dcNumber || "-"} | {getPodStatusLabel(podModal.record.podStatus)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closePodModal}
+                className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-900"
+              >
+                x
+              </button>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  POD Document
+                </label>
+                <label className="mt-1 flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center hover:border-slate-400">
+                  <UploadCloud className="mb-2 h-7 w-7 text-slate-500" />
+                  <span className="text-sm font-medium text-slate-700">
+                    {podForm.fileName || "Upload signed POD"}
+                  </span>
+                  <span className="mt-1 text-xs text-slate-500">
+                    PDF, JPG, or PNG | Max 5 MB
+                  </span>
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    onChange={handlePodFileChange}
+                    className="sr-only"
+                  />
+                </label>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    POD Reference
+                  </label>
+                  <input
+                    type="text"
+                    value={podForm.reference}
+                    onChange={(event) =>
+                      setPodForm((prev) => ({
+                        ...prev,
+                        reference: event.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    placeholder="POD reference"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    POD Date / Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={podForm.podDate}
+                    onChange={(event) =>
+                      setPodForm((prev) => ({ ...prev, podDate: event.target.value }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Upload Remarks
+                </label>
+                <textarea
+                  value={podForm.remarks}
+                  onChange={(event) =>
+                    setPodForm((prev) => ({ ...prev, remarks: event.target.value }))
+                  }
+                  rows={3}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  placeholder="Delivery handover remarks"
+                />
+              </div>
+              {podActionError ? (
+                <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {podActionError}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={closePodModal}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700"
+                disabled={podActionLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={podActionLoading}
+              >
+                {podActionLoading ? "Uploading..." : "Upload POD"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {["verify", "reject", "dispute", "waive", "resolve"].includes(podModal.type) &&
+      podModal.record ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <form
+            onSubmit={handlePodActionSubmit}
+            className="w-full max-w-lg rounded-lg border border-slate-200 bg-white shadow-2xl"
+          >
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h2 className="text-lg font-semibold text-slate-900">
+                {POD_ACTION_TITLES[podModal.type] || "POD Action"}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {podModal.record.dcNumber || "-"} | {getPodStatusLabel(podModal.record.podStatus)}
+              </p>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <p className="font-medium">
+                  {podModal.record.podDocumentName || "No document name available"}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Uploaded {formatDateTime(podModal.record.podUploadedAt)} by{" "}
+                  {podModal.record.podUploadedBy || "-"}
+                </p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  {podModal.type === "waive"
+                    ? "Waiver Reason"
+                    : podModal.type === "dispute"
+                    ? "Dispute Remarks"
+                    : podModal.type === "reject"
+                    ? "Rejection Remarks"
+                    : podModal.type === "resolve"
+                    ? "Resolution Remarks"
+                    : "Verification Remarks"}
+                </label>
+                <textarea
+                  value={podForm.remarks}
+                  onChange={(event) =>
+                    setPodForm((prev) => ({ ...prev, remarks: event.target.value }))
+                  }
+                  rows={4}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  required={["reject", "dispute", "waive", "resolve"].includes(
+                    podModal.type
+                  )}
+                />
+              </div>
+              {podActionError ? (
+                <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {podActionError}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <button
+                type="button"
+                onClick={closePodModal}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700"
+                disabled={podActionLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={podActionLoading}
+              >
+                {podActionLoading
+                  ? "Saving..."
+                  : POD_ACTION_CONFIRM_LABELS[podModal.type] || "Save"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {["details", "reason", "issue", "approval", "audit"].includes(podModal.type) &&
+      podModal.record
+        ? (() => {
+            const record = podModal.record;
+            const documentIsImage = String(record.podDocumentType || "").startsWith("image/");
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+                <div className="max-h-[86vh] w-full max-w-2xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
+                  <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+                    <div>
+                      <h2 className="text-lg font-semibold text-slate-900">
+                        {POD_DETAIL_TITLES[podModal.type] || "POD Details"}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {record.dcNumber || "-"} | {getPodStatusLabel(record.podStatus)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closePodModal}
+                      className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-900"
+                    >
+                      x
+                    </button>
+                  </div>
+                  <div className="max-h-[68vh] space-y-4 overflow-y-auto px-6 py-5">
+                    {podModal.type === "audit" ? (
+                      <div className="space-y-3">
+                        {podAuditLoading ? (
+                          <p className="text-sm text-slate-500">Loading audit log...</p>
+                        ) : podAuditEntries.length ? (
+                          podAuditEntries.map((entry) => (
+                            <div
+                              key={entry.id || `${entry.action}-${entry.createdAt}`}
+                              className="rounded-lg border border-slate-200 px-4 py-3"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-slate-900">
+                                  {entry.action || "POD Update"}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  {formatDateTime(entry.createdAt)}
+                                </p>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {getPodStatusLabel(entry.fromStatus)} -&gt;{" "}
+                                {getPodStatusLabel(entry.toStatus)}
+                              </p>
+                              <p className="mt-1 text-sm text-slate-700">
+                                {entry.performedBy || "-"}{" "}
+                                {entry.performedRole ? `(${entry.performedRole})` : ""}
+                              </p>
+                              {entry.remarks ? (
+                                <p className="mt-2 text-sm text-slate-600">
+                                  {entry.remarks}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-sm text-slate-500">No POD audit entries.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid gap-3 text-sm md:grid-cols-2">
+                          <div className="rounded-lg border border-slate-200 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Status
+                            </p>
+                            <p className="mt-1 font-medium text-slate-900">
+                              {getPodStatusLabel(record.podStatus)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Last Updated
+                            </p>
+                            <p className="mt-1 font-medium text-slate-900">
+                              {formatDateTime(getPodTimestamp(record))}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Reference
+                            </p>
+                            <p className="mt-1 font-medium text-slate-900">
+                              {record.podReference || "-"}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              Actor
+                            </p>
+                            <p className="mt-1 font-medium text-slate-900">
+                              {getPodActor(record) || "-"}
+                            </p>
+                          </div>
+                        </div>
+                        {podModal.type === "reason" ? (
+                          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                            {record.podRejectionRemarks || "No rejection remarks recorded."}
+                          </div>
+                        ) : null}
+                        {podModal.type === "issue" ? (
+                          <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700">
+                            {record.podDisputeRemarks || "No dispute remarks recorded."}
+                          </div>
+                        ) : null}
+                        {podModal.type === "approval" ? (
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                            <p>
+                              Approved by {record.podWaiverApprovedBy || record.podWaivedBy || "-"}
+                            </p>
+                            <p className="mt-1">{record.podWaiverReason || "-"}</p>
+                          </div>
+                        ) : null}
+                        {podModal.type === "details" &&
+                        podActionLoading &&
+                        !record.podDocumentData ? (
+                          <p className="text-sm text-slate-500">
+                            Loading POD document...
+                          </p>
+                        ) : null}
+                        {record.podDocumentData ? (
+                          <div className="rounded-lg border border-slate-200 px-4 py-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-900">
+                                  {record.podDocumentName || "POD document"}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {record.podDocumentType || "Document"} |{" "}
+                                  {record.podDocumentSize
+                                    ? `${Math.round(record.podDocumentSize / 1024)} KB`
+                                    : "-"}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  window.open(
+                                    record.podDocumentData,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  )
+                                }
+                                className={podButtonClass}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                Open
+                              </button>
+                            </div>
+                            {documentIsImage ? (
+                              <img
+                                src={record.podDocumentData}
+                                alt="POD preview"
+                                className="mt-3 max-h-72 w-full rounded-lg border border-slate-200 object-contain"
+                              />
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                    {podActionError ? (
+                      <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        {podActionError}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            );
+          })()
+        : null}
 
       <div id="delivery-challan-print-area">
         {selectedChallan && (
@@ -1889,9 +2676,9 @@ const DeliveryChallan = () => {
                   <p className="text-slate-600">POD:</p>
                   <p className="font-semibold">
                     {[
-                      selectedChallan.podStatus || "Pending",
+                      getPodStatusLabel(selectedChallan.podStatus),
                       selectedChallan.podReference,
-                      formatDate(selectedChallan.podDate),
+                      formatDateTime(getPodTimestamp(selectedChallan)),
                     ]
                       .filter((value) => value && value !== "-")
                       .join(" | ") || "-"}
