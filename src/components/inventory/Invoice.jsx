@@ -27,6 +27,7 @@ import {
   XCircle,
 } from "lucide-react";
 import DateInput from "../common/DateInput";
+import { parseDateValue } from "../../utils/dateFormat";
 import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
 import { fetchVendors } from "../../services/vendorsApi";
@@ -102,11 +103,11 @@ const toIsoDate = (value) => {
   if (direct) {
     return `${direct[1]}-${direct[2]}-${direct[3]}`;
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const date = parseDateValue(value);
+  if (!date || Number.isNaN(date.getTime())) {
     return "";
   }
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
 
 const addDays = (isoDate, days) => {
@@ -118,7 +119,10 @@ const addDays = (isoDate, days) => {
     return "";
   }
   date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 const formatDate = (value) => {
@@ -911,7 +915,7 @@ const Invoice = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-28 text-slate-900">
+    <div id="invoice-print-area" className="min-h-screen bg-slate-50 pb-28 text-slate-900">
       <div className="space-y-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <nav className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-500">

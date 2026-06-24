@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import AppIcon from "../layout/AppIcon";
 import { useNotifications } from "../../context/NotificationContext";
+import { formatDate } from "../../utils/dateFormat";
 
 const severityStyles = {
   critical: {
@@ -34,14 +35,7 @@ const formatTime = (value) => {
 };
 
 const formatShortDate = (value) => {
-  try {
-    return new Intl.DateTimeFormat("en-IN", {
-      day: "numeric",
-      month: "short",
-    }).format(new Date(value));
-  } catch {
-    return "-";
-  }
+  return formatDate(value);
 };
 
 const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());

@@ -72,12 +72,32 @@ img {
   letter-spacing: -0.03em;
 }
 
+@page {
+  size: A4;
+  margin: 10mm;
+}
+
 @media print {
+  html,
+  body,
+  #root {
+    min-height: auto !important;
+    background: #fff !important;
+  }
+
+  body {
+    overflow: visible !important;
+    color: #111827 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
   .app-sidebar,
   .app-sidebar-overlay,
   .app-header,
   .no-print,
-  nav {
+  nav,
+  button {
     display: none !important;
   }
 
@@ -89,18 +109,24 @@ img {
     margin: 0 !important;
     padding: 0 !important;
     max-width: none !important;
+    width: 100% !important;
   }
 
   body * {
     visibility: hidden;
+    max-width: 100% !important;
   }
 
   #boq-print-area,
   #boq-print-area *,
   #delivery-challan-print-area,
   #delivery-challan-print-area *,
+  #invoice-print-area,
+  #invoice-print-area *,
   #payslip-print-area,
   #payslip-print-area *,
+  #relieving-letter-print-area,
+  #relieving-letter-print-area *,
   #consumption-view-panel,
   #consumption-view-panel *,
   #consumption-register,
@@ -110,15 +136,58 @@ img {
 
   #boq-print-area,
   #delivery-challan-print-area,
+  #invoice-print-area,
   #payslip-print-area,
+  #relieving-letter-print-area,
   #consumption-view-panel,
   #consumption-register {
     position: absolute;
     inset: 0;
     width: 100%;
-    padding: 1rem;
+    min-width: 0 !important;
+    padding: 0;
     background: #fff !important;
     color: #111827 !important;
+    overflow: visible !important;
+  }
+
+  .overflow-x-auto,
+  .app-scroll-region {
+    overflow: visible !important;
+  }
+
+  [class*="min-w-"] {
+    min-width: 0 !important;
+  }
+
+  [class*="max-h-"] {
+    max-height: none !important;
+  }
+
+  .sticky,
+  [class*="sticky"] {
+    position: static !important;
+  }
+
+  table {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    table-layout: fixed;
+    border-collapse: collapse;
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+  }
+
+  th,
+  td {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    vertical-align: top;
   }
 
   .app-content thead th {

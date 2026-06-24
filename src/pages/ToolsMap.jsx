@@ -36,6 +36,8 @@ import {
   getToolMaintenance,
   getTools,
 } from "../services/toolsStore";
+import DateInput from "../components/common/DateInput";
+import { formatDate, formatDateTimeDDMMYYYY, parseDateValue } from "../utils/dateFormat";
 
 const STATUS_META = {
   available: {
@@ -357,29 +359,14 @@ const getInitials = (value = "") =>
 
 const getDateValue = (value) => {
   if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
-const formatDate = (value) => {
-  const parsed = getDateValue(value);
-  if (!parsed) return "-";
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(parsed);
+  const parsed = parseDateValue(value);
+  return !parsed || Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
 const formatShortDateTime = (value) => {
   const parsed = getDateValue(value);
   if (!parsed) return "-";
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(parsed);
+  return formatDateTimeDDMMYYYY(parsed);
 };
 
 const formatLastSeen = (hours) => {
@@ -1166,10 +1153,10 @@ export default function ToolsMap() {
                   <span className="mb-1 block text-xs font-semibold text-slate-700">
                     From
                   </span>
-                  <input
-                    type="date"
+                  <DateInput
                     value={draftFilters.dateFrom}
-                    onChange={(event) => updateDraftFilter("dateFrom", event.target.value)}
+                    onChange={(value) => updateDraftFilter("dateFrom", value)}
+                    showCalendarButton
                     className="h-10 w-full rounded-lg border border-slate-200 px-2 text-xs text-slate-700 outline-none"
                   />
                 </label>
@@ -1177,10 +1164,10 @@ export default function ToolsMap() {
                   <span className="mb-1 block text-xs font-semibold text-slate-700">
                     To
                   </span>
-                  <input
-                    type="date"
+                  <DateInput
                     value={draftFilters.dateTo}
-                    onChange={(event) => updateDraftFilter("dateTo", event.target.value)}
+                    onChange={(value) => updateDraftFilter("dateTo", value)}
+                    showCalendarButton
                     className="h-10 w-full rounded-lg border border-slate-200 px-2 text-xs text-slate-700 outline-none"
                   />
                 </label>

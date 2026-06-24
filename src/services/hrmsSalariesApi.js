@@ -1,4 +1,5 @@
 import api from "./api";
+import { parseDateValue } from "../utils/dateFormat";
 
 const emitHrmsSalariesChange = () => {
   if (typeof window !== "undefined") {
@@ -26,8 +27,8 @@ const calculateEsiAmount = (grossSalary) =>
   Math.round(toNumber(grossSalary) * 0.015);
 
 const getTime = (value) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  const date = parseDateValue(value);
+  return !date || Number.isNaN(date.getTime()) ? 0 : date.getTime();
 };
 
 export const normalizeHrmsSalary = (record = {}) => {
@@ -35,9 +36,17 @@ export const normalizeHrmsSalary = (record = {}) => {
   const salary = toNumber(
     record.salary ?? record.basicSalary ?? record.BasicSalary
   );
-  const allowance = 0;
+  const allowance = toNumber(
+    record.allowance ?? record.allowances ?? record.Allowances
+  );
   const deduction = toNumber(
     record.deduction ?? record.deductions ?? record.Deductions
+  );
+  const professionalTax = toNumber(
+    record.professionalTax ?? record.pt ?? record.ProfessionalTax
+  );
+  const tdsAmount = toNumber(
+    record.tdsAmount ?? record.tds ?? record.TDSAmount
   );
   const pfAmount =
     toOptionalNumber(
@@ -49,7 +58,8 @@ export const normalizeHrmsSalary = (record = {}) => {
   const esiAmount =
     toOptionalNumber(record.esiAmount ?? record.esi ?? record.ESIAmount) ??
     calculateEsiAmount(salary);
-  const totalDeductions = deduction + pfAmount + esiAmount;
+  const totalDeductions = deduction + pfAmount + esiAmount + professionalTax + tdsAmount;
+  const totalEarnings = salary + allowance;
   return {
     ...record,
     id: String(record.id ?? record.Id ?? ""),
@@ -68,12 +78,19 @@ export const normalizeHrmsSalary = (record = {}) => {
     allowances: allowance,
     deduction,
     deductions: deduction,
+    grossSalary: salary,
+    monthlySalary: Math.round(salary / 12),
     esi: esiAmount,
     esiAmount,
-    net: salary - totalDeductions,
-    netSalary: salary - totalDeductions,
+    net: totalEarnings - totalDeductions,
+    netSalary: totalEarnings - totalDeductions,
     pfAmount,
     providentFund: pfAmount,
+    professionalTax,
+    pt: professionalTax,
+    tdsAmount,
+    tds: tdsAmount,
+    totalEarnings,
     totalDeductions,
     status: record.status ?? record.Status ?? "Processed",
     savedAt: record.savedAt ?? record.SavedDate ?? null,

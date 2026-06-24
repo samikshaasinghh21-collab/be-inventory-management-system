@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { parseDateValue } from "../../utils/dateFormat";
 
 const pad = (value) => String(value).padStart(2, "0");
 
@@ -10,11 +11,11 @@ const toIsoDateValue = (value) => {
   if (directMatch) {
     return `${directMatch[1]}-${directMatch[2]}-${directMatch[3]}`;
   }
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
+  const parsed = parseDateValue(trimmed);
+  if (!parsed || Number.isNaN(parsed.getTime())) {
     return "";
   }
-  return `${parsed.getUTCFullYear()}-${pad(parsed.getUTCMonth() + 1)}-${pad(parsed.getUTCDate())}`;
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
 };
 
 const isoToDisplay = (isoDate) => {

@@ -8,7 +8,7 @@ import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import { getProjects } from "../../services/projectsStore";
 import { fetchVendors } from "../../services/vendorsApi";
 import { fetchLocations } from "../../services/locationsApi";
-import { formatDate } from "../../utils/dateFormat";
+import { formatDate, parseDateValue } from "../../utils/dateFormat";
 import useSettings from "../../hooks/useSettings";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
@@ -52,7 +52,8 @@ const toChronologyTime = (...values) => {
     if (!value) {
       continue;
     }
-    const time = new Date(value).getTime();
+    const date = parseDateValue(value);
+    const time = date ? date.getTime() : NaN;
     if (Number.isFinite(time)) {
       return time;
     }

@@ -72,6 +72,7 @@ export const normalizeHrmsEmployee = (employee = {}) => {
   const esiAmount = toOptionalNumber(
     employee.esiAmount ?? employee.esi ?? employee.ESIAmount
   );
+<<<<<<< HEAD
   const grossSalary = toOptionalNumber(
     employee.grossSalary ?? employee.GrossSalary
   );
@@ -80,6 +81,16 @@ export const normalizeHrmsEmployee = (employee = {}) => {
   );
   const pt = toOptionalNumber(
     employee.pt ?? employee.professionalTax ?? employee.ProfessionalTax
+=======
+  const allowances = toOptionalNumber(
+    employee.allowances ?? employee.allowance ?? employee.Allowances
+  );
+  const professionalTax = toOptionalNumber(
+    employee.professionalTax ?? employee.pt ?? employee.ProfessionalTax
+  );
+  const tdsAmount = toOptionalNumber(
+    employee.tdsAmount ?? employee.tds ?? employee.TDSAmount
+>>>>>>> origin/main
   );
 
   return {
@@ -105,6 +116,16 @@ export const normalizeHrmsEmployee = (employee = {}) => {
       employee.emergencyPhone ??
       employee.EmergencyContactNumber ??
       "",
+    emergencyContactRelation:
+      employee.emergencyContactRelation ??
+      employee.relation ??
+      employee.EmergencyContactRelation ??
+      "",
+    relation:
+      employee.relation ??
+      employee.emergencyContactRelation ??
+      employee.EmergencyContactRelation ??
+      "",
     status: employee.status ?? employee.Status ?? "Active",
     manager:
       employee.manager ??
@@ -121,6 +142,12 @@ export const normalizeHrmsEmployee = (employee = {}) => {
     basicSalary: Number.isFinite(salary) ? salary : 0,
     salaryDeduction,
     deduction: salaryDeduction,
+    allowances,
+    allowance: allowances,
+    professionalTax,
+    pt: professionalTax,
+    tdsAmount,
+    tds: tdsAmount,
     pfAmount,
     providentFund: pfAmount,
     esiAmount,
@@ -132,14 +159,20 @@ export const normalizeHrmsEmployee = (employee = {}) => {
     address: employee.address ?? employee.Address ?? "",
     bloodGroup: employee.bloodGroup ?? employee.BloodGroup ?? "",
     dateOfBirth: toDisplayDate(employee.dateOfBirth ?? employee.DateOfBirth),
+    documentNumber: employee.documentNumber ?? employee.DocumentNumber ?? "",
+    esiNumber: employee.esiNumber ?? employee.ESINumber ?? "",
     gender: employee.gender ?? employee.Gender ?? "",
     maritalStatus: employee.maritalStatus ?? employee.MaritalStatus ?? "",
     nationality: employee.nationality ?? employee.Nationality ?? "",
     panNumber: employee.panNumber ?? employee.PANNumber ?? "",
+<<<<<<< HEAD
     uanNumber: employee.uanNumber ?? employee.UANNumber ?? "",
     relation: employee.relation ?? employee.Relation ?? "",
+=======
+>>>>>>> origin/main
     photo: employee.photo ?? employee.photoPath ?? employee.PhotoPath ?? "",
     photoPath: employee.photoPath ?? employee.photo ?? employee.PhotoPath ?? "",
+    uanNumber: employee.uanNumber ?? employee.UANNumber ?? "",
     documents:
       employee.documents && typeof employee.documents === "object"
         ? employee.documents

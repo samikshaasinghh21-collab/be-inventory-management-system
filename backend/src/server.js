@@ -8162,13 +8162,21 @@ const ensureHrmsEmployeesTable = async () => {
           BloodGroup VARCHAR(10) NULL,
           PhoneNumber VARCHAR(20) NULL,
           EmergencyContactNumber VARCHAR(20) NULL,
+          EmergencyContactRelation VARCHAR(100) NULL,
           Email VARCHAR(150) NULL,
           DepartmentID INT NULL,
           DesignationID INT NULL,
           BasicSalary DECIMAL(18,2) NULL,
+          Allowances DECIMAL(18,2) NULL,
           SalaryDeduction DECIMAL(18,2) NULL,
           ProvidentFund DECIMAL(18,2) NULL,
+          ProfessionalTax DECIMAL(18,2) NULL,
+          TDSAmount DECIMAL(18,2) NULL,
           ESIAmount DECIMAL(18,2) NULL,
+          PANNumber VARCHAR(10) NULL,
+          DocumentNumber VARCHAR(100) NULL,
+          UANNumber VARCHAR(50) NULL,
+          ESINumber VARCHAR(50) NULL,
           Address VARCHAR(500) NULL,
           PhotoPath VARCHAR(255) NULL,
           DocumentsJson NVARCHAR(MAX) NULL,
@@ -8182,9 +8190,19 @@ const ensureHrmsEmployeesTable = async () => {
         ALTER TABLE ${hrmsTable("Employees")} ADD EmergencyContactNumber VARCHAR(20) NULL;
       END
 
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'EmergencyContactRelation') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD EmergencyContactRelation VARCHAR(100) NULL;
+      END
+
       IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'DocumentsJson') IS NULL
       BEGIN
         ALTER TABLE ${hrmsTable("Employees")} ADD DocumentsJson NVARCHAR(MAX) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'Allowances') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD Allowances DECIMAL(18,2) NULL;
       END
 
       IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'SalaryDeduction') IS NULL
@@ -8197,9 +8215,39 @@ const ensureHrmsEmployeesTable = async () => {
         ALTER TABLE ${hrmsTable("Employees")} ADD ProvidentFund DECIMAL(18,2) NULL;
       END
 
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'ProfessionalTax') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD ProfessionalTax DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'TDSAmount') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD TDSAmount DECIMAL(18,2) NULL;
+      END
+
       IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'ESIAmount') IS NULL
       BEGIN
         ALTER TABLE ${hrmsTable("Employees")} ADD ESIAmount DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'PANNumber') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD PANNumber VARCHAR(10) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'DocumentNumber') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD DocumentNumber VARCHAR(100) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'UANNumber') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD UANNumber VARCHAR(50) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'ESINumber') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD ESINumber VARCHAR(50) NULL;
       END
 
       IF OBJECT_ID(N'${hrmsObjectName("EmployeeIdSequences")}', N'U') IS NULL
@@ -8325,11 +8373,20 @@ const buildHrmsEmployeePayload = async (source = {}, tx) => {
   const salary = Number(
     source.salary ?? source.basicSalary ?? source.BasicSalary ?? 0
   );
+  const allowances = normalizeHrmsOptionalDecimal(
+    source.allowances ?? source.allowance ?? source.Allowances
+  );
   const salaryDeduction = normalizeHrmsOptionalDecimal(
     source.salaryDeduction ?? source.deduction ?? source.SalaryDeduction
   );
   const providentFund = normalizeHrmsOptionalDecimal(
     source.pfAmount ?? source.providentFund ?? source.ProvidentFund
+  );
+  const professionalTax = normalizeHrmsOptionalDecimal(
+    source.professionalTax ?? source.pt ?? source.ProfessionalTax
+  );
+  const tdsAmount = normalizeHrmsOptionalDecimal(
+    source.tdsAmount ?? source.tds ?? source.TDSAmount
   );
   const esiAmount = normalizeHrmsOptionalDecimal(
     source.esiAmount ?? source.esi ?? source.ESIAmount
@@ -8367,13 +8424,29 @@ const buildHrmsEmployeePayload = async (source = {}, tx) => {
         source.EmergencyContactNumber,
       20
     ),
+    emergencyContactRelation: trimToLength(
+      source.emergencyContactRelation ??
+        source.relation ??
+        source.EmergencyContactRelation,
+      100
+    ),
     email: trimToLength(source.email ?? source.Email, 150),
     departmentId,
     designationId,
     basicSalary: Number.isFinite(salary) ? salary : 0,
+    allowances,
     salaryDeduction,
     providentFund,
+    professionalTax,
+    tdsAmount,
     esiAmount,
+    panNumber: trimToLength(source.panNumber ?? source.PANNumber, 10),
+    documentNumber: trimToLength(
+      source.documentNumber ?? source.DocumentNumber,
+      100
+    ),
+    uanNumber: trimToLength(source.uanNumber ?? source.UANNumber, 50),
+    esiNumber: trimToLength(source.esiNumber ?? source.ESINumber, 50),
     address: trimToLength(source.address ?? source.Address, 500),
     photoPath: normalizeHrmsPhotoPath(
       source.photoPath ?? source.PhotoPath ?? source.photo
@@ -8403,6 +8476,8 @@ const normalizeHrmsEmployeeRow = (row = {}) => ({
   phoneNumber: row.PhoneNumber ?? "",
   emergencyContactNumber: row.EmergencyContactNumber ?? "",
   emergencyPhone: row.EmergencyContactNumber ?? "",
+  emergencyContactRelation: row.EmergencyContactRelation ?? "",
+  relation: row.EmergencyContactRelation ?? "",
   email: row.Email ?? "",
   departmentId: row.DepartmentID ?? null,
   department: row.DepartmentName ?? "",
@@ -8410,12 +8485,22 @@ const normalizeHrmsEmployeeRow = (row = {}) => ({
   designation: row.DesignationTitle ?? "",
   salary: Number(row.BasicSalary ?? 0),
   basicSalary: Number(row.BasicSalary ?? 0),
+  allowances: normalizeHrmsOptionalDecimal(row.Allowances),
+  allowance: normalizeHrmsOptionalDecimal(row.Allowances),
   salaryDeduction: normalizeHrmsOptionalDecimal(row.SalaryDeduction),
   deduction: normalizeHrmsOptionalDecimal(row.SalaryDeduction),
   pfAmount: normalizeHrmsOptionalDecimal(row.ProvidentFund),
   providentFund: normalizeHrmsOptionalDecimal(row.ProvidentFund),
+  professionalTax: normalizeHrmsOptionalDecimal(row.ProfessionalTax),
+  pt: normalizeHrmsOptionalDecimal(row.ProfessionalTax),
+  tdsAmount: normalizeHrmsOptionalDecimal(row.TDSAmount),
+  tds: normalizeHrmsOptionalDecimal(row.TDSAmount),
   esiAmount: normalizeHrmsOptionalDecimal(row.ESIAmount),
   esi: normalizeHrmsOptionalDecimal(row.ESIAmount),
+  panNumber: row.PANNumber ?? "",
+  documentNumber: row.DocumentNumber ?? "",
+  uanNumber: row.UANNumber ?? "",
+  esiNumber: row.ESINumber ?? "",
   address: row.Address ?? "",
   photo: row.PhotoPath ?? "",
   photoPath: row.PhotoPath ?? "",
@@ -8440,15 +8525,23 @@ const loadHrmsEmployeeById = async (source, employeeId) => {
         e.BloodGroup,
         e.PhoneNumber,
         e.EmergencyContactNumber,
+        e.EmergencyContactRelation,
         e.Email,
         e.DepartmentID,
         d.Name AS DepartmentName,
         e.DesignationID,
         g.Title AS DesignationTitle,
         e.BasicSalary,
+        e.Allowances,
         e.SalaryDeduction,
         e.ProvidentFund,
+        e.ProfessionalTax,
+        e.TDSAmount,
         e.ESIAmount,
+        e.PANNumber,
+        e.DocumentNumber,
+        e.UANNumber,
+        e.ESINumber,
         e.Address,
         e.PhotoPath,
         e.DocumentsJson,
@@ -8495,6 +8588,9 @@ const ensureHrmsReviewsTable = async () => {
           Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
           EmployeeID VARCHAR(20) NULL,
           ReviewPeriod VARCHAR(100) NULL,
+          ReviewStartDate DATE NULL,
+          ReviewEndDate DATE NULL,
+          ReviewDate DATE NULL,
           ReviewType VARCHAR(50) NULL,
           Reviewer VARCHAR(150) NULL,
           OverallRating INT NULL,
@@ -8503,6 +8599,21 @@ const ensureHrmsReviewsTable = async () => {
           Comments VARCHAR(1000) NULL,
           SavedDate DATETIME NULL
         );
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Reviews")}', N'ReviewStartDate') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Reviews")} ADD ReviewStartDate DATE NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Reviews")}', N'ReviewEndDate') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Reviews")} ADD ReviewEndDate DATE NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Reviews")}', N'ReviewDate') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Reviews")} ADD ReviewDate DATE NULL;
       END
     `);
   })();
@@ -8522,30 +8633,56 @@ const normalizeHrmsReviewRating = (value) => {
   return Math.min(5, Math.max(0, Math.trunc(parsed)));
 };
 
-const buildHrmsReviewPayload = (source = {}) => ({
-  employeeId: trimToLength(
-    source.employeeId ?? source.EmployeeID,
-    20
-  ),
-  period: trimToLength(source.period ?? source.ReviewPeriod, 100),
-  type: trimToLength(source.type ?? source.ReviewType, 50),
-  reviewer: trimToLength(source.reviewer ?? source.Reviewer, 150),
-  rating: normalizeHrmsReviewRating(
-    source.rating ?? source.OverallRating
-  ),
-  strengths: trimToLength(source.strengths ?? source.Strengths, 1000),
-  improvement: trimToLength(
-    source.improvement ?? source.AreasOfImprovement,
-    1000
-  ),
-  comments: trimToLength(source.comments ?? source.Comments, 1000),
-});
+const buildHrmsReviewPayload = (source = {}) => {
+  const reviewStartDate = parseHrmsDateInput(
+    source.reviewStartDate ?? source.ReviewStartDate
+  );
+  const reviewEndDate = parseHrmsDateInput(
+    source.reviewEndDate ?? source.ReviewEndDate
+  );
+  const reviewDate = parseHrmsDateInput(source.reviewDate ?? source.ReviewDate);
+
+  if (
+    Number.isNaN(reviewStartDate) ||
+    Number.isNaN(reviewEndDate) ||
+    Number.isNaN(reviewDate)
+  ) {
+    const error = new Error("Invalid review date.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    employeeId: trimToLength(
+      source.employeeId ?? source.EmployeeID,
+      20
+    ),
+    period: trimToLength(source.period ?? source.ReviewPeriod, 100),
+    reviewDate,
+    reviewEndDate,
+    reviewStartDate,
+    type: trimToLength(source.type ?? source.ReviewType, 50),
+    reviewer: trimToLength(source.reviewer ?? source.Reviewer, 150),
+    rating: normalizeHrmsReviewRating(
+      source.rating ?? source.OverallRating
+    ),
+    strengths: trimToLength(source.strengths ?? source.Strengths, 1000),
+    improvement: trimToLength(
+      source.improvement ?? source.AreasOfImprovement,
+      1000
+    ),
+    comments: trimToLength(source.comments ?? source.Comments, 1000),
+  };
+};
 
 const normalizeHrmsReviewRow = (row = {}) => ({
   id: String(row.Id ?? ""),
   employeeId: row.EmployeeID ?? "",
   employeeName: row.EmployeeName ?? row.FullName ?? row.EmployeeID ?? "",
   period: row.ReviewPeriod ?? "",
+  reviewDate: formatHrmsDate(row.ReviewDate),
+  reviewEndDate: formatHrmsDate(row.ReviewEndDate),
+  reviewStartDate: formatHrmsDate(row.ReviewStartDate),
   type: row.ReviewType ?? "",
   reviewer: row.Reviewer ?? "",
   rating: Number(row.OverallRating ?? 0) || 0,
@@ -8564,6 +8701,9 @@ const loadHrmsReviewById = async (source, reviewId) => {
         r.EmployeeID,
         COALESCE(e.FullName, r.EmployeeID) AS EmployeeName,
         r.ReviewPeriod,
+        r.ReviewStartDate,
+        r.ReviewEndDate,
+        r.ReviewDate,
         r.ReviewType,
         r.Reviewer,
         r.OverallRating,
@@ -8590,6 +8730,9 @@ app.get("/api/hrms/reviews", async (_req, res) => {
         r.EmployeeID,
         COALESCE(e.FullName, r.EmployeeID) AS EmployeeName,
         r.ReviewPeriod,
+        r.ReviewStartDate,
+        r.ReviewEndDate,
+        r.ReviewDate,
         r.ReviewType,
         r.Reviewer,
         r.OverallRating,
@@ -8632,6 +8775,9 @@ app.post("/api/hrms/reviews", async (req, res) => {
       .request()
       .input("EmployeeID", sql.VarChar(20), payload.employeeId)
       .input("ReviewPeriod", sql.VarChar(100), payload.period)
+      .input("ReviewStartDate", sql.Date, payload.reviewStartDate)
+      .input("ReviewEndDate", sql.Date, payload.reviewEndDate)
+      .input("ReviewDate", sql.Date, payload.reviewDate)
       .input("ReviewType", sql.VarChar(50), payload.type)
       .input("Reviewer", sql.VarChar(150), payload.reviewer)
       .input("OverallRating", sql.Int, payload.rating)
@@ -8642,6 +8788,9 @@ app.post("/api/hrms/reviews", async (req, res) => {
         INSERT INTO ${hrmsTable("Reviews")} (
           EmployeeID,
           ReviewPeriod,
+          ReviewStartDate,
+          ReviewEndDate,
+          ReviewDate,
           ReviewType,
           Reviewer,
           OverallRating,
@@ -8654,6 +8803,9 @@ app.post("/api/hrms/reviews", async (req, res) => {
         VALUES (
           @EmployeeID,
           @ReviewPeriod,
+          @ReviewStartDate,
+          @ReviewEndDate,
+          @ReviewDate,
           @ReviewType,
           @Reviewer,
           @OverallRating,
@@ -8668,7 +8820,7 @@ app.post("/api/hrms/reviews", async (req, res) => {
     const review = await loadHrmsReviewById(pool, reviewId);
     return res.status(201).json({ ok: true, review });
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       ok: false,
       error: error?.message ?? "Failed to create HRMS review",
     });
@@ -8712,9 +8864,12 @@ const ensureHrmsSalaryReassessmentsTable = async () => {
           RecommendedIncrementPercent DECIMAL(5,2) NULL,
           Bonus DECIMAL(18,2) NULL,
           RevisedSalary DECIMAL(18,2) NULL,
+          Allowances DECIMAL(18,2) NULL,
           SalaryDeduction DECIMAL(18,2) NULL,
           ProvidentFund DECIMAL(18,2) NULL,
           ESIAmount DECIMAL(18,2) NULL,
+          ProfessionalTax DECIMAL(18,2) NULL,
+          TDSAmount DECIMAL(18,2) NULL,
           TotalDeductions DECIMAL(18,2) NULL,
           NetSalary DECIMAL(18,2) NULL,
           CurrentRole VARCHAR(100) NULL,
@@ -8753,6 +8908,11 @@ const ensureHrmsSalaryReassessmentsTable = async () => {
         ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD SalaryDeduction DECIMAL(18,2) NULL;
       END
 
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'Allowances') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD Allowances DECIMAL(18,2) NULL;
+      END
+
       IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'ProvidentFund') IS NULL
       BEGIN
         ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD ProvidentFund DECIMAL(18,2) NULL;
@@ -8761,6 +8921,16 @@ const ensureHrmsSalaryReassessmentsTable = async () => {
       IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'ESIAmount') IS NULL
       BEGIN
         ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD ESIAmount DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'ProfessionalTax') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD ProfessionalTax DECIMAL(18,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'TDSAmount') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("SalaryReassessments")} ADD TDSAmount DECIMAL(18,2) NULL;
       END
 
       IF COL_LENGTH(N'${hrmsObjectName("SalaryReassessments")}', N'TotalDeductions') IS NULL
@@ -8831,6 +9001,9 @@ const buildHrmsSalaryReassessmentPayload = (source = {}) => {
   const revisedSalary = normalizeHrmsDecimal(
     source.revisedSalary ?? source.RevisedSalary
   );
+  const allowances = normalizeHrmsDecimal(
+    source.allowances ?? source.allowance ?? source.Allowances
+  );
   const salaryDeduction = normalizeHrmsDecimal(
     source.salaryDeduction ?? source.deduction ?? source.SalaryDeduction
   );
@@ -8849,8 +9022,15 @@ const buildHrmsSalaryReassessmentPayload = (source = {}) => {
     providedEsiAmount === ""
       ? calculateHrmsEsiAmount(revisedSalary)
       : normalizeHrmsDecimal(providedEsiAmount);
-  const totalDeductions = salaryDeduction + pfAmount + esiAmount;
-  const netSalary = revisedSalary - totalDeductions;
+  const professionalTax = normalizeHrmsDecimal(
+    source.professionalTax ?? source.pt ?? source.ProfessionalTax
+  );
+  const tdsAmount = normalizeHrmsDecimal(
+    source.tdsAmount ?? source.tds ?? source.TDSAmount
+  );
+  const totalDeductions =
+    salaryDeduction + pfAmount + esiAmount + professionalTax + tdsAmount;
+  const netSalary = revisedSalary + allowances - totalDeductions;
 
   return {
     employeeId: trimToLength(source.employeeId ?? source.EmployeeID, 20),
@@ -8909,9 +9089,12 @@ const buildHrmsSalaryReassessmentPayload = (source = {}) => {
     ),
     bonus: normalizeHrmsDecimal(source.bonus ?? source.Bonus),
     revisedSalary,
+    allowances,
     salaryDeduction,
     providentFund: pfAmount,
     esiAmount,
+    professionalTax,
+    tdsAmount,
     totalDeductions,
     netSalary,
     currentRole: trimToLength(source.currentRole ?? source.CurrentRole, 100),
@@ -9692,10 +9875,17 @@ const ensureHrmsSalariesTable = async () => {
           Deductions DECIMAL(12,2) NULL,
           PFAmount DECIMAL(12,2) NULL,
           ESIAmount DECIMAL(12,2) NULL,
-          NetSalary AS (ISNULL(BasicSalary, 0) - ISNULL(Deductions, 0) - ISNULL(PFAmount, 0) - ISNULL(ESIAmount, 0)),
+          ProfessionalTax DECIMAL(12,2) NULL,
+          TDSAmount DECIMAL(12,2) NULL,
+          NetSalary AS (ISNULL(BasicSalary, 0) + ISNULL(Allowances, 0) - ISNULL(Deductions, 0) - ISNULL(PFAmount, 0) - ISNULL(ESIAmount, 0) - ISNULL(ProfessionalTax, 0) - ISNULL(TDSAmount, 0)),
           Status VARCHAR(50) NULL,
           SavedDate DATETIME NULL
         );
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'Allowances') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Salaries")} ADD Allowances DECIMAL(12,2) NULL;
       END
 
       IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'PFAmount') IS NULL
@@ -9706,6 +9896,16 @@ const ensureHrmsSalariesTable = async () => {
       IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'ESIAmount') IS NULL
       BEGIN
         ALTER TABLE ${hrmsTable("Salaries")} ADD ESIAmount DECIMAL(12,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'ProfessionalTax') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Salaries")} ADD ProfessionalTax DECIMAL(12,2) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'TDSAmount') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Salaries")} ADD TDSAmount DECIMAL(12,2) NULL;
       END
     `);
   })();
@@ -9721,9 +9921,17 @@ const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
   const basicSalary = normalizeHrmsDecimal(
     source.salary ?? source.basicSalary ?? source.BasicSalary
   );
-  const allowances = 0;
+  const allowances = normalizeHrmsDecimal(
+    source.allowance ?? source.allowances ?? source.Allowances
+  );
   const deductions = normalizeHrmsDecimal(
     source.deduction ?? source.deductions ?? source.Deductions
+  );
+  const professionalTax = normalizeHrmsDecimal(
+    source.professionalTax ?? source.pt ?? source.ProfessionalTax
+  );
+  const tdsAmount = normalizeHrmsDecimal(
+    source.tdsAmount ?? source.tds ?? source.TDSAmount
   );
   const providedPfAmount =
     source.pfAmount ?? source.providentFund ?? source.PFAmount;
@@ -9740,7 +9948,8 @@ const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
     providedEsiAmount === ""
       ? calculateHrmsEsiAmount(basicSalary)
       : normalizeHrmsDecimal(providedEsiAmount);
-  const netSalary = basicSalary - deductions - pfAmount - esiAmount;
+  const netSalary =
+    basicSalary + allowances - deductions - pfAmount - esiAmount - professionalTax - tdsAmount;
 
   return {
     employeeId: trimToLength(
@@ -9769,6 +9978,8 @@ const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
     esiAmount,
     netSalary,
     pfAmount,
+    professionalTax,
+    tdsAmount,
     status:
       trimToLength(source.status ?? source.Status, 50) ?? "Processed",
   };
@@ -9776,14 +9987,17 @@ const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
 
 const normalizeHrmsSalaryRow = (row = {}) => {
   const basicSalary = Number(row.BasicSalary ?? 0);
-  const allowances = 0;
+  const allowances = Number(row.Allowances ?? 0);
   const deductions = Number(row.Deductions ?? 0);
   const pfAmount =
     normalizeHrmsOptionalDecimal(row.PFAmount) ?? calculateHrmsPfAmount(basicSalary);
   const esiAmount =
     normalizeHrmsOptionalDecimal(row.ESIAmount) ?? calculateHrmsEsiAmount(basicSalary);
-  const totalDeductions = deductions + pfAmount + esiAmount;
-  const netSalary = basicSalary - totalDeductions;
+  const professionalTax = Number(row.ProfessionalTax ?? 0);
+  const tdsAmount = Number(row.TDSAmount ?? 0);
+  const totalDeductions =
+    deductions + pfAmount + esiAmount + professionalTax + tdsAmount;
+  const netSalary = basicSalary + allowances - totalDeductions;
 
   return {
     id: String(row.Id ?? ""),
@@ -9795,6 +10009,8 @@ const normalizeHrmsSalaryRow = (row = {}) => {
     department: row.Department ?? "All",
     salary: basicSalary,
     basicSalary,
+    grossSalary: basicSalary,
+    monthlySalary: Math.round(basicSalary / 12),
     allowance: allowances,
     allowances,
     deduction: deductions,
@@ -9805,6 +10021,11 @@ const normalizeHrmsSalaryRow = (row = {}) => {
     netSalary,
     pfAmount,
     providentFund: pfAmount,
+    professionalTax,
+    pt: professionalTax,
+    tdsAmount,
+    tds: tdsAmount,
+    totalEarnings: basicSalary + allowances,
     totalDeductions,
     status: row.Status ?? "Processed",
     savedAt: row.SavedDate ?? null,
@@ -9876,6 +10097,8 @@ const bindHrmsSalaryInputs = (request, payload) =>
     .input("Deductions", sql.Decimal(12, 2), payload.deductions)
     .input("PFAmount", sql.Decimal(12, 2), payload.pfAmount)
     .input("ESIAmount", sql.Decimal(12, 2), payload.esiAmount)
+    .input("ProfessionalTax", sql.Decimal(12, 2), payload.professionalTax)
+    .input("TDSAmount", sql.Decimal(12, 2), payload.tdsAmount)
     .input("Status", sql.VarChar(50), payload.status);
 
 const saveHrmsSalaryRow = async (source, payload) => {
@@ -9907,6 +10130,8 @@ const saveHrmsSalaryRow = async (source, payload) => {
         Deductions = @Deductions,
         PFAmount = @PFAmount,
         ESIAmount = @ESIAmount,
+        ProfessionalTax = @ProfessionalTax,
+        TDSAmount = @TDSAmount,
         Status = @Status,
         SavedDate = GETDATE()
       WHERE Id = @Id
@@ -9929,6 +10154,8 @@ const saveHrmsSalaryRow = async (source, payload) => {
         Deductions,
         PFAmount,
         ESIAmount,
+        ProfessionalTax,
+        TDSAmount,
         Status,
         SavedDate
       )
@@ -9942,6 +10169,8 @@ const saveHrmsSalaryRow = async (source, payload) => {
         @Deductions,
         @PFAmount,
         @ESIAmount,
+        @ProfessionalTax,
+        @TDSAmount,
         @Status,
         GETDATE()
       )
@@ -9967,6 +10196,8 @@ const saveHrmsSalaryRow = async (source, payload) => {
       Deductions,
       PFAmount,
       ESIAmount,
+      ProfessionalTax,
+      TDSAmount,
       Status,
       SavedDate
     )
@@ -9980,6 +10211,8 @@ const saveHrmsSalaryRow = async (source, payload) => {
       @Deductions,
       @PFAmount,
       @ESIAmount,
+      @ProfessionalTax,
+      @TDSAmount,
       @Status,
       GETDATE()
     )
@@ -10498,15 +10731,23 @@ app.get("/api/hrms/employees", async (_req, res) => {
         e.BloodGroup,
         e.PhoneNumber,
         e.EmergencyContactNumber,
+        e.EmergencyContactRelation,
         e.Email,
         e.DepartmentID,
         d.Name AS DepartmentName,
         e.DesignationID,
         g.Title AS DesignationTitle,
         e.BasicSalary,
+        e.Allowances,
         e.SalaryDeduction,
         e.ProvidentFund,
+        e.ProfessionalTax,
+        e.TDSAmount,
         e.ESIAmount,
+        e.PANNumber,
+        e.DocumentNumber,
+        e.UANNumber,
+        e.ESINumber,
         e.Address,
         e.PhotoPath,
         e.DocumentsJson,
@@ -10591,13 +10832,21 @@ app.post("/api/hrms/employees", async (req, res) => {
       .input("BloodGroup", sql.VarChar(10), payload.bloodGroup)
       .input("PhoneNumber", sql.VarChar(20), payload.phoneNumber)
       .input("EmergencyContactNumber", sql.VarChar(20), payload.emergencyContactNumber)
+      .input("EmergencyContactRelation", sql.VarChar(100), payload.emergencyContactRelation)
       .input("Email", sql.VarChar(150), payload.email)
       .input("DepartmentID", sql.Int, payload.departmentId)
       .input("DesignationID", sql.Int, payload.designationId)
       .input("BasicSalary", sql.Decimal(18, 2), payload.basicSalary)
+      .input("Allowances", sql.Decimal(18, 2), payload.allowances)
       .input("SalaryDeduction", sql.Decimal(18, 2), payload.salaryDeduction)
       .input("ProvidentFund", sql.Decimal(18, 2), payload.providentFund)
+      .input("ProfessionalTax", sql.Decimal(18, 2), payload.professionalTax)
+      .input("TDSAmount", sql.Decimal(18, 2), payload.tdsAmount)
       .input("ESIAmount", sql.Decimal(18, 2), payload.esiAmount)
+      .input("PANNumber", sql.VarChar(10), payload.panNumber)
+      .input("DocumentNumber", sql.VarChar(100), payload.documentNumber)
+      .input("UANNumber", sql.VarChar(50), payload.uanNumber)
+      .input("ESINumber", sql.VarChar(50), payload.esiNumber)
       .input("Address", sql.VarChar(500), payload.address)
       .input("PhotoPath", sql.VarChar(255), payload.photoPath)
       .input("DocumentsJson", sql.NVarChar(sql.MAX), payload.documentsJson)
@@ -10615,13 +10864,21 @@ app.post("/api/hrms/employees", async (req, res) => {
           BloodGroup,
           PhoneNumber,
           EmergencyContactNumber,
+          EmergencyContactRelation,
           Email,
           DepartmentID,
           DesignationID,
           BasicSalary,
+          Allowances,
           SalaryDeduction,
           ProvidentFund,
+          ProfessionalTax,
+          TDSAmount,
           ESIAmount,
+          PANNumber,
+          DocumentNumber,
+          UANNumber,
+          ESINumber,
           Address,
           PhotoPath,
           DocumentsJson,
@@ -10640,13 +10897,21 @@ app.post("/api/hrms/employees", async (req, res) => {
           @BloodGroup,
           @PhoneNumber,
           @EmergencyContactNumber,
+          @EmergencyContactRelation,
           @Email,
           @DepartmentID,
           @DesignationID,
           @BasicSalary,
+          @Allowances,
           @SalaryDeduction,
           @ProvidentFund,
+          @ProfessionalTax,
+          @TDSAmount,
           @ESIAmount,
+          @PANNumber,
+          @DocumentNumber,
+          @UANNumber,
+          @ESINumber,
           @Address,
           @PhotoPath,
           @DocumentsJson,
@@ -10708,13 +10973,21 @@ app.put("/api/hrms/employees/:id", async (req, res) => {
       .input("BloodGroup", sql.VarChar(10), payload.bloodGroup)
       .input("PhoneNumber", sql.VarChar(20), payload.phoneNumber)
       .input("EmergencyContactNumber", sql.VarChar(20), payload.emergencyContactNumber)
+      .input("EmergencyContactRelation", sql.VarChar(100), payload.emergencyContactRelation)
       .input("Email", sql.VarChar(150), payload.email)
       .input("DepartmentID", sql.Int, payload.departmentId)
       .input("DesignationID", sql.Int, payload.designationId)
       .input("BasicSalary", sql.Decimal(18, 2), payload.basicSalary)
+      .input("Allowances", sql.Decimal(18, 2), payload.allowances)
       .input("SalaryDeduction", sql.Decimal(18, 2), payload.salaryDeduction)
       .input("ProvidentFund", sql.Decimal(18, 2), payload.providentFund)
+      .input("ProfessionalTax", sql.Decimal(18, 2), payload.professionalTax)
+      .input("TDSAmount", sql.Decimal(18, 2), payload.tdsAmount)
       .input("ESIAmount", sql.Decimal(18, 2), payload.esiAmount)
+      .input("PANNumber", sql.VarChar(10), payload.panNumber)
+      .input("DocumentNumber", sql.VarChar(100), payload.documentNumber)
+      .input("UANNumber", sql.VarChar(50), payload.uanNumber)
+      .input("ESINumber", sql.VarChar(50), payload.esiNumber)
       .input("Address", sql.VarChar(500), payload.address)
       .input("PhotoPath", sql.VarChar(255), payload.photoPath)
       .input("DocumentsJson", sql.NVarChar(sql.MAX), payload.documentsJson)
@@ -10732,13 +11005,21 @@ app.put("/api/hrms/employees/:id", async (req, res) => {
           BloodGroup = @BloodGroup,
           PhoneNumber = @PhoneNumber,
           EmergencyContactNumber = @EmergencyContactNumber,
+          EmergencyContactRelation = @EmergencyContactRelation,
           Email = @Email,
           DepartmentID = @DepartmentID,
           DesignationID = @DesignationID,
           BasicSalary = @BasicSalary,
+          Allowances = @Allowances,
           SalaryDeduction = @SalaryDeduction,
           ProvidentFund = @ProvidentFund,
+          ProfessionalTax = @ProfessionalTax,
+          TDSAmount = @TDSAmount,
           ESIAmount = @ESIAmount,
+          PANNumber = @PANNumber,
+          DocumentNumber = @DocumentNumber,
+          UANNumber = @UANNumber,
+          ESINumber = @ESINumber,
           Address = @Address,
           PhotoPath = @PhotoPath,
           DocumentsJson = @DocumentsJson,

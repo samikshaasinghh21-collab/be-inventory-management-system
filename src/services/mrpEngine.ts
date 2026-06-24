@@ -22,13 +22,40 @@ const parseDate = (value) => {
     return Number.isNaN(value.getTime()) ? null : value;
   }
 
-  const parsed = new Date(value);
+  const text = String(value).trim();
+  const separatedDateMatch = /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/.exec(text);
+  if (separatedDateMatch) {
+    const first = Number(separatedDateMatch[1]);
+    const second = Number(separatedDateMatch[2]);
+    const year =
+      separatedDateMatch[3].length === 2
+        ? Number(`20${separatedDateMatch[3]}`)
+        : Number(separatedDateMatch[3]);
+    const isLegacyUsDate = first <= 12 && second > 12;
+    const day = isLegacyUsDate ? second : first;
+    const month = isLegacyUsDate ? first : second;
+    const parsedDate = new Date(year, month - 1, day);
+    const isValid =
+      !Number.isNaN(parsedDate.getTime()) &&
+      parsedDate.getFullYear() === year &&
+      parsedDate.getMonth() === month - 1 &&
+      parsedDate.getDate() === day;
+    return isValid ? parsedDate : null;
+  }
+
+  const parsed = new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
 const toIsoDate = (value) => {
   const parsed = parseDate(value);
-  return parsed ? parsed.toISOString().slice(0, 10) : "";
+  if (!parsed) {
+    return "";
+  }
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 const createHash = (value = "") => {

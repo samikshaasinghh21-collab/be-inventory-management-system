@@ -4,6 +4,7 @@ import {
   getSettings,
   saveSettings,
 } from "../services/settingsStore";
+import DateInput from "../components/common/DateInput";
 
 const inputClass =
   "w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none";
@@ -351,12 +352,9 @@ const Profile = () => {
                 <label className="text-sm font-medium text-slate-700">
                   Date of birth
                 </label>
-                <input
-                  type="date"
+                <DateInput
                   value={profile.dob || ""}
-                  onChange={(event) =>
-                    updateProfile("dob", event.target.value)
-                  }
+                  onChange={(value) => updateProfile("dob", value)}
                   className={inputClass}
                 />
               </div>

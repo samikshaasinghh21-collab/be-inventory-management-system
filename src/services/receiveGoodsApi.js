@@ -1,5 +1,6 @@
 import api from "./api";
 import { roundUnitPrice } from "../utils/formatters";
+import { parseDateValue } from "../utils/dateFormat";
 
 const toQuantity = (value) => {
   if (value === null || value === undefined || value === "") {
@@ -16,7 +17,8 @@ const toChronologyTime = (...values) => {
     if (!value) {
       continue;
     }
-    const time = new Date(value).getTime();
+    const date = parseDateValue(value);
+    const time = date ? date.getTime() : NaN;
     if (Number.isFinite(time)) {
       return time;
     }
