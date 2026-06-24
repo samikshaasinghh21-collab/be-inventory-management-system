@@ -70,6 +70,18 @@ const statusClass = (status) => {
  
 const getMovementTypeLabel = (type) =>
   type === "Reallocate" ? "Reallocation" : type || "-";
+
+const buildReallocationReferenceNumber = (id) => `REL-${id}`;
+
+const getReallocationReferenceSequence = (record = {}) => {
+  const reference = String(record.referenceNumber || "").trim();
+  const referenceMatch = reference.match(/^REL-(\d+)$/i);
+  if (referenceMatch) {
+    return Number(referenceMatch[1]) || 0;
+  }
+  const id = Number(record.id ?? record.transferId);
+  return Number.isFinite(id) ? id : 0;
+};
  
 const getReceiveReference = (record = {}) =>
   record.consumptionNumber ??
@@ -358,6 +370,18 @@ const ReallocateReturn = () => {
     () => [...records].sort((a, b) => sortValue(b) - sortValue(a)),
     [records]
   );
+
+  const nextReferenceNumber = useMemo(() => {
+    const maxSequence = records.reduce(
+      (max, record) => Math.max(max, getReallocationReferenceSequence(record)),
+      0
+    );
+    return buildReallocationReferenceNumber(maxSequence + 1);
+  }, [records]);
+
+  const displayedReferenceNumber =
+    form.referenceNumber ||
+    (editingId ? buildReallocationReferenceNumber(editingId) : nextReferenceNumber);
  
   const totalQty = useMemo(
     () =>
@@ -883,11 +907,16 @@ const ReallocateReturn = () => {
               <label className="text-sm font-medium text-slate-700">Reallocation Reference *</label>
               <input
                 type="text"
-                value={form.referenceNumber || (editingId ? `REL-${editingId}` : "Auto-generated on save")}
+                value={displayedReferenceNumber}
                 readOnly
-                placeholder="Auto-generated on save"
+                placeholder={nextReferenceNumber}
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-slate-700"
               />
+              {!editingId && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Next reference preview: {nextReferenceNumber}
+                </p>
+              )}
               {errors.referenceNumber && (
                 <p className="mt-1 text-xs text-red-600">{errors.referenceNumber}</p>
               )}

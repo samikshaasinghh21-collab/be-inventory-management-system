@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import useSettings from "../../hooks/useSettings";
 import { createItem } from "../../services/inventoryApi";
 import { fetchBrands } from "../../services/brandsApi";
@@ -56,6 +56,7 @@ const createInitialForm = (profileName = "", defaultUnit = "Nos") => ({
 
 const CreateProduct = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const settings = useSettings();
   const profileName = settings?.profile?.fullName || "";
   const defaultUnit = settings?.inventory?.defaultUnit || "Nos";
@@ -67,6 +68,41 @@ const CreateProduct = () => {
   const [errors, setErrors] = useState({});
   const [apiError, setApiError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const coreDetailsRef = useRef(null);
+  const unitsInventoryRef = useRef(null);
+  const configurationTaxRef = useRef(null);
+  const stockInfoRef = useRef(null);
+  const auditRef = useRef(null);
+
+  const productSections = [
+    { id: "core-details", label: "Core Details", ref: coreDetailsRef },
+    { id: "units-inventory", label: "Units & Inventory", ref: unitsInventoryRef },
+    { id: "configuration-tax", label: "Configuration & Tax", ref: configurationTaxRef },
+    { id: "stock-info", label: "Stock Info", ref: stockInfoRef },
+    { id: "remarks-audit", label: "Remarks & Audit", ref: auditRef },
+  ];
+
+  const scrollToSection = (sectionRef) => {
+    sectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+      inline: "nearest",
+    });
+  };
+
+  useEffect(() => {
+    if (location.hash !== "#stock-info") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      stockInfoRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+        inline: "nearest",
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [location.hash]);
 
   useEffect(() => {
     const syncCategories = () => setCategories(getCategories());
@@ -380,7 +416,29 @@ const CreateProduct = () => {
               </div>
             )}
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <nav
+              aria-label="Create product sections"
+              className="sticky top-0 z-20 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur"
+            >
+              <div className="flex gap-2 overflow-x-auto">
+                {productSections.map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    onClick={() => scrollToSection(section.ref)}
+                    className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  >
+                    {section.label}
+                  </button>
+                ))}
+              </div>
+            </nav>
+
+            <section
+              id="core-details"
+              ref={coreDetailsRef}
+              className="scroll-mt-20 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-base font-semibold text-slate-900">Core Details</h3>
                 <span className="text-xs text-slate-500">Fields marked * are required</span>
@@ -500,7 +558,11 @@ const CreateProduct = () => {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section
+              id="units-inventory"
+              ref={unitsInventoryRef}
+              className="scroll-mt-20 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
               <h3 className="text-base font-semibold text-slate-900">Units & Inventory</h3>
               <div className="mt-4 grid grid-cols-1 gap-5 lg:grid-cols-3">
                 <label>
@@ -600,7 +662,11 @@ const CreateProduct = () => {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section
+              id="configuration-tax"
+              ref={configurationTaxRef}
+              className="scroll-mt-20 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
               <h3 className="text-base font-semibold text-slate-900">Configuration & Tax</h3>
               <div className="mt-4 grid grid-cols-1 gap-5 lg:grid-cols-2">
                 <label>
@@ -665,7 +731,11 @@ const CreateProduct = () => {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section
+              id="stock-info"
+              ref={stockInfoRef}
+              className="scroll-mt-20 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
               <h3 className="text-base font-semibold text-slate-900">Stock Info</h3>
               <div className="mt-4 grid grid-cols-1 gap-5 md:grid-cols-2">
                 <label>
@@ -692,7 +762,11 @@ const CreateProduct = () => {
               </p>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section
+              id="remarks-audit"
+              ref={auditRef}
+              className="scroll-mt-20 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
               <h3 className="text-base font-semibold text-slate-900">Remarks & Audit</h3>
               <div className="mt-4 grid grid-cols-1 gap-5 lg:grid-cols-2">
                 <label className="lg:col-span-2">

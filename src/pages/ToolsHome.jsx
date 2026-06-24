@@ -15,6 +15,7 @@ import {
   setToolMaintenance,
   setTools,
 } from "../services/toolsStore";
+import { formatDate } from "../utils/dateFormat";
 
 const PAGE_SIZE = 6;
 
@@ -92,13 +93,6 @@ const ACTION_BUTTONS = {
 };
 
 const formatNumber = (value) => new Intl.NumberFormat("en-US").format(value);
-
-const formatDate = (value) => {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("en-GB").format(parsed);
-};
 
 const clampText = (value, max = 18) => {
   if (!value) return "-";

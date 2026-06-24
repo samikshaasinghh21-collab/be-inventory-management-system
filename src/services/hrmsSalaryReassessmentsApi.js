@@ -52,6 +52,9 @@ const calculatePfAmount = (grossSalary) =>
 const calculateEsiAmount = (grossSalary) =>
   Math.round(toNumber(grossSalary) * 0.015);
 
+const calculateMonthlySalary = (grossSalary) =>
+  Math.round(toNumber(grossSalary) / 12);
+
 const metricKeys = [
   ["workQuality", "WorkQuality"],
   ["communication", "Communication"],
@@ -77,19 +80,28 @@ const buildMetrics = (record = {}) =>
 const buildCompensationRows = (revisedSalary = 0, record = {}) => {
   const grossSalary = toNumber(revisedSalary);
   const deduction = toNumber(record.salaryDeduction ?? record.deduction);
+  const allowances = toNumber(record.allowances ?? record.allowance);
   const pfAmount =
     toOptionalNumber(record.pfAmount ?? record.providentFund) ??
     calculatePfAmount(grossSalary);
   const esiAmount =
     toOptionalNumber(record.esiAmount ?? record.esi) ??
     calculateEsiAmount(grossSalary);
+  const professionalTax = toNumber(record.professionalTax ?? record.pt);
+  const tdsAmount = toNumber(record.tdsAmount ?? record.tds);
+  const totalDeductions =
+    deduction + pfAmount + esiAmount + professionalTax + tdsAmount;
 
   return [
     ["Gross Salary", grossSalary],
+    ["Monthly Salary", calculateMonthlySalary(grossSalary)],
+    ["Allowances", allowances],
     ["Deduction", deduction],
     ["PF", pfAmount],
     ["ESI", esiAmount],
-    ["Net Salary", grossSalary - deduction - pfAmount - esiAmount],
+    ["TDS", tdsAmount],
+    ["Professional Tax", professionalTax],
+    ["Net Salary", grossSalary + allowances - totalDeductions],
   ];
 };
 
@@ -126,6 +138,9 @@ export const normalizeHrmsSalaryReassessment = (record = {}) => {
     toOptionalNumber(
       record.salaryDeduction ?? record.deduction ?? record.SalaryDeduction
     ) ?? 0;
+  const allowances =
+    toOptionalNumber(record.allowances ?? record.allowance ?? record.Allowances) ??
+    0;
   const pfAmount =
     toOptionalNumber(
       record.pfAmount ?? record.providentFund ?? record.ProvidentFund
@@ -133,8 +148,14 @@ export const normalizeHrmsSalaryReassessment = (record = {}) => {
   const esiAmount =
     toOptionalNumber(record.esiAmount ?? record.esi ?? record.ESIAmount) ??
     calculateEsiAmount(revisedSalary);
-  const totalDeductions = salaryDeduction + pfAmount + esiAmount;
-  const netSalary = revisedSalary - totalDeductions;
+  const professionalTax =
+    toOptionalNumber(record.professionalTax ?? record.pt ?? record.ProfessionalTax) ??
+    0;
+  const tdsAmount =
+    toOptionalNumber(record.tdsAmount ?? record.tds ?? record.TDSAmount) ?? 0;
+  const totalDeductions =
+    salaryDeduction + pfAmount + esiAmount + professionalTax + tdsAmount;
+  const netSalary = revisedSalary + allowances - totalDeductions;
   const status =
     record.status ??
     record.Status ??
@@ -157,8 +178,11 @@ export const normalizeHrmsSalaryReassessment = (record = {}) => {
     bonus,
     compensationRows: buildCompensationRows(revisedSalary, {
       esiAmount,
+      allowances,
       pfAmount,
+      professionalTax,
       salaryDeduction,
+      tdsAmount,
     }),
     currentRole: record.currentRole ?? record.CurrentRole ?? "",
     currentSalary,
@@ -209,6 +233,8 @@ export const normalizeHrmsSalaryReassessment = (record = {}) => {
           ? "Medium"
           : "Low",
     revisedSalary,
+    allowances,
+    allowance: allowances,
     salaryDeduction,
     deduction: salaryDeduction,
     reviewDate: toDateInputValue(record.reviewDate ?? record.ReviewDate),
@@ -221,12 +247,18 @@ export const normalizeHrmsSalaryReassessment = (record = {}) => {
       "Pending",
     salaryStatus: status,
     totalDeductions,
+    totalEarnings: revisedSalary + allowances,
     savedAt: record.savedAt ?? record.SavedDate ?? null,
     esiAmount,
     esi: esiAmount,
+    monthlySalary: calculateMonthlySalary(revisedSalary),
     netSalary,
     pfAmount,
     providentFund: pfAmount,
+    professionalTax,
+    pt: professionalTax,
+    tdsAmount,
+    tds: tdsAmount,
     strengths: record.strengths ?? record.EmployeeStrengths ?? "",
     directorStatus:
       record.directorStatus ?? record.DirectorApprovalStatus ?? "Pending",

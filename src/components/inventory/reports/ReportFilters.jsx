@@ -1,3 +1,4 @@
+import DateInput from "../../common/DateInput";
 import { REPORT_ACTIVITY_TYPES } from "./reportUtils";
 
 const inputClass =
@@ -42,23 +43,23 @@ const ReportFilters = ({
 
         <div className="xl:col-span-3">
           <label className="text-sm font-medium text-slate-700">From Date</label>
-          <input
-            type="date"
+          <DateInput
             value={filters.fromDate}
-            onChange={(event) => onFieldChange("fromDate", event.target.value)}
+            onChange={(value) => onFieldChange("fromDate", value)}
             className={inputClass}
             disabled={disabled}
+            showCalendarButton={!disabled}
           />
         </div>
 
         <div className="xl:col-span-4">
           <label className="text-sm font-medium text-slate-700">To Date</label>
-          <input
-            type="date"
+          <DateInput
             value={filters.toDate}
-            onChange={(event) => onFieldChange("toDate", event.target.value)}
+            onChange={(value) => onFieldChange("toDate", value)}
             className={inputClass}
             disabled={disabled}
+            showCalendarButton={!disabled}
           />
         </div>
 

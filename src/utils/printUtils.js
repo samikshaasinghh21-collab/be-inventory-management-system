@@ -3,14 +3,21 @@ import { defaultBrandLogoUrl, resolveBrandLogo } from "./branding";
 const commonStyles = `
   @page {
     size: A4;
-    margin: 12mm;
+    margin: 10mm;
+  }
+  html {
+    background: #fff;
   }
   body {
     font-family: "Inter", "Segoe UI", system-ui, sans-serif;
     color: #0f172a;
     margin: 0;
-    padding: 24px;
+    padding: 0;
     background: #fff;
+    min-width: 0;
+    overflow-x: hidden;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   *,
   *::before,
@@ -21,11 +28,19 @@ const commonStyles = `
     margin: 0;
     font-weight: 600;
   }
+  .print-page {
+    width: 100%;
+    max-width: 190mm;
+    margin: 0 auto;
+    padding: 16px;
+    transform-origin: top left;
+  }
   .print-header {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
     margin-bottom: 1rem;
+    page-break-after: avoid;
   }
   .print-title {
     font-size: 1.6rem;
@@ -102,6 +117,26 @@ const commonStyles = `
   }
   .print-body {
     width: 100%;
+    max-width: 100%;
+    overflow: visible;
+  }
+  .print-body *,
+  .document-view-panel * {
+    max-width: 100%;
+  }
+  .print-body .overflow-x-auto,
+  .print-body .app-scroll-region {
+    overflow: visible !important;
+  }
+  .print-body [class*="min-w-"] {
+    min-width: 0 !important;
+  }
+  .print-body [class*="max-h-"] {
+    max-height: none !important;
+  }
+  .print-body .sticky,
+  .print-body [class*="sticky"] {
+    position: static !important;
   }
   .print-body img {
     max-width: 260px;
@@ -116,7 +151,7 @@ const commonStyles = `
     width: 100%;
     border-collapse: collapse;
     margin-top: 1rem;
-    table-layout: auto;
+    table-layout: fixed;
     page-break-inside: auto;
   }
   tr {
@@ -127,6 +162,10 @@ const commonStyles = `
     padding: 0.55rem 0.65rem;
     font-size: 0.9rem;
     text-align: left;
+    vertical-align: top;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   th {
     background: #f8fafc;
@@ -168,7 +207,41 @@ const commonStyles = `
       display: none !important;
     }
     body {
-      padding: 16px;
+      padding: 0;
+      overflow: visible !important;
+    }
+    .print-page {
+      max-width: 100%;
+      padding: 0;
+    }
+    .print-title {
+      font-size: 1.2rem;
+      letter-spacing: 0.12em;
+    }
+    .print-subtitle {
+      font-size: 0.85rem;
+    }
+    .print-brand {
+      margin-top: 0.5rem;
+      padding-bottom: 0.5rem;
+    }
+    .print-brand-logo {
+      max-height: 72px;
+    }
+    .print-meta-grid {
+      gap: 0.45rem;
+    }
+    .print-meta-item {
+      padding: 0.45rem;
+    }
+    table {
+      min-width: 0 !important;
+      max-width: 100% !important;
+      margin-top: 0.65rem;
+    }
+    th, td {
+      padding: 0.35rem 0.4rem;
+      font-size: 0.72rem;
     }
   }
 `;
@@ -240,19 +313,21 @@ const buildDocument = ({
         <style>${commonStyles}</style>
       </head>
       <body>
-        ${
-          showHeader
-            ? `<header class="print-header">
-                <div class="print-title">${title}</div>
-                ${subtitle ? `<p class="print-subtitle">${subtitle}</p>` : ""}
-                ${brandHeader}
-                ${formattedMeta}
-              </header>`
-            : ""
-        }
-        <section class="print-body">
-          ${body}
-        </section>
+        <main class="print-page">
+          ${
+            showHeader
+              ? `<header class="print-header">
+                  <div class="print-title">${title}</div>
+                  ${subtitle ? `<p class="print-subtitle">${subtitle}</p>` : ""}
+                  ${brandHeader}
+                  ${formattedMeta}
+                </header>`
+              : ""
+          }
+          <section class="print-body">
+            ${body}
+          </section>
+        </main>
       </body>
     </html>`;
 };
@@ -283,6 +358,28 @@ const waitForNode = async (selector, timeoutMs = 900) => {
   return null;
 };
 
+const fitPrintDocument = (printWindow) => {
+  try {
+    const page = printWindow.document.querySelector(".print-page");
+    if (!page) {
+      return;
+    }
+    page.style.removeProperty("zoom");
+    const availableWidth =
+      printWindow.document.documentElement.clientWidth ||
+      printWindow.innerWidth ||
+      page.clientWidth;
+    const contentWidth = page.scrollWidth;
+    if (!availableWidth || !contentWidth || contentWidth <= availableWidth) {
+      return;
+    }
+    const scale = Math.max(0.72, Math.min(1, availableWidth / contentWidth));
+    page.style.zoom = String(scale);
+  } catch {
+    // Best-effort print fitting only.
+  }
+};
+
 const printWhenReady = (printWindow) => {
   let printed = false;
   const run = () => {
@@ -291,6 +388,7 @@ const printWhenReady = (printWindow) => {
     }
     printed = true;
     try {
+      fitPrintDocument(printWindow);
       printWindow.focus();
       printWindow.print();
     } catch {

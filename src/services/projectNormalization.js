@@ -1,4 +1,5 @@
 import { formatCustomerName } from "../utils/formatters";
+import { parseDateValue } from "../utils/dateFormat";
 
 const pad = (value) => String(value).padStart(2, "0");
 
@@ -17,12 +18,12 @@ export const normalizeProjectDate = (value) => {
     return `${directMatch[1]}-${directMatch[2]}-${directMatch[3]}`;
   }
 
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
+  const parsed = parseDateValue(trimmed);
+  if (!parsed || Number.isNaN(parsed.getTime())) {
     return null;
   }
 
-  return `${parsed.getUTCFullYear()}-${pad(parsed.getUTCMonth() + 1)}-${pad(parsed.getUTCDate())}`;
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
 };
 
 export const normalizeProjectRecord = (project = {}) => ({

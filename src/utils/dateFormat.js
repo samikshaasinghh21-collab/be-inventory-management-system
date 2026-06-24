@@ -17,15 +17,24 @@ export const parseDateValue = (value) => {
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  const slashDateMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
-  if (slashDateMatch) {
-    const first = Number(slashDateMatch[1]);
-    const second = Number(slashDateMatch[2]);
-    const year = Number(slashDateMatch[3]);
-    const month = first > 12 ? second : first;
-    const day = first > 12 ? first : second;
+  const separatedDateMatch = /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/.exec(trimmed);
+  if (separatedDateMatch) {
+    const first = Number(separatedDateMatch[1]);
+    const second = Number(separatedDateMatch[2]);
+    const year =
+      separatedDateMatch[3].length === 2
+        ? Number(`20${separatedDateMatch[3]}`)
+        : Number(separatedDateMatch[3]);
+    const isLegacyUsDate = first <= 12 && second > 12;
+    const day = isLegacyUsDate ? second : first;
+    const month = isLegacyUsDate ? first : second;
     const date = new Date(year, month - 1, day);
-    return Number.isNaN(date.getTime()) ? null : date;
+    const isValid =
+      !Number.isNaN(date.getTime()) &&
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day;
+    return isValid ? date : null;
   }
 
   const date = new Date(trimmed);
@@ -44,8 +53,6 @@ const getDateParts = (value) => {
   }
   return parsed;
 };
-
-const isValidDate = (value) => Boolean(getDateParts(value));
 
 const pad = (value) => String(value).padStart(2, "0");
 

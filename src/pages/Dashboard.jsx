@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { formatDate } from "../utils/dateFormat";
+import { formatDate, parseDateValue } from "../utils/dateFormat";
 import { formatInrCurrency, roundUnitPrice } from "../utils/formatters";
 import { ensureApiAvailable, isApiUnavailableError } from "../services/api";
 import { fetchProjects } from "../services/projectsApi";
@@ -26,11 +26,6 @@ const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
 const toNumber = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
-};
-const parseDateValue = (value) => {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 const isInMonth = (value, monthOffset = 0) => {
   const date = parseDateValue(value);

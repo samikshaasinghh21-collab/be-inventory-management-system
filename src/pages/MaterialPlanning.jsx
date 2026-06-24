@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import useMrpPlanning from "../hooks/useMrpPlanning";
+import { formatDate } from "../utils/dateFormat";
 import { formatInrCurrency, roundUnitPrice } from "../utils/formatters";
 
 const statusMeta = {
@@ -19,22 +20,6 @@ const statusMeta = {
     cardClass: "border-red-200 bg-red-50 text-red-700",
     pillClass: "bg-red-100 text-red-700",
   },
-};
-
-const formatDate = (value) => {
-  if (!value) {
-    return "No deadline";
-  }
-
-  try {
-    return new Intl.DateTimeFormat("en-IN", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
 };
 
 const MaterialPlanning = () => {

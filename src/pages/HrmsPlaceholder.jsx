@@ -38,6 +38,7 @@ import {
   fetchHrmsRelieving,
   getHrmsRelievingErrorMessage,
 } from "../services/hrmsRelievingApi";
+import { parseDateValue } from "../utils/dateFormat";
 
 const seedEmployees = [];
 
@@ -681,8 +682,8 @@ const formatDate = (value) => {
     const year = dmyMatch[3].length === 2 ? `20${dmyMatch[3]}` : dmyMatch[3];
     return `${dmyMatch[1]}/${dmyMatch[2]}/${year}`;
   }
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) {
+  const date = parseDateValue(text);
+  if (!date || Number.isNaN(date.getTime())) {
     return value;
   }
   return `${padDatePart(date.getDate())}/${padDatePart(
@@ -692,8 +693,8 @@ const formatDate = (value) => {
 
 const formatDateTime = (value) => {
   if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const date = parseDateValue(value);
+  if (!date || Number.isNaN(date.getTime())) {
     return formatDate(value);
   }
   return `${formatDate(date.toISOString())} ${date.toLocaleTimeString("en-GB", {
@@ -750,6 +751,44 @@ const getAttendanceMonthIndex = (value) => {
 const areAttendanceMonthsEqual = (left, right) =>
   normalizeAttendanceMonth(left) === normalizeAttendanceMonth(right);
 
+const getAttendanceMonthDate = (value) => {
+  const normalized = normalizeAttendanceMonth(value);
+  if (!normalized) return null;
+
+  const parsed = new Date(`1 ${normalized}`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getAttendanceDays = (value) => {
+  const monthDate = getAttendanceMonthDate(value);
+  if (!monthDate) return [];
+
+  const year = monthDate.getFullYear();
+  const monthIndex = monthDate.getMonth();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+  return Array.from({ length: daysInMonth }, (_, index) => {
+    const date = new Date(year, monthIndex, index + 1);
+    return {
+      day: index + 1,
+      iso: `${year}-${padDatePart(monthIndex + 1)}-${padDatePart(index + 1)}`,
+      isWeekend: date.getDay() === 0 || date.getDay() === 6,
+      weekday: date.toLocaleDateString("en-US", { weekday: "short" }),
+    };
+  });
+};
+
+const normalizeAttendanceStatusesForMonth = (statuses = [], monthValue) => {
+  const days = getAttendanceDays(monthValue);
+  const size = days.length || DEFAULT_ATTENDANCE_STATUSES.length;
+  const source = Array.isArray(statuses) ? statuses : [];
+
+  return Array.from({ length: size }, (_, index) => {
+    const status = source[index] || DEFAULT_ATTENDANCE_STATUSES[index] || "P";
+    return ["P", "A", "L", "H"].includes(status) ? status : "P";
+  });
+};
+
 const toDateInputValue = (value = "") => {
   const text = String(value || "");
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
@@ -758,6 +797,45 @@ const toDateInputValue = (value = "") => {
   if (!match) return "";
   const year = match[3].length === 2 ? `20${match[3]}` : match[3];
   return `${year}-${match[2]}-${match[1]}`;
+};
+
+const toIsoDateValue = (value = "") => {
+  const text = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+
+  const dmyValue = toDateInputValue(text);
+  if (dmyValue) return dmyValue;
+
+  const date = parseDateValue(text);
+  return date && !Number.isNaN(date.getTime())
+    ? `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(
+        date.getDate()
+      )}`
+    : "";
+};
+
+const addDaysToIsoDate = (value, days) => {
+  const isoValue = toIsoDateValue(value);
+  if (!isoValue) return "";
+
+  const [year, month, day] = isoValue.split("-").map(Number);
+  const date = new Date(year, month - 1, day + days);
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(
+    date.getDate()
+  )}`;
+};
+
+const getYearEndDate = (value = todayValue()) => {
+  const isoValue = toIsoDateValue(value) || todayValue();
+  const year = Number(isoValue.slice(0, 4)) || new Date().getFullYear();
+  return `${year}-12-31`;
+};
+
+const buildReviewPeriod = (startDate, endDate) => {
+  if (!startDate && !endDate) return "";
+  if (!startDate) return `Until ${formatDate(endDate)}`;
+  if (!endDate) return `From ${formatDate(startDate)}`;
+  return `${formatDate(startDate)} - ${formatDate(endDate)}`;
 };
 
 const displayValue = (value) => {
@@ -788,13 +866,18 @@ const buildEmployeeForm = (employee) => {
     maritalStatus: source.maritalStatus || "",
     nationality: source.nationality || "",
     panNumber: source.panNumber || "",
-    bankAccountNumber: source.bankAccountNumber || "",
-    bankIfsc: source.bankIfsc || "",
+    documentNumber: source.documentNumber || "",
+    relation: source.relation || source.emergencyContactRelation || "",
+    esiNumber: source.esiNumber || "",
+    uanNumber: source.uanNumber || "",
     phone: source.phone || "",
     photo: source.photo || "",
     salary: String(source.salary || ""),
+    allowances: String(source.allowances ?? source.allowance ?? ""),
     salaryDeduction: String(source.salaryDeduction ?? source.deduction ?? ""),
     pfAmount: String(source.pfAmount ?? source.providentFund ?? ""),
+    professionalTax: String(source.professionalTax ?? source.pt ?? ""),
+    tdsAmount: String(source.tdsAmount ?? source.tds ?? ""),
     esiAmount: String(source.esiAmount ?? source.esi ?? ""),
     status: source.status || "Active",
   };
@@ -854,15 +937,15 @@ const employeeDocumentFields = [
   { key: "pan", label: "PAN", multiple: false },
   { key: "aadhaar", label: "Aadhar", multiple: false },
   { key: "offerLetter", label: "Offer Letter", multiple: false },
-  { key: "bankDetails", label: "Bank Details", multiple: false },
   { key: "uan", label: "UAN Number", multiple: false },
   { key: "esi", label: "ESI", multiple: false },
-  { key: "certificate", label: "Certificate", multiple: false },
+  { key: "certificate", label: "Certificates", multiple: true },
   {
     key: "additionalSpecialisationCertificates",
     label: "Additional Specialisation Certificates",
     multiple: true,
   },
+  { key: "otherDocuments", label: "Other Documents", multiple: true },
 ];
 
 const emptyEmployeeDocuments = () =>
@@ -914,6 +997,33 @@ const readEmployeeDocumentFile = (file) =>
     reader.readAsDataURL(file);
   });
 
+const validateEmployeeDocuments = ({ documents, panNumber, documentNumber }) => {
+  const normalizedDocuments = normalizeEmployeeDocuments(documents);
+  const allDocuments = Object.values(normalizedDocuments).flat();
+  const invalidDocument = allDocuments.find(
+    (document) =>
+      !document ||
+      !document.name ||
+      !Number.isFinite(Number(document.size)) ||
+      Number(document.size) <= 0 ||
+      !document.dataUrl
+  );
+
+  if (invalidDocument) {
+    return "One or more uploaded documents are incomplete. Please remove and upload them again.";
+  }
+
+  if (panNumber && !normalizedDocuments.pan.length) {
+    return "Upload PAN document before saving employee details.";
+  }
+
+  if (documentNumber && !allDocuments.length) {
+    return "Upload at least one document for the entered document number.";
+  }
+
+  return "";
+};
+
 const escapeHtml = (value = "") =>
   String(value)
     .replaceAll("&", "&amp;")
@@ -933,7 +1043,7 @@ const printEmployeeProfile = (employee) => {
     ["Email", displayValue(employee.email)],
     ["Phone", displayValue(employee.phone)],
     ["Emergency Contact", displayValue(employee.emergencyContactNumber)],
-    ["Contact Relation", displayValue(employee.emergencyContactRelation)],
+    ["Relation", displayValue(employee.relation || employee.emergencyContactRelation)],
     ["Status", displayValue(employee.status)],
     ["Reporting To", displayValue(employee.manager)],
     ["Date of Joining", displayValue(employee.joined)],
@@ -942,9 +1052,11 @@ const printEmployeeProfile = (employee) => {
     ["Nationality", displayValue(employee.nationality)],
     ["Blood Group", displayValue(employee.bloodGroup)],
     ["PAN Number", displayValue(employee.panNumber)],
-    ["Bank Account", displayValue(employee.bankAccountNumber)],
-    ["Bank IFSC", displayValue(employee.bankIfsc)],
-    ["Salary", money(employee.salary)],
+    ["Document Number", displayValue(employee.documentNumber)],
+    ["UAN Number", displayValue(employee.uanNumber)],
+    ["ESI Number", displayValue(employee.esiNumber)],
+    ["Gross Salary", money(employee.salary)],
+    ["Monthly Salary", money(getSalaryBreakup(employee).monthlySalary)],
     ["Address", displayValue(employee.address)],
   ];
   const printWindow = window.open("", "_blank", "width=900,height=700");
@@ -1331,12 +1443,24 @@ const calculatePfAmount = (grossSalary) =>
 const calculateEsiAmount = (grossSalary) =>
   Math.round(toSalaryNumber(grossSalary) * 0.015);
 
+const calculateMonthlySalary = (grossSalary) =>
+  Math.round(toSalaryNumber(grossSalary) / 12);
+
 const getSalaryBreakup = (source = {}, grossOverride) => {
   const grossSalary = toSalaryNumber(
-    grossOverride ?? source.salary ?? source.basicSalary
+    grossOverride ?? source.salary ?? source.grossSalary ?? source.basicSalary
+  );
+  const allowances = toSalaryNumber(
+    source.allowances ?? source.allowance ?? source.Allowances
   );
   const deduction = toSalaryNumber(
     source.salaryDeduction ?? source.deduction ?? source.SalaryDeduction
+  );
+  const tdsAmount = toSalaryNumber(
+    source.tdsAmount ?? source.tds ?? source.TDSAmount
+  );
+  const professionalTax = toSalaryNumber(
+    source.professionalTax ?? source.pt ?? source.ProfessionalTax
   );
   const pfAmount = toSalaryNumber(
     source.pfAmount ??
@@ -1349,31 +1473,48 @@ const getSalaryBreakup = (source = {}, grossOverride) => {
     source.esiAmount ?? source.esi ?? source.ESIAmount,
     calculateEsiAmount(grossSalary)
   );
-  const totalDeductions = deduction + pfAmount + esiAmount;
+  const totalEarnings = grossSalary + allowances;
+  const totalDeductions =
+    deduction + pfAmount + esiAmount + tdsAmount + professionalTax;
 
   return {
+    allowances,
     deduction,
     esiAmount,
     grossSalary,
-    netSalary: grossSalary - totalDeductions,
+    monthlySalary: calculateMonthlySalary(grossSalary),
+    netSalary: totalEarnings - totalDeductions,
     pfAmount,
+    professionalTax,
+    tdsAmount,
+    totalEarnings,
     totalDeductions,
   };
 };
 
 const getFormSalaryBreakup = (form = {}) => {
   const grossSalary = toSalaryNumber(form.salary);
+  const allowances = toSalaryNumber(form.allowances);
   const deduction = toSalaryNumber(form.salaryDeduction);
+  const tdsAmount = toSalaryNumber(form.tdsAmount);
+  const professionalTax = toSalaryNumber(form.professionalTax);
   const pfAmount = toSalaryNumber(form.pfAmount, calculatePfAmount(grossSalary));
   const esiAmount = toSalaryNumber(form.esiAmount, calculateEsiAmount(grossSalary));
-  const totalDeductions = deduction + pfAmount + esiAmount;
+  const totalEarnings = grossSalary + allowances;
+  const totalDeductions =
+    deduction + pfAmount + esiAmount + tdsAmount + professionalTax;
 
   return {
+    allowances,
     deduction,
     esiAmount,
     grossSalary,
-    netSalary: grossSalary - totalDeductions,
+    monthlySalary: calculateMonthlySalary(grossSalary),
+    netSalary: totalEarnings - totalDeductions,
     pfAmount,
+    professionalTax,
+    tdsAmount,
+    totalEarnings,
     totalDeductions,
   };
 };
@@ -2161,7 +2302,11 @@ const EmployeeListPage = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [filteredEmployees]);
+  }, [query]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(Math.max(page, 1), pageCount));
+  }, [pageCount]);
 
   return (
     <Panel>
@@ -2322,13 +2467,18 @@ const AddEmployeePage = () => {
     maritalStatus: "",
     nationality: "",
     panNumber: "",
-    bankAccountNumber: "",
-    bankIfsc: "",
+    documentNumber: "",
+    relation: "",
+    esiNumber: "",
+    uanNumber: "",
     phone: "",
     photo: "",
     pfAmount: "",
     salary: "",
+    allowances: "",
     salaryDeduction: "",
+    professionalTax: "",
+    tdsAmount: "",
     esiAmount: "",
     status: "Active",
   });
@@ -2367,9 +2517,13 @@ const AddEmployeePage = () => {
       return;
     }
 
-    const normalizedIfsc = form.bankIfsc.trim().toUpperCase();
-    if (normalizedIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(normalizedIfsc)) {
-      setError("IFSC code must be 11 characters in the format AAAA0AAAAA.");
+    const documentError = validateEmployeeDocuments({
+      documents: form.documents,
+      documentNumber: form.documentNumber.trim(),
+      panNumber: normalizedPan,
+    });
+    if (documentError) {
+      setError(documentError);
       return;
     }
 
@@ -2380,17 +2534,22 @@ const AddEmployeePage = () => {
       designation: form.designation,
       email: form.email.trim(),
       emergencyContactNumber: form.emergencyContactNumber.trim(),
-      emergencyContactRelation: form.emergencyContactRelation.trim(),
+      emergencyContactRelation: form.relation.trim(),
+      relation: form.relation.trim(),
       panNumber: normalizedPan,
-      bankAccountNumber: form.bankAccountNumber.trim(),
-      bankIfsc: normalizedIfsc,
+      documentNumber: form.documentNumber.trim(),
+      esiNumber: form.esiNumber.trim(),
+      uanNumber: form.uanNumber.trim(),
       phone: form.phone.trim(),
       status: form.status,
       manager: form.manager.trim(),
       joined: formatDate(form.joined),
       salary: salaryBreakup.grossSalary,
+      allowances: salaryBreakup.allowances,
       salaryDeduction: salaryBreakup.deduction,
       pfAmount: salaryBreakup.pfAmount,
+      professionalTax: salaryBreakup.professionalTax,
+      tdsAmount: salaryBreakup.tdsAmount,
       esiAmount: salaryBreakup.esiAmount,
       avatar: getInitials(form.fullName),
       address: form.address.trim(),
@@ -2519,13 +2678,13 @@ const AddEmployeePage = () => {
                   placeholder="Enter emergency contact number"
                 />
               </Field>
-              <Field label="Contact Relation">
+              <Field label="Relation">
                 <Input
-                  value={form.emergencyContactRelation}
+                  value={form.relation}
                   onChange={(event) =>
-                    updateForm("emergencyContactRelation", event.target.value)
+                    updateForm("relation", event.target.value)
                   }
-                  placeholder="Enter emergency contact relation"
+                  placeholder="Enter relation"
                 />
               </Field>
               <Field label="Email">
@@ -2606,19 +2765,25 @@ const AddEmployeePage = () => {
                 maxLength={10}
               />
             </Field>
-            <Field label="Bank Account Number">
+            <Field label="Document Number">
               <Input
-                value={form.bankAccountNumber}
-                onChange={(event) => updateForm("bankAccountNumber", event.target.value)}
-                placeholder="Enter bank account number"
+                value={form.documentNumber}
+                onChange={(event) => updateForm("documentNumber", event.target.value)}
+                placeholder="Enter document number"
               />
             </Field>
-            <Field label="IFSC Code">
+            <Field label="UAN Number">
               <Input
-                value={form.bankIfsc}
-                onChange={(event) => updateForm("bankIfsc", event.target.value.toUpperCase())}
-                placeholder="Enter IFSC code"
-                maxLength={11}
+                value={form.uanNumber}
+                onChange={(event) => updateForm("uanNumber", event.target.value)}
+                placeholder="Enter UAN number"
+              />
+            </Field>
+            <Field label="ESI Number">
+              <Input
+                value={form.esiNumber}
+                onChange={(event) => updateForm("esiNumber", event.target.value)}
+                placeholder="Enter ESI number"
               />
             </Field>
             <Field label="Status">
@@ -2645,6 +2810,18 @@ const AddEmployeePage = () => {
                 placeholder="Enter gross salary"
               />
             </Field>
+            <Field label="Monthly Salary">
+              <Input value={money(getFormSalaryBreakup(form).monthlySalary)} disabled />
+            </Field>
+            <Field label="Allowances">
+              <Input
+                type="number"
+                min="0"
+                value={form.allowances}
+                onChange={(event) => updateForm("allowances", event.target.value)}
+                placeholder="Enter allowances"
+              />
+            </Field>
             <Field label="Deduction">
               <Input
                 type="number"
@@ -2668,16 +2845,32 @@ const AddEmployeePage = () => {
                 onChange={(event) => updateForm("pfAmount", event.target.value)}
               />
             </Field>
-            <Field label="ESI">
+            <Field label="TDS">
               <Input
                 type="number"
                 min="0"
+                value={form.tdsAmount}
+                onChange={(event) => updateForm("tdsAmount", event.target.value)}
+                placeholder="Enter TDS"
+              />
+            </Field>
+            <Field label="Professional Tax (PT)">
+              <Input
+                type="number"
+                min="0"
+                value={form.professionalTax}
+                onChange={(event) => updateForm("professionalTax", event.target.value)}
+                placeholder="Enter PT"
+              />
+            </Field>
+            <Field label="ESI Amount">
+              <Input
                 value={
                   form.esiAmount === ""
                     ? calculateEsiAmount(form.salary)
                     : form.esiAmount
                 }
-                onChange={(event) => updateForm("esiAmount", event.target.value)}
+                disabled
               />
             </Field>
             <div className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-blue-900 sm:col-span-2">
@@ -2772,9 +2965,13 @@ const EditEmployeePage = () => {
       return;
     }
 
-    const normalizedIfsc = form.bankIfsc.trim().toUpperCase();
-    if (normalizedIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(normalizedIfsc)) {
-      setError("IFSC code must be 11 characters in the format AAAA0AAAAA.");
+    const documentError = validateEmployeeDocuments({
+      documents: form.documents,
+      documentNumber: form.documentNumber.trim(),
+      panNumber: normalizedPan,
+    });
+    if (documentError) {
+      setError(documentError);
       return;
     }
 
@@ -2786,17 +2983,22 @@ const EditEmployeePage = () => {
       designation: form.designation.trim(),
       email: form.email.trim(),
       emergencyContactNumber: form.emergencyContactNumber.trim(),
-      emergencyContactRelation: form.emergencyContactRelation.trim(),
+      emergencyContactRelation: form.relation.trim(),
+      relation: form.relation.trim(),
       panNumber: normalizedPan,
-      bankAccountNumber: form.bankAccountNumber.trim(),
-      bankIfsc: normalizedIfsc,
+      documentNumber: form.documentNumber.trim(),
+      esiNumber: form.esiNumber.trim(),
+      uanNumber: form.uanNumber.trim(),
       phone: form.phone.trim(),
       status: form.status,
       manager: form.manager.trim(),
       joined: formatDate(form.joined),
       salary: salaryBreakup.grossSalary,
+      allowances: salaryBreakup.allowances,
       salaryDeduction: salaryBreakup.deduction,
       pfAmount: salaryBreakup.pfAmount,
+      professionalTax: salaryBreakup.professionalTax,
+      tdsAmount: salaryBreakup.tdsAmount,
       esiAmount: salaryBreakup.esiAmount,
       avatar: getInitials(form.fullName),
       address: form.address.trim(),
@@ -2959,13 +3161,13 @@ const EditEmployeePage = () => {
                   placeholder="Enter emergency contact number"
                 />
               </Field>
-              <Field label="Contact Relation">
+              <Field label="Relation">
                 <Input
-                  value={form.emergencyContactRelation}
+                  value={form.relation}
                   onChange={(event) =>
-                    updateForm("emergencyContactRelation", event.target.value)
+                    updateForm("relation", event.target.value)
                   }
-                  placeholder="Enter emergency contact relation"
+                  placeholder="Enter relation"
                 />
               </Field>
               <Field label="Email">
@@ -3046,19 +3248,25 @@ const EditEmployeePage = () => {
                 maxLength={10}
               />
             </Field>
-            <Field label="Bank Account Number">
+            <Field label="Document Number">
               <Input
-                value={form.bankAccountNumber}
-                onChange={(event) => updateForm("bankAccountNumber", event.target.value)}
-                placeholder="Enter bank account number"
+                value={form.documentNumber}
+                onChange={(event) => updateForm("documentNumber", event.target.value)}
+                placeholder="Enter document number"
               />
             </Field>
-            <Field label="IFSC Code">
+            <Field label="UAN Number">
               <Input
-                value={form.bankIfsc}
-                onChange={(event) => updateForm("bankIfsc", event.target.value.toUpperCase())}
-                placeholder="Enter IFSC code"
-                maxLength={11}
+                value={form.uanNumber}
+                onChange={(event) => updateForm("uanNumber", event.target.value)}
+                placeholder="Enter UAN number"
+              />
+            </Field>
+            <Field label="ESI Number">
+              <Input
+                value={form.esiNumber}
+                onChange={(event) => updateForm("esiNumber", event.target.value)}
+                placeholder="Enter ESI number"
               />
             </Field>
             <Field label="Status">
@@ -3086,6 +3294,18 @@ const EditEmployeePage = () => {
                 placeholder="Enter gross salary"
               />
             </Field>
+            <Field label="Monthly Salary">
+              <Input value={money(getFormSalaryBreakup(form).monthlySalary)} disabled />
+            </Field>
+            <Field label="Allowances">
+              <Input
+                type="number"
+                min="0"
+                value={form.allowances}
+                onChange={(event) => updateForm("allowances", event.target.value)}
+                placeholder="Enter allowances"
+              />
+            </Field>
             <Field label="Deduction">
               <Input
                 type="number"
@@ -3109,16 +3329,32 @@ const EditEmployeePage = () => {
                 onChange={(event) => updateForm("pfAmount", event.target.value)}
               />
             </Field>
-            <Field label="ESI">
+            <Field label="TDS">
               <Input
                 type="number"
                 min="0"
+                value={form.tdsAmount}
+                onChange={(event) => updateForm("tdsAmount", event.target.value)}
+                placeholder="Enter TDS"
+              />
+            </Field>
+            <Field label="Professional Tax (PT)">
+              <Input
+                type="number"
+                min="0"
+                value={form.professionalTax}
+                onChange={(event) => updateForm("professionalTax", event.target.value)}
+                placeholder="Enter PT"
+              />
+            </Field>
+            <Field label="ESI Amount">
+              <Input
                 value={
                   form.esiAmount === ""
                     ? calculateEsiAmount(form.salary)
                     : form.esiAmount
                 }
-                onChange={(event) => updateForm("esiAmount", event.target.value)}
+                disabled
               />
             </Field>
             <div className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-blue-900 sm:col-span-2">
@@ -3392,13 +3628,15 @@ const EmployeeProfilePage = () => {
           ["Email", displayValue(employee.email)],
           ["Phone", displayValue(employee.phone)],
           ["Emergency Contact", displayValue(employee.emergencyContactNumber)],
-          ["Contact Relation", displayValue(employee.emergencyContactRelation)],
+          ["Relation", displayValue(employee.relation || employee.emergencyContactRelation)],
           ["Reporting To", displayValue(employee.manager)],
           ["Joining Date", displayValue(employee.joined)],
           ["Gross Salary", money(employee.salary)],
+          ["Monthly Salary", money(getSalaryBreakup(employee).monthlySalary)],
           ["PAN Number", displayValue(employee.panNumber)],
-          ["Bank Account", displayValue(employee.bankAccountNumber)],
-          ["Bank IFSC", displayValue(employee.bankIfsc)],
+          ["Document Number", displayValue(employee.documentNumber)],
+          ["UAN Number", displayValue(employee.uanNumber)],
+          ["ESI Number", displayValue(employee.esiNumber)],
         ]}
         tableColumns={["Sl No", "Particulars", "Details"]}
         tableRows={[
@@ -3420,18 +3658,28 @@ const EmployeeProfilePage = () => {
 };
 
 const ReviewsPage = () => {
+  const settings = useSettings();
+  const role = String(settings?.profile?.role || "").toLowerCase();
+  const canAddReview = ["admin", "hr manager", "manager"].includes(role);
   const [employees] = useHrmsEmployees();
   const [reviews, setReviews, reviewsState] = useHrmsReviews();
+  const [salaryAssessments, , salaryAssessmentsState] =
+    useHrmsSalaryReassessments();
+  const currentReviewYear = new Date().getFullYear();
   const [rating, setRating] = useState(4);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [activeReviewId, setActiveReviewId] = useState("");
+  const [manualReviewPeriod, setManualReviewPeriod] = useState(false);
   const [form, setForm] = useState({
     comments: "",
     employeeId: employees[0]?.id || "",
     improvement: "",
-    period: "01/01/2024 - 31/12/2024",
+    period: buildReviewPeriod(`${currentReviewYear}-01-01`, `${currentReviewYear}-12-31`),
+    reviewDate: todayValue(),
+    reviewEndDate: `${currentReviewYear}-12-31`,
+    reviewStartDate: `${currentReviewYear}-01-01`,
     reviewer: "",
     strengths: "",
     type: "Manual",
@@ -3447,6 +3695,54 @@ const ReviewsPage = () => {
   );
   const activeReviewRecord =
     reviewRows.find((record) => record.id === activeReviewId) || null;
+  const previousReviewCycle = useMemo(() => {
+    if (!form.employeeId) return null;
+
+    const reviewCycles = reviews
+      .filter((record) => record.employeeId === form.employeeId)
+      .map((record) => ({
+        date:
+          toIsoDateValue(record.reviewEndDate) ||
+          toIsoDateValue(record.reviewDate) ||
+          toIsoDateValue(record.savedAt),
+        endDate:
+          toIsoDateValue(record.reviewEndDate) ||
+          toIsoDateValue(record.reviewDate) ||
+          toIsoDateValue(record.savedAt),
+        label: record.period || "Previous review",
+        type: "Review",
+      }));
+    const salaryCycles = salaryAssessments
+      .filter((record) => record.employeeId === form.employeeId)
+      .map((record) => ({
+        date:
+          toIsoDateValue(record.effectiveDate) ||
+          toIsoDateValue(record.reviewDate) ||
+          toIsoDateValue(record.savedAt),
+        endDate:
+          toIsoDateValue(record.effectiveDate) ||
+          toIsoDateValue(record.reviewDate) ||
+          toIsoDateValue(record.savedAt),
+        label: record.reviewPeriod || "Salary assessment",
+        type: "Salary Assessment",
+      }));
+
+    return [...reviewCycles, ...salaryCycles]
+      .filter((record) => record.date)
+      .sort((first, second) => String(second.date).localeCompare(String(first.date)))[0] || null;
+  }, [form.employeeId, reviews, salaryAssessments]);
+  const reviewPeriodSuggestion = useMemo(() => {
+    const startDate = previousReviewCycle?.endDate
+      ? addDaysToIsoDate(previousReviewCycle.endDate, 1)
+      : `${currentReviewYear}-01-01`;
+    const endDate = getYearEndDate(startDate);
+
+    return {
+      endDate,
+      period: buildReviewPeriod(startDate, endDate),
+      startDate,
+    };
+  }, [currentReviewYear, previousReviewCycle]);
 
   useEffect(() => {
     if (!form.employeeId && employees[0]?.id) {
@@ -3454,8 +3750,51 @@ const ReviewsPage = () => {
     }
   }, [employees, form.employeeId]);
 
+  useEffect(() => {
+    if (!form.employeeId || manualReviewPeriod) return;
+
+    setForm((current) => {
+      if (
+        current.reviewStartDate === reviewPeriodSuggestion.startDate &&
+        current.reviewEndDate === reviewPeriodSuggestion.endDate &&
+        current.period === reviewPeriodSuggestion.period
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        period: reviewPeriodSuggestion.period,
+        reviewEndDate: reviewPeriodSuggestion.endDate,
+        reviewStartDate: reviewPeriodSuggestion.startDate,
+      };
+    });
+  }, [
+    form.employeeId,
+    manualReviewPeriod,
+    reviewPeriodSuggestion.endDate,
+    reviewPeriodSuggestion.period,
+    reviewPeriodSuggestion.startDate,
+  ]);
+
   const updateForm = (field, value) => {
+    if (field === "employeeId") {
+      setManualReviewPeriod(false);
+    }
     setForm((current) => ({ ...current, [field]: value }));
+    setMessage("");
+    setError("");
+  };
+
+  const updateReviewPeriodDate = (field, value) => {
+    setManualReviewPeriod(true);
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      return {
+        ...next,
+        period: buildReviewPeriod(next.reviewStartDate, next.reviewEndDate),
+      };
+    });
     setMessage("");
     setError("");
   };
@@ -3463,18 +3802,37 @@ const ReviewsPage = () => {
   const saveReview = async (event) => {
     event.preventDefault();
 
+    if (!canAddReview) {
+      setError("Only Admin, HR Manager, or Manager roles can add reviews.");
+      return;
+    }
+
     if (!selectedEmployee) {
       setError("Add an employee before saving a review.");
       return;
     }
 
+    if (!form.reviewStartDate || !form.reviewEndDate || !form.reviewDate) {
+      setError("Select review start date, end date, and review date before saving.");
+      return;
+    }
+
+    if (form.reviewEndDate < form.reviewStartDate) {
+      setError("Review end date cannot be before review start date.");
+      return;
+    }
+
+    const reviewPeriod = buildReviewPeriod(form.reviewStartDate, form.reviewEndDate);
     const review = {
       comments: form.comments.trim(),
       employeeId: selectedEmployee.id,
       employeeName: selectedEmployee.name,
       improvement: form.improvement.trim(),
-      period: form.period,
+      period: reviewPeriod,
       rating,
+      reviewDate: form.reviewDate,
+      reviewEndDate: form.reviewEndDate,
+      reviewStartDate: form.reviewStartDate,
       reviewer: form.reviewer,
       strengths: form.strengths.trim(),
       type: form.type,
@@ -3510,9 +3868,19 @@ const ReviewsPage = () => {
       <Panel>
         <div className="mb-4 grid gap-2">
           <Notice>{message}</Notice>
+          <Notice tone={canAddReview ? "success" : "warning"}>
+            {canAddReview
+              ? ""
+              : "Add Review access is restricted to Admin, HR Manager, and Manager roles."}
+          </Notice>
+          <Notice>
+            {previousReviewCycle
+              ? `Review period suggested from previous ${previousReviewCycle.type}: ${previousReviewCycle.label}.`
+              : ""}
+          </Notice>
           <Notice tone="warning">{error || reviewsState.error}</Notice>
           <Notice>
-            {reviewsState.loading && !reviews.length
+            {(reviewsState.loading && !reviews.length) || salaryAssessmentsState.loading
               ? "Loading reviews from HRMS database..."
               : ""}
           </Notice>
@@ -3550,15 +3918,29 @@ const ReviewsPage = () => {
                 ))}
               </Input>
             </Field>
+            <Field label="Review Start Date">
+              <DateInput
+                className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                value={form.reviewStartDate}
+                onChange={(value) => updateReviewPeriodDate("reviewStartDate", value)}
+              />
+            </Field>
+            <Field label="Review End Date">
+              <DateInput
+                className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                value={form.reviewEndDate}
+                onChange={(value) => updateReviewPeriodDate("reviewEndDate", value)}
+              />
+            </Field>
+            <Field label="Review Date">
+              <DateInput
+                className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                value={form.reviewDate}
+                onChange={(value) => updateForm("reviewDate", value)}
+              />
+            </Field>
             <Field label="Review Period">
-              <Input
-                as="select"
-                value={form.period}
-                onChange={(event) => updateForm("period", event.target.value)}
-              >
-                <option>01/01/2024 - 31/12/2024</option>
-                <option>01/07/2024 - 31/12/2024</option>
-              </Input>
+              <Input value={form.period} disabled />
             </Field>
             <Field label="Review Type">
               <Input
@@ -3639,15 +4021,20 @@ const ReviewsPage = () => {
                   ...current,
                   comments: "",
                   improvement: "",
+                  period: reviewPeriodSuggestion.period,
+                  reviewDate: todayValue(),
+                  reviewEndDate: reviewPeriodSuggestion.endDate,
+                  reviewStartDate: reviewPeriodSuggestion.startDate,
                   strengths: "",
                 }));
+                setManualReviewPeriod(false);
                 setMessage("");
                 setError("");
               }}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving || !canAddReview}>
               {saving ? "Saving..." : "Save Review"}
             </Button>
           </div>
@@ -3671,7 +4058,7 @@ const ReviewsPage = () => {
           <table className="min-w-[920px] w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
               <tr>
-                {["Saved Date", "Employee", "Period", "Type", "Rating", "Reviewer", "Action"].map(
+                {["Saved Date", "Employee", "Start Date", "End Date", "Period", "Type", "Rating", "Reviewer", "Action"].map(
                   (heading) => (
                     <th key={heading} className="px-3 py-3 font-bold">
                       {heading}
@@ -3698,6 +4085,8 @@ const ReviewsPage = () => {
                     <strong>{record.employeeName}</strong>
                     <p className="text-xs text-slate-500">{record.employeeId}</p>
                   </td>
+                  <td className="px-3 py-3">{formatDate(record.reviewStartDate)}</td>
+                  <td className="px-3 py-3">{formatDate(record.reviewEndDate)}</td>
                   <td className="px-3 py-3">{record.period}</td>
                   <td className="px-3 py-3">{record.type}</td>
                   <td className="px-3 py-3">{record.rating || 0} / 5</td>
@@ -3715,7 +4104,7 @@ const ReviewsPage = () => {
               ))}
               {!reviewRows.length && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
                     No registered review details found. Save a review to create an entry.
                   </td>
                 </tr>
@@ -3735,9 +4124,12 @@ const ReviewsPage = () => {
             ["Employee ID", activeReviewRecord.employeeId],
             ["Review Type", activeReviewRecord.type],
             ["Review Period", activeReviewRecord.period],
+            ["Review Start", formatDate(activeReviewRecord.reviewStartDate)],
+            ["Review End", formatDate(activeReviewRecord.reviewEndDate)],
           ]}
           rightRows={[
             ["Reviewer", displayValue(activeReviewRecord.reviewer)],
+            ["Review Date", formatDate(activeReviewRecord.reviewDate)],
             ["Rating", `${activeReviewRecord.rating || 0} / 5`],
             [
               "Saved Date",
@@ -3932,9 +4324,13 @@ const SalaryReassessmentPage = () => {
   const compensationBreakup = getSalaryBreakup(selectedEmployee || {}, revisedSalary);
   const compensationRows = [
     ["Gross Salary", compensationBreakup.grossSalary],
+    ["Monthly Salary", compensationBreakup.monthlySalary],
+    ["Allowances", compensationBreakup.allowances],
     ["Deduction", compensationBreakup.deduction],
     ["PF", compensationBreakup.pfAmount],
     ["ESI", compensationBreakup.esiAmount],
+    ["TDS", compensationBreakup.tdsAmount],
+    ["Professional Tax", compensationBreakup.professionalTax],
     ["Net Salary", compensationBreakup.netSalary],
   ];
 
@@ -3991,9 +4387,13 @@ const SalaryReassessmentPage = () => {
       bonus,
       compensationRows,
       esiAmount: compensationBreakup.esiAmount,
+      allowances: compensationBreakup.allowances,
+      monthlySalary: compensationBreakup.monthlySalary,
       netSalary: compensationBreakup.netSalary,
       pfAmount: compensationBreakup.pfAmount,
+      professionalTax: compensationBreakup.professionalTax,
       salaryDeduction: compensationBreakup.deduction,
+      tdsAmount: compensationBreakup.tdsAmount,
       totalDeductions: compensationBreakup.totalDeductions,
       currentRole: selectedEmployee?.designation || "",
       currentSalary,
@@ -4331,6 +4731,150 @@ const SalaryReassessmentPage = () => {
     window.setTimeout(() => printWindow.print(), 250);
   };
 
+  const printAppraisalPdf = (record = activeRegisterRecord) => {
+    const sourceRecord = record || buildRecord("Report Generated");
+    const employee =
+      employees.find((item) => item.id === sourceRecord.employeeId) ||
+      selectedEmployee;
+
+    if (typeof window === "undefined" || !employee) {
+      setMessage("Select an employee before generating the appraisal PDF.");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1000,height=760");
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+
+    const metricsRows = Object.entries(sourceRecord.metrics || metrics)
+      .map(
+        ([key, value]) => `
+          <tr>
+            <td>${escapeHtml(reassessmentMetricLabels[key] || key)}</td>
+            <td>${escapeHtml(String(value ?? 0))}</td>
+          </tr>
+        `
+      )
+      .join("");
+    const historyRows = salaryHistory
+      .filter((item) => item.employeeId === employee.id)
+      .slice(0, 8)
+      .map(
+        (item) => `
+          <tr>
+            <td>${escapeHtml(item.id)}</td>
+            <td>${escapeHtml(item.reviewPeriod || "Not provided")}</td>
+            <td>${escapeHtml(formatDate(item.reviewDate || item.effectiveDate))}</td>
+            <td>${escapeHtml(money(item.currentSalary))}</td>
+            <td>${escapeHtml(money(item.revisedSalary))}</td>
+            <td>${escapeHtml(item.salaryStatus || item.status || "Pending")}</td>
+          </tr>
+        `
+      )
+      .join("");
+    const documentRows = (sourceRecord.documents || [])
+      .map(
+        (document) => `
+          <tr>
+            <td>${escapeHtml(document.name || "Document")}</td>
+            <td>${escapeHtml(document.type || "Document")}</td>
+            <td>${escapeHtml(formatDateTime(document.addedAt))}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${escapeHtml(employee.name)} Appraisal PDF</title>
+          <style>
+            body { color: #0f172a; font-family: Arial, sans-serif; margin: 0; padding: 34px; }
+            h1 { font-size: 24px; margin: 0; }
+            h2 { border-bottom: 2px solid #2563eb; font-size: 15px; margin: 26px 0 10px; padding-bottom: 6px; }
+            table { border-collapse: collapse; margin-top: 10px; width: 100%; }
+            th, td { border: 1px solid #dbe3ef; font-size: 12px; padding: 8px; text-align: left; vertical-align: top; }
+            th { background: #f8fafc; color: #475569; }
+            .muted { color: #64748b; }
+            .grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin-top: 18px; }
+            .box { border: 1px solid #dbe3ef; padding: 12px; }
+            .label { color: #64748b; font-weight: 700; width: 34%; }
+          </style>
+        </head>
+        <body>
+          <h1>Employee Appraisal PDF</h1>
+          <p class="muted">Generated on ${escapeHtml(formatDateTime(new Date().toISOString()))}</p>
+
+          <div class="grid">
+            <table>
+              <tr><td class="label">Employee</td><td>${escapeHtml(employee.name)}</td></tr>
+              <tr><td class="label">Employee ID</td><td>${escapeHtml(employee.id)}</td></tr>
+              <tr><td class="label">Department</td><td>${escapeHtml(employee.department || "Not provided")}</td></tr>
+              <tr><td class="label">Designation</td><td>${escapeHtml(employee.designation || "Not provided")}</td></tr>
+              <tr><td class="label">Reviewer</td><td>${escapeHtml(sourceRecord.reviewerName || "Not provided")}</td></tr>
+              <tr><td class="label">Review Period</td><td>${escapeHtml(sourceRecord.reviewPeriod || "Not provided")}</td></tr>
+              <tr><td class="label">Review Date</td><td>${escapeHtml(formatDate(sourceRecord.reviewDate))}</td></tr>
+            </table>
+            <table>
+              <tr><td class="label">Current Salary</td><td>${escapeHtml(money(sourceRecord.currentSalary))}</td></tr>
+              <tr><td class="label">Increment</td><td>${escapeHtml(String(sourceRecord.incrementPercent || 0))}% (${escapeHtml(money(sourceRecord.incrementAmount))})</td></tr>
+              <tr><td class="label">Bonus</td><td>${escapeHtml(money(sourceRecord.bonus))}</td></tr>
+              <tr><td class="label">Revised Salary</td><td>${escapeHtml(money(sourceRecord.revisedSalary))}</td></tr>
+              <tr><td class="label">Net Salary</td><td>${escapeHtml(money(sourceRecord.netSalary))}</td></tr>
+              <tr><td class="label">Grade</td><td>${escapeHtml(sourceRecord.grade || "Not provided")}</td></tr>
+              <tr><td class="label">Status</td><td>${escapeHtml(sourceRecord.salaryStatus || sourceRecord.status || "Pending")}</td></tr>
+            </table>
+          </div>
+
+          <h2>Assessment Ratings</h2>
+          <table>
+            <thead><tr><th>Metric</th><th>Score</th></tr></thead>
+            <tbody>
+              <tr><td>KPI Score</td><td>${escapeHtml(String(sourceRecord.kpiScore || 0))}</td></tr>
+              <tr><td>Attendance Score</td><td>${escapeHtml(String(sourceRecord.attendanceScore || 0))}</td></tr>
+              <tr><td>Behavior Score</td><td>${escapeHtml(String(sourceRecord.behaviorScore || 0))}</td></tr>
+              <tr><td>Productivity Score</td><td>${escapeHtml(String(sourceRecord.productivityScore || 0))}</td></tr>
+              ${metricsRows || `<tr><td colspan="2">No metric details saved</td></tr>`}
+            </tbody>
+          </table>
+
+          <h2>Comments And Approval</h2>
+          <table>
+            <tr><td class="label">Strengths</td><td>${escapeHtml(sourceRecord.strengths || "Not provided")}</td></tr>
+            <tr><td class="label">Improvement</td><td>${escapeHtml(sourceRecord.improvement || "Not provided")}</td></tr>
+            <tr><td class="label">Manager Comments</td><td>${escapeHtml(sourceRecord.managerComments || "Not provided")}</td></tr>
+            <tr><td class="label">HR Comments</td><td>${escapeHtml(sourceRecord.hrComments || "Not provided")}</td></tr>
+            <tr><td class="label">Employee Comments</td><td>${escapeHtml(sourceRecord.employeeComment || "Not provided")}</td></tr>
+            <tr><td class="label">Manager Approval</td><td>${escapeHtml(sourceRecord.managerStatus || "Pending")}</td></tr>
+            <tr><td class="label">HR Approval</td><td>${escapeHtml(sourceRecord.hrStatus || "Pending")}</td></tr>
+            <tr><td class="label">Director Approval</td><td>${escapeHtml(sourceRecord.directorStatus || "Pending")}</td></tr>
+            <tr><td class="label">Employee Acknowledgement</td><td>${escapeHtml(sourceRecord.acknowledgement || "Pending")}</td></tr>
+            <tr><td class="label">Digital Signature</td><td>${escapeHtml(sourceRecord.digitalSignature || "Not provided")}</td></tr>
+          </table>
+
+          <h2>Review History</h2>
+          <table>
+            <thead>
+              <tr><th>Ref</th><th>Period</th><th>Date</th><th>Previous Salary</th><th>Revised Salary</th><th>Status</th></tr>
+            </thead>
+            <tbody>${historyRows || `<tr><td colspan="6">No salary assessment history found</td></tr>`}</tbody>
+          </table>
+
+          <h2>Appraisal Documents</h2>
+          <table>
+            <thead><tr><th>Document</th><th>Type</th><th>Added Date</th></tr></thead>
+            <tbody>${documentRows || `<tr><td colspan="3">No documents attached</td></tr>`}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => printWindow.print(), 250);
+  };
+
   return (
     <div className="grid gap-4">
       <Panel>
@@ -4355,7 +4899,12 @@ const SalaryReassessmentPage = () => {
             <Notice>{message}</Notice>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <Button variant="secondary" onClick={() => window.print()}>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                printAppraisalPdf(activeRegisterRecord || buildRecord("Report Generated"))
+              }
+            >
               <AppIcon name="file" className="h-4 w-4" />
               Appraisal PDF
             </Button>
@@ -5124,6 +5673,14 @@ const AttendancePage = () => {
     latestAttendanceRecord?.month
   );
   const selectedMonth = normalizeAttendanceMonth(month);
+  const attendanceDays = useMemo(
+    () => getAttendanceDays(selectedMonth || month),
+    [month, selectedMonth]
+  );
+  const normalizedStatuses = useMemo(
+    () => normalizeAttendanceStatusesForMonth(statuses, selectedMonth || month),
+    [month, selectedMonth, statuses]
+  );
   const isCurrentMonthSelected =
     selectedMonth &&
     areAttendanceMonthsEqual(selectedMonth, currentAttendanceMonth);
@@ -5145,6 +5702,13 @@ const AttendancePage = () => {
   );
   const activeAttendanceRecord =
     attendanceRows.find((record) => record.id === activeAttendanceId) || null;
+  const activeAttendanceDays = useMemo(
+    () =>
+      activeAttendanceRecord
+        ? getAttendanceDays(activeAttendanceRecord.month)
+        : [],
+    [activeAttendanceRecord]
+  );
 
   useEffect(() => {
     if (!selectedEmployeeId && employees[0]?.id) {
@@ -5184,7 +5748,12 @@ const AttendancePage = () => {
       }
 
       const saved = findAttendanceRecord(selectedEmployeeId, month);
-      setStatuses(saved?.statuses || DEFAULT_ATTENDANCE_STATUSES);
+      setStatuses(
+        normalizeAttendanceStatusesForMonth(
+          saved?.statuses || DEFAULT_ATTENDANCE_STATUSES,
+          month
+        )
+      );
       setActiveAttendanceId(saved?.id || "");
       if (!silent) {
         setMessage(
@@ -5206,6 +5775,13 @@ const AttendancePage = () => {
   }, [loadAttendance, month, selectedEmployeeId]);
 
   useEffect(() => {
+    if (!month) return;
+    setStatuses((current) =>
+      normalizeAttendanceStatusesForMonth(current, selectedMonth || month)
+    );
+  }, [month, selectedMonth]);
+
+  useEffect(() => {
     if (!latestAttendanceRecord?.employeeId || selectedEmployeeId) return;
     setSelectedEmployeeId(latestAttendanceRecord.employeeId);
   }, [latestAttendanceRecord?.employeeId, selectedEmployeeId]);
@@ -5214,7 +5790,12 @@ const AttendancePage = () => {
     setSelectedEmployeeId(record.employeeId);
     setMonth(normalizeAttendanceMonth(record.month));
     setIsManualMonthSelection(true);
-    setStatuses(record.statuses || DEFAULT_ATTENDANCE_STATUSES);
+    setStatuses(
+      normalizeAttendanceStatusesForMonth(
+        record.statuses || DEFAULT_ATTENDANCE_STATUSES,
+        record.month
+      )
+    );
     setActiveAttendanceId(record.id);
     setError("");
     setMessage(
@@ -5227,7 +5808,11 @@ const AttendancePage = () => {
       return;
     }
 
-    const counts = statuses.reduce(
+    const nextStatuses = normalizeAttendanceStatusesForMonth(
+      statuses,
+      selectedMonth || month
+    );
+    const counts = nextStatuses.reduce(
       (summary, status) => ({
         ...summary,
         [status]: (summary[status] || 0) + 1,
@@ -5238,7 +5823,7 @@ const AttendancePage = () => {
       employeeId: selectedEmployeeId,
       employeeName: selectedEmployee.name,
       month: selectedMonth || month,
-      statuses,
+      statuses: nextStatuses,
       counts,
     };
 
@@ -5346,16 +5931,41 @@ const AttendancePage = () => {
         </div>
 
         <div className="mt-6 overflow-x-auto">
-          <div className="min-w-[980px]">
-            <div className="grid grid-cols-[72px_repeat(31,minmax(24px,1fr))] text-center text-xs">
+          <div className="min-w-[1100px]">
+            <div
+              className="grid text-center text-xs"
+              style={{
+                gridTemplateColumns: `72px repeat(${
+                  attendanceDays.length || normalizedStatuses.length
+                }, minmax(32px, 1fr))`,
+              }}
+            >
               <div className="border border-slate-200 bg-slate-50 py-2 font-bold">Date</div>
-              {statuses.map((_, index) => (
-                <div key={index + 1} className="border-y border-r border-slate-200 bg-slate-50 py-2 font-bold">
-                  {index + 1}
+              {attendanceDays.map((day) => (
+                <div
+                  key={day.iso}
+                  className={[
+                    "border-y border-r border-slate-200 py-2 font-bold",
+                    day.isWeekend ? "bg-blue-50 text-blue-700" : "bg-slate-50",
+                  ].join(" ")}
+                >
+                  {day.day}
+                </div>
+              ))}
+              <div className="border-x border-b border-slate-200 bg-slate-50 py-2 font-bold">Day</div>
+              {attendanceDays.map((day) => (
+                <div
+                  key={`${day.iso}-weekday`}
+                  className={[
+                    "border-b border-r border-slate-200 py-2 font-bold",
+                    day.isWeekend ? "bg-blue-50 text-blue-700" : "bg-white",
+                  ].join(" ")}
+                >
+                  {day.weekday}
                 </div>
               ))}
               <div className="border-x border-b border-slate-200 py-2 font-bold">Status</div>
-              {statuses.map((status, index) => (
+              {normalizedStatuses.map((status, index) => (
                 <button
                   key={`${status}-${index}`}
                   type="button"
@@ -5503,19 +6113,25 @@ const AttendancePage = () => {
             ["Holiday", activeAttendanceRecord.counts?.H || 0],
           ]}
           tableColumns={["Date", "Status", "Description"]}
-          tableRows={(activeAttendanceRecord.statuses || []).map((status, index) => ({
-            id: `${activeAttendanceRecord.id}-${index}`,
-            values: [
-              String(index + 1),
-              status,
-              {
-                P: "Present",
-                A: "Absent",
-                L: "Leave",
-                H: "Holiday",
-              }[status] || "Present",
-            ],
-          }))}
+          tableRows={normalizeAttendanceStatusesForMonth(
+            activeAttendanceRecord.statuses || [],
+            activeAttendanceRecord.month
+          ).map((status, index) => {
+            const day = activeAttendanceDays[index];
+            return {
+              id: `${activeAttendanceRecord.id}-${index}`,
+              values: [
+                day ? `${day.day} ${day.weekday}` : String(index + 1),
+                status,
+                {
+                  P: "Present",
+                  A: "Absent",
+                  L: "Leave",
+                  H: "Holiday",
+                }[status] || "Present",
+              ],
+            };
+          })}
           bottomLeftTitle="Attendance Summary"
           bottomLeftValue={`Present: ${activeAttendanceRecord.counts?.P || 0}\nAbsent: ${
             activeAttendanceRecord.counts?.A || 0
@@ -5547,6 +6163,10 @@ const PayrollPage = () => {
     const edit = payrollEdits[employee.id] || {};
     const salary = toSalaryNumber(edit.salary ?? employee.salary);
     const employeeBreakup = getSalaryBreakup(employee, salary);
+    const rowAllowances = toSalaryNumber(
+      edit.allowances,
+      employeeBreakup.allowances
+    );
     const rowDeduction = toSalaryNumber(
       edit.deduction,
       employeeBreakup.deduction
@@ -5559,21 +6179,38 @@ const PayrollPage = () => {
       edit.esiAmount,
       employeeBreakup.esiAmount
     );
-    const totalDeductions = rowDeduction + rowPfAmount + rowEsiAmount;
+    const rowProfessionalTax = toSalaryNumber(
+      edit.professionalTax,
+      employeeBreakup.professionalTax
+    );
+    const rowTdsAmount = toSalaryNumber(
+      edit.tdsAmount,
+      employeeBreakup.tdsAmount
+    );
+    const totalDeductions =
+      rowDeduction + rowPfAmount + rowEsiAmount + rowProfessionalTax + rowTdsAmount;
+    const totalEarnings = salary + rowAllowances;
 
     return {
       ...employee,
       salary,
       basicSalary: salary,
-      allowance: 0,
-      allowances: 0,
+      grossSalary: salary,
+      monthlySalary: calculateMonthlySalary(salary),
+      allowance: rowAllowances,
+      allowances: rowAllowances,
       deduction: rowDeduction,
       deductions: rowDeduction,
       esiAmount: rowEsiAmount,
-      net: salary - totalDeductions,
-      netSalary: salary - totalDeductions,
+      net: totalEarnings - totalDeductions,
+      netSalary: totalEarnings - totalDeductions,
       pfAmount: rowPfAmount,
       providentFund: rowPfAmount,
+      professionalTax: rowProfessionalTax,
+      pt: rowProfessionalTax,
+      tdsAmount: rowTdsAmount,
+      tds: rowTdsAmount,
+      totalEarnings,
       totalDeductions,
       status: edit.status || (generated || index < 3 ? "Processed" : "Pending"),
     };
@@ -5604,10 +6241,13 @@ const PayrollPage = () => {
       const currentEdit = current[selectedPayrollRow.id] || {};
       const nextEdit = {
         salary: selectedPayrollRow.salary,
+        allowances: selectedPayrollRow.allowances,
         deduction: selectedPayrollRow.deduction,
         esiAmount: selectedPayrollRow.esiAmount,
         pfAmount: selectedPayrollRow.pfAmount,
+        professionalTax: selectedPayrollRow.professionalTax,
         status: selectedPayrollRow.status,
+        tdsAmount: selectedPayrollRow.tdsAmount,
         ...currentEdit,
         [field]: value,
       };
@@ -5675,11 +6315,14 @@ const PayrollPage = () => {
     setPayrollEdits(
       (batch.rows || []).reduce((edits, row) => {
         edits[row.id] = {
+          allowances: Number(row.allowances || 0),
           deduction: Number(row.deduction || 0),
           esiAmount: Number(row.esiAmount || 0),
           pfAmount: Number(row.pfAmount || 0),
+          professionalTax: Number(row.professionalTax || 0),
           salary: Number(row.salary || 0),
           status: row.status || "Processed",
+          tdsAmount: Number(row.tdsAmount || 0),
         };
         return edits;
       }, {})
@@ -5810,7 +6453,7 @@ const PayrollPage = () => {
         </div>
 
         {selectedPayrollRow && (
-          <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[repeat(6,minmax(0,1fr))_auto]">
+          <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[repeat(9,minmax(0,1fr))_auto]">
             <Field label="Select Employee">
               <Input
                 as="select"
@@ -5833,6 +6476,17 @@ const PayrollPage = () => {
                 min="0"
                 value={selectedPayrollRow.salary}
                 onChange={(event) => updatePayrollEdit("salary", event.target.value)}
+              />
+            </Field>
+            <Field label="Monthly Salary">
+              <Input value={money(selectedPayrollRow.monthlySalary)} disabled />
+            </Field>
+            <Field label="Allowances">
+              <Input
+                type="number"
+                min="0"
+                value={selectedPayrollRow.allowances}
+                onChange={(event) => updatePayrollEdit("allowances", event.target.value)}
               />
             </Field>
             <Field label="Deduction">
@@ -5859,6 +6513,22 @@ const PayrollPage = () => {
                 onChange={(event) => updatePayrollEdit("esiAmount", event.target.value)}
               />
             </Field>
+            <Field label="TDS">
+              <Input
+                type="number"
+                min="0"
+                value={selectedPayrollRow.tdsAmount}
+                onChange={(event) => updatePayrollEdit("tdsAmount", event.target.value)}
+              />
+            </Field>
+            <Field label="PT">
+              <Input
+                type="number"
+                min="0"
+                value={selectedPayrollRow.professionalTax}
+                onChange={(event) => updatePayrollEdit("professionalTax", event.target.value)}
+              />
+            </Field>
             <Field label="Status">
               <Input
                 as="select"
@@ -5880,10 +6550,10 @@ const PayrollPage = () => {
         )}
 
         <div className="mt-5 overflow-x-auto">
-          <table className="min-w-[980px] w-full text-left text-sm">
+          <table className="min-w-[1280px] w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
               <tr>
-                {["ID", "Employee", "Gross Salary", "Deduction", "PF", "ESI", "Net Salary", "Status", "Action"].map((heading) => (
+                {["ID", "Employee", "Gross Salary", "Monthly Salary", "Allowances", "Deduction", "PF", "ESI", "TDS", "PT", "Net Salary", "Status", "Action"].map((heading) => (
                   <th key={heading} className="px-3 py-3 font-bold">
                     {heading}
                   </th>
@@ -5899,9 +6569,13 @@ const PayrollPage = () => {
                   <td className="px-3 py-3 font-semibold">{row.id}</td>
                   <td className="px-3 py-3">{row.name}</td>
                   <td className="px-3 py-3">{money(row.salary)}</td>
+                  <td className="px-3 py-3">{money(row.monthlySalary)}</td>
+                  <td className="px-3 py-3">{money(row.allowances)}</td>
                   <td className="px-3 py-3">{money(row.deduction)}</td>
                   <td className="px-3 py-3">{money(row.pfAmount)}</td>
                   <td className="px-3 py-3">{money(row.esiAmount)}</td>
+                  <td className="px-3 py-3">{money(row.tdsAmount)}</td>
+                  <td className="px-3 py-3">{money(row.professionalTax)}</td>
                   <td className="px-3 py-3 font-bold">{money(row.net)}</td>
                   <td className="px-3 py-3">
                     <StatusBadge status={row.status} />
@@ -5919,7 +6593,7 @@ const PayrollPage = () => {
               ))}
               {!rows.length && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={13} className="px-3 py-8 text-center text-slate-500">
                     No employees found for this payroll selection.
                   </td>
                 </tr>
@@ -6044,6 +6718,15 @@ const PayrollPage = () => {
               ),
             ],
             [
+              "Total Allowances",
+              money(
+                (selectedPayrollBatch.rows || []).reduce(
+                  (sum, row) => sum + Number(row.allowances || 0),
+                  0
+                )
+              ),
+            ],
+            [
               "Total Deductions",
               money(
                 (selectedPayrollBatch.rows || []).reduce(
@@ -6053,7 +6736,9 @@ const PayrollPage = () => {
                       row.totalDeductions ??
                         Number(row.deduction || 0) +
                           Number(row.pfAmount || 0) +
-                          Number(row.esiAmount || 0)
+                          Number(row.esiAmount || 0) +
+                          Number(row.tdsAmount || 0) +
+                          Number(row.professionalTax || 0)
                     ),
                   0
                 )
@@ -6073,9 +6758,13 @@ const PayrollPage = () => {
             "Employee ID",
             "Employee",
             "Gross Salary",
+            "Monthly Salary",
+            "Allowances",
             "Deduction",
             "PF",
             "ESI",
+            "TDS",
+            "PT",
             "Net Pay",
             "Status",
           ]}
@@ -6085,9 +6774,13 @@ const PayrollPage = () => {
               row.id,
               row.name,
               money(row.salary),
+              money(row.monthlySalary ?? calculateMonthlySalary(row.salary)),
+              money(row.allowances),
               money(row.deduction),
               money(row.pfAmount),
               money(row.esiAmount),
+              money(row.tdsAmount),
+              money(row.professionalTax),
               money(row.net),
               row.status,
             ],
@@ -6123,13 +6816,19 @@ const PayslipPage = () => {
     ? getSalaryBreakup(payrollRow || {}, payrollRow?.salary)
     : null;
   const earnings = payslip
-    ? [["Gross Salary", payrollBreakup.grossSalary]]
+    ? [
+        ["Gross Salary", payrollBreakup.grossSalary],
+        ["Monthly Salary", payrollBreakup.monthlySalary],
+        ["Allowances", payrollBreakup.allowances],
+      ]
     : [];
   const deductions = payslip
     ? [
         ["Deduction", payrollBreakup.deduction],
         ["PF", payrollBreakup.pfAmount],
         ["ESI", payrollBreakup.esiAmount],
+        ["TDS", payrollBreakup.tdsAmount],
+        ["Professional Tax", payrollBreakup.professionalTax],
       ]
     : [];
   const totalEarnings = earnings.reduce((sum, [, value]) => sum + value, 0);
@@ -6167,12 +6866,15 @@ const PayslipPage = () => {
     const fallbackBreakup = getSalaryBreakup(selectedEmployee);
     const fallbackRow = {
       ...selectedEmployee,
-      allowance: 0,
+      allowance: fallbackBreakup.allowances,
+      allowances: fallbackBreakup.allowances,
       deduction: fallbackBreakup.deduction,
       esiAmount: fallbackBreakup.esiAmount,
       net: fallbackBreakup.netSalary,
       pfAmount: fallbackBreakup.pfAmount,
+      professionalTax: fallbackBreakup.professionalTax,
       salary: fallbackBreakup.grossSalary,
+      tdsAmount: fallbackBreakup.tdsAmount,
       totalDeductions: fallbackBreakup.totalDeductions,
       status: "Pending",
     };
@@ -6300,7 +7002,7 @@ const PayslipPage = () => {
                   ["Month", payslip.month],
                   ["Date of Joining", displayValue(employee?.joined)],
                   ["Days Worked", "26"],
-                  ["Bank Account", "Not provided"],
+                  ["Document Number", displayValue(employee?.documentNumber)],
                   ["Payment Date", "31/05/2024"],
                   ["Payroll Status", payrollRow?.status || "Pending"],
                   ["Payroll Ref", payslip.batch?.id || "Not saved"],
@@ -6436,7 +7138,13 @@ const RelievingPage = () => {
   const [employees, setEmployees] = useHrmsEmployees();
   const [relievingRecords, setRelievingRecords, relievingState] =
     useHrmsRelieving();
-  const employee = employees[0] || null;
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState(
+    employees[0]?.id || ""
+  );
+  const employee =
+    employees.find((record) => record.id === selectedEmployeeId) ||
+    employees[0] ||
+    null;
   const [registeredRelievingRecord, setRegisteredRelievingRecord] =
     useState(null);
   const [selectedRelievingRecord, setSelectedRelievingRecord] = useState(null);
@@ -6450,6 +7158,43 @@ const RelievingPage = () => {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const employeeId = employee?.id;
+  const relievingRegisterRows = useMemo(() => {
+    const employeeById = new Map(employees.map((item) => [item.id, item]));
+    const rowsByEmployee = new Map();
+
+    relievingRecords.forEach((record) => {
+      const recordEmployee = employeeById.get(record.employeeId);
+      rowsByEmployee.set(record.employeeId || record.id, {
+        employeeId: record.employeeId,
+        employeeName:
+          record.employeeName || recordEmployee?.name || "Not provided",
+        lastWorkingDate: record.lastWorkingDate,
+        record,
+        resignationDate: record.resignationDate,
+        status: record.status || recordEmployee?.status || "Relieved",
+      });
+    });
+
+    employees
+      .filter((item) => String(item.status || "").toLowerCase() === "relieved")
+      .forEach((item) => {
+        if (rowsByEmployee.has(item.id)) return;
+        rowsByEmployee.set(item.id, {
+          employeeId: item.id,
+          employeeName: item.name,
+          lastWorkingDate: "",
+          record: null,
+          resignationDate: "",
+          status: item.status,
+        });
+      });
+
+    return Array.from(rowsByEmployee.values()).sort((first, second) =>
+      String(second.lastWorkingDate || second.resignationDate || "").localeCompare(
+        String(first.lastWorkingDate || first.resignationDate || "")
+      )
+    );
+  }, [employees, relievingRecords]);
 
   const existingRegisteredRecord = useMemo(
     () =>
@@ -6466,12 +7211,21 @@ const RelievingPage = () => {
     selectedRelievingRecord?.employeeId === employeeId
       ? selectedRelievingRecord
       : null;
+  const selectedLetterEmployee =
+    employees.find((item) => item.id === activeSelectedRelievingRecord?.employeeId) ||
+    employee;
   const registeredRecord = recentRegisteredRecord || existingRegisteredRecord;
   const relievingDetails = registeredRecord || {
     lastWorkingDate: "10/06/2024",
     noticePeriod: "30 Days",
     resignationDate: "10/05/2024",
   };
+
+  useEffect(() => {
+    if (!selectedEmployeeId && employees[0]?.id) {
+      setSelectedEmployeeId(employees[0].id);
+    }
+  }, [employees, selectedEmployeeId]);
 
   const processRelieving = async () => {
     if (!employee) {
@@ -6558,6 +7312,27 @@ const RelievingPage = () => {
           </Link>
         </Panel>
       )}
+      {employees.length ? (
+        <Panel>
+          <Field label="Employee">
+            <Input
+              as="select"
+              value={employee?.id || selectedEmployeeId}
+              onChange={(event) => {
+                setSelectedEmployeeId(event.target.value);
+                setSelectedRelievingRecord(null);
+                setMessage("");
+              }}
+            >
+              {employees.map((record) => (
+                <option key={record.id} value={record.id}>
+                  {record.id} - {record.name} ({record.status || "Active"})
+                </option>
+              ))}
+            </Input>
+          </Field>
+        </Panel>
+      ) : null}
       {employee && (
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.95fr)]">
       <Panel>
@@ -6662,6 +7437,66 @@ const RelievingPage = () => {
           </div>
         </Panel>
       )}
+      <Panel>
+        <div>
+          <h2 className="text-base font-bold">Exit Employee List</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Relieved employees and saved relieving records from the HRMS database.
+          </p>
+        </div>
+        <div className="mt-5 overflow-x-auto">
+          <table className="min-w-[820px] w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs text-slate-500">
+              <tr>
+                {["Employee", "Resignation Date", "Last Working Date", "Status", "Record", "Action"].map((heading) => (
+                  <th key={heading} className="px-3 py-3 font-bold">
+                    {heading}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {relievingRegisterRows.map((row) => (
+                <tr key={`${row.employeeId || "record"}-${row.record?.id || "employee"}`}>
+                  <td className="px-3 py-3">
+                    <strong>{row.employeeName}</strong>
+                    <p className="text-xs text-slate-500">{displayValue(row.employeeId)}</p>
+                  </td>
+                  <td className="px-3 py-3">{formatDate(row.resignationDate)}</td>
+                  <td className="px-3 py-3">{formatDate(row.lastWorkingDate)}</td>
+                  <td className="px-3 py-3">
+                    <StatusBadge status={row.status || "Relieved"} />
+                  </td>
+                  <td className="px-3 py-3">{row.record?.id || "No form saved"}</td>
+                  <td className="px-3 py-3">
+                    <Button
+                      className="min-h-8 px-2 text-xs"
+                      variant="secondary"
+                      onClick={() => {
+                        if (row.employeeId) {
+                          setSelectedEmployeeId(row.employeeId);
+                        }
+                        if (row.record) {
+                          setSelectedRelievingRecord(row.record);
+                        }
+                      }}
+                    >
+                      {row.record ? "View Letter" : "Select"}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {!relievingRegisterRows.length && (
+                <tr>
+                  <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
+                    No exited employees found. Process relieving to create an exit record.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
       {employee && activeSelectedRelievingRecord && (
         <Panel id="relieving-letter-print-area">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -6676,7 +7511,7 @@ const RelievingPage = () => {
               <Button
                 variant="secondary"
                 onClick={() =>
-                  printRelievingLetter(activeSelectedRelievingRecord, employee)
+                  printRelievingLetter(activeSelectedRelievingRecord, selectedLetterEmployee)
                 }
               >
                 <AppIcon name="file" className="h-4 w-4" />
@@ -6684,7 +7519,7 @@ const RelievingPage = () => {
               </Button>
               <Button
                 onClick={() =>
-                  printRelievingLetter(activeSelectedRelievingRecord, employee)
+                  printRelievingLetter(activeSelectedRelievingRecord, selectedLetterEmployee)
                 }
               >
                 <AppIcon name="download" className="h-4 w-4" />
@@ -6700,7 +7535,7 @@ const RelievingPage = () => {
           </div>
           <RelievingLetterDocument
             record={activeSelectedRelievingRecord}
-            employee={employee}
+            employee={selectedLetterEmployee}
           />
         </Panel>
       )}
