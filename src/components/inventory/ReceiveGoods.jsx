@@ -473,6 +473,50 @@ const buildReceiveItems = (purchaseOrder, receiptHistory = [], receipt = null) =
     };
   });
 };
+
+const mergeHydratedReceiveItems = (nextItems = [], previousItems = []) => {
+  if (!Array.isArray(nextItems) || !nextItems.length) {
+    return [];
+  }
+
+  const previousItemsByKey = new Map(
+    (Array.isArray(previousItems) ? previousItems : []).map((item, index) => [
+      getItemKey(item, index),
+      item,
+    ])
+  );
+
+  return nextItems.map((item, index) => {
+    const previousItem = previousItemsByKey.get(getItemKey(item, index));
+    if (!previousItem) {
+      return item;
+    }
+
+    const receivedQty = Math.max(
+      0,
+      Math.min(
+        toNumber(previousItem.receivedQty),
+        toNumber(item.availableBalanceQty ?? item.pendingQty ?? item.orderedQty)
+      )
+    );
+    const serialNumbers = getItemSerialNumbers(previousItem);
+
+    return {
+      ...item,
+      receivedQty,
+      balanceQty: Math.max(
+        toNumber(item.availableBalanceQty ?? item.pendingQty ?? item.orderedQty) - receivedQty,
+        0
+      ),
+      serialNumbers,
+      serialInput:
+        typeof previousItem.serialInput === "string"
+          ? previousItem.serialInput
+          : getSerialInputText(serialNumbers),
+    };
+  });
+};
+
 const createReceiveForm = (
   purchaseOrder,
   receiptHistory = [],
@@ -485,6 +529,10 @@ const createReceiveForm = (
     receivedBy: receipt?.receivedBy || "",
     invoiceNumber: receipt?.invoiceNumber || "",
     invoiceDate: receipt?.invoiceDate || "",
+    invoiceDocumentName: receipt?.invoiceDocumentName || "",
+    invoiceDocumentType: receipt?.invoiceDocumentType || "",
+    invoiceDocumentSize: Number(receipt?.invoiceDocumentSize ?? 0) || 0,
+    invoiceDocumentData: receipt?.invoiceDocumentData || "",
     billFrom:
       receipt?.billFrom ??
       receipt?.billTo ??
@@ -507,6 +555,32 @@ const createReceiveForm = (
     items,
   };
 };
+
+const MAX_INVOICE_DOCUMENT_SIZE = 5 * 1024 * 1024;
+
+const readInvoiceDocument = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error("Select a valid invoice file."));
+      return;
+    }
+    if (file.size > MAX_INVOICE_DOCUMENT_SIZE) {
+      reject(new Error(`${file.name} is larger than 5 MB.`));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve({
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        dataUrl: reader.result,
+      });
+    };
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
 
 const findMatchingPoItem = (purchaseOrder, receiptItem, index) => {
   const poItems = Array.isArray(purchaseOrder?.items) ? purchaseOrder.items : [];
@@ -669,7 +743,9 @@ const ReceiveGoods = () => {
   const [passwordPromptOpen, setPasswordPromptOpen] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminPasswordError, setAdminPasswordError] = useState("");
+  const [invoiceUploadError, setInvoiceUploadError] = useState("");
   const serialUploadInputRefs = useRef({});
+  const hydratedReceiveFormKeyRef = useRef("");
 
   const purchaseOrderIdFromSearch = searchParams.get("purchaseOrderId") || "";
   const receiptIdFromSearch = searchParams.get("receiptId") || "";
@@ -795,11 +871,16 @@ const ReceiveGoods = () => {
   const isSelectedPurchaseOrderClosed = isLockedPurchaseOrder(
     selectedPurchaseOrder?.status
   );
+  const defaultBillFromText =
+    buildReceiveVendorAddressText(selectedVendor) ||
+    buildReceiveBillFromText(selectedProject);
+  const defaultShipToText = buildReceiveShipToText(selectedLocation);
 
   useEffect(() => {
     let isActive = true;
     const loadSelectedReceipt = async () => {
       if (!selectedPurchaseOrder?.id) {
+        hydratedReceiveFormKeyRef.current = "";
         setReceiptHistory([]);
         setSelectedReceipt(null);
         setEditingReceipt(null);
@@ -808,13 +889,11 @@ const ReceiveGoods = () => {
         setClosedPoOverrideApproved(false);
         return;
       }
-      const systemBillFrom =
-        buildReceiveVendorAddressText(selectedVendor) ||
-        buildReceiveBillFromText(selectedProject);
       if (
         isLockedPurchaseOrder(selectedPurchaseOrder.status) &&
         !receiptIdFromSearch
       ) {
+        hydratedReceiveFormKeyRef.current = "";
         setApiError(getPurchaseOrderLockMessage(selectedPurchaseOrder.status));
         setReceiptHistory([]);
         setSelectedReceipt(null);
@@ -850,18 +929,42 @@ const ReceiveGoods = () => {
         if (!isLockedPurchaseOrder(selectedPurchaseOrder.status) || !nextEditingReceipt) {
           setClosedPoOverrideApproved(false);
         }
-        setReceiveForm(
-          createReceiveForm(
+        const nextHydrationKey = `${selectedPurchaseOrder.id}:${
+          nextEditingReceipt?.id ?? "new"
+        }`;
+        setReceiveForm((prev) => {
+          const nextForm = createReceiveForm(
             selectedPurchaseOrder,
             safeReceiptList,
             nextEditingReceipt,
             {
-              billFrom: systemBillFrom,
-              shipTo: buildReceiveShipToText(selectedLocation),
+              billFrom: defaultBillFromText,
+              shipTo: defaultShipToText,
               showProjectDetails: true,
             }
-          )
-        );
+          );
+          if (hydratedReceiveFormKeyRef.current === nextHydrationKey) {
+            return {
+              ...nextForm,
+              receivedDate: prev.receivedDate,
+              receivedBy: prev.receivedBy,
+              invoiceNumber: prev.invoiceNumber,
+              invoiceDate: prev.invoiceDate,
+              invoiceDocumentName: prev.invoiceDocumentName,
+              invoiceDocumentType: prev.invoiceDocumentType,
+              invoiceDocumentSize: prev.invoiceDocumentSize,
+              invoiceDocumentData: prev.invoiceDocumentData,
+              billFrom: prev.billFrom,
+              shipTo: prev.shipTo,
+              showProjectDetails: prev.showProjectDetails,
+              status: prev.status,
+              notes: prev.notes,
+              items: mergeHydratedReceiveItems(nextForm.items, prev.items),
+            };
+          }
+          hydratedReceiveFormKeyRef.current = nextHydrationKey;
+          return nextForm;
+        });
         setHasStatusOverride(false);
       } catch (error) {
         if (!isActive) return;
@@ -876,8 +979,8 @@ const ReceiveGoods = () => {
         setClosedPoOverrideApproved(false);
         setReceiveForm(
           createReceiveForm(selectedPurchaseOrder, [], null, {
-            billFrom: systemBillFrom,
-            shipTo: buildReceiveShipToText(selectedLocation),
+            billFrom: defaultBillFromText,
+            shipTo: defaultShipToText,
             showProjectDetails: true,
           })
         );
@@ -891,11 +994,10 @@ const ReceiveGoods = () => {
       isActive = false;
     };
   }, [
+    defaultBillFromText,
+    defaultShipToText,
     receiptIdFromSearch,
-    selectedLocation,
-    selectedProject,
     selectedPurchaseOrder,
-    selectedVendor,
   ]);
 
   const receiveItems = useMemo(
@@ -1004,6 +1106,40 @@ const ReceiveGoods = () => {
     setSearchParams(nextSearchParams, { replace: true });
   };
   const getReceiveLineKey = (item = {}, index = 0) => getItemKey(item, index);
+
+  const handleInvoiceUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const document = await readInvoiceDocument(file);
+      setReceiveForm((prev) => ({
+        ...prev,
+        invoiceDocumentName: document.name,
+        invoiceDocumentType: document.type,
+        invoiceDocumentSize: document.size,
+        invoiceDocumentData: document.dataUrl,
+      }));
+      setInvoiceUploadError("");
+    } catch (error) {
+      setInvoiceUploadError(error?.message || "Failed to upload invoice file.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const clearInvoiceUpload = () => {
+    setReceiveForm((prev) => ({
+      ...prev,
+      invoiceDocumentName: "",
+      invoiceDocumentType: "",
+      invoiceDocumentSize: 0,
+      invoiceDocumentData: "",
+    }));
+    setInvoiceUploadError("");
+  };
 
   const handleReceiveFieldChange = (field, value) => {
     if (isReceiveReadOnly) {
@@ -1172,6 +1308,10 @@ const ReceiveGoods = () => {
         receivedBy: receiveForm.receivedBy.trim() || null,
         invoiceNumber: receiveForm.invoiceNumber.trim() || null,
         invoiceDate: receiveForm.invoiceDate || null,
+        invoiceDocumentName: receiveForm.invoiceDocumentName || null,
+        invoiceDocumentType: receiveForm.invoiceDocumentType || null,
+        invoiceDocumentSize: receiveForm.invoiceDocumentSize || null,
+        invoiceDocumentData: receiveForm.invoiceDocumentData || null,
         billFrom: receiveForm.billFrom?.trim() || null,
         shipTo: receiveForm.shipTo.trim() || null,
         showProjectDetails: receiveForm.showProjectDetails !== false,
@@ -1209,6 +1349,7 @@ const ReceiveGoods = () => {
           selectedPurchaseOrder.poNumber || "selected PO"
         }.`
       );
+      hydratedReceiveFormKeyRef.current = "";
       syncSelectedPurchaseOrder(
         selectedPurchaseOrder.id,
         editingReceipt ? savedReceipt.id : ""
@@ -1817,6 +1958,69 @@ const ReceiveGoods = () => {
                         className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                       />
                     </div>
+                    <div className="sm:col-span-2">
+                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Invoice Upload
+                            </label>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Upload invoice copy using the existing document flow. Max 5 MB.
+                            </p>
+                          </div>
+                          <input
+                            type="file"
+                            onChange={handleInvoiceUpload}
+                            disabled={isReceiveReadOnly}
+                            className="block text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-indigo-700 disabled:opacity-60"
+                          />
+                        </div>
+                        {invoiceUploadError ? (
+                          <p className="mt-3 text-sm text-red-600">{invoiceUploadError}</p>
+                        ) : null}
+                        {receiveForm.invoiceDocumentName ? (
+                          <div className="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <p className="truncate font-medium text-slate-800">
+                                {receiveForm.invoiceDocumentName}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {receiveForm.invoiceDocumentType || "Document"} |{" "}
+                                {receiveForm.invoiceDocumentSize
+                                  ? `${Math.round(receiveForm.invoiceDocumentSize / 1024)} KB`
+                                  : "-"}
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              {receiveForm.invoiceDocumentData ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    window.open(
+                                      receiveForm.invoiceDocumentData,
+                                      "_blank",
+                                      "noopener,noreferrer"
+                                    )
+                                  }
+                                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700"
+                                >
+                                  Open
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={clearInvoiceUpload}
+                                disabled={isReceiveReadOnly}
+                                className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                     <div>
                       <label className="text-sm font-medium text-slate-700">Bill From</label>
                       <textarea
@@ -2165,6 +2369,10 @@ const ReceiveGoods = () => {
             { label: "Received Date", value: formatDate(viewReceipt.receivedDate) || "-" },
             { label: "Invoice No", value: viewReceipt.invoiceNumber || "-" },
             { label: "Invoice Date", value: formatDate(viewReceipt.invoiceDate) || "-" },
+            {
+              label: "Invoice File",
+              value: viewReceipt.invoiceDocumentName || "-",
+            },
             { label: "Status", value: viewReceipt.status || viewPurchaseOrder?.status || "Draft" },
             { label: "Received By", value: viewReceipt.receivedBy || "-" },
           ]}

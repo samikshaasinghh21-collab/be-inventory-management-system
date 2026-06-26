@@ -9,10 +9,10 @@
   padding: 1rem 0.85rem;
   color: var(--sidebar-text);
   background:
-    radial-gradient(circle at top left, rgba(54, 197, 240, 0.12), transparent 22%),
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.2), transparent 24%),
     linear-gradient(180deg, var(--sidebar-bg) 0%, var(--sidebar-bg-elevated) 100%);
   border-right: 1px solid var(--sidebar-border);
-  box-shadow: 18px 0 42px rgba(15, 23, 42, 0.1);
+  box-shadow: var(--shadow-soft);
   transition:
     width 0.28s var(--transition-emphasized),
     transform 0.28s var(--transition-emphasized);
@@ -30,11 +30,11 @@
   min-width: 0;
   width: 100%;
   padding: 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--sidebar-border);
+  border-radius: var(--radius);
   color: var(--sidebar-text);
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .sidebar-footer-card {
@@ -43,7 +43,8 @@
 }
 
 .sidebar-footer-card:hover {
-  background: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transform: translateY(-1px);
 }
 
@@ -54,8 +55,9 @@
   height: 2.65rem;
   flex-shrink: 0;
   place-items: center;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(54, 197, 240, 0.22), rgba(74, 21, 75, 0.38));
+  border-radius: var(--radius-sm);
+  background: var(--gradient-accent);
+  box-shadow: var(--shadow-soft);
   color: white;
   object-fit: cover;
   font-size: 0.82rem;
@@ -118,8 +120,8 @@
   gap: 0.75rem;
   width: 100%;
   padding: 0.6rem 0.7rem;
-  border: 0;
-  border-radius: 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--sidebar-text-muted);
   background: transparent;
   transition: var(--transition);
@@ -138,16 +140,19 @@
 
 .sidebar-nav-link:hover {
   color: var(--sidebar-text);
+  border-color: var(--sidebar-border);
   background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   transform: translateX(2px);
 }
 
 .sidebar-nav-link.is-active {
   color: var(--sidebar-text);
-  background: linear-gradient(135deg, rgba(74, 21, 75, 0.82), rgba(74, 21, 75, 0.54));
+  border-color: rgba(255, 255, 255, 0.14);
+  background: linear-gradient(145deg, #6f91eb 0%, #5f96e8 100%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 18px 30px rgba(11, 15, 25, 0.2);
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 12px 24px rgba(24, 32, 46, 0.22);
 }
 
 .sidebar-nav-link.is-active::before {
@@ -156,7 +161,7 @@
 
 .sidebar-nav-link.is-child {
   min-height: 2.55rem;
-  border-radius: 14px;
+  border-radius: var(--radius-xs);
 }
 
 .sidebar-nav-icon {
@@ -165,8 +170,9 @@
   height: 2rem;
   flex-shrink: 0;
   place-items: center;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .sidebar-nav-copy {
@@ -191,7 +197,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
-  color: rgba(255, 255, 255, 0.62);
+  color: var(--sidebar-text-muted);
   font-size: 0.72rem;
   line-height: 1.25;
   -webkit-box-orient: vertical;
@@ -203,7 +209,7 @@
   width: 1.5rem;
   height: 1.5rem;
   place-items: center;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--sidebar-text-muted);
   transition: transform 0.2s ease;
 }
 
@@ -214,12 +220,12 @@
 .sidebar-subnav {
   margin: 0.25rem 0 0.35rem 0.55rem;
   padding-left: 0.35rem;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .sidebar-footer {
   padding-top: 0.25rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .app-shell.is-sidebar-collapsed .sidebar-workspace-card,
@@ -245,8 +251,8 @@
   position: fixed;
   inset: 0;
   z-index: var(--z-overlay);
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(2px);
+  background: rgba(31, 42, 61, 0.28);
+  backdrop-filter: blur(6px);
 }
 
 @media (max-width: 1023px) {

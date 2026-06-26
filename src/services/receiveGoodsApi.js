@@ -230,6 +230,14 @@ export const normalizeReceiveGoods = (receipt = {}) => {
     receivedBy: receipt.receivedBy ?? receipt.ReceivedBy ?? "",
     invoiceNumber: receipt.invoiceNumber ?? receipt.InvoiceNumber ?? "",
     invoiceDate: receipt.invoiceDate ?? receipt.InvoiceDate ?? null,
+    invoiceDocumentName:
+      receipt.invoiceDocumentName ?? receipt.InvoiceDocumentName ?? "",
+    invoiceDocumentType:
+      receipt.invoiceDocumentType ?? receipt.InvoiceDocumentType ?? "",
+    invoiceDocumentSize:
+      Number(receipt.invoiceDocumentSize ?? receipt.InvoiceDocumentSize ?? 0) || 0,
+    invoiceDocumentData:
+      receipt.invoiceDocumentData ?? receipt.InvoiceDocumentData ?? "",
     billFrom:
       receipt.billFrom ??
       receipt.BillFrom ??

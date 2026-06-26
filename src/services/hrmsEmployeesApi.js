@@ -14,6 +14,10 @@ const emitHrmsEmployeesChange = () => {
   }
 };
 
+const normalizeHrmsEmployeeRequestId = (id) => String(id ?? "").trim();
+
+const isHrmsEmployeeNotFoundError = (error) => error?.response?.status === 404;
+
 const toDisplayDate = (value) => {
   if (!value) return "";
   const text = String(value);
@@ -72,16 +76,13 @@ export const normalizeHrmsEmployee = (employee = {}) => {
   const esiAmount = toOptionalNumber(
     employee.esiAmount ?? employee.esi ?? employee.ESIAmount
   );
-<<<<<<< HEAD
   const grossSalary = toOptionalNumber(
-    employee.grossSalary ?? employee.GrossSalary
+    employee.grossSalary ??
+      employee.GrossSalary ??
+      employee.salary ??
+      employee.basicSalary ??
+      employee.BasicSalary
   );
-  const tds = toOptionalNumber(
-    employee.tds ?? employee.TDS
-  );
-  const pt = toOptionalNumber(
-    employee.pt ?? employee.professionalTax ?? employee.ProfessionalTax
-=======
   const allowances = toOptionalNumber(
     employee.allowances ?? employee.allowance ?? employee.Allowances
   );
@@ -89,9 +90,10 @@ export const normalizeHrmsEmployee = (employee = {}) => {
     employee.professionalTax ?? employee.pt ?? employee.ProfessionalTax
   );
   const tdsAmount = toOptionalNumber(
-    employee.tdsAmount ?? employee.tds ?? employee.TDSAmount
->>>>>>> origin/main
+    employee.tdsAmount ?? employee.tds ?? employee.TDSAmount ?? employee.TDS
   );
+  const tds = tdsAmount;
+  const pt = professionalTax;
 
   return {
     ...employee,
@@ -106,6 +108,14 @@ export const normalizeHrmsEmployee = (employee = {}) => {
     email: employee.email ?? employee.Email ?? "",
     phone,
     phoneNumber: phone,
+    emergencyContactName:
+      employee.emergencyContactName ??
+      employee.EmergencyContactName ??
+      "",
+    emergencyContactAddress:
+      employee.emergencyContactAddress ??
+      employee.EmergencyContactAddress ??
+      "",
     emergencyContactNumber:
       employee.emergencyContactNumber ??
       employee.emergencyPhone ??
@@ -153,10 +163,52 @@ export const normalizeHrmsEmployee = (employee = {}) => {
     esiAmount,
     esi: esiAmount,
     grossSalary,
-    tds,
-    pt,
     avatar: employee.avatar ?? getInitials(name),
-    address: employee.address ?? employee.Address ?? "",
+    permanentAddress:
+      employee.permanentAddress ?? employee.PermanentAddress ?? "",
+    presentAddress:
+      employee.presentAddress ??
+      employee.PresentAddress ??
+      employee.address ??
+      employee.Address ??
+      "",
+    sameAsPermanentAddress:
+      typeof employee.sameAsPermanentAddress === "boolean"
+        ? employee.sameAsPermanentAddress
+        : typeof employee.SameAsPermanentAddress === "boolean"
+          ? employee.SameAsPermanentAddress
+          : Boolean(
+              String(
+                employee.presentAddress ??
+                  employee.PresentAddress ??
+                  employee.address ??
+                  employee.Address ??
+                  ""
+              ).trim() &&
+                String(
+                  employee.permanentAddress ??
+                    employee.PermanentAddress ??
+                    ""
+                ).trim() &&
+                String(
+                  employee.presentAddress ??
+                    employee.PresentAddress ??
+                    employee.address ??
+                    employee.Address ??
+                    ""
+                ).trim() ===
+                  String(
+                    employee.permanentAddress ??
+                      employee.PermanentAddress ??
+                      ""
+                  ).trim()
+            ),
+    address:
+      employee.presentAddress ??
+      employee.PresentAddress ??
+      employee.address ??
+      employee.Address ??
+      "",
     bloodGroup: employee.bloodGroup ?? employee.BloodGroup ?? "",
     dateOfBirth: toDisplayDate(employee.dateOfBirth ?? employee.DateOfBirth),
     documentNumber: employee.documentNumber ?? employee.DocumentNumber ?? "",
@@ -165,11 +217,6 @@ export const normalizeHrmsEmployee = (employee = {}) => {
     maritalStatus: employee.maritalStatus ?? employee.MaritalStatus ?? "",
     nationality: employee.nationality ?? employee.Nationality ?? "",
     panNumber: employee.panNumber ?? employee.PANNumber ?? "",
-<<<<<<< HEAD
-    uanNumber: employee.uanNumber ?? employee.UANNumber ?? "",
-    relation: employee.relation ?? employee.Relation ?? "",
-=======
->>>>>>> origin/main
     photo: employee.photo ?? employee.photoPath ?? employee.PhotoPath ?? "",
     photoPath: employee.photoPath ?? employee.photo ?? employee.PhotoPath ?? "",
     uanNumber: employee.uanNumber ?? employee.UANNumber ?? "",
@@ -218,10 +265,19 @@ export const fetchHrmsEmployees = async (page = 1, pageSize = 50, filters = {}) 
 };
 
 export const fetchHrmsEmployee = async (id) => {
+  const normalizedId = normalizeHrmsEmployeeRequestId(id);
   try {
-    const response = await api.get(`/hrms/employees/${id}`);
-    return normalizeHrmsEmployee(response.data?.data || response.data);
+    const response = await api.get(`/hrms/employees/${encodeURIComponent(normalizedId)}`);
+    return normalizeHrmsEmployee(
+      response.data?.employee ??
+        response.data?.data?.employee ??
+        response.data?.data ??
+        response.data
+    );
   } catch (error) {
+    if (isHrmsEmployeeNotFoundError(error)) {
+      emitHrmsEmployeesChange();
+    }
     console.error('Error fetching employee:', error);
     throw error;
   }
@@ -237,17 +293,36 @@ export const createHrmsEmployee = async (payload) => {
 };
 
 export const updateHrmsEmployee = async (id, payload) => {
-  const response = await api.put(`/hrms/employees/${id}`, payload);
-  const normalized = normalizeHrmsEmployee(
-    response.data?.employee ?? response.data
-  );
-  emitHrmsEmployeesChange();
-  return normalized;
+  const normalizedId = normalizeHrmsEmployeeRequestId(id);
+  try {
+    const response = await api.put(
+      `/hrms/employees/${encodeURIComponent(normalizedId)}`,
+      payload
+    );
+    const normalized = normalizeHrmsEmployee(
+      response.data?.employee ?? response.data
+    );
+    emitHrmsEmployeesChange();
+    return normalized;
+  } catch (error) {
+    if (isHrmsEmployeeNotFoundError(error)) {
+      emitHrmsEmployeesChange();
+    }
+    throw error;
+  }
 };
 
 export const deleteHrmsEmployee = async (id) => {
-  await api.delete(`/hrms/employees/${id}`);
-  emitHrmsEmployeesChange();
+  const normalizedId = normalizeHrmsEmployeeRequestId(id);
+  try {
+    await api.delete(`/hrms/employees/${encodeURIComponent(normalizedId)}`);
+    emitHrmsEmployeesChange();
+  } catch (error) {
+    if (isHrmsEmployeeNotFoundError(error)) {
+      emitHrmsEmployeesChange();
+    }
+    throw error;
+  }
 };
 
 export const getHrmsEmployeeErrorMessage = (

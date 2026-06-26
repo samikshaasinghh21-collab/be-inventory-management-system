@@ -839,6 +839,11 @@ const normalizeCustomer = (row = {}) => ({
   email: row.Email ?? row.email ?? "",
   contactPerson: row.ContactPerson ?? row.contactPerson ?? "",
   designation: row.Designation ?? row.designation ?? "",
+  documents: Array.isArray(row.documents)
+    ? row.documents
+    : Array.isArray(row.Documents)
+    ? row.Documents
+    : parseJsonArray(row.DocumentsJson ?? row.documentsJson),
   createdAt: row.CreatedAt ?? row.createdAt ?? null,
   updatedAt: row.UpdatedAt ?? row.updatedAt ?? null,
 });
@@ -974,7 +979,18 @@ const normalizeBoq = (row = {}) => ({
 });
 
 const normalizeBoqItem = (row = {}) => {
-  const quantity = Number(row.Quantity ?? row.quantity ?? 0) || 0;
+  const quantity =
+    Number(
+      row.Quantity ??
+        row.quantity ??
+        row.UnitQty ??
+        row.unitQty ??
+        row.UnitQuantity ??
+        row.unitQuantity ??
+        row.Qty ??
+        row.qty ??
+        0
+    ) || 0;
   const rate = Number(row.Rate ?? row.rate ?? 0) || 0;
   const itemId = toNullableInt(
     row.ItemId ?? row.itemId ?? row.InventoryItemId ?? row.inventoryItemId
@@ -1025,7 +1041,7 @@ const normalizeBoqItem = (row = {}) => {
       ) ?? 0,
     quantity,
     consumedQty,
-    availableQty: inventoryQty ?? availableQty,
+    availableQty,
     inventoryQty,
     currentStock: inventoryQty,
     stock: inventoryQty,
@@ -1577,6 +1593,15 @@ const normalizeReallocateInventory = (row = {}) => {
     id,
     transferId: id,
     referenceNumber: metadata.referenceNumber ?? `REL-${id}`,
+    referenceType:
+      metadata.referenceType ??
+      (metadata.consumptionId ? "consumption" : ""),
+    referenceId:
+      metadata.referenceId ?? metadata.consumptionId ?? null,
+    referenceNo:
+      metadata.referenceNo ??
+      metadata.consumptionNumber ??
+      "",
     type: metadata.type === "Return" ? "Return" : "Reallocate",
     consumptionId: metadata.consumptionId ?? null,
     consumptionNumber: metadata.consumptionNumber ?? "",
@@ -1588,6 +1613,7 @@ const normalizeReallocateInventory = (row = {}) => {
       row.TransferDate ?? row.transferDate ?? metadata.requestDate ?? null,
     transferDate: row.TransferDate ?? row.transferDate ?? null,
     requestedBy: metadata.requestedBy ?? "",
+    eWayBillNumber: metadata.eWayBillNumber ?? "",
     status: metadata.status ?? "Pending",
     notes: metadata.notes ?? rawNotes ?? "",
     createdAt: row.CreatedAt ?? row.createdAt ?? metadata.createdAt ?? null,
@@ -1615,6 +1641,7 @@ const normalizeReallocateInventoryItem = (row = {}) => ({
     null,
   sourceType: row.SourceType ?? row.sourceType ?? "",
   sourceKey: row.SourceKey ?? row.sourceKey ?? "",
+  sourceRef: row.SourceRef ?? row.sourceRef ?? "",
   item: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
   name: row.Item ?? row.item ?? row.Name ?? row.name ?? "",
   description: row.Description ?? row.description ?? "",
@@ -1624,6 +1651,9 @@ const normalizeReallocateInventoryItem = (row = {}) => ({
 const generateReallocateReferenceNumber = (id) => `REL-${id}`;
 const buildReallocateNotesPayload = ({
   referenceNumber = null,
+  referenceType = null,
+  referenceId = null,
+  referenceNo = "",
   type = "Reallocate",
   consumptionId = null,
   consumptionNumber = "",
@@ -1631,6 +1661,7 @@ const buildReallocateNotesPayload = ({
   returnVendorId = null,
   requestDate = null,
   requestedBy = "",
+  eWayBillNumber = "",
   status = "Pending",
   notes = "",
   createdAt = null,
@@ -1638,6 +1669,9 @@ const buildReallocateNotesPayload = ({
 } = {}) =>
   JSON.stringify({
     referenceNumber,
+    referenceType,
+    referenceId,
+    referenceNo,
     type,
     consumptionId,
     consumptionNumber,
@@ -1645,6 +1679,7 @@ const buildReallocateNotesPayload = ({
     returnVendorId,
     requestDate,
     requestedBy,
+    eWayBillNumber,
     status,
     notes,
     createdAt,
@@ -1755,6 +1790,19 @@ const normalizeCustomerContactsInput = (contacts = []) =>
     .filter((contact) =>
       [contact.contactName, contact.email, contact.designation, contact.phone].some(Boolean)
     );
+
+const normalizeUploadedDocumentsInput = (documents = []) =>
+  (Array.isArray(documents) ? documents : [])
+    .map((document) => ({
+      name: String(document?.name ?? document?.fileName ?? "").trim(),
+      type: String(document?.type ?? document?.fileType ?? "").trim(),
+      size: Number(document?.size ?? document?.fileSize ?? 0) || 0,
+      uploadedAt: String(
+        document?.uploadedAt ?? document?.createdAt ?? new Date().toISOString()
+      ).trim(),
+      dataUrl: String(document?.dataUrl ?? document?.fileData ?? "").trim(),
+    }))
+    .filter((document) => document.name && document.dataUrl);
 
 const getVendorContactsValidationError = (contacts = []) => {
   for (const [index, contact] of contacts.entries()) {
@@ -1995,6 +2043,14 @@ const normalizeReceiveGoods = (row = {}) => {
     receivedBy: row.ReceivedBy ?? row.receivedBy ?? "",
     invoiceNumber: row.InvoiceNumber ?? row.invoiceNumber ?? "",
     invoiceDate: row.InvoiceDate ?? row.invoiceDate ?? null,
+    invoiceDocumentName:
+      row.InvoiceDocumentName ?? row.invoiceDocumentName ?? "",
+    invoiceDocumentType:
+      row.InvoiceDocumentType ?? row.invoiceDocumentType ?? "",
+    invoiceDocumentSize:
+      Number(row.InvoiceDocumentSize ?? row.invoiceDocumentSize ?? 0) || 0,
+    invoiceDocumentData:
+      row.InvoiceDocumentData ?? row.invoiceDocumentData ?? "",
     billFrom:
       row.BillFrom ?? row.billFrom ?? row.BillTo ?? row.billTo ?? "",
     billTo:
@@ -2942,6 +2998,7 @@ const ensureCustomersTable = async () => {
         Email NVARCHAR(255) NULL,
         ContactPerson NVARCHAR(255) NULL,
         Designation NVARCHAR(255) NULL,
+        DocumentsJson NVARCHAR(MAX) NULL,
         CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
       )
@@ -2996,6 +3053,10 @@ const ensureCustomersTable = async () => {
     IF COL_LENGTH('dbo.Customers', 'Designation') IS NULL
     BEGIN
       ALTER TABLE dbo.Customers ADD Designation NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.Customers', 'DocumentsJson') IS NULL
+    BEGIN
+      ALTER TABLE dbo.Customers ADD DocumentsJson NVARCHAR(MAX) NULL;
     END;
     IF COL_LENGTH('dbo.Customers', 'CreatedAt') IS NULL
     BEGIN
@@ -3619,7 +3680,18 @@ const normalizeBoqItemsInput = (items = []) =>
         normalizeOptionalString(
           item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate
         ) ?? "",
-      quantity: Number(item.quantity ?? item.qty ?? item.Quantity ?? 0) || 0,
+      quantity:
+        Number(
+          item.quantity ??
+            item.Quantity ??
+            item.unitQty ??
+            item.UnitQty ??
+            item.unitQuantity ??
+            item.UnitQuantity ??
+            item.qty ??
+            item.Qty ??
+            0
+        ) || 0,
       rate: Number(item.rate ?? item.Rate ?? item.unitPrice ?? item.UnitPrice ?? 0) || 0,
       notes: normalizeOptionalString(item.notes ?? item.Notes) ?? "",
     }))
@@ -4702,6 +4774,10 @@ const ensureReceiveTables = async () => {
       TaxMode NVARCHAR(20) NULL,
         InvoiceNumber NVARCHAR(100) NULL,
         InvoiceDate DATE NULL,
+        InvoiceDocumentName NVARCHAR(255) NULL,
+        InvoiceDocumentType NVARCHAR(120) NULL,
+        InvoiceDocumentSize INT NULL,
+        InvoiceDocumentData NVARCHAR(MAX) NULL,
         Status NVARCHAR(50) NULL,
         CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -4790,6 +4866,22 @@ const ensureReceiveTables = async () => {
     IF COL_LENGTH('dbo.ReceiveGoods', 'InvoiceDate') IS NULL
     BEGIN
       ALTER TABLE dbo.ReceiveGoods ADD InvoiceDate DATE NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'InvoiceDocumentName') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD InvoiceDocumentName NVARCHAR(255) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'InvoiceDocumentType') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD InvoiceDocumentType NVARCHAR(120) NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'InvoiceDocumentSize') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD InvoiceDocumentSize INT NULL;
+    END;
+    IF COL_LENGTH('dbo.ReceiveGoods', 'InvoiceDocumentData') IS NULL
+    BEGIN
+      ALTER TABLE dbo.ReceiveGoods ADD InvoiceDocumentData NVARCHAR(MAX) NULL;
     END;
     IF COL_LENGTH('dbo.ReceiveGoods', 'Status') IS NULL
     BEGIN
@@ -7355,6 +7447,7 @@ const ensureReallocateInventoryTables = async () => {
           DeliveryChallanItemId BIGINT NULL,
           SourceType NVARCHAR(50) NULL,
           SourceKey NVARCHAR(200) NULL,
+          SourceRef NVARCHAR(255) NULL,
           Item NVARCHAR(200) NULL,
           Description NVARCHAR(500) NULL,
           Unit NVARCHAR(100) NULL,
@@ -7387,6 +7480,10 @@ const ensureReallocateInventoryTables = async () => {
       IF COL_LENGTH('dbo.ReallocateInventoryItems', 'SourceKey') IS NULL
       BEGIN
         ALTER TABLE dbo.ReallocateInventoryItems ADD SourceKey NVARCHAR(200) NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventoryItems', 'SourceRef') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventoryItems ADD SourceRef NVARCHAR(255) NULL;
       END;
       IF COL_LENGTH('dbo.ReallocateInventoryItems', 'Item') IS NULL
       BEGIN
@@ -7452,6 +7549,9 @@ const buildAvailabilitySourceKey = (item = {}) => {
   const receiveGoodsItemId = toNullableInt(
     item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
   );
+  const consumptionId = toNullableInt(
+    item.consumptionId ?? item.ConsumptionId ?? item.ConsumptionID
+  );
   const itemId = toNullableInt(item.itemId ?? item.ItemId);
   const materialKey = buildInventoryMaterialKey(item);
 
@@ -7467,6 +7567,17 @@ const buildAvailabilitySourceKey = (item = {}) => {
   if (sourceType === "reallocation") {
     const id = item.id ?? item.Id ?? item.transferId ?? item.TransferId ?? materialKey;
     return id ? `reallocation:${id}` : "";
+  }
+
+  if (sourceType === "consumption") {
+    const identity =
+      item.id ??
+      item.Id ??
+      receiveGoodsItemId ??
+      deliveryChallanId ??
+      itemId ??
+      materialKey;
+    return identity ? `consumption:${consumptionId ?? "unknown"}:${identity}` : "";
   }
 
   return "";
@@ -7897,6 +8008,35 @@ const loadAvailableInventoryRows = async (
     });
   });
 
+  (consumptionItemsResult.recordset ?? []).forEach((row) => {
+    const item = normalizeConsumptionItem(row);
+    const itemQty = toAvailabilityQuantity(item.quantity);
+    if (!itemQty) {
+      return;
+    }
+
+    addSourceEntry(
+      {
+        ...item,
+        consumptionId: row.HeaderConsumptionId ?? item.consumptionId,
+        sourceType: "consumption",
+        sourceKey:
+          item.sourceKey ||
+          `consumption:${row.HeaderConsumptionId ?? item.consumptionId ?? "record"}:${
+            item.id ??
+            item.receiveGoodsItemId ??
+            item.deliveryChallanItemId ??
+            item.itemId ??
+            buildInventoryMaterialKey(item)
+          }`,
+        projectId: row.HeaderProjectId,
+        locationId: row.HeaderLocationId,
+        sourceRef: `Consumption ${row.HeaderConsumptionId ?? item.consumptionId ?? ""}`.trim(),
+      },
+      itemQty
+    );
+  });
+
   (reallocateItemsResult.recordset ?? []).forEach((row) => {
     const transfer = normalizeReallocateInventory({
       Id: row.HeaderTransferId,
@@ -8161,8 +8301,10 @@ const ensureHrmsEmployeesTable = async () => {
           MaritalStatus VARCHAR(20) NULL,
           BloodGroup VARCHAR(10) NULL,
           PhoneNumber VARCHAR(20) NULL,
+          EmergencyContactName VARCHAR(150) NULL,
           EmergencyContactNumber VARCHAR(20) NULL,
           EmergencyContactRelation VARCHAR(100) NULL,
+          EmergencyContactAddress VARCHAR(500) NULL,
           Email VARCHAR(150) NULL,
           DepartmentID INT NULL,
           DesignationID INT NULL,
@@ -8177,12 +8319,20 @@ const ensureHrmsEmployeesTable = async () => {
           DocumentNumber VARCHAR(100) NULL,
           UANNumber VARCHAR(50) NULL,
           ESINumber VARCHAR(50) NULL,
+          PermanentAddress VARCHAR(500) NULL,
+          PresentAddress VARCHAR(500) NULL,
+          SameAsPermanentAddress BIT NULL,
           Address VARCHAR(500) NULL,
           PhotoPath VARCHAR(255) NULL,
           DocumentsJson NVARCHAR(MAX) NULL,
           Status VARCHAR(20) NULL,
           CreatedAt DATETIME NULL DEFAULT GETDATE()
         );
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'EmergencyContactName') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD EmergencyContactName VARCHAR(150) NULL;
       END
 
       IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'EmergencyContactNumber') IS NULL
@@ -8193,6 +8343,26 @@ const ensureHrmsEmployeesTable = async () => {
       IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'EmergencyContactRelation') IS NULL
       BEGIN
         ALTER TABLE ${hrmsTable("Employees")} ADD EmergencyContactRelation VARCHAR(100) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'EmergencyContactAddress') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD EmergencyContactAddress VARCHAR(500) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'PermanentAddress') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD PermanentAddress VARCHAR(500) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'PresentAddress') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD PresentAddress VARCHAR(500) NULL;
+      END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'SameAsPermanentAddress') IS NULL
+      BEGIN
+        ALTER TABLE ${hrmsTable("Employees")} ADD SameAsPermanentAddress BIT NULL;
       END
 
       IF COL_LENGTH(N'${hrmsObjectName("Employees")}', N'DocumentsJson') IS NULL
@@ -8391,6 +8561,16 @@ const buildHrmsEmployeePayload = async (source = {}, tx) => {
   const esiAmount = normalizeHrmsOptionalDecimal(
     source.esiAmount ?? source.esi ?? source.ESIAmount
   );
+  const permanentAddress = trimToLength(
+    source.permanentAddress ?? source.PermanentAddress,
+    500
+  );
+  const presentAddress = trimToLength(
+    source.presentAddress ?? source.PresentAddress ?? source.address ?? source.Address,
+    500
+  );
+  const sameAsPermanentAddressSource =
+    source.sameAsPermanentAddress ?? source.SameAsPermanentAddress;
 
   return {
     employeeId: trimToLength(
@@ -8418,6 +8598,10 @@ const buildHrmsEmployeePayload = async (source = {}, tx) => {
       source.phone ?? source.phoneNumber ?? source.PhoneNumber,
       20
     ),
+    emergencyContactName: trimToLength(
+      source.emergencyContactName ?? source.EmergencyContactName,
+      150
+    ),
     emergencyContactNumber: trimToLength(
       source.emergencyContactNumber ??
         source.emergencyPhone ??
@@ -8429,6 +8613,10 @@ const buildHrmsEmployeePayload = async (source = {}, tx) => {
         source.relation ??
         source.EmergencyContactRelation,
       100
+    ),
+    emergencyContactAddress: trimToLength(
+      source.emergencyContactAddress ?? source.EmergencyContactAddress,
+      500
     ),
     email: trimToLength(source.email ?? source.Email, 150),
     departmentId,
@@ -8447,7 +8635,19 @@ const buildHrmsEmployeePayload = async (source = {}, tx) => {
     ),
     uanNumber: trimToLength(source.uanNumber ?? source.UANNumber, 50),
     esiNumber: trimToLength(source.esiNumber ?? source.ESINumber, 50),
-    address: trimToLength(source.address ?? source.Address, 500),
+    permanentAddress,
+    presentAddress,
+    sameAsPermanentAddress:
+      sameAsPermanentAddressSource === undefined ||
+      sameAsPermanentAddressSource === null ||
+      sameAsPermanentAddressSource === ""
+        ? Boolean(
+            permanentAddress &&
+              presentAddress &&
+              permanentAddress === presentAddress
+          )
+        : Boolean(sameAsPermanentAddressSource),
+    address: presentAddress,
     photoPath: normalizeHrmsPhotoPath(
       source.photoPath ?? source.PhotoPath ?? source.photo
     ),
@@ -8474,10 +8674,12 @@ const normalizeHrmsEmployeeRow = (row = {}) => ({
   bloodGroup: row.BloodGroup ?? "",
   phone: row.PhoneNumber ?? "",
   phoneNumber: row.PhoneNumber ?? "",
+  emergencyContactName: row.EmergencyContactName ?? "",
   emergencyContactNumber: row.EmergencyContactNumber ?? "",
   emergencyPhone: row.EmergencyContactNumber ?? "",
   emergencyContactRelation: row.EmergencyContactRelation ?? "",
   relation: row.EmergencyContactRelation ?? "",
+  emergencyContactAddress: row.EmergencyContactAddress ?? "",
   email: row.Email ?? "",
   departmentId: row.DepartmentID ?? null,
   department: row.DepartmentName ?? "",
@@ -8501,7 +8703,18 @@ const normalizeHrmsEmployeeRow = (row = {}) => ({
   documentNumber: row.DocumentNumber ?? "",
   uanNumber: row.UANNumber ?? "",
   esiNumber: row.ESINumber ?? "",
-  address: row.Address ?? "",
+  permanentAddress: row.PermanentAddress ?? "",
+  presentAddress: row.PresentAddress ?? row.Address ?? "",
+  sameAsPermanentAddress:
+    typeof row.SameAsPermanentAddress === "boolean"
+      ? row.SameAsPermanentAddress
+      : Boolean(
+          (row.PermanentAddress ?? "") &&
+            (row.PresentAddress ?? row.Address ?? "") &&
+            String(row.PermanentAddress ?? "").trim() ===
+              String(row.PresentAddress ?? row.Address ?? "").trim()
+        ),
+  address: row.PresentAddress ?? row.Address ?? "",
   photo: row.PhotoPath ?? "",
   photoPath: row.PhotoPath ?? "",
   documents: parseJsonObject(row.DocumentsJson),
@@ -8524,8 +8737,10 @@ const loadHrmsEmployeeById = async (source, employeeId) => {
         e.MaritalStatus,
         e.BloodGroup,
         e.PhoneNumber,
+        e.EmergencyContactName,
         e.EmergencyContactNumber,
         e.EmergencyContactRelation,
+        e.EmergencyContactAddress,
         e.Email,
         e.DepartmentID,
         d.Name AS DepartmentName,
@@ -8542,6 +8757,9 @@ const loadHrmsEmployeeById = async (source, employeeId) => {
         e.DocumentNumber,
         e.UANNumber,
         e.ESINumber,
+        e.PermanentAddress,
+        e.PresentAddress,
+        e.SameAsPermanentAddress,
         e.Address,
         e.PhotoPath,
         e.DocumentsJson,
@@ -10730,8 +10948,10 @@ app.get("/api/hrms/employees", async (_req, res) => {
         e.MaritalStatus,
         e.BloodGroup,
         e.PhoneNumber,
+        e.EmergencyContactName,
         e.EmergencyContactNumber,
         e.EmergencyContactRelation,
+        e.EmergencyContactAddress,
         e.Email,
         e.DepartmentID,
         d.Name AS DepartmentName,
@@ -10748,6 +10968,9 @@ app.get("/api/hrms/employees", async (_req, res) => {
         e.DocumentNumber,
         e.UANNumber,
         e.ESINumber,
+        e.PermanentAddress,
+        e.PresentAddress,
+        e.SameAsPermanentAddress,
         e.Address,
         e.PhotoPath,
         e.DocumentsJson,
@@ -10831,8 +11054,10 @@ app.post("/api/hrms/employees", async (req, res) => {
       .input("MaritalStatus", sql.VarChar(20), payload.maritalStatus)
       .input("BloodGroup", sql.VarChar(10), payload.bloodGroup)
       .input("PhoneNumber", sql.VarChar(20), payload.phoneNumber)
+      .input("EmergencyContactName", sql.VarChar(150), payload.emergencyContactName)
       .input("EmergencyContactNumber", sql.VarChar(20), payload.emergencyContactNumber)
       .input("EmergencyContactRelation", sql.VarChar(100), payload.emergencyContactRelation)
+      .input("EmergencyContactAddress", sql.VarChar(500), payload.emergencyContactAddress)
       .input("Email", sql.VarChar(150), payload.email)
       .input("DepartmentID", sql.Int, payload.departmentId)
       .input("DesignationID", sql.Int, payload.designationId)
@@ -10847,6 +11072,9 @@ app.post("/api/hrms/employees", async (req, res) => {
       .input("DocumentNumber", sql.VarChar(100), payload.documentNumber)
       .input("UANNumber", sql.VarChar(50), payload.uanNumber)
       .input("ESINumber", sql.VarChar(50), payload.esiNumber)
+      .input("PermanentAddress", sql.VarChar(500), payload.permanentAddress)
+      .input("PresentAddress", sql.VarChar(500), payload.presentAddress)
+      .input("SameAsPermanentAddress", sql.Bit, payload.sameAsPermanentAddress)
       .input("Address", sql.VarChar(500), payload.address)
       .input("PhotoPath", sql.VarChar(255), payload.photoPath)
       .input("DocumentsJson", sql.NVarChar(sql.MAX), payload.documentsJson)
@@ -10863,8 +11091,10 @@ app.post("/api/hrms/employees", async (req, res) => {
           MaritalStatus,
           BloodGroup,
           PhoneNumber,
+          EmergencyContactName,
           EmergencyContactNumber,
           EmergencyContactRelation,
+          EmergencyContactAddress,
           Email,
           DepartmentID,
           DesignationID,
@@ -10879,6 +11109,9 @@ app.post("/api/hrms/employees", async (req, res) => {
           DocumentNumber,
           UANNumber,
           ESINumber,
+          PermanentAddress,
+          PresentAddress,
+          SameAsPermanentAddress,
           Address,
           PhotoPath,
           DocumentsJson,
@@ -10896,8 +11129,10 @@ app.post("/api/hrms/employees", async (req, res) => {
           @MaritalStatus,
           @BloodGroup,
           @PhoneNumber,
+          @EmergencyContactName,
           @EmergencyContactNumber,
           @EmergencyContactRelation,
+          @EmergencyContactAddress,
           @Email,
           @DepartmentID,
           @DesignationID,
@@ -10912,6 +11147,9 @@ app.post("/api/hrms/employees", async (req, res) => {
           @DocumentNumber,
           @UANNumber,
           @ESINumber,
+          @PermanentAddress,
+          @PresentAddress,
+          @SameAsPermanentAddress,
           @Address,
           @PhotoPath,
           @DocumentsJson,
@@ -10972,8 +11210,10 @@ app.put("/api/hrms/employees/:id", async (req, res) => {
       .input("MaritalStatus", sql.VarChar(20), payload.maritalStatus)
       .input("BloodGroup", sql.VarChar(10), payload.bloodGroup)
       .input("PhoneNumber", sql.VarChar(20), payload.phoneNumber)
+      .input("EmergencyContactName", sql.VarChar(150), payload.emergencyContactName)
       .input("EmergencyContactNumber", sql.VarChar(20), payload.emergencyContactNumber)
       .input("EmergencyContactRelation", sql.VarChar(100), payload.emergencyContactRelation)
+      .input("EmergencyContactAddress", sql.VarChar(500), payload.emergencyContactAddress)
       .input("Email", sql.VarChar(150), payload.email)
       .input("DepartmentID", sql.Int, payload.departmentId)
       .input("DesignationID", sql.Int, payload.designationId)
@@ -10988,6 +11228,9 @@ app.put("/api/hrms/employees/:id", async (req, res) => {
       .input("DocumentNumber", sql.VarChar(100), payload.documentNumber)
       .input("UANNumber", sql.VarChar(50), payload.uanNumber)
       .input("ESINumber", sql.VarChar(50), payload.esiNumber)
+      .input("PermanentAddress", sql.VarChar(500), payload.permanentAddress)
+      .input("PresentAddress", sql.VarChar(500), payload.presentAddress)
+      .input("SameAsPermanentAddress", sql.Bit, payload.sameAsPermanentAddress)
       .input("Address", sql.VarChar(500), payload.address)
       .input("PhotoPath", sql.VarChar(255), payload.photoPath)
       .input("DocumentsJson", sql.NVarChar(sql.MAX), payload.documentsJson)
@@ -11004,8 +11247,10 @@ app.put("/api/hrms/employees/:id", async (req, res) => {
           MaritalStatus = @MaritalStatus,
           BloodGroup = @BloodGroup,
           PhoneNumber = @PhoneNumber,
+          EmergencyContactName = @EmergencyContactName,
           EmergencyContactNumber = @EmergencyContactNumber,
           EmergencyContactRelation = @EmergencyContactRelation,
+          EmergencyContactAddress = @EmergencyContactAddress,
           Email = @Email,
           DepartmentID = @DepartmentID,
           DesignationID = @DesignationID,
@@ -11020,6 +11265,9 @@ app.put("/api/hrms/employees/:id", async (req, res) => {
           DocumentNumber = @DocumentNumber,
           UANNumber = @UANNumber,
           ESINumber = @ESINumber,
+          PermanentAddress = @PermanentAddress,
+          PresentAddress = @PresentAddress,
+          SameAsPermanentAddress = @SameAsPermanentAddress,
           Address = @Address,
           PhotoPath = @PhotoPath,
           DocumentsJson = @DocumentsJson,
@@ -11040,11 +11288,39 @@ app.put("/api/hrms/employees/:id", async (req, res) => {
 });
 
 app.delete("/api/hrms/employees/:id", async (req, res) => {
+  let tx;
   try {
     await ensureHrmsEmployeesTable();
+    await ensureHrmsReviewsTable();
+    await ensureHrmsSalaryReassessmentsTable();
+    await ensureHrmsAttendanceTable();
+    await ensureHrmsSalariesTable();
+    await ensureHrmsRelievingTable();
     const pool = await getPool();
-    const result = await pool
-      .request()
+    tx = pool.transaction();
+    await tx.begin();
+
+    // Clear dependent HRMS records first so stale/demo employees can be fully removed.
+    await createDbRequest(tx)
+      .input("EmployeeID", sql.VarChar(20), req.params.id)
+      .query(`
+        DELETE FROM ${hrmsTable("Reviews")}
+        WHERE EmployeeID = @EmployeeID;
+
+        DELETE FROM ${hrmsTable("SalaryReassessments")}
+        WHERE EmployeeID = @EmployeeID;
+
+        DELETE FROM ${hrmsTable("Attendance")}
+        WHERE EmployeeID = @EmployeeID;
+
+        DELETE FROM ${hrmsTable("Salaries")}
+        WHERE EmployeeID = @EmployeeID;
+
+        DELETE FROM ${hrmsTable("Relieving")}
+        WHERE EmployeeID = @EmployeeID;
+      `);
+
+    const result = await createDbRequest(tx)
       .input("EmployeeID", sql.VarChar(20), req.params.id)
       .query(`
         DELETE FROM ${hrmsTable("Employees")}
@@ -11052,21 +11328,20 @@ app.delete("/api/hrms/employees/:id", async (req, res) => {
       `);
 
     if ((result.rowsAffected?.[0] ?? 0) === 0) {
+      await tx.rollback();
       return res.status(404).json({
         ok: false,
         error: "Employee not found",
       });
     }
 
+    await tx.commit();
     return res.json({ ok: true });
   } catch (error) {
-    const status = isSqlForeignKeyViolation(error) ? 409 : 500;
-    return res.status(status).json({
+    await rollbackTx(tx);
+    return res.status(500).json({
       ok: false,
-      error:
-        status === 409
-          ? "Employee cannot be deleted because linked HRMS records exist."
-          : error?.message ?? "Failed to delete HRMS employee",
+      error: error?.message ?? "Failed to delete HRMS employee",
     });
   }
 });
@@ -12017,6 +12292,7 @@ app.get("/api/customers", async (_req, res) => {
           Email,
           ContactPerson,
           Designation,
+          DocumentsJson,
           CreatedAt,
           UpdatedAt
         FROM dbo.Customers
@@ -12079,6 +12355,7 @@ app.post("/api/customers", async (req, res) => {
       contactPerson,
       designation,
       contacts,
+      documents,
       CustomerName,
       CompanyName,
       Address,
@@ -12102,6 +12379,7 @@ app.post("/api/customers", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Customer pincode is required" });
     }
     const normalizedContacts = normalizeCustomerContactsInput(contacts);
+    const normalizedDocuments = normalizeUploadedDocumentsInput(documents);
     const contactsError = getCustomerContactsValidationError(normalizedContacts);
     if (contactsError) {
       return res.status(400).json({ ok: false, error: contactsError });
@@ -12156,12 +12434,17 @@ app.post("/api/customers", async (req, res) => {
             designation ?? Designation ?? primaryContact?.designation
           )
         )
+        .input(
+          "DocumentsJson",
+          sql.NVarChar(sql.MAX),
+          serializeJson(normalizedDocuments)
+        )
         .query(`
           INSERT INTO dbo.Customers
-            (CustomerName, CompanyName, Address, GSTNumber, GSTType, City, State, Pincode, ContactNumber, Email, ContactPerson, Designation)
+            (CustomerName, CompanyName, Address, GSTNumber, GSTType, City, State, Pincode, ContactNumber, Email, ContactPerson, Designation, DocumentsJson)
           OUTPUT INSERTED.*
           VALUES
-            (@CustomerName, @CompanyName, @Address, @GSTNumber, @GSTType, @City, @State, @Pincode, @ContactNumber, @Email, @ContactPerson, @Designation)
+            (@CustomerName, @CompanyName, @Address, @GSTNumber, @GSTType, @City, @State, @Pincode, @ContactNumber, @Email, @ContactPerson, @Designation, @DocumentsJson)
         `);
 
       const customer = normalizeCustomer(result.recordset?.[0] ?? {});
@@ -12184,7 +12467,13 @@ app.post("/api/customers", async (req, res) => {
 
       return res.status(201).json({
         ok: true,
-        customer: attachCustomerContacts(customer, normalizedContacts),
+        customer: attachCustomerContacts(
+          {
+            ...customer,
+            documents: normalizedDocuments,
+          },
+          normalizedContacts
+        ),
       });
     } catch (error) {
       await rollbackTx(tx);
@@ -12220,6 +12509,7 @@ app.put("/api/customers/:id", async (req, res) => {
       contactPerson,
       designation,
       contacts,
+      documents,
       CustomerName,
       CompanyName,
       Address,
@@ -12243,8 +12533,12 @@ app.put("/api/customers/:id", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Customer pincode is required" });
     }
     const hasContactsPayload = Array.isArray(contacts);
+    const hasDocumentsPayload = Array.isArray(documents);
     const normalizedContacts = hasContactsPayload
       ? normalizeCustomerContactsInput(contacts)
+      : [];
+    const normalizedDocuments = hasDocumentsPayload
+      ? normalizeUploadedDocumentsInput(documents)
       : [];
     const contactsError = hasContactsPayload
       ? getCustomerContactsValidationError(normalizedContacts)
@@ -12303,6 +12597,11 @@ app.put("/api/customers/:id", async (req, res) => {
             designation ?? Designation ?? primaryContact?.designation
           )
         )
+        .input(
+          "DocumentsJson",
+          sql.NVarChar(sql.MAX),
+          hasDocumentsPayload ? serializeJson(normalizedDocuments) : null
+        )
         .query(`
           UPDATE dbo.Customers
           SET CustomerName = @CustomerName,
@@ -12317,6 +12616,7 @@ app.put("/api/customers/:id", async (req, res) => {
               Email = @Email,
               ContactPerson = @ContactPerson,
               Designation = @Designation,
+              DocumentsJson = COALESCE(@DocumentsJson, DocumentsJson),
               UpdatedAt = SYSUTCDATETIME()
           OUTPUT INSERTED.*
           WHERE CustomerId = @CustomerId
@@ -12369,7 +12669,15 @@ app.put("/api/customers/:id", async (req, res) => {
 
       return res.json({
         ok: true,
-        customer: attachCustomerContacts(normalizeCustomer(updated), savedContacts),
+        customer: attachCustomerContacts(
+          {
+            ...normalizeCustomer(updated),
+            documents: hasDocumentsPayload
+              ? normalizedDocuments
+              : normalizeCustomer(updated).documents,
+          },
+          savedContacts
+        ),
       });
     } catch (error) {
       await rollbackTx(tx);
@@ -14007,6 +14315,10 @@ app.post("/api/receive-goods", async (req, res) => {
     receivedBy = null,
     invoiceNumber = null,
     invoiceDate = null,
+    invoiceDocumentName = null,
+    invoiceDocumentType = null,
+    invoiceDocumentSize = null,
+    invoiceDocumentData = null,
     billFrom = null,
     billTo = null,
     shipTo = null,
@@ -14114,6 +14426,28 @@ app.post("/api/receive-goods", async (req, res) => {
       normalizeOptionalString(invoiceNumber) ?? null
     );
     upsertReq.input("InvoiceDate", sql.Date, parsedInvoiceDate ?? null);
+    upsertReq.input(
+      "InvoiceDocumentName",
+      sql.NVarChar(255),
+      normalizeOptionalString(invoiceDocumentName) ?? null
+    );
+    upsertReq.input(
+      "InvoiceDocumentType",
+      sql.NVarChar(120),
+      normalizeOptionalString(invoiceDocumentType) ?? null
+    );
+    upsertReq.input(
+      "InvoiceDocumentSize",
+      sql.Int,
+      Number.isFinite(Number(invoiceDocumentSize))
+        ? Number(invoiceDocumentSize)
+        : null
+    );
+    upsertReq.input(
+      "InvoiceDocumentData",
+      sql.NVarChar(sql.MAX),
+      normalizeOptionalString(invoiceDocumentData) ?? null
+    );
     upsertReq.input("BillFrom", sql.NVarChar(sql.MAX), normalizedBillFrom);
     upsertReq.input("BillTo", sql.NVarChar(sql.MAX), normalizedBillFrom);
     upsertReq.input("ShipTo", sql.NVarChar(sql.MAX), normalizeOptionalString(shipTo) ?? null);
@@ -14131,10 +14465,10 @@ app.post("/api/receive-goods", async (req, res) => {
 
     const insertResult = await upsertReq.query(`
       INSERT INTO dbo.ReceiveGoods
-        (PurchaseOrderId, ProjectId, VendorId, LocationId, ReceivedDate, ReceivedBy, InvoiceNumber, InvoiceDate, BillFrom, BillTo, ShipTo, ShowProjectDetails, Notes, TaxMode, Status, BOQId)
+        (PurchaseOrderId, ProjectId, VendorId, LocationId, ReceivedDate, ReceivedBy, InvoiceNumber, InvoiceDate, InvoiceDocumentName, InvoiceDocumentType, InvoiceDocumentSize, InvoiceDocumentData, BillFrom, BillTo, ShipTo, ShowProjectDetails, Notes, TaxMode, Status, BOQId)
       OUTPUT INSERTED.*
       VALUES
-        (@PurchaseOrderId, @ProjectId, @VendorId, @LocationId, @ReceivedDate, @ReceivedBy, @InvoiceNumber, @InvoiceDate, @BillFrom, @BillTo, @ShipTo, @ShowProjectDetails, @Notes, @TaxMode, @Status, @BOQId)
+        (@PurchaseOrderId, @ProjectId, @VendorId, @LocationId, @ReceivedDate, @ReceivedBy, @InvoiceNumber, @InvoiceDate, @InvoiceDocumentName, @InvoiceDocumentType, @InvoiceDocumentSize, @InvoiceDocumentData, @BillFrom, @BillTo, @ShipTo, @ShowProjectDetails, @Notes, @TaxMode, @Status, @BOQId)
     `);
     const receiptRow = insertResult.recordset?.[0] ?? null;
 
@@ -14242,6 +14576,10 @@ app.put("/api/receive-goods/:id", async (req, res) => {
     receivedBy = null,
     invoiceNumber = null,
     invoiceDate = null,
+    invoiceDocumentName = null,
+    invoiceDocumentType = null,
+    invoiceDocumentSize = null,
+    invoiceDocumentData = null,
     billFrom = null,
     billTo = null,
     shipTo = null,
@@ -14368,6 +14706,28 @@ app.put("/api/receive-goods/:id", async (req, res) => {
       normalizeOptionalString(invoiceNumber) ?? null
     );
     updateReq.input("InvoiceDate", sql.Date, parsedInvoiceDate ?? null);
+    updateReq.input(
+      "InvoiceDocumentName",
+      sql.NVarChar(255),
+      normalizeOptionalString(invoiceDocumentName) ?? null
+    );
+    updateReq.input(
+      "InvoiceDocumentType",
+      sql.NVarChar(120),
+      normalizeOptionalString(invoiceDocumentType) ?? null
+    );
+    updateReq.input(
+      "InvoiceDocumentSize",
+      sql.Int,
+      Number.isFinite(Number(invoiceDocumentSize))
+        ? Number(invoiceDocumentSize)
+        : null
+    );
+    updateReq.input(
+      "InvoiceDocumentData",
+      sql.NVarChar(sql.MAX),
+      normalizeOptionalString(invoiceDocumentData) ?? null
+    );
     updateReq.input("BillFrom", sql.NVarChar(sql.MAX), normalizedBillFrom);
     updateReq.input("BillTo", sql.NVarChar(sql.MAX), normalizedBillFrom);
     updateReq.input("ShipTo", sql.NVarChar(sql.MAX), normalizeOptionalString(shipTo) ?? null);
@@ -14391,6 +14751,10 @@ app.put("/api/receive-goods/:id", async (req, res) => {
           ReceivedBy = @ReceivedBy,
           InvoiceNumber = @InvoiceNumber,
           InvoiceDate = @InvoiceDate,
+          InvoiceDocumentName = @InvoiceDocumentName,
+          InvoiceDocumentType = @InvoiceDocumentType,
+          InvoiceDocumentSize = @InvoiceDocumentSize,
+          InvoiceDocumentData = @InvoiceDocumentData,
           BillFrom = @BillFrom,
           BillTo = @BillTo,
           ShipTo = @ShipTo,
@@ -17424,6 +17788,9 @@ app.get("/api/reallocate-inventory/:id", async (req, res) => {
 app.post("/api/reallocate-inventory", async (req, res) => {
   const {
     type = "Reallocate",
+    referenceType = null,
+    referenceId = null,
+    referenceNo = "",
     consumptionId = null,
     consumptionNumber = "",
     projectId = null,
@@ -17432,6 +17799,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     returnVendorId = null,
     requestDate = null,
     requestedBy = null,
+    eWayBillNumber = null,
     status = "Pending",
     notes = null,
     items = [],
@@ -17440,6 +17808,18 @@ app.post("/api/reallocate-inventory", async (req, res) => {
   const safeType = String(type ?? "Reallocate").trim() === "Return"
     ? "Return"
     : "Reallocate";
+  const safeReferenceType = (() => {
+    const normalized = String(referenceType ?? "").trim().toLowerCase();
+    if (["delivery_challan", "delivery-challan", "delivery challan", "dc"].includes(normalized)) {
+      return "delivery_challan";
+    }
+    if (["consumption", "consume"].includes(normalized)) {
+      return "consumption";
+    }
+    return "";
+  })();
+  const safeReferenceId = toNullableInt(referenceId);
+  const safeReferenceNo = normalizeOptionalString(referenceNo) ?? "";
   const safeConsumptionId = toNullableInt(consumptionId);
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
   const safeProjectId = toNullableInt(projectId);
@@ -17447,6 +17827,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
   const safeToLocationId = toNullableInt(toLocationId);
   const safeReturnVendorId = toNullableInt(returnVendorId);
   const safeRequestedBy = normalizeOptionalString(requestedBy) ?? "";
+  const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? "";
   const safeStatus = normalizeOptionalString(status) ?? "Pending";
   const safeNotes = normalizeOptionalString(notes) ?? "";
   const parsedRequestDate = parseDateInput(requestDate);
@@ -17505,6 +17886,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
         deliveryChallanItemId,
         sourceType,
         sourceKey: normalizeOptionalString(item.sourceKey ?? item.SourceKey) ?? null,
+        sourceRef: normalizeOptionalString(item.sourceRef ?? item.SourceRef) ?? null,
       };
       normalizedItem.sourceKey =
         normalizedItem.sourceKey || buildAvailabilitySourceKey(normalizedItem);
@@ -17537,6 +17919,9 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     const now = new Date().toISOString();
     const initialNotesPayload = buildReallocateNotesPayload({
       referenceNumber: null,
+      referenceType: safeReferenceType,
+      referenceId: safeReferenceId,
+      referenceNo: safeReferenceNo,
       type: safeType,
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
@@ -17544,6 +17929,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,
+      eWayBillNumber: safeEWayBillNumber,
       status: safeStatus,
       notes: safeNotes,
       createdAt: now,
@@ -17576,6 +17962,9 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     const generatedReferenceNumber = generateReallocateReferenceNumber(transferId);
     const finalNotesPayload = buildReallocateNotesPayload({
       referenceNumber: generatedReferenceNumber,
+      referenceType: safeReferenceType,
+      referenceId: safeReferenceId,
+      referenceNo: safeReferenceNo,
       type: safeType,
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
@@ -17583,6 +17972,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,
+      eWayBillNumber: safeEWayBillNumber,
       status: safeStatus,
       notes: safeNotes,
       createdAt: now,
@@ -17612,15 +18002,16 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       insertItemReq.input("DeliveryChallanItemId", sql.BigInt, item.deliveryChallanItemId);
       insertItemReq.input("SourceType", sql.NVarChar(50), item.sourceType);
       insertItemReq.input("SourceKey", sql.NVarChar(200), item.sourceKey);
+      insertItemReq.input("SourceRef", sql.NVarChar(255), item.sourceRef);
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       await insertItemReq.query(`
         INSERT INTO dbo.ReallocateInventoryItems
-          (${fkCol}, ReceiveGoodsItemId, DeliveryChallanId, DeliveryChallanItemId, SourceType, SourceKey, Item, Description, Unit, Quantity)
+          (${fkCol}, ReceiveGoodsItemId, DeliveryChallanId, DeliveryChallanItemId, SourceType, SourceKey, SourceRef, Item, Description, Unit, Quantity)
         VALUES
-          (@TransferId, @ReceiveGoodsItemId, @DeliveryChallanId, @DeliveryChallanItemId, @SourceType, @SourceKey, @Item, @Description, @Unit, @Quantity)
+          (@TransferId, @ReceiveGoodsItemId, @DeliveryChallanId, @DeliveryChallanItemId, @SourceType, @SourceKey, @SourceRef, @Item, @Description, @Unit, @Quantity)
       `);
     }
 
@@ -17661,6 +18052,9 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
 
   const {
     type = "Reallocate",
+    referenceType = null,
+    referenceId = null,
+    referenceNo = "",
     consumptionId = null,
     consumptionNumber = "",
     projectId = null,
@@ -17669,6 +18063,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     returnVendorId = null,
     requestDate = null,
     requestedBy = null,
+    eWayBillNumber = null,
     status = "Pending",
     notes = null,
     items = [],
@@ -17677,6 +18072,18 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
   const safeType = String(type ?? "Reallocate").trim() === "Return"
     ? "Return"
     : "Reallocate";
+  const safeReferenceType = (() => {
+    const normalized = String(referenceType ?? "").trim().toLowerCase();
+    if (["delivery_challan", "delivery-challan", "delivery challan", "dc"].includes(normalized)) {
+      return "delivery_challan";
+    }
+    if (["consumption", "consume"].includes(normalized)) {
+      return "consumption";
+    }
+    return "";
+  })();
+  const safeReferenceId = toNullableInt(referenceId);
+  const safeReferenceNo = normalizeOptionalString(referenceNo) ?? "";
   const safeConsumptionId = toNullableInt(consumptionId);
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
   const safeProjectId = toNullableInt(projectId);
@@ -17684,6 +18091,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
   const safeToLocationId = toNullableInt(toLocationId);
   const safeReturnVendorId = toNullableInt(returnVendorId);
   const safeRequestedBy = normalizeOptionalString(requestedBy) ?? "";
+  const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? "";
   const safeStatus = normalizeOptionalString(status) ?? "Pending";
   const safeNotes = normalizeOptionalString(notes) ?? "";
   const parsedRequestDate = parseDateInput(requestDate);
@@ -17742,6 +18150,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
         deliveryChallanItemId,
         sourceType,
         sourceKey: normalizeOptionalString(item.sourceKey ?? item.SourceKey) ?? null,
+        sourceRef: normalizeOptionalString(item.sourceRef ?? item.SourceRef) ?? null,
       };
       normalizedItem.sourceKey =
         normalizedItem.sourceKey || buildAvailabilitySourceKey(normalizedItem);
@@ -17791,6 +18200,9 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
 
     const notesPayload = buildReallocateNotesPayload({
       referenceNumber: previousRecord.referenceNumber || generateReallocateReferenceNumber(id),
+      referenceType: safeReferenceType,
+      referenceId: safeReferenceId,
+      referenceNo: safeReferenceNo,
       type: safeType,
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
@@ -17798,6 +18210,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,
+      eWayBillNumber: safeEWayBillNumber,
       status: safeStatus,
       notes: safeNotes,
       createdAt: previousRecord.createdAt ?? new Date().toISOString(),
@@ -17844,15 +18257,16 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
       insertItemReq.input("DeliveryChallanItemId", sql.BigInt, item.deliveryChallanItemId);
       insertItemReq.input("SourceType", sql.NVarChar(50), item.sourceType);
       insertItemReq.input("SourceKey", sql.NVarChar(200), item.sourceKey);
+      insertItemReq.input("SourceRef", sql.NVarChar(255), item.sourceRef);
       insertItemReq.input("Item", sql.NVarChar(200), item.name);
       insertItemReq.input("Description", sql.NVarChar(500), item.description);
       insertItemReq.input("Unit", sql.NVarChar(100), item.unit);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       await insertItemReq.query(`
         INSERT INTO dbo.ReallocateInventoryItems
-          (${fkCol}, ReceiveGoodsItemId, DeliveryChallanId, DeliveryChallanItemId, SourceType, SourceKey, Item, Description, Unit, Quantity)
+          (${fkCol}, ReceiveGoodsItemId, DeliveryChallanId, DeliveryChallanItemId, SourceType, SourceKey, SourceRef, Item, Description, Unit, Quantity)
         VALUES
-          (@TransferId, @ReceiveGoodsItemId, @DeliveryChallanId, @DeliveryChallanItemId, @SourceType, @SourceKey, @Item, @Description, @Unit, @Quantity)
+          (@TransferId, @ReceiveGoodsItemId, @DeliveryChallanId, @DeliveryChallanItemId, @SourceType, @SourceKey, @SourceRef, @Item, @Description, @Unit, @Quantity)
       `);
     }
 

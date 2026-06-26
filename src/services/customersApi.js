@@ -17,6 +17,11 @@ export const normalizeCustomer = (customer = {}) => {
     : Array.isArray(customer.CustomerContacts)
     ? customer.CustomerContacts.map(normalizeCustomerContact)
     : [];
+  const documents = Array.isArray(customer.documents)
+    ? customer.documents
+    : Array.isArray(customer.Documents)
+    ? customer.Documents
+    : [];
   const primaryContact = contacts[0] ?? null;
 
   return {
@@ -58,6 +63,7 @@ export const normalizeCustomer = (customer = {}) => {
       primaryContact?.designation ??
       "",
     contacts,
+    documents,
   };
 };
 

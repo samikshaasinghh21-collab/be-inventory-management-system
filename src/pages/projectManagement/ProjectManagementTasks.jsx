@@ -185,6 +185,124 @@ const KpiCard = ({ icon: IconComponent, label, value, helper, tone = "indigo" })
   );
 };
 
+const DetailItem = ({ label, value }) => (
+  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+      {label}
+    </p>
+    <p className="mt-2 text-sm font-medium text-slate-900">{value || "-"}</p>
+  </div>
+);
+
+const TaskDetailDrawer = ({ task, onClose, onViewProject }) => {
+  if (!task) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40 backdrop-blur-sm">
+      <div className="flex h-full w-full max-w-2xl flex-col overflow-hidden bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">
+              Task Details
+            </p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-950">
+              {getTaskName(task) || task.taskId || "Task"}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Review assignment, schedule, ownership, and delivery progress.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge label={getTaskStatus(task)} />
+            <Badge label={task.priority || "Medium"} type="priority" />
+            <span className="text-sm text-slate-500">
+              {task.taskId || "No task ID"} • {task.projectName || "No project"}
+            </span>
+          </div>
+
+          <section className="grid gap-4 md:grid-cols-2">
+            <DetailItem label="Project" value={task.projectName || "-"} />
+            <DetailItem label="Project Code" value={task.projectCode || "-"} />
+            <DetailItem label="Client" value={task.client || "-"} />
+            <DetailItem label="Project Manager" value={task.projectManager || "-"} />
+            <DetailItem label="Assigned To" value={task.assignedTo || "-"} />
+            <DetailItem label="Assigned By" value={task.assignedBy || "-"} />
+            <DetailItem label="Start Date" value={formatDateValue(task.startDate)} />
+            <DetailItem label="Due Date" value={formatDateValue(task.dueDate)} />
+            <DetailItem
+              label="Estimated Hours"
+              value={numberValue(task.estimatedHours).toLocaleString("en-IN")}
+            />
+            <DetailItem
+              label="Progress"
+              value={`${percentValue(getTaskProgress(task))}%`}
+            />
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-5">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+              Description
+            </h3>
+            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+              {getTaskDescription(task) || "No description added for this task yet."}
+            </p>
+          </section>
+
+          <section className="grid gap-4 md:grid-cols-2">
+            <DetailItem label="Dependencies" value={task.dependencies || "-"} />
+            <DetailItem label="Project Status" value={task.projectStatus || "-"} />
+            <DetailItem
+              label="Created"
+              value={formatDateValue(task.createdAt || task.sortDate)}
+            />
+            <DetailItem
+              label="Last Updated"
+              value={formatDateValue(task.updatedAt || task.sortDate)}
+            />
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+              Notes
+            </h3>
+            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+              {task.notes || task.comments || "No notes added for this task yet."}
+            </p>
+          </section>
+        </div>
+
+        <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-4 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onViewProject}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+          >
+            <FolderKanban className="h-4 w-4" />
+            View Project
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ProjectManagementTasks = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState(() => getProjectManagementProjects());
@@ -192,6 +310,7 @@ const ProjectManagementTasks = () => {
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [ownerFilter, setOwnerFilter] = useState("All");
+  const [selectedTask, setSelectedTask] = useState(null);
 
   useEffect(() => {
     const handleProjectsChange = () => setProjects(getProjectManagementProjects());
@@ -491,14 +610,24 @@ const ProjectManagementTasks = () => {
                       {task.dependencies || "-"}
                     </td>
                     <td className="px-4 py-4">
-                      <button
-                        type="button"
-                        onClick={() => navigate("/project-management/projects")}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
-                      >
-                        <Eye className="h-4 w-4" />
-                        View Project
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTask(task)}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                        >
+                          <Eye className="h-4 w-4" />
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => navigate("/project-management/projects")}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                        >
+                          <FolderKanban className="h-4 w-4" />
+                          Project
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -533,6 +662,17 @@ const ProjectManagementTasks = () => {
           </button>
         </div>
       </section>
+
+      {selectedTask && (
+        <TaskDetailDrawer
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onViewProject={() => {
+            setSelectedTask(null);
+            navigate("/project-management/projects");
+          }}
+        />
+      )}
     </div>
   );
 };

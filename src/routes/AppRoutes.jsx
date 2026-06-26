@@ -19,6 +19,7 @@ import HrmsPlaceholder from "../pages/HrmsPlaceholder";
 import ProjectDashboard from "../pages/projectManagement/ProjectDashboard";
 import ProjectManagementProjects from "../pages/projectManagement/ProjectManagementProjects";
 import ProjectManagementTasks from "../pages/projectManagement/ProjectManagementTasks";
+import ProjectManagementTeamAllocation from "../pages/projectManagement/ProjectManagementTeamAllocation";
 import ProjectManagementPlaceholder from "../pages/projectManagement/ProjectManagementPlaceholder";
 import { projectManagementPlaceholderPages } from "../pages/projectManagement/projectManagementData";
 import Settings from "../pages/Settings";
@@ -56,8 +57,6 @@ const HRMS_PAGE_ROUTES = [
   { path: "/employees/add", page: "add-employee" },
   { path: "/employees/profile", page: "employee-profile" },
   { path: "/employees/profile/:employeeId", page: "employee-profile" },
-  { path: "/employees/edit", page: "edit-employee" },
-  { path: "/employees/edit/:employeeId", page: "edit-employee" },
   { path: "/employees/print-profile", page: "employee-profile" },
   { path: "/employees/print-profile/:employeeId", page: "employee-profile" },
   { path: "/reviews", page: "reviews" },
@@ -79,8 +78,6 @@ const HRMS_PAGE_ROUTES = [
   { path: "/hrms/employees/list", page: "employees" },
   { path: "/hrms/employees/profile", page: "employee-profile" },
   { path: "/hrms/employees/profile/:employeeId", page: "employee-profile" },
-  { path: "/hrms/employees/edit", page: "edit-employee" },
-  { path: "/hrms/employees/edit/:employeeId", page: "edit-employee" },
   { path: "/hrms/employees/print-profile", page: "employee-profile" },
   { path: "/hrms/employees/print-profile/:employeeId", page: "employee-profile" },
   { path: "/hrms/reviews/add", page: "reviews" },
@@ -203,8 +200,12 @@ const AppRoutes = () => {
           path="/project-management/tasks"
           element={<ProjectManagementTasks />}
         />
+        <Route
+          path="/project-management/team-allocation"
+          element={<ProjectManagementTeamAllocation />}
+        />
         {projectManagementPlaceholderPages
-          .filter((screen) => !["projects", "tasks"].includes(screen.key))
+          .filter((screen) => !["projects", "tasks", "team-allocation"].includes(screen.key))
           .map((screen) => (
           <Route
             key={screen.path}

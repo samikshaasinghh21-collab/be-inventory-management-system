@@ -2,14 +2,14 @@
 .app-panel,
 .app-surface {
   border: 1px solid var(--border-color);
-  border-radius: calc(var(--radius) + 2px);
-  background: var(--background-card-elevated);
+  border-radius: var(--radius);
+  background: var(--gradient-surface);
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(16px);
 }
 
 .app-card {
-  padding: 1.25rem;
+  padding: 1.35rem;
 }
 
 .app-panel {
@@ -33,11 +33,13 @@
 }
 
 .app-content .bg-white {
-  background: var(--background-card-elevated);
+  background: var(--gradient-surface);
 }
 
 .app-content .shadow-sm,
 .app-content .shadow,
+.app-content .shadow-md,
+.app-content .shadow-lg,
 .app-content .shadow-xl,
 .app-content .shadow-2xl {
   box-shadow: var(--shadow-card);

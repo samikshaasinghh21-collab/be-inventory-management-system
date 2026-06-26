@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import DateInput from "../components/common/DateInput";
+import PasswordPromptModal from "../components/common/PasswordPromptModal";
 import useSettings from "../hooks/useSettings";
 import AppIcon from "../components/layout/AppIcon";
 import {
@@ -38,6 +39,11 @@ import {
   fetchHrmsRelieving,
   getHrmsRelievingErrorMessage,
 } from "../services/hrmsRelievingApi";
+import {
+  hasClosedPoAdminPassword,
+  isAdminRole,
+  verifyClosedPoAdminPassword,
+} from "../utils/closedPoAuth";
 import { parseDateValue } from "../utils/dateFormat";
 
 const seedEmployees = [];
@@ -73,6 +79,18 @@ const removeDemoEmployees = (records = []) => {
   });
 
   return cleanedRecords.length === records.length ? records : cleanedRecords;
+};
+
+const getHrmsEmployeeRecords = (value) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (Array.isArray(value?.employees)) {
+    return value.employees;
+  }
+
+  return [];
 };
 
 const readStoredList = (key, fallback = []) => {
@@ -152,9 +170,10 @@ const useHrmsEmployees = () => {
 
     try {
       const records = await fetchHrmsEmployees();
-      saveEmployees(removeDemoEmployees(records));
+      const nextEmployees = removeDemoEmployees(getHrmsEmployeeRecords(records));
+      saveEmployees(nextEmployees);
       setApiState({ error: "", loading: false });
-      return records;
+      return nextEmployees;
     } catch (error) {
       setApiState({
         error: getHrmsEmployeeErrorMessage(
@@ -176,7 +195,8 @@ const useHrmsEmployees = () => {
       try {
         const records = await fetchHrmsEmployees();
         if (!active) return;
-        saveEmployees(removeDemoEmployees(records));
+        const nextEmployees = removeDemoEmployees(getHrmsEmployeeRecords(records));
+        saveEmployees(nextEmployees);
         setApiState({ error: "", loading: false });
       } catch (error) {
         if (!active) return;
@@ -759,6 +779,20 @@ const getAttendanceMonthDate = (value) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const getPayrollPaymentDate = (value) => {
+  const monthDate = getAttendanceMonthDate(value);
+  if (!monthDate) return "-";
+
+  const lastDay = new Date(
+    monthDate.getFullYear(),
+    monthDate.getMonth() + 1,
+    0
+  );
+  return `${padDatePart(lastDay.getDate())}/${padDatePart(
+    lastDay.getMonth() + 1
+  )}/${lastDay.getFullYear()}`;
+};
+
 const getAttendanceDays = (value) => {
   const monthDate = getAttendanceMonthDate(value);
   if (!monthDate) return [];
@@ -848,15 +882,27 @@ const bloodGroupOptions = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 
 const buildEmployeeForm = (employee) => {
   const source = employee ?? {};
+  const permanentAddress = source.permanentAddress || "";
+  const presentAddress = source.presentAddress || source.address || "";
+  const sameAsPermanentAddress =
+    typeof source.sameAsPermanentAddress === "boolean"
+      ? source.sameAsPermanentAddress
+      : Boolean(
+          permanentAddress &&
+            presentAddress &&
+            permanentAddress.trim() === presentAddress.trim()
+        );
 
   return {
-    address: source.address || "",
+    address: presentAddress,
     bloodGroup: source.bloodGroup || "",
     dateOfBirth: toDateInputValue(source.dateOfBirth),
     department: source.department || "",
     designation: source.designation || "",
     documents: normalizeEmployeeDocuments(source.documents),
     email: source.email || "",
+    emergencyContactAddress: source.emergencyContactAddress || "",
+    emergencyContactName: source.emergencyContactName || "",
     emergencyContactNumber: source.emergencyContactNumber || "",
     emergencyContactRelation: source.emergencyContactRelation || "",
     fullName: source.name || "",
@@ -867,7 +913,10 @@ const buildEmployeeForm = (employee) => {
     nationality: source.nationality || "",
     panNumber: source.panNumber || "",
     documentNumber: source.documentNumber || "",
+    permanentAddress,
+    presentAddress,
     relation: source.relation || source.emergencyContactRelation || "",
+    sameAsPermanentAddress,
     esiNumber: source.esiNumber || "",
     uanNumber: source.uanNumber || "",
     phone: source.phone || "",
@@ -1042,8 +1091,13 @@ const printEmployeeProfile = (employee) => {
     ["Designation", displayValue(employee.designation)],
     ["Email", displayValue(employee.email)],
     ["Phone", displayValue(employee.phone)],
+    ["Emergency Contact Name", displayValue(employee.emergencyContactName)],
     ["Emergency Contact", displayValue(employee.emergencyContactNumber)],
     ["Relation", displayValue(employee.relation || employee.emergencyContactRelation)],
+    [
+      "Emergency Contact Address",
+      displayValue(employee.emergencyContactAddress),
+    ],
     ["Status", displayValue(employee.status)],
     ["Reporting To", displayValue(employee.manager)],
     ["Date of Joining", displayValue(employee.joined)],
@@ -1057,7 +1111,8 @@ const printEmployeeProfile = (employee) => {
     ["ESI Number", displayValue(employee.esiNumber)],
     ["Gross Salary", money(employee.salary)],
     ["Monthly Salary", money(getSalaryBreakup(employee).monthlySalary)],
-    ["Address", displayValue(employee.address)],
+    ["Permanent Address", displayValue(employee.permanentAddress)],
+    ["Present Address", displayValue(employee.presentAddress || employee.address)],
   ];
   const printWindow = window.open("", "_blank", "width=900,height=700");
 
@@ -2034,6 +2089,19 @@ const Notice = ({ children, tone = "success" }) => {
   );
 };
 
+const getHrmsAdminAuthError = (settings, password, actionLabel) => {
+  if (!isAdminRole(settings)) {
+    return `Only Admin users can ${actionLabel}.`;
+  }
+  if (!hasClosedPoAdminPassword(settings)) {
+    return "Set the Closed PO Admin Password in Settings before approving employee edits or deletions.";
+  }
+  if (!verifyClosedPoAdminPassword(settings, password)) {
+    return "Incorrect admin password.";
+  }
+  return "";
+};
+
 const HrmsShell = ({ children }) => {
   return (
     <div className="min-h-[calc(100vh-7rem)] rounded-lg border border-slate-200 bg-slate-50 p-4 text-slate-900 shadow-sm">
@@ -2269,9 +2337,15 @@ const DashboardPage = () => {
 const EmployeeListPage = () => {
   const settings = useSettings();
   const isAdmin = String(settings?.profile?.role || "").toLowerCase() === "admin";
-  const [employees, , employeesState] = useHrmsEmployees();
+  const [employees, setEmployees, employeesState] = useHrmsEmployees();
   const [query, setQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [editingEmployeeId, setEditingEmployeeId] = useState("");
+  const [authPrompt, setAuthPrompt] = useState(null);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState("");
 
   const filteredEmployees = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -2299,6 +2373,8 @@ const EmployeeListPage = () => {
     safePage * pageSize
   );
   const pageNumbers = buildPageNumbers(safePage, pageCount);
+  const editingEmployee =
+    employees.find((employee) => employee.id === editingEmployeeId) || null;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -2308,9 +2384,106 @@ const EmployeeListPage = () => {
     setCurrentPage((page) => Math.min(Math.max(page, 1), pageCount));
   }, [pageCount]);
 
+  const closeAuthPrompt = () => {
+    setAuthPrompt(null);
+    setAdminPassword("");
+    setAdminPasswordError("");
+  };
+
+  const requestEdit = (employee) => {
+    if (!isAdmin) {
+      setError("Only Admin users can edit employee details.");
+      return;
+    }
+    setMessage("");
+    setError("");
+    setAuthPrompt({
+      action: "edit",
+      employeeId: employee.id,
+      employeeName: employee.name,
+    });
+    setAdminPassword("");
+    setAdminPasswordError("");
+  };
+
+  const requestDelete = (employee) => {
+    if (!isAdmin) {
+      setError("Only Admin users can delete employee details.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${employee.name} (${employee.id})? This action requires admin approval and cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setMessage("");
+    setError("");
+    setAuthPrompt({
+      action: "delete",
+      employeeId: employee.id,
+      employeeName: employee.name,
+    });
+    setAdminPassword("");
+    setAdminPasswordError("");
+  };
+
+  const confirmAdminAction = async () => {
+    const actionLabel =
+      authPrompt?.action === "delete"
+        ? "delete employee records"
+        : "edit employee details";
+    const authError = getHrmsAdminAuthError(
+      settings,
+      adminPassword,
+      actionLabel
+    );
+
+    if (authError) {
+      setAdminPasswordError(authError);
+      return;
+    }
+
+    if (!authPrompt?.employeeId) {
+      closeAuthPrompt();
+      return;
+    }
+
+    if (authPrompt.action === "edit") {
+      setEditingEmployeeId(authPrompt.employeeId);
+      closeAuthPrompt();
+      return;
+    }
+
+    try {
+      await deleteHrmsEmployee(authPrompt.employeeId);
+      setEmployees((current) =>
+        current.filter((record) => record.id !== authPrompt.employeeId)
+      );
+      if (editingEmployeeId === authPrompt.employeeId) {
+        setEditingEmployeeId("");
+      }
+      setMessage(
+        `${authPrompt.employeeName} deleted from HRMS database records.`
+      );
+      setError("");
+      closeAuthPrompt();
+    } catch (deleteError) {
+      setAdminPasswordError(
+        getHrmsEmployeeErrorMessage(
+          deleteError,
+          "Could not delete employee from the HRMS database."
+        )
+      );
+    }
+  };
+
   return (
     <Panel>
       <div className="mb-4 grid gap-2">
+        <Notice>{message}</Notice>
+        <Notice tone="warning">{error}</Notice>
         <Notice tone="warning">{employeesState.error}</Notice>
         <Notice>
           {employeesState.loading && !employees.length
@@ -2377,15 +2550,26 @@ const EmployeeListPage = () => {
                         </Button>
                       </Link>
                       {isAdmin ? (
-                        <Link
-                          to={`/employees/edit/${employee.id}`}
-                          aria-label={`Edit ${employee.name}`}
-                        >
-                          <Button className="min-h-8 px-2 text-xs" variant="secondary">
+                        <>
+                          <Button
+                            className="min-h-8 px-2 text-xs"
+                            variant="secondary"
+                            onClick={() => requestEdit(employee)}
+                            aria-label={`Edit ${employee.name}`}
+                          >
                             <AppIcon name="edit" className="h-4 w-4" />
                             Edit
                           </Button>
-                        </Link>
+                          <Button
+                            className="min-h-8 px-2 text-xs"
+                            variant="danger"
+                            onClick={() => requestDelete(employee)}
+                            aria-label={`Delete ${employee.name}`}
+                          >
+                            <AppIcon name="x" className="h-4 w-4" />
+                            Delete
+                          </Button>
+                        </>
                       ) : null}
                     </div>
                   </td>
@@ -2439,6 +2623,50 @@ const EmployeeListPage = () => {
           </button>
         </div>
       </div>
+
+      {editingEmployee ? (
+        <div className="mt-6 border-t border-slate-200 pt-6">
+          <EmployeeEditor
+            employee={editingEmployee}
+            showHeading
+            onCancel={() => {
+              setEditingEmployeeId("");
+              setAdminPassword("");
+              setAdminPasswordError("");
+            }}
+            onSaved={(savedEmployee) => {
+              setEditingEmployeeId("");
+              setMessage(`${savedEmployee.name} updated in the HRMS database.`);
+              setError("");
+            }}
+          />
+        </div>
+      ) : null}
+
+      <PasswordPromptModal
+        isOpen={Boolean(authPrompt)}
+        title={
+          authPrompt?.action === "delete"
+            ? "Admin Approval Required"
+            : "Verify Before Editing"
+        }
+        description={
+          authPrompt?.action === "delete"
+            ? `Enter the admin password to delete ${authPrompt?.employeeName || "this employee"}.`
+            : `Enter the admin password to edit ${authPrompt?.employeeName || "this employee"}.`
+        }
+        password={adminPassword}
+        error={adminPasswordError}
+        confirmLabel={authPrompt?.action === "delete" ? "Approve Delete" : "Approve Edit"}
+        onPasswordChange={(value) => {
+          setAdminPassword(value);
+          if (adminPasswordError) {
+            setAdminPasswordError("");
+          }
+        }}
+        onCancel={closeAuthPrompt}
+        onConfirm={confirmAdminAction}
+      />
     </Panel>
   );
 };
@@ -2450,42 +2678,35 @@ const AddEmployeePage = () => {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    address: "",
-    bloodGroup: "",
-    dateOfBirth: "",
-    department: "",
-    designation: "",
-    documents: emptyEmployeeDocuments(),
-    email: "",
-    emergencyContactNumber: "",
-    emergencyContactRelation: "",
-    fullName: "",
-    gender: "",
-    joined: "",
-    manager: "",
-    maritalStatus: "",
-    nationality: "",
-    panNumber: "",
-    documentNumber: "",
-    relation: "",
-    esiNumber: "",
-    uanNumber: "",
-    phone: "",
-    photo: "",
-    pfAmount: "",
-    salary: "",
-    allowances: "",
-    salaryDeduction: "",
-    professionalTax: "",
-    tdsAmount: "",
-    esiAmount: "",
-    status: "Active",
-  });
+  const [form, setForm] = useState(() => buildEmployeeForm());
   const tabs = ["Personal Details", "Employment Details", "Salary Details", "Documents"];
   const employeeId = useMemo(() => createEmployeeId(employees), [employees]);
   const updateForm = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+
+      if (field === "sameAsPermanentAddress") {
+        next.sameAsPermanentAddress = Boolean(value);
+        if (value) {
+          next.presentAddress = current.permanentAddress;
+          next.address = current.permanentAddress;
+        }
+      }
+
+      if (field === "permanentAddress" && current.sameAsPermanentAddress) {
+        next.presentAddress = value;
+        next.address = value;
+      }
+
+      if (field === "presentAddress") {
+        next.address = value;
+        next.sameAsPermanentAddress =
+          Boolean(current.permanentAddress.trim()) &&
+          current.permanentAddress.trim() === String(value).trim();
+      }
+
+      return next;
+    });
     setError("");
     setMessage("");
   };
@@ -2533,6 +2754,8 @@ const AddEmployeePage = () => {
       department: form.department,
       designation: form.designation,
       email: form.email.trim(),
+      emergencyContactAddress: form.emergencyContactAddress.trim(),
+      emergencyContactName: form.emergencyContactName.trim(),
       emergencyContactNumber: form.emergencyContactNumber.trim(),
       emergencyContactRelation: form.relation.trim(),
       relation: form.relation.trim(),
@@ -2552,13 +2775,16 @@ const AddEmployeePage = () => {
       tdsAmount: salaryBreakup.tdsAmount,
       esiAmount: salaryBreakup.esiAmount,
       avatar: getInitials(form.fullName),
-      address: form.address.trim(),
+      address: form.presentAddress.trim(),
       bloodGroup: form.bloodGroup,
       dateOfBirth: formatDate(form.dateOfBirth),
       gender: form.gender,
       maritalStatus: form.maritalStatus,
       nationality: form.nationality.trim(),
+      permanentAddress: form.permanentAddress.trim(),
       photo: form.photo,
+      presentAddress: form.presentAddress.trim(),
+      sameAsPermanentAddress: form.sameAsPermanentAddress,
       documents: form.documents,
     };
 
@@ -2669,6 +2895,15 @@ const AddEmployeePage = () => {
                   placeholder="Enter phone number"
                 />
               </Field>
+              <Field label="Emergency Contact Name">
+                <Input
+                  value={form.emergencyContactName}
+                  onChange={(event) =>
+                    updateForm("emergencyContactName", event.target.value)
+                  }
+                  placeholder="Enter emergency contact name"
+                />
+              </Field>
               <Field label="Emergency Contact Number">
                 <Input
                   value={form.emergencyContactNumber}
@@ -2695,13 +2930,51 @@ const AddEmployeePage = () => {
                   placeholder="Enter email"
                 />
               </Field>
-              <Field label="Address">
+              <Field label="Emergency Contact Address">
                 <Input
                   as="textarea"
                   rows={3}
-                  value={form.address}
-                  onChange={(event) => updateForm("address", event.target.value)}
-                  placeholder="Enter address"
+                  value={form.emergencyContactAddress}
+                  onChange={(event) =>
+                    updateForm("emergencyContactAddress", event.target.value)
+                  }
+                  placeholder="Enter emergency contact address"
+                  className="sm:col-span-2"
+                />
+              </Field>
+              <Field label="Permanent Address">
+                <Input
+                  as="textarea"
+                  rows={3}
+                  value={form.permanentAddress}
+                  onChange={(event) =>
+                    updateForm("permanentAddress", event.target.value)
+                  }
+                  placeholder="Enter permanent address"
+                  className="sm:col-span-2"
+                />
+              </Field>
+              <Field label="Same as Permanent Address">
+                <label className="flex min-h-10 items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.sameAsPermanentAddress}
+                    onChange={(event) =>
+                      updateForm("sameAsPermanentAddress", event.target.checked)
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Use permanent address as present address</span>
+                </label>
+              </Field>
+              <Field label="Present Address">
+                <Input
+                  as="textarea"
+                  rows={3}
+                  value={form.presentAddress}
+                  onChange={(event) => updateForm("presentAddress", event.target.value)}
+                  placeholder="Enter present address"
+                  disabled={form.sameAsPermanentAddress}
                   className="sm:col-span-2"
                 />
               </Field>
@@ -2901,23 +3174,17 @@ const AddEmployeePage = () => {
   );
 };
 
-const EditEmployeePage = () => {
-  const settings = useSettings();
-  const isAdmin = String(settings?.profile?.role || "").toLowerCase() === "admin";
-  const { employeeId } = useParams();
-  const [employees, setEmployees] = useHrmsEmployees();
-  const navigate = useNavigate();
+const EmployeeEditor = ({
+  employee,
+  onCancel,
+  onSaved,
+  showHeading = false,
+}) => {
   const [tab, setTab] = useState("Personal Details");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const employee = useMemo(
-    () =>
-      employees.find((record) => record.id === employeeId) ||
-      employees[0] ||
-      null,
-    [employeeId, employees]
-  );
+  const [, setEmployees] = useHrmsEmployees();
   const [form, setForm] = useState(() => buildEmployeeForm(employee));
   const tabs = ["Personal Details", "Employment Details", "Salary Details", "Documents"];
 
@@ -2928,7 +3195,31 @@ const EditEmployeePage = () => {
   }, [employee]);
 
   const updateForm = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+
+      if (field === "sameAsPermanentAddress") {
+        next.sameAsPermanentAddress = Boolean(value);
+        if (value) {
+          next.presentAddress = current.permanentAddress;
+          next.address = current.permanentAddress;
+        }
+      }
+
+      if (field === "permanentAddress" && current.sameAsPermanentAddress) {
+        next.presentAddress = value;
+        next.address = value;
+      }
+
+      if (field === "presentAddress") {
+        next.address = value;
+        next.sameAsPermanentAddress =
+          Boolean(current.permanentAddress.trim()) &&
+          current.permanentAddress.trim() === String(value).trim();
+      }
+
+      return next;
+    });
     setError("");
     setMessage("");
   };
@@ -2982,6 +3273,8 @@ const EditEmployeePage = () => {
       department: form.department,
       designation: form.designation.trim(),
       email: form.email.trim(),
+      emergencyContactAddress: form.emergencyContactAddress.trim(),
+      emergencyContactName: form.emergencyContactName.trim(),
       emergencyContactNumber: form.emergencyContactNumber.trim(),
       emergencyContactRelation: form.relation.trim(),
       relation: form.relation.trim(),
@@ -3001,13 +3294,16 @@ const EditEmployeePage = () => {
       tdsAmount: salaryBreakup.tdsAmount,
       esiAmount: salaryBreakup.esiAmount,
       avatar: getInitials(form.fullName),
-      address: form.address.trim(),
+      address: form.presentAddress.trim(),
       bloodGroup: form.bloodGroup,
       dateOfBirth: formatDate(form.dateOfBirth),
       gender: form.gender,
       maritalStatus: form.maritalStatus,
       nationality: form.nationality.trim(),
+      permanentAddress: form.permanentAddress.trim(),
       photo: form.photo,
+      presentAddress: form.presentAddress.trim(),
+      sameAsPermanentAddress: form.sameAsPermanentAddress,
       documents: form.documents,
     };
 
@@ -3023,7 +3319,7 @@ const EditEmployeePage = () => {
         )
       );
       setMessage(`${savedEmployee.name} updated in the HRMS database.`);
-      window.setTimeout(() => navigate("/employees"), 450);
+      window.setTimeout(() => onSaved?.(savedEmployee), 450);
     } catch (saveError) {
       setError(
         getHrmsEmployeeErrorMessage(
@@ -3040,21 +3336,8 @@ const EditEmployeePage = () => {
     return (
       <Panel>
         <Notice tone="warning">No employee record found to edit.</Notice>
-        <Button className="mt-4" onClick={() => navigate("/employees")}>
-          Back to Employees
-        </Button>
-      </Panel>
-    );
-  }
-
-  if (!isAdmin) {
-    return (
-      <Panel>
-        <Notice tone="warning">
-          You do not have permission to edit employee records. Please contact an Admin.
-        </Notice>
-        <Button className="mt-4" onClick={() => navigate("/employees")}> 
-          Back to Employees
+        <Button className="mt-4" onClick={onCancel}>
+          Back
         </Button>
       </Panel>
     );
@@ -3063,6 +3346,21 @@ const EditEmployeePage = () => {
   return (
     <Panel>
       <div className="mb-4 grid gap-2">
+        {showHeading ? (
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">
+                Edit Employee
+              </h2>
+              <p className="text-sm text-slate-500">
+                Update employee details directly from the employee list.
+              </p>
+            </div>
+            <span className="text-xs font-bold text-slate-500">
+              Editing {employee.id}
+            </span>
+          </div>
+        ) : null}
         <Notice>{message}</Notice>
         <Notice tone="warning">{error}</Notice>
       </div>
@@ -3072,9 +3370,11 @@ const EditEmployeePage = () => {
         activeTab={tab}
         onChange={setTab}
         trailing={
-          <span className="text-xs font-bold text-slate-500">
-            Editing {employee.id}
-          </span>
+          showHeading ? null : (
+            <span className="text-xs font-bold text-slate-500">
+              Editing {employee.id}
+            </span>
+          )
         }
       />
 
@@ -3152,6 +3452,15 @@ const EditEmployeePage = () => {
                   placeholder="Enter phone number"
                 />
               </Field>
+              <Field label="Emergency Contact Name">
+                <Input
+                  value={form.emergencyContactName}
+                  onChange={(event) =>
+                    updateForm("emergencyContactName", event.target.value)
+                  }
+                  placeholder="Enter emergency contact name"
+                />
+              </Field>
               <Field label="Emergency Contact Number">
                 <Input
                   value={form.emergencyContactNumber}
@@ -3178,13 +3487,51 @@ const EditEmployeePage = () => {
                   placeholder="Enter email"
                 />
               </Field>
-              <Field label="Address">
+              <Field label="Emergency Contact Address">
                 <Input
                   as="textarea"
                   rows={3}
-                  value={form.address}
-                  onChange={(event) => updateForm("address", event.target.value)}
-                  placeholder="Enter address"
+                  value={form.emergencyContactAddress}
+                  onChange={(event) =>
+                    updateForm("emergencyContactAddress", event.target.value)
+                  }
+                  placeholder="Enter emergency contact address"
+                  className="sm:col-span-2"
+                />
+              </Field>
+              <Field label="Permanent Address">
+                <Input
+                  as="textarea"
+                  rows={3}
+                  value={form.permanentAddress}
+                  onChange={(event) =>
+                    updateForm("permanentAddress", event.target.value)
+                  }
+                  placeholder="Enter permanent address"
+                  className="sm:col-span-2"
+                />
+              </Field>
+              <Field label="Same as Permanent Address">
+                <label className="flex min-h-10 items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.sameAsPermanentAddress}
+                    onChange={(event) =>
+                      updateForm("sameAsPermanentAddress", event.target.checked)
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Use permanent address as present address</span>
+                </label>
+              </Field>
+              <Field label="Present Address">
+                <Input
+                  as="textarea"
+                  rows={3}
+                  value={form.presentAddress}
+                  onChange={(event) => updateForm("presentAddress", event.target.value)}
+                  placeholder="Enter present address"
+                  disabled={form.sameAsPermanentAddress}
                   className="sm:col-span-2"
                 />
               </Field>
@@ -3373,7 +3720,7 @@ const EditEmployeePage = () => {
         )}
 
         <div className="flex justify-end gap-2 lg:col-span-2">
-          <Button variant="secondary" onClick={() => navigate("/employees")}>
+          <Button variant="secondary" onClick={onCancel}>
             Cancel
           </Button>
           <Button type="submit" disabled={saving}>
@@ -3385,11 +3732,49 @@ const EditEmployeePage = () => {
   );
 };
 
+const EditEmployeePage = () => {
+  const settings = useSettings();
+  const isAdmin = String(settings?.profile?.role || "").toLowerCase() === "admin";
+  const { employeeId } = useParams();
+  const [employees] = useHrmsEmployees();
+  const navigate = useNavigate();
+  const employee = useMemo(
+    () => {
+      if (employeeId) {
+        return employees.find((record) => record.id === employeeId) || null;
+      }
+      return employees[0] || null;
+    },
+    [employeeId, employees]
+  );
+
+  if (!isAdmin) {
+    return (
+      <Panel>
+        <Notice tone="warning">
+          You do not have permission to edit employee records. Please contact an Admin.
+        </Notice>
+        <Button className="mt-4" onClick={() => navigate("/employees")}>
+          Back to Employees
+        </Button>
+      </Panel>
+    );
+  }
+
+  return (
+    <EmployeeEditor
+      employee={employee}
+      onCancel={() => navigate("/employees")}
+      onSaved={() => navigate("/employees")}
+    />
+  );
+};
+
 const EmployeeProfilePage = () => {
   const settings = useSettings();
   const isAdmin = String(settings?.profile?.role || "").toLowerCase() === "admin";
   const { employeeId } = useParams();
-  const [employees, setEmployees] = useHrmsEmployees();
+  const [employees, setEmployees, employeesState] = useHrmsEmployees();
   const [, setAttendanceRecords] = useStoredList(HRMS_STORAGE_KEYS.attendance, []);
   const [, setPayrollBatches] = useStoredList(HRMS_STORAGE_KEYS.payroll, []);
   const [, setRelievingRecords] = useStoredList(HRMS_STORAGE_KEYS.relieving, []);
@@ -3403,10 +3788,19 @@ const EmployeeProfilePage = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const employee =
-    employees.find((record) => record.id === selectedEmployeeId) ||
-    employees[0] ||
-    null;
+  const [deletePromptOpen, setDeletePromptOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState("");
+  const employee = useMemo(() => {
+    if (employeeId) {
+      return employees.find((record) => record.id === selectedEmployeeId) || null;
+    }
+    return (
+      employees.find((record) => record.id === selectedEmployeeId) ||
+      employees[0] ||
+      null
+    );
+  }, [employeeId, employees, selectedEmployeeId]);
   const filteredEmployees = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
     if (!needle) return employees;
@@ -3429,13 +3823,27 @@ const EmployeeProfilePage = () => {
   useEffect(() => {
     if (employeeId && employees.some((record) => record.id === employeeId)) {
       setSelectedEmployeeId(employeeId);
+      setError("");
+      return;
+    }
+
+    if (employeeId && !employeesState.loading) {
+      const fallbackEmployeeId = employees[0]?.id || "";
+      setSelectedEmployeeId(fallbackEmployeeId);
+      setError(`Employee ${employeeId} was not found in the HRMS database.`);
+      navigate(
+        fallbackEmployeeId
+          ? `/employees/profile/${fallbackEmployeeId}`
+          : "/employees/profile",
+        { replace: true }
+      );
       return;
     }
 
     if (!selectedEmployeeId && employees[0]?.id) {
       setSelectedEmployeeId(employees[0].id);
     }
-  }, [employeeId, employees, selectedEmployeeId]);
+  }, [employeeId, employees, employeesState.loading, navigate, selectedEmployeeId]);
 
   const selectEmployee = (id) => {
     setSelectedEmployeeId(id);
@@ -3447,11 +3855,35 @@ const EmployeeProfilePage = () => {
   const deleteEmployee = async () => {
     if (!employee) return;
 
+    if (!isAdmin) {
+      setError("Only Admin users can delete employee records.");
+      return;
+    }
+
     const confirmed = window.confirm(
-      `Delete ${employee.name} (${employee.id}) from HRMS database records?`
+      `Are you sure you want to delete ${employee.name} (${employee.id})? This action requires admin approval and cannot be undone.`
     );
 
     if (!confirmed) return;
+
+    setDeletePromptOpen(true);
+    setAdminPassword("");
+    setAdminPasswordError("");
+  };
+
+  const confirmDeleteEmployee = async () => {
+    if (!employee) return;
+
+    const authError = getHrmsAdminAuthError(
+      settings,
+      adminPassword,
+      "delete employee records"
+    );
+
+    if (authError) {
+      setAdminPasswordError(authError);
+      return;
+    }
 
     try {
       setError("");
@@ -3490,6 +3922,9 @@ const EmployeeProfilePage = () => {
     setSelectedEmployeeId(nextEmployeeId);
     setError("");
     setMessage(`${employee.name} deleted from HRMS database records.`);
+    setDeletePromptOpen(false);
+    setAdminPassword("");
+    setAdminPasswordError("");
     navigate(
       nextEmployeeId ? `/employees/profile/${nextEmployeeId}` : "/employees/profile",
       { replace: true }
@@ -3584,12 +4019,10 @@ const EmployeeProfilePage = () => {
           <div className="flex flex-wrap items-end justify-start gap-2 xl:justify-end">
             {isAdmin ? (
               <>
-                <Link to={`/employees/edit/${employee.id}`}>
-                  <Button>
-                    <AppIcon name="edit" className="h-4 w-4" />
-                    Edit Employee
-                  </Button>
-                </Link>
+                <Button variant="secondary" onClick={() => navigate("/employees")}>
+                  <AppIcon name="table" className="h-4 w-4" />
+                  Open Employee List
+                </Button>
                 <Button variant="danger" onClick={deleteEmployee}>
                   <AppIcon name="x" className="h-4 w-4" />
                   Delete Employee
@@ -3597,7 +4030,7 @@ const EmployeeProfilePage = () => {
               </>
             ) : (
               <span className="text-sm text-slate-500">
-                Employee updates and print access are restricted to Admin.
+                Employee updates, delete actions, and print access are restricted to Admin.
               </span>
             )}
           </div>
@@ -3627,8 +4060,13 @@ const EmployeeProfilePage = () => {
         rightRows={[
           ["Email", displayValue(employee.email)],
           ["Phone", displayValue(employee.phone)],
+          ["Emergency Contact Name", displayValue(employee.emergencyContactName)],
           ["Emergency Contact", displayValue(employee.emergencyContactNumber)],
           ["Relation", displayValue(employee.relation || employee.emergencyContactRelation)],
+          [
+            "Emergency Contact Address",
+            displayValue(employee.emergencyContactAddress),
+          ],
           ["Reporting To", displayValue(employee.manager)],
           ["Joining Date", displayValue(employee.joined)],
           ["Gross Salary", money(employee.salary)],
@@ -3640,18 +4078,50 @@ const EmployeeProfilePage = () => {
         ]}
         tableColumns={["Sl No", "Particulars", "Details"]}
         tableRows={[
-          { id: "address", values: ["1", "Address", displayValue(employee.address)] },
-          { id: "dob", values: ["2", "Date of Birth", displayValue(employee.dateOfBirth)] },
-          { id: "gender", values: ["3", "Gender", displayValue(employee.gender)] },
+          {
+            id: "permanent-address",
+            values: ["1", "Permanent Address", displayValue(employee.permanentAddress)],
+          },
+          {
+            id: "present-address",
+            values: [
+              "2",
+              "Present Address",
+              displayValue(employee.presentAddress || employee.address),
+            ],
+          },
+          { id: "dob", values: ["3", "Date of Birth", displayValue(employee.dateOfBirth)] },
+          { id: "gender", values: ["4", "Gender", displayValue(employee.gender)] },
           {
             id: "marital",
-            values: ["4", "Marital Status", displayValue(employee.maritalStatus)],
+            values: ["5", "Marital Status", displayValue(employee.maritalStatus)],
           },
-          { id: "nationality", values: ["5", "Nationality", displayValue(employee.nationality)] },
-          { id: "blood", values: ["6", "Blood Group", displayValue(employee.bloodGroup)] },
+          { id: "nationality", values: ["6", "Nationality", displayValue(employee.nationality)] },
+          { id: "blood", values: ["7", "Blood Group", displayValue(employee.bloodGroup)] },
         ]}
         bottomLeftTitle="Employee Notes"
         bottomLeftValue="Registered employee details from HRMS database records."
+      />
+
+      <PasswordPromptModal
+        isOpen={deletePromptOpen}
+        title="Admin Approval Required"
+        description={`Enter the admin password to delete ${employee?.name || "this employee"}.`}
+        password={adminPassword}
+        error={adminPasswordError}
+        confirmLabel="Approve Delete"
+        onPasswordChange={(value) => {
+          setAdminPassword(value);
+          if (adminPasswordError) {
+            setAdminPasswordError("");
+          }
+        }}
+        onCancel={() => {
+          setDeletePromptOpen(false);
+          setAdminPassword("");
+          setAdminPasswordError("");
+        }}
+        onConfirm={confirmDeleteEmployee}
       />
     </div>
   );
@@ -6149,7 +6619,7 @@ const PayrollPage = () => {
   const [payrollBatches, setPayrollBatches, payrollState] = useHrmsSalaries();
   const [generated, setGenerated] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [month, setMonth] = useState("May 2024");
+  const [month, setMonth] = useState(getCurrentAttendanceMonth());
   const [department, setDepartment] = useState("All");
   const [message, setMessage] = useState("");
   const [selectedBatchId, setSelectedBatchId] = useState("");
@@ -6307,7 +6777,9 @@ const PayrollPage = () => {
   const loadPayrollBatch = (batch) => {
     if (!batch) return;
 
-    setMonth(batch.month || "May 2024");
+    setMonth(
+      normalizeAttendanceMonth(batch.month) || getCurrentAttendanceMonth()
+    );
     setDepartment(batch.department || "All");
     setGenerated(true);
     setSelectedBatchId(batch.id);
@@ -6410,19 +6882,19 @@ const PayrollPage = () => {
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <Field label="Month">
             <Input
-              as="select"
-              value={month}
+              type="month"
+              value={toAttendanceMonthInputValue(month)}
               onChange={(event) => {
-                setMonth(event.target.value);
+                setMonth(
+                  normalizeAttendanceMonth(event.target.value) ||
+                    getCurrentAttendanceMonth()
+                );
                 setGenerated(false);
                 setSelectedBatchId("");
                 setSelectedEmployeeId("");
                 setMessage("");
               }}
-            >
-              <option>May 2024</option>
-              <option>June 2024</option>
-            </Input>
+            />
           </Field>
           <Field label="Department">
             <Input
@@ -6796,15 +7268,8 @@ const PayrollPage = () => {
 const PayslipPage = () => {
   const [employees] = useHrmsEmployees();
   const [payrollBatches, , payrollState] = useHrmsSalaries();
-  const monthOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(["May 2024", "June 2024", ...payrollBatches.map((batch) => batch.month).filter(Boolean)])
-      ),
-    [payrollBatches]
-  );
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
-  const [month, setMonth] = useState("May 2024");
+  const [month, setMonth] = useState(getCurrentAttendanceMonth());
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState("success");
   const [payslip, setPayslip] = useState(null);
@@ -6857,7 +7322,7 @@ const PayslipPage = () => {
       )
       .find(
         (batch) =>
-          batch.month === month &&
+          areAttendanceMonthsEqual(batch.month, month) &&
           (batch.rows || []).some((row) => row.id === selectedEmployee.id)
       );
     const savedRow = matchingBatch?.rows?.find(
@@ -6944,18 +7409,17 @@ const PayslipPage = () => {
           </Field>
           <Field label="Month">
             <Input
-              as="select"
-              value={month}
+              type="month"
+              value={toAttendanceMonthInputValue(month)}
               onChange={(event) => {
-                setMonth(event.target.value);
+                setMonth(
+                  normalizeAttendanceMonth(event.target.value) ||
+                    getCurrentAttendanceMonth()
+                );
                 setPayslip(null);
                 setMessage("");
               }}
-            >
-              {monthOptions.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </Input>
+            />
           </Field>
           <Button onClick={createPayslip} className="self-end">
             Create Payslip
@@ -7003,7 +7467,7 @@ const PayslipPage = () => {
                   ["Date of Joining", displayValue(employee?.joined)],
                   ["Days Worked", "26"],
                   ["Document Number", displayValue(employee?.documentNumber)],
-                  ["Payment Date", "31/05/2024"],
+                  ["Payment Date", getPayrollPaymentDate(payslip.month)],
                   ["Payroll Status", payrollRow?.status || "Pending"],
                   ["Payroll Ref", payslip.batch?.id || "Not saved"],
                 ].map(([label, value]) => (

@@ -9,6 +9,19 @@ const emitBoqChange = () => {
   }
 };
 
+const parseQuantity = (...values) => {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+};
+
 const normalizeBoqItem = (item = {}) => {
   const rate = roundUnitPrice(item.rate ?? item.Rate ?? item.unitPrice ?? item.UnitPrice ?? 0);
   const rawInventoryQty =
@@ -22,7 +35,16 @@ const normalizeBoqItem = (item = {}) => {
   const inventoryQty = Number.isFinite(Number(rawInventoryQty))
     ? Number(rawInventoryQty)
     : null;
-  const quantity = inventoryQty ?? Number(item.quantity ?? item.Quantity ?? 0);
+  const quantity = parseQuantity(
+    item.quantity,
+    item.Quantity,
+    item.unitQty,
+    item.UnitQty,
+    item.unitQuantity,
+    item.UnitQuantity,
+    item.qty,
+    item.Qty
+  );
   const rawConsumed =
     item.consumedQty ?? item.ConsumedQty ?? item.totalConsumed ?? item.TotalConsumed ?? null;
   const consumedQty = Number.isFinite(Number(rawConsumed)) ? Number(rawConsumed) : null;
@@ -47,7 +69,7 @@ const normalizeBoqItem = (item = {}) => {
     taxPercentage: Number(item.taxPercentage ?? item.TaxPercentage ?? 0),
     quantity,
     consumedQty,
-    availableQty: inventoryQty ?? availableQty,
+    availableQty,
     inventoryQty,
     currentStock: inventoryQty,
     stock: inventoryQty,

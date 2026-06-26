@@ -57,6 +57,27 @@ const formatQty = (value) =>
     maximumFractionDigits: 2,
   });
 
+const resolveConsumptionProjectId = (record = {}, deliveryChallanMap = {}) => {
+  const directProjectId = record.projectId ?? null;
+  if (directProjectId !== null && directProjectId !== undefined && directProjectId !== "") {
+    return directProjectId;
+  }
+
+  const linkedIds = Array.isArray(record.deliveryChallanIds)
+    ? record.deliveryChallanIds
+    : record.deliveryChallanId
+    ? [record.deliveryChallanId]
+    : [];
+  for (const challanId of linkedIds) {
+    const linked = deliveryChallanMap[String(challanId)];
+    if (linked?.projectId !== null && linked?.projectId !== undefined && linked?.projectId !== "") {
+      return linked.projectId;
+    }
+  }
+
+  return null;
+};
+
 const materialKey = (item = {}) => {
   const name = normalizeText(item.name ?? item.ItemName ?? item.Item ?? "");
   if (!name) {
@@ -1005,7 +1026,11 @@ const Consumption = () => {
         return true;
       }
 
-      const projectName = projectMap[String(record.projectId)]?.name || "";
+      const resolvedProjectId = resolveConsumptionProjectId(
+        record,
+        deliveryChallanMap
+      );
+      const projectName = projectMap[String(resolvedProjectId)]?.name || "";
       const locationName = locationMap[String(record.locationId)]?.name || "";
       const challanRef =
         deliveryChallanMap[String(record.deliveryChallanId)]?.dcNumber ||
@@ -1525,7 +1550,10 @@ const Consumption = () => {
     setFeedback({ type: "", message: "" });
 
     const nextProjectId =
-      linkedChallan?.projectId ?? record.projectId ?? form.projectId ?? "";
+      linkedChallan?.projectId ??
+      resolveConsumptionProjectId(record, deliveryChallanMap) ??
+      form.projectId ??
+      "";
     const nextLocationId =
       record.locationId ??
       linkedChallan?.toLocationId ??
@@ -2495,7 +2523,9 @@ const Consumption = () => {
                       {record.consumptionNumber || "-"}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
-                      {projectMap[String(record.projectId)]?.name || "-"}
+                      {projectMap[
+                        String(resolveConsumptionProjectId(record, deliveryChallanMap))
+                      ]?.name || "-"}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                       {locationMap[String(record.locationId)]?.name || "-"}
@@ -2572,7 +2602,9 @@ const Consumption = () => {
             ]}
             leftBlockTitle="Project"
             leftBlockLines={[
-              projectMap[String(viewRecord.projectId)]?.name || "-",
+              projectMap[
+                String(resolveConsumptionProjectId(viewRecord, deliveryChallanMap))
+              ]?.name || "-",
               locationMap[String(viewRecord.locationId)]?.name || "-",
             ]}
             rightBlockTitle="Delivery Challan"

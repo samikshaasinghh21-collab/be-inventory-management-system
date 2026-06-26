@@ -50,6 +50,19 @@ const createLineItem = () => ({
   location: "",
 });
 
+const getBoqLineQuantity = (item = {}) =>
+  Number(
+    item.quantity ??
+      item.Quantity ??
+      item.unitQty ??
+      item.UnitQty ??
+      item.unitQuantity ??
+      item.UnitQuantity ??
+      item.qty ??
+      item.Qty ??
+      0
+  ) || 0;
+
 const createRecommendationLineItem = (recommendation = {}) => ({
   id: Date.now() + Math.random(),
   itemId: recommendation.productId ?? null,
@@ -589,7 +602,7 @@ const PurchaseOrder = () => {
     }
 
     const mapped = availableItems.map((item) => {
-      const qty = Number(item.quantity ?? 0) || 0;
+      const qty = getBoqLineQuantity(item);
       const directRate = Number(item.rate ?? item.Rate);
       const rate =
         Number.isFinite(directRate) && directRate >= 0

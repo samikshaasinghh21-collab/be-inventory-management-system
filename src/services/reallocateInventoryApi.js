@@ -36,6 +36,7 @@ const normalizeReallocateInventoryItem = (item = {}) => ({
     null,
   sourceType: item.sourceType ?? item.SourceType ?? "",
   sourceKey: item.sourceKey ?? item.SourceKey ?? "",
+  sourceRef: item.sourceRef ?? item.SourceRef ?? "",
   item: item.item ?? item.Item ?? item.name ?? item.Name ?? "",
   name: item.name ?? item.item ?? item.Item ?? item.Name ?? "",
   description: item.description ?? item.Description ?? "",
@@ -51,10 +52,28 @@ const normalizeReallocateInventory = (record = {}) => {
     record.TransferId ??
     null;
 
+  const referenceType =
+    record.referenceType ??
+    record.ReferenceType ??
+    (record.consumptionId ?? record.ConsumptionId ? "consumption" : "");
+  const referenceId =
+    record.referenceId ??
+    record.ReferenceId ??
+    (record.consumptionId ?? record.ConsumptionId ?? null);
+  const referenceNo =
+    record.referenceNo ??
+    record.ReferenceNo ??
+    record.consumptionNumber ??
+    record.ConsumptionNumber ??
+    "";
+
   return {
     id,
     transferId: id,
     referenceNumber: record.referenceNumber ?? record.ReferenceNumber ?? `REL-${id}`,
+    referenceType,
+    referenceId,
+    referenceNo,
     type: record.type ?? record.Type ?? "Reallocate",
     consumptionId: record.consumptionId ?? record.ConsumptionId ?? null,
     consumptionNumber:
@@ -68,6 +87,11 @@ const normalizeReallocateInventory = (record = {}) => {
     ),
     transferDate: record.transferDate ?? record.TransferDate ?? null,
     requestedBy: record.requestedBy ?? record.RequestedBy ?? "",
+    eWayBillNumber:
+      record.eWayBillNumber ??
+      record.EWayBillNumber ??
+      record.EwayBillNumber ??
+      "",
     status: record.status ?? record.Status ?? "Pending",
     notes: record.notes ?? record.Notes ?? "",
     createdAt: record.createdAt ?? record.CreatedAt ?? null,

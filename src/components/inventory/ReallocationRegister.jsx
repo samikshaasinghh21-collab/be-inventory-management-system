@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import DateInput from "../common/DateInput";
 import { fetchLocations } from "../../services/locationsApi";
 import { fetchProjects } from "../../services/projectsApi";
 import { fetchVendors } from "../../services/vendorsApi";
@@ -8,6 +9,11 @@ import useSettings from "../../hooks/useSettings";
 import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
+import {
+  buildInventorySourceSearchText,
+  buildInventorySourceSummary,
+  matchesInventorySourceFilter,
+} from "../../utils/inventorySource";
 import DocumentViewPanel from "./DocumentViewPanel";
  
 const panel =
@@ -53,7 +59,14 @@ const ReallocationRegister = () => {
   const [locations, setLocations] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [query, setQuery] = useState("");
+  const [movementTypeFilter, setMovementTypeFilter] = useState("all");
+  const [sourceTypeFilter, setSourceTypeFilter] = useState("all");
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [fromLocationFilter, setFromLocationFilter] = useState("all");
+  const [destinationFilter, setDestinationFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [fromDateFilter, setFromDateFilter] = useState("");
+  const [toDateFilter, setToDateFilter] = useState("");
   const [viewRecord, setViewRecord] = useState(null);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -100,21 +113,58 @@ const ReallocationRegister = () => {
       ),
     [sortedRecords]
   );
- 
+
+  const getRecordDestination = (record = {}) =>
+    record.type === "Return"
+      ? vendorMap[String(record.returnVendorId)]?.name || "-"
+      : locationMap[String(record.toLocationId)]?.name || "-";
+
+  const getRecordDestinationFilterValue = (record = {}) =>
+    record.type === "Return"
+      ? `vendor:${String(record.returnVendorId || "")}`
+      : `location:${String(record.toLocationId || "")}`;
+
   const visibleRecords = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return sortedRecords.filter((record) => {
+      if (statusFilter !== "all" && String(record.status || "").toLowerCase() !== statusFilter) {
+        return false;
+      }
+      if (movementTypeFilter !== "all" && String(record.type || "").toLowerCase() !== movementTypeFilter) {
+        return false;
+      }
       if (
-        statusFilter !== "all" &&
-        String(record.status || "").toLowerCase() !== statusFilter
+        sourceTypeFilter !== "all" &&
+        !(record.items || []).some((item) =>
+          matchesInventorySourceFilter(item.sourceType, sourceTypeFilter)
+        )
       ) {
         return false;
       }
+      if (projectFilter !== "all" && String(record.projectId || "") !== projectFilter) {
+        return false;
+      }
+      if (
+        fromLocationFilter !== "all" &&
+        String(record.fromLocationId || "") !== fromLocationFilter
+      ) {
+        return false;
+      }
+      if (destinationFilter !== "all" && getRecordDestinationFilterValue(record) !== destinationFilter) {
+        return false;
+      }
+      const recordDate =
+        record.requestDate || record.transferDate || record.createdAt || null;
+      const recordDateValue =
+        recordDate && String(recordDate).length >= 10 ? String(recordDate).slice(0, 10) : "";
+      if (fromDateFilter && (!recordDateValue || recordDateValue < fromDateFilter)) {
+        return false;
+      }
+      if (toDateFilter && (!recordDateValue || recordDateValue > toDateFilter)) {
+        return false;
+      }
       if (!needle) return true;
-      const destination =
-        record.type === "Return"
-          ? vendorMap[String(record.returnVendorId)]?.name
-          : locationMap[String(record.toLocationId)]?.name;
+      const destination = getRecordDestination(record);
       const itemsText = (record.items || [])
         .map((item) => item.name || item.item || "")
         .filter(Boolean)
@@ -123,10 +173,12 @@ const ReallocationRegister = () => {
         record.requestDate || record.transferDate || record.createdAt
       );
       const safeDate = dateText === "-" ? "" : dateText;
+      const sourceSummary = buildInventorySourceSummary(record.items);
       const haystack = [
         record.referenceNumber,
         record.consumptionNumber,
         record.type,
+        sourceSummary,
         projectMap[String(record.projectId)]?.name,
         locationMap[String(record.fromLocationId)]?.name,
         destination,
@@ -134,6 +186,7 @@ const ReallocationRegister = () => {
         record.requestedBy,
         record.notes,
         itemsText,
+        buildInventorySourceSearchText(record.items),
         safeDate,
       ]
         .filter(Boolean)
@@ -145,8 +198,15 @@ const ReallocationRegister = () => {
     query,
     statusFilter,
     sortedRecords,
+    destinationFilter,
+    fromDateFilter,
+    fromLocationFilter,
     projectMap,
     locationMap,
+    movementTypeFilter,
+    projectFilter,
+    sourceTypeFilter,
+    toDateFilter,
     vendorMap,
   ]);
  
@@ -318,14 +378,34 @@ const ReallocationRegister = () => {
             Print Reallocation
           </button>
         </div>
-        <div className="grid gap-2 border-b border-slate-200 px-4 py-3 md:grid-cols-[1fr_210px]">
+        <div className="grid gap-2 border-b border-slate-200 px-4 py-3 md:grid-cols-2 xl:grid-cols-4">
           <input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search reallocation reference, item, date, project..."
+            placeholder="Search reference, source ref, item, project, requester..."
             className={field}
           />
+          <select
+            value={movementTypeFilter}
+            onChange={(e) => setMovementTypeFilter(e.target.value)}
+            className={field}
+          >
+            <option value="all">All Movement Types</option>
+            <option value="reallocate">Reallocation</option>
+            <option value="return">Return</option>
+          </select>
+          <select
+            value={sourceTypeFilter}
+            onChange={(e) => setSourceTypeFilter(e.target.value)}
+            className={field}
+          >
+            <option value="all">All Source Types</option>
+            <option value="receive">Receive</option>
+            <option value="dc">DC</option>
+            <option value="consumption">Consumption</option>
+            <option value="reallocation">Reallocation</option>
+          </select>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -336,6 +416,57 @@ const ReallocationRegister = () => {
             <option value="in transit">In Transit</option>
             <option value="completed">Completed</option>
           </select>
+          <select
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className={field}
+          >
+            <option value="all">All Projects</option>
+            {projects.map((project) => (
+              <option key={project.id} value={String(project.id)}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={fromLocationFilter}
+            onChange={(e) => setFromLocationFilter(e.target.value)}
+            className={field}
+          >
+            <option value="all">All From Locations</option>
+            {locations.map((location) => (
+              <option key={location.id} value={String(location.id)}>
+                {location.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={destinationFilter}
+            onChange={(e) => setDestinationFilter(e.target.value)}
+            className={field}
+          >
+            <option value="all">All To Locations / Vendors</option>
+            {locations.map((location) => (
+              <option key={`location-${location.id}`} value={`location:${location.id}`}>
+                To: {location.name}
+              </option>
+            ))}
+            {vendors.map((vendor) => (
+              <option key={`vendor-${vendor.id}`} value={`vendor:${vendor.id}`}>
+                Vendor: {vendor.name}
+              </option>
+            ))}
+          </select>
+          <DateInput
+            value={fromDateFilter}
+            onChange={setFromDateFilter}
+            className={field}
+          />
+          <DateInput
+            value={toDateFilter}
+            onChange={setToDateFilter}
+            className={field}
+          />
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -343,6 +474,7 @@ const ReallocationRegister = () => {
               <tr>
                 <th className="px-4 py-3 text-left font-semibold min-w-[140px]">Reallocation Reference</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Type</th>
+                <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Source Type</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Receive Ref</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[180px]">Project</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[160px]">From</th>
@@ -356,7 +488,7 @@ const ReallocationRegister = () => {
             <tbody>
               {visibleRecords.length === 0 && (
                 <tr>
-                  <td colSpan="10" className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan="11" className="px-4 py-10 text-center text-slate-500">
                     {loading
                       ? "Loading reallocations..."
                       : "No reallocations found."}
@@ -368,10 +500,8 @@ const ReallocationRegister = () => {
                   (sum, item) => sum + qty(item.quantity),
                   0
                 );
-                const destination =
-                  record.type === "Return"
-                    ? vendorMap[String(record.returnVendorId)]?.name || "-"
-                    : locationMap[String(record.toLocationId)]?.name || "-";
+                const destination = getRecordDestination(record);
+                const sourceSummary = buildInventorySourceSummary(record.items);
                 return (
                   <tr key={record.id} className="border-b border-slate-200 bg-white">
                     <td className="px-4 py-3 text-slate-800">
@@ -379,6 +509,11 @@ const ReallocationRegister = () => {
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                       {getMovementTypeLabel(record.type)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                        {sourceSummary}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                       {record.consumptionNumber || "-"}
@@ -447,7 +582,7 @@ const ReallocationRegister = () => {
     primaryPairs={[
       {
         label: "E-Way Bill",
-        value: activeViewRecord.eWayBill || "-",
+        value: activeViewRecord.eWayBillNumber || "-",
       },
     ]}
 

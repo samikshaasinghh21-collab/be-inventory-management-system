@@ -154,6 +154,12 @@ const commonStyles = `
     table-layout: fixed;
     page-break-inside: auto;
   }
+  thead {
+    display: table-header-group;
+  }
+  tfoot {
+    display: table-footer-group;
+  }
   tr {
     page-break-inside: avoid;
   }
@@ -197,6 +203,17 @@ const commonStyles = `
   .details-section table td {
     font-size: 0.9rem;
   }
+  .print-register-body table {
+    table-layout: auto;
+  }
+  .print-register-body th,
+  .print-register-body td {
+    font-size: 0.8rem;
+  }
+  .print-register-body .rounded-full,
+  .print-register-body [class*="rounded-full"] {
+    border-radius: 9999px;
+  }
   @media print {
     /* Override app-level print rules (e.g. body * { visibility: hidden }) in popup window */
     body,
@@ -239,6 +256,9 @@ const commonStyles = `
       max-width: 100% !important;
       margin-top: 0.65rem;
     }
+    .print-register-body table {
+      table-layout: auto;
+    }
     th, td {
       padding: 0.35rem 0.4rem;
       font-size: 0.72rem;
@@ -270,6 +290,7 @@ const buildDocument = ({
   brandDescription,
   headStyles = "",
   showHeader = true,
+  bodyClass = "",
 }) => {
   const formattedMeta =
     Array.isArray(metaRows) && metaRows.length
@@ -324,7 +345,7 @@ const buildDocument = ({
                 </header>`
               : ""
           }
-          <section class="print-body">
+          <section class="print-body ${bodyClass}">
             ${body}
           </section>
         </main>
@@ -356,6 +377,131 @@ const waitForNode = async (selector, timeoutMs = 900) => {
     await wait(30);
   }
   return null;
+};
+
+const getDirectChildUnderRoot = (root, node) => {
+  let current = node;
+  while (current && current.parentElement && current.parentElement !== root) {
+    current = current.parentElement;
+  }
+  return current && current.parentElement === root ? current : null;
+};
+
+const removeInteractiveRegisterBlocks = (root) => {
+  const containersToRemove = new Set();
+  root.querySelectorAll("input, select, textarea").forEach((field) => {
+    const directChild = getDirectChildUnderRoot(root, field);
+    if (directChild && !directChild.querySelector("table")) {
+      containersToRemove.add(directChild);
+    }
+  });
+  containersToRemove.forEach((node) => node.remove());
+};
+
+const stripActionColumns = (root) => {
+  root.querySelectorAll("table").forEach((table) => {
+    const rows = Array.from(table.querySelectorAll("tr"));
+    if (!rows.length) {
+      return;
+    }
+
+    const candidateIndices = new Set();
+    const headerRow =
+      table.querySelector("thead tr:last-child") ??
+      rows.find((row) => row.querySelector("th")) ??
+      null;
+
+    if (headerRow) {
+      Array.from(headerRow.children).forEach((cell, index) => {
+        const label = String(cell.textContent ?? "").trim().toLowerCase();
+        if (["action", "actions", "print"].includes(label)) {
+          candidateIndices.add(index);
+        }
+      });
+    }
+
+    if (!candidateIndices.size) {
+      const width = Math.max(
+        ...rows.map((row) =>
+          Array.from(row.children).filter((cell) =>
+            /^(TH|TD)$/i.test(cell.tagName)
+          ).length
+        ),
+        0
+      );
+      for (let index = 0; index < width; index += 1) {
+        const columnCells = rows
+          .map((row) =>
+            Array.from(row.children).filter((cell) =>
+              /^(TH|TD)$/i.test(cell.tagName)
+            )[index] ?? null
+          )
+          .filter(Boolean);
+        if (!columnCells.length) {
+          continue;
+        }
+        const containsInteractive = columnCells.some(
+          (cell) => cell.querySelector("button, a[href], svg") || !String(cell.textContent ?? "").trim()
+        );
+        const allBodyEmpty = columnCells
+          .filter((cell) => cell.tagName === "TD")
+          .every((cell) => !String(cell.textContent ?? "").trim());
+        if (containsInteractive && allBodyEmpty) {
+          candidateIndices.add(index);
+        }
+      }
+    }
+
+    Array.from(candidateIndices)
+      .sort((left, right) => right - left)
+      .forEach((index) => {
+        rows.forEach((row) => {
+          const cells = Array.from(row.children).filter((cell) =>
+            /^(TH|TD)$/i.test(cell.tagName)
+          );
+          const target = cells[index];
+          if (target) {
+            target.remove();
+          }
+        });
+      });
+  });
+};
+
+const cleanupEmptyNodes = (root) => {
+  const candidates = Array.from(
+    root.querySelectorAll("div, section, article, aside, header, footer")
+  ).reverse();
+  candidates.forEach((node) => {
+    if (node.querySelector("table, img")) {
+      return;
+    }
+    const text = String(node.textContent ?? "").replace(/\s+/g, " ").trim();
+    const hasMeaningfulChild = Array.from(node.children).some((child) =>
+      /^(TABLE|IMG|H1|H2|H3|H4|H5|H6|P|SPAN|STRONG|SMALL)$/i.test(child.tagName)
+    );
+    if (!text && !hasMeaningfulChild) {
+      node.remove();
+    }
+  });
+};
+
+const sanitizeCloneForPrint = (clone, { isPanelPrint = false } = {}) => {
+  clone.querySelectorAll(".print-hidden, button").forEach((element) => {
+    element.remove();
+  });
+
+  if (isPanelPrint) {
+    return clone;
+  }
+
+  removeInteractiveRegisterBlocks(clone);
+  clone.querySelectorAll("input, select, textarea").forEach((element) => {
+    element.remove();
+  });
+  stripActionColumns(clone);
+  cleanupEmptyNodes(clone);
+  return clone;
 };
 
 const fitPrintDocument = (printWindow) => {
@@ -436,10 +582,7 @@ export const printSection = async ({
     return;
   }
   const isPanelPrint = selector.includes("view-panel");
-  const clone = node.cloneNode(true);
-  clone.querySelectorAll(".print-hidden, button").forEach((element) => {
-    element.remove();
-  });
+  const clone = sanitizeCloneForPrint(node.cloneNode(true), { isPanelPrint });
   const bodyHtml = isPanelPrint ? clone.outerHTML : clone.innerHTML;
   const printWindow = safeOpen();
   if (!printWindow) {
@@ -456,6 +599,7 @@ export const printSection = async ({
       brandDescription,
       headStyles: collectHeadStyles(),
       showHeader: !isPanelPrint,
+      bodyClass: isPanelPrint ? "print-panel-body" : "print-register-body",
       body: bodyHtml,
     })
   );

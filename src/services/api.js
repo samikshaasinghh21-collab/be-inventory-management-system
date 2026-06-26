@@ -1,13 +1,46 @@
 import axios from "axios";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim() || "/api";
-const API_HEALTH_URL = `${API_BASE_URL.replace(/\/+$/, "")}/health`;
+const CONFIGURED_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").trim();
+const DEFAULT_API_BASE_URL = "/api";
+const API_BASE_URL = CONFIGURED_API_BASE_URL || DEFAULT_API_BASE_URL;
 const API_AVAILABILITY_TTL_MS = 15_000;
 const API_UNAVAILABLE_CODE = "API_UNAVAILABLE";
 const DB_UNAVAILABLE_CODE = "DB_UNAVAILABLE";
 const API_UNAVAILABLE_CODES = new Set([API_UNAVAILABLE_CODE, DB_UNAVAILABLE_CODE]);
 const API_UNAVAILABLE_MESSAGE =
   "Inventory API is unavailable. Start the backend server and verify the SQL Server connection.";
+
+const normalizeApiBaseUrl = (value) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return DEFAULT_API_BASE_URL;
+  }
+  return trimmed.replace(/\/+$/, "") || DEFAULT_API_BASE_URL;
+};
+
+const canUseSameOriginFallback = () => {
+  if (!CONFIGURED_API_BASE_URL || typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const currentOrigin = window.location.origin;
+    const configuredOrigin = new URL(CONFIGURED_API_BASE_URL, currentOrigin).origin;
+    return configuredOrigin !== currentOrigin;
+  } catch {
+    return false;
+  }
+};
+
+const resolveApiUrls = (baseUrl) => {
+  const normalizedBaseUrl = normalizeApiBaseUrl(baseUrl);
+  return {
+    baseUrl: normalizedBaseUrl,
+    healthUrl: `${normalizedBaseUrl}/health`,
+  };
+};
+
+let activeApiBaseUrl = normalizeApiBaseUrl(API_BASE_URL);
 
 const buildApiUnavailableError = (
   message = API_UNAVAILABLE_MESSAGE,
@@ -76,6 +109,7 @@ export const resetApiAvailability = () => {
   apiAvailabilityError = null;
   apiAvailabilityPending = null;
   apiAvailabilityOk = null;
+  activeApiBaseUrl = normalizeApiBaseUrl(API_BASE_URL);
 };
 
 export const ensureApiAvailable = async ({ force = false } = {}) => {
@@ -97,8 +131,9 @@ export const ensureApiAvailable = async ({ force = false } = {}) => {
   }
 
   apiAvailabilityPending = (async () => {
-    try {
-      const response = await axios.get(API_HEALTH_URL, {
+    const tryHealthCheck = async (baseUrl) => {
+      const { baseUrl: normalizedBaseUrl, healthUrl } = resolveApiUrls(baseUrl);
+      const response = await axios.get(healthUrl, {
         timeout: 5000,
         headers: {
           "Cache-Control": "no-cache",
@@ -112,9 +147,28 @@ export const ensureApiAvailable = async ({ force = false } = {}) => {
         );
       }
 
+      activeApiBaseUrl = normalizedBaseUrl;
+      return true;
+    };
+
+    try {
+      await tryHealthCheck(activeApiBaseUrl);
       markApiAvailable();
       return true;
     } catch (error) {
+      const shouldFallback =
+        canUseSameOriginFallback() &&
+        activeApiBaseUrl !== DEFAULT_API_BASE_URL &&
+        !error?.response;
+      if (shouldFallback) {
+        try {
+          await tryHealthCheck(DEFAULT_API_BASE_URL);
+          markApiAvailable();
+          return true;
+        } catch (fallbackError) {
+          throw markApiUnavailable(fallbackError);
+        }
+      }
       throw markApiUnavailable(error);
     } finally {
       apiAvailabilityPending = null;
@@ -125,7 +179,7 @@ export const ensureApiAvailable = async ({ force = false } = {}) => {
 };
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: activeApiBaseUrl,
 });
 
 api.interceptors.request.use(
@@ -134,6 +188,7 @@ api.interceptors.request.use(
       await ensureApiAvailable();
     }
 
+    config.baseURL = activeApiBaseUrl;
     const token = localStorage.getItem("token");
     if (token) {
       config.headers = config.headers ?? {};

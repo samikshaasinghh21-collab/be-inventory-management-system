@@ -135,7 +135,7 @@ const DateInput = ({
           <button
             type="button"
             onClick={openNativePicker}
-            className="p-2 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            className="date-input-trigger"
             aria-label="Open calendar"
           >
             <svg

@@ -17,6 +17,7 @@ const emptyForm = {
   gstNumber: "",
   phone: "",
   email: "",
+  documents: [],
 };
 
 const createEmptyContact = () => ({
@@ -26,6 +27,34 @@ const createEmptyContact = () => ({
   designation: "",
   phone: "",
 });
+
+const MAX_CUSTOMER_DOCUMENT_SIZE = 5 * 1024 * 1024;
+
+const readCustomerDocument = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error("Select a valid file."));
+      return;
+    }
+    if (file.size > MAX_CUSTOMER_DOCUMENT_SIZE) {
+      reject(new Error(`${file.name} is larger than 5 MB.`));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve({
+        id: `${Date.now()}-${Math.random()}`,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        uploadedAt: new Date().toISOString(),
+        dataUrl: reader.result,
+      });
+    };
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
 
 const resolveCustomerName = ({ customerName = "" } = {}) => customerName.trim();
 
@@ -38,6 +67,11 @@ const getCustomerCompanyName = (customer = {}) => {
     ? customer.companyName
     : "-";
 };
+
+const mapDocumentForForm = (document = {}, index = 0, customerId = "customer") => ({
+  ...document,
+  id: document.id ?? `${customerId}-document-${index}`,
+});
 
 const mapContactForForm = (contact = {}) => ({
   id: contact.id ?? Date.now() + Math.random(),
@@ -84,6 +118,7 @@ const Customers = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [isDeletingId, setIsDeletingId] = useState(null);
+  const [documentError, setDocumentError] = useState("");
 
   const loadCustomers = async () => {
     try {
@@ -147,6 +182,7 @@ const Customers = () => {
     setContacts([createEmptyContact()]);
     setErrors({});
     setApiError("");
+    setDocumentError("");
   };
 
   const openEdit = (customer) => {
@@ -164,10 +200,14 @@ const Customers = () => {
       gstNumber: customer.gstNumber ?? "",
       phone: customer.phone ?? "",
       email: customer.email ?? "",
+      documents: (customer.documents || []).map((document, index) =>
+        mapDocumentForForm(document, index, customer.id)
+      ),
     });
     setContacts(deriveCustomerContacts(customer));
     setErrors({});
     setApiError("");
+    setDocumentError("");
   };
 
   const closeModal = () => {
@@ -176,6 +216,7 @@ const Customers = () => {
     setForm(emptyForm);
     setContacts([createEmptyContact()]);
     setErrors({});
+    setDocumentError("");
   };
 
   const updateField = (key, value) => {
@@ -183,6 +224,35 @@ const Customers = () => {
     if (errors[key]) {
       setErrors((prev) => ({ ...prev, [key]: undefined }));
     }
+  };
+
+  const handleDocumentUpload = async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) {
+      return;
+    }
+
+    try {
+      const documents = await Promise.all(files.map(readCustomerDocument));
+      setForm((prev) => ({
+        ...prev,
+        documents: [...(prev.documents || []), ...documents],
+      }));
+      setDocumentError("");
+    } catch (error) {
+      setDocumentError(error?.message || "Failed to upload customer document.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const removeDocument = (documentId) => {
+    setForm((prev) => ({
+      ...prev,
+      documents: (prev.documents || []).filter(
+        (document) => document.id !== documentId
+      ),
+    }));
   };
 
   const updateContact = (id, key, value) => {
@@ -278,6 +348,13 @@ const Customers = () => {
       contactPerson: primaryContact?.contactName || undefined,
       designation: primaryContact?.designation || undefined,
       contacts: normalizedContacts,
+      documents: (form.documents || []).map((document) => ({
+        name: document.name || "",
+        size: Number(document.size) || 0,
+        type: document.type || "",
+        uploadedAt: document.uploadedAt || new Date().toISOString(),
+        dataUrl: document.dataUrl || "",
+      })),
     };
 
     try {
@@ -642,6 +719,58 @@ const Customers = () => {
                         }
                         className="mt-1 min-h-[120px] w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
                       />
+                    </div>
+                    <div className="lg:col-span-2">
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div>
+                            <label className="text-sm font-medium text-slate-700">
+                              Customer Documents
+                            </label>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Upload supporting customer files up to 5 MB each.
+                            </p>
+                          </div>
+                          <input
+                            type="file"
+                            multiple
+                            onChange={handleDocumentUpload}
+                            className="block text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-indigo-700"
+                          />
+                        </div>
+                        {documentError ? (
+                          <p className="mt-3 text-sm text-red-600">{documentError}</p>
+                        ) : null}
+                        {(form.documents || []).length ? (
+                          <div className="mt-4 space-y-2">
+                            {(form.documents || []).map((document) => (
+                              <div
+                                key={document.id}
+                                className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium text-slate-800">
+                                    {document.name || "Document"}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {document.type || "File"} |{" "}
+                                    {document.size
+                                      ? `${Math.round(document.size / 1024)} KB`
+                                      : "-"}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => removeDocument(document.id)}
+                                  className="rounded-md border border-red-200 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </section>

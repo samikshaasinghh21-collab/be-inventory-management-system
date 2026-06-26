@@ -1064,12 +1064,19 @@ const DeliveryChallan = () => {
     );
   }, [dcStatusFilter, records]);
 
-  const handlePrint = (record) => {
+  const handlePrint = async (record) => {
     if (!record) return;
     setSelectedChallan(record);
-    setTimeout(() => {
-      window.print();
-    }, 0);
+    window.setTimeout(() => {
+      void printSection({
+        selector: "#delivery-challan-print-area",
+        title: "Delivery Challan",
+        subtitle: record.dcNumber || "Dispatch copy",
+        logoUrl: company.logo || "",
+        brandName: companyName,
+        brandDescription: company.address || "Company address",
+      });
+    }, 80);
   };
 
   const handleViewChallan = (record) => {

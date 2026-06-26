@@ -247,14 +247,6 @@ export const NAVIGATION_SECTIONS = [
                 searchKeywords: ["profile", "employee details"],
               }),
               createNavItem({
-                id: "hrms-edit-employee",
-                label: "Edit Employee",
-                to: "/employees/edit",
-                icon: "edit",
-                subtitle: "Update employee information.",
-                searchKeywords: ["update employee", "modify employee"],
-              }),
-              createNavItem({
                 id: "hrms-print-profile",
                 label: "Print Profile",
                 to: "/employees/print-profile",

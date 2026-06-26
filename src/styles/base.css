@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap");
 
 html,
 body,
@@ -21,10 +21,7 @@ body {
   overflow-x: hidden;
   font-family: var(--font-sans);
   color: var(--text-primary);
-  background:
-    radial-gradient(circle at top left, rgba(54, 197, 240, 0.12), transparent 24%),
-    radial-gradient(circle at top right, rgba(74, 21, 75, 0.1), transparent 28%),
-    linear-gradient(180deg, var(--background-main) 0%, var(--background-main-alt) 100%);
+  background: var(--gradient-body);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -42,24 +39,42 @@ textarea {
   font: inherit;
 }
 
+button,
+input,
+select,
+textarea,
+[role="button"] {
+  transition:
+    background-color 0.24s ease,
+    border-color 0.24s ease,
+    color 0.24s ease,
+    box-shadow 0.24s ease,
+    transform 0.24s ease;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 img {
   display: block;
   max-width: 100%;
 }
 
 ::selection {
-  background: rgba(74, 21, 75, 0.18);
+  background: rgba(110, 123, 242, 0.22);
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 
 ::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   border-radius: 999px;
-  background: rgba(97, 96, 97, 0.28);
+  background: linear-gradient(180deg, rgba(138, 158, 180, 0.82), rgba(167, 183, 200, 0.6));
   background-clip: padding-box;
 }
 
@@ -70,6 +85,20 @@ img {
 .display-font {
   font-family: var(--font-display);
   letter-spacing: -0.03em;
+}
+
+.app-clay-surface {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--gradient-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.app-clay-pressed {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gradient-surface);
+  box-shadow: var(--shadow-pressed);
 }
 
 @page {

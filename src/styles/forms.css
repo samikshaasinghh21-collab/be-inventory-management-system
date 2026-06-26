@@ -4,13 +4,13 @@
   ),
 .input {
   width: 100%;
-  min-height: 2.9rem;
-  padding: 0.72rem 0.92rem;
+  min-height: 3rem;
+  padding: 0.8rem 1rem;
   border: 1px solid var(--border-color);
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  background: var(--gradient-surface);
+  box-shadow: var(--shadow-pressed);
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease,
@@ -31,9 +31,11 @@
   ):focus,
 .input:focus {
   outline: none;
-  border-color: rgba(74, 21, 75, 0.38);
-  box-shadow: 0 0 0 4px var(--ring);
-  background: #fff;
+  border-color: rgba(110, 123, 242, 0.3);
+  box-shadow:
+    var(--shadow-pressed),
+    var(--focus-ring);
+  background: var(--gradient-surface);
 }
 
 .app-content :is(
@@ -63,11 +65,11 @@
 .input:disabled {
   cursor: not-allowed;
   opacity: 0.72;
-  background: var(--background-muted);
+  background: var(--gradient-surface-strong);
 }
 
 .app-content :is(input, textarea)[readonly] {
-  background: var(--background-muted);
+  background: var(--gradient-surface-strong);
   color: var(--text-secondary);
 }
 
@@ -80,6 +82,25 @@
   color: var(--text-secondary);
   font-size: 0.86rem;
   font-weight: 600;
+}
+
+.date-input-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.85rem;
+  height: 2.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--gradient-surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.date-input-trigger:hover {
+  color: var(--text-primary);
+  background: var(--gradient-surface-strong);
+  transform: translateY(-1px);
 }
 
 .app-form-grid {

@@ -5,6 +5,7 @@
 .app-main {
   min-height: 100vh;
   padding-left: var(--sidebar-width);
+  background: transparent;
   transition: padding-left 0.28s var(--transition-emphasized);
 }
 
@@ -13,7 +14,7 @@
 }
 
 .app-content {
-  padding: 18px 20px 24px;
+  padding: 20px 22px 28px;
 }
 
 .app-content-inner {
@@ -24,6 +25,7 @@
 
 .app-route-frame {
   animation: app-page-in 0.28s var(--transition-emphasized);
+  min-width: 0;
 }
 
 @keyframes app-page-in {
@@ -44,6 +46,6 @@
   }
 
   .app-content {
-    padding: 12px 12px 20px;
+    padding: 14px 12px 22px;
   }
 }

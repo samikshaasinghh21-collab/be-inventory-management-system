@@ -4,12 +4,13 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  min-height: 2.85rem;
-  padding: 0.72rem 1rem;
-  border: 1px solid transparent;
-  border-radius: 14px;
+  min-height: 2.95rem;
+  padding: 0.78rem 1.08rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
   font-weight: 700;
   line-height: 1;
+  box-shadow: var(--shadow-soft);
   transition:
     transform 0.18s ease,
     border-color 0.18s ease,
@@ -33,26 +34,42 @@
 .app-btn-primary,
 .btn:not(.app-btn-secondary):not(.app-btn-danger):not(.app-btn-outline) {
   color: #fff;
-  background: linear-gradient(135deg, var(--primary), var(--primary-light));
-  box-shadow: 0 14px 30px rgba(74, 21, 75, 0.18);
+  border-color: rgba(255, 255, 255, 0.14);
+  background: var(--gradient-accent);
+  box-shadow: var(--shadow-accent);
 }
 
 .app-btn-secondary {
   color: var(--text-primary);
-  background: linear-gradient(180deg, #ffffff 0%, var(--background-muted) 100%);
+  background: var(--gradient-surface);
   border-color: var(--border-color);
+  box-shadow: var(--shadow-soft);
 }
 
 .app-btn-danger {
   color: #fff;
-  background: linear-gradient(135deg, #d81b60, var(--accent-red));
-  box-shadow: 0 14px 30px rgba(224, 30, 90, 0.18);
+  border-color: rgba(255, 255, 255, 0.12);
+  background: linear-gradient(145deg, #f394a6, #db667e);
+  box-shadow: 12px 12px 24px rgba(219, 102, 126, 0.22);
 }
 
 .app-btn-outline {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--gradient-surface);
   border-color: var(--border-color);
+  box-shadow: var(--shadow-soft);
+}
+
+.app-btn:hover,
+.btn:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-card);
+}
+
+.app-btn:active,
+.btn:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-pressed-strong);
 }
 
 .app-content button {
@@ -68,5 +85,7 @@
 .app-btn:focus-visible,
 .btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 4px var(--ring);
+  box-shadow:
+    var(--shadow-soft),
+    var(--focus-ring);
 }

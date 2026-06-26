@@ -11,7 +11,12 @@ import {
   setProducts,
   updateProduct,
 } from "../../services/productsStore";
-import { deleteItemApi, fetchItems, updateItemApi } from "../../services/inventoryApi";
+import {
+  deleteItemApi,
+  fetchItems,
+  updateItemApi,
+  updateQuantityApi,
+} from "../../services/inventoryApi";
 import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
 import AppIcon from "../layout/AppIcon";
 
@@ -196,6 +201,10 @@ export default function ProductCatalogDashboard() {
   });
   const [editErrors, setEditErrors] = useState({});
   const [editApiError, setEditApiError] = useState("");
+  const [manualStockItem, setManualStockItem] = useState(null);
+  const [manualStockValue, setManualStockValue] = useState("");
+  const [manualStockError, setManualStockError] = useState("");
+  const [manualStockSaving, setManualStockSaving] = useState(false);
 
   const refreshFromStorage = () => {
     setItems(normalizeStoredProducts(getProducts()));
@@ -354,6 +363,54 @@ export default function ProductCatalogDashboard() {
           error?.message ??
           "Failed to delete product."
       );
+    }
+  };
+
+  const openManualStockEntry = (item) => {
+    setManualStockItem(item);
+    setManualStockValue("");
+    setManualStockError("");
+    setEditApiError("");
+  };
+
+  const closeManualStockEntry = () => {
+    setManualStockItem(null);
+    setManualStockValue("");
+    setManualStockError("");
+    setManualStockSaving(false);
+  };
+
+  const handleManualStockSave = async () => {
+    if (!manualStockItem) {
+      return;
+    }
+
+    const quantityToAdd = Number(manualStockValue);
+    if (!Number.isFinite(quantityToAdd) || quantityToAdd <= 0) {
+      setManualStockError("Enter a valid stock quantity greater than 0.");
+      return;
+    }
+
+    try {
+      setManualStockSaving(true);
+      setManualStockError("");
+      const nextStock = Math.max(Number(manualStockItem.stock ?? 0), 0) + quantityToAdd;
+      const updatedItem = await updateQuantityApi(manualStockItem.id, nextStock);
+      updateProduct(manualStockItem.id, updatedItem);
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === manualStockItem.id ? { ...item, ...updatedItem } : item
+        )
+      );
+      closeManualStockEntry();
+    } catch (error) {
+      setManualStockError(
+        error?.response?.data?.error ??
+          error?.message ??
+          "Failed to update manual stock."
+      );
+    } finally {
+      setManualStockSaving(false);
     }
   };
 
@@ -752,6 +809,15 @@ export default function ProductCatalogDashboard() {
                             </td>
                             <td className="px-5 py-4">
                               <div className="flex justify-end gap-2">
+                                {(Number(item.stock ?? 0) || 0) <= 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openManualStockEntry(item)}
+                                    className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
+                                  >
+                                    Manual Stock
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => startEdit(item)}
@@ -858,6 +924,15 @@ export default function ProductCatalogDashboard() {
                         </div>
 
                         <div className="mt-4 flex gap-2">
+                          {(Number(item.stock ?? 0) || 0) <= 0 && (
+                            <button
+                              type="button"
+                              onClick={() => openManualStockEntry(item)}
+                              className="flex-1 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
+                            >
+                              Manual Stock
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => startEdit(item)}
@@ -1114,6 +1189,65 @@ export default function ProductCatalogDashboard() {
                     Save Changes
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {manualStockItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+            <div className="w-[460px] max-w-[94vw] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="border-b bg-slate-50 px-6 py-4">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+                  Inventory
+                </p>
+                <h2 className="text-xl font-semibold text-slate-950">
+                  Manual Stock Entry
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Add stock for {manualStockItem.name || "this product"}.
+                </p>
+              </div>
+              <div className="space-y-4 px-6 py-5">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  Current stock: <span className="font-semibold">{manualStockItem.stock ?? 0}</span>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Quantity to add
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={manualStockValue}
+                    onChange={(event) => setManualStockValue(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                  />
+                </div>
+                {manualStockError ? (
+                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {manualStockError}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex justify-end gap-3 border-t bg-slate-50 px-6 py-4">
+                <button
+                  type="button"
+                  onClick={closeManualStockEntry}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700"
+                  disabled={manualStockSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleManualStockSave()}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                  disabled={manualStockSaving}
+                >
+                  {manualStockSaving ? "Saving..." : "Add Stock"}
+                </button>
               </div>
             </div>
           </div>
