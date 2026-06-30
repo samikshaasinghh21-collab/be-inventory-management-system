@@ -17,6 +17,12 @@ const normalizeAvailableInventoryItem = (item = {}) => ({
   deliveryChallanItemId:
     item.deliveryChallanItemId ?? item.DeliveryChallanItemId ?? null,
   itemId: item.itemId ?? item.ItemId ?? null,
+  itemCode:
+    item.itemCode ??
+    item.ItemCode ??
+    item.itemId ??
+    item.ItemId ??
+    "",
   name: item.name ?? item.Item ?? item.item ?? "",
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",

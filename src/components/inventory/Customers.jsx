@@ -5,6 +5,7 @@ import {
   fetchCustomers,
   updateCustomer,
 } from "../../services/customersApi";
+import { transformUppercaseFieldValue } from "../../utils/inputTransform";
 
 const emptyForm = {
   customerName: "",
@@ -19,6 +20,20 @@ const emptyForm = {
   email: "",
   documents: [],
 };
+
+const UPPERCASE_FIELDS = [
+  "customerName",
+  "companyName",
+  "address",
+  "city",
+  "state",
+  "pincode",
+  "gstNumber",
+  "phone",
+  "email",
+];
+
+const UPPERCASE_CONTACT_FIELDS = ["contactName", "email", "designation", "phone"];
 
 const createEmptyContact = () => ({
   id: Date.now() + Math.random(),
@@ -220,7 +235,10 @@ const Customers = () => {
   };
 
   const updateField = (key, value) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => ({
+      ...prev,
+      [key]: transformUppercaseFieldValue(key, value, UPPERCASE_FIELDS),
+    }));
     if (errors[key]) {
       setErrors((prev) => ({ ...prev, [key]: undefined }));
     }
@@ -258,7 +276,16 @@ const Customers = () => {
   const updateContact = (id, key, value) => {
     setContacts((prev) =>
       prev.map((contact) =>
-        contact.id === id ? { ...contact, [key]: value } : contact
+        contact.id === id
+          ? {
+              ...contact,
+              [key]: transformUppercaseFieldValue(
+                key,
+                value,
+                UPPERCASE_CONTACT_FIELDS
+              ),
+            }
+          : contact
       )
     );
   };

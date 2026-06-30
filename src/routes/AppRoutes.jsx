@@ -43,10 +43,9 @@ import Locations from "../components/inventory/Locations";
 import PurchaseOrder from "../components/inventory/PurchaseOrder";
 import PurchaseOrderRegister from "../components/inventory/PurchaseOrderRegister";
 import Invoice from "../components/inventory/Invoice";
+import Invoices from "../components/inventory/Invoices";
 import ReceiveGoodsRegister from "../components/inventory/ReceiveGoodsRegister";
 import Consumption from "../components/inventory/Consumption";
-import ReallocateReturn from "../components/inventory/ReallocateReturn";
-import ReallocationRegister from "../components/inventory/ReallocationRegister";
 import BoqDetail from "../components/inventory/BoqDetail";
 import ReportsPage from "../components/inventory/ReportsPage";
 
@@ -172,10 +171,11 @@ const AppRoutes = () => {
           element={<PurchaseOrderRegister />}
         />
         <Route path="/inventory/invoice" element={<Invoice />} />
+        <Route path="/inventory/invoices" element={<Invoices />} />
         <Route path="/inventory/consumption" element={<Consumption />} />
-        <Route path="/inventory/reallocate-return" element={<ReallocateReturn />} />
-        <Route path="/inventory/reallocation-register" element={<ReallocationRegister />} />
-        <Route path="/inventory/return-dc" element={<Navigate replace to="/inventory/reallocate-return" />} />
+        <Route path="/inventory/return-dc" element={<Navigate replace to="/inventory/delivery-challan" />} />
+        <Route path="/inventory/reallocate-return" element={<Navigate replace to="/inventory/delivery-challan" />} />
+        <Route path="/inventory/reallocation-register" element={<Navigate replace to="/inventory/delivery-challan" />} />
         <Route path="/inventory/reports" element={<ReportsPage />} />
         {HRMS_PAGE_ROUTES.map((screen) => (
           <Route

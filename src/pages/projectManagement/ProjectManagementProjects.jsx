@@ -30,8 +30,12 @@ import {
   X,
 } from "lucide-react";
 import DateInput from "../../components/common/DateInput";
+import { fetchCustomers } from "../../services/customersApi";
+import { fetchHrmsEmployees } from "../../services/hrmsEmployeesApi";
+import { fetchLocations } from "../../services/locationsApi";
 import {
   PROJECT_MANAGEMENT_PROJECTS_EVENT,
+  hydrateProjectManagementProjects,
   ensureProjectManagementProjects,
   getProjectManagementProjects as getProjects,
   saveProjectManagementProject as saveProject,
@@ -111,13 +115,25 @@ const emptyProjectForm = {
   name: "",
   code: "",
   client: "",
+  customerId: "",
+  clientId: "",
+  companyName: "",
+  customerAddress: "",
+  customerGstNumber: "",
+  customerPhone: "",
+  customerEmail: "",
+  customerContactPerson: "",
+  customerDesignation: "",
   projectCategory: "",
   description: "",
   priority: "Medium",
   status: "Draft",
   projectManager: "",
+  projectManagerId: "",
   siteEngineer: "",
+  siteEngineerId: "",
   teamLead: "",
+  teamLeadId: "",
   department: "",
   startDate: "",
   endDate: "",
@@ -129,6 +145,7 @@ const emptyProjectForm = {
   labourBudget: "",
   otherCostBudget: "",
   siteName: "",
+  locationId: "",
   siteAddress: "",
   city: "",
   state: "",
@@ -769,6 +786,22 @@ const getCustomerOptionLabel = (customer = {}) => {
   return [primaryName, company].filter(Boolean).join(" | ") || "Unnamed customer";
 };
 
+const getEmployeeOptionLabel = (employee = {}) => {
+  const name = employee.name || employee.fullName || employee.employeeId || "";
+  const details = [employee.designation, employee.department].filter(Boolean).join(" | ");
+  return [name, details].filter(Boolean).join(" - ") || "Unnamed employee";
+};
+
+const makeLegacySelectOption = (value, options = []) => {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const exists = options.some(
+    (option) =>
+      String(option.value ?? "").trim().toLowerCase() === text.toLowerCase()
+  );
+  return exists ? null : { value: text, label: `${text} (saved)` };
+};
+
 const numberValue = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -1067,45 +1100,50 @@ const groupActivitiesByDate = (activities = []) =>
   }, {});
 
 const buildTeamAllocations = (form, existing = []) => {
-  if (existing.length) return existing;
   return [
     {
-      id: makeId("team"),
+      ...existing[0],
+      id: existing[0]?.id || makeId("team"),
+      employeeId: form.projectManagerId || "",
       role: "Project Manager",
       member: form.projectManager,
       employee: form.projectManager,
-      department: form.department || "Projects",
+      department: form.department || existing[0]?.department || "Projects",
       allocation: "100%",
       allocationPercent: 100,
       startDate: form.startDate,
       endDate: form.endDate,
-      availability: "Occupied",
-      status: "Active",
+      availability: existing[0]?.availability || "Occupied",
+      status: form.projectManager ? "Active" : existing[0]?.status || "Planned",
     },
     {
-      id: makeId("team"),
+      ...existing[1],
+      id: existing[1]?.id || makeId("team"),
+      employeeId: form.siteEngineerId || "",
       role: "Site Engineer",
       member: form.siteEngineer,
       employee: form.siteEngineer,
-      department: form.department || "Projects",
+      department: form.department || existing[1]?.department || "Projects",
       allocation: form.siteEngineer ? "75%" : "",
       allocationPercent: form.siteEngineer ? 75 : 0,
       startDate: form.startDate,
       endDate: form.endDate,
-      availability: "Available",
+      availability: existing[1]?.availability || "Available",
       status: form.siteEngineer ? "Active" : "Planned",
     },
     {
-      id: makeId("team"),
+      ...existing[2],
+      id: existing[2]?.id || makeId("team"),
+      employeeId: form.teamLeadId || "",
       role: "Team Lead",
       member: form.teamLead,
       employee: form.teamLead,
-      department: form.department || "Projects",
+      department: form.department || existing[2]?.department || "Projects",
       allocation: form.teamLead ? "75%" : "",
       allocationPercent: form.teamLead ? 75 : 0,
       startDate: form.startDate,
       endDate: form.endDate,
-      availability: "Available",
+      availability: existing[2]?.availability || "Available",
       status: form.teamLead ? "Active" : "Planned",
     },
   ].filter((item) => item.member);
@@ -1269,13 +1307,25 @@ const mapProjectToForm = (project = {}) => ({
   name: project.name || "",
   code: project.code || "",
   client: project.client || project.companyName || "",
+  customerId: project.customerId || project.clientId || "",
+  clientId: project.clientId || project.customerId || "",
+  companyName: project.companyName || "",
+  customerAddress: project.address || "",
+  customerGstNumber: project.gstNumber || "",
+  customerPhone: project.phone || "",
+  customerEmail: project.email || "",
+  customerContactPerson: project.contactPerson || "",
+  customerDesignation: project.designation || "",
   projectCategory: project.projectCategory || "",
   description: project.description || project.notes || "",
   priority: project.priority || "Medium",
   status: normalizeProjectStatus(project.status),
   projectManager: project.projectManager || project.manager || "",
+  projectManagerId: project.projectManagerId || "",
   siteEngineer: project.siteEngineer || "",
+  siteEngineerId: project.siteEngineerId || "",
   teamLead: project.teamLead || "",
+  teamLeadId: project.teamLeadId || "",
   department: project.department || "",
   startDate: project.startDate || "",
   endDate: project.endDate || "",
@@ -1287,6 +1337,7 @@ const mapProjectToForm = (project = {}) => ({
   labourBudget: project.labourBudget || "",
   otherCostBudget: project.otherCostBudget || "",
   siteName: project.siteName || "",
+  locationId: project.locationId || "",
   siteAddress: project.siteAddress || project.address || "",
   city: project.city || "",
   state: project.state || "",
@@ -1321,16 +1372,27 @@ const buildProjectPayload = (form, existingProject = null) => {
     id: existingProject?.id ?? makeId("pm"),
     name: form.name.trim(),
     code: form.code.trim(),
+    customerId: form.customerId || null,
+    clientId: form.clientId || form.customerId || null,
     client: form.client.trim(),
-    companyName: form.client.trim(),
+    companyName: form.companyName.trim() || form.client.trim(),
+    address: form.customerAddress.trim(),
+    gstNumber: form.customerGstNumber.trim(),
+    phone: form.customerPhone.trim(),
+    email: form.customerEmail.trim(),
+    contactPerson: form.customerContactPerson.trim(),
+    designation: form.customerDesignation.trim(),
     projectCategory: form.projectCategory,
     description: form.description.trim(),
     notes: form.description.trim(),
     priority: form.priority,
     status: form.status,
     projectManager: form.projectManager.trim(),
+    projectManagerId: form.projectManagerId || null,
     siteEngineer: form.siteEngineer.trim(),
+    siteEngineerId: form.siteEngineerId || null,
     teamLead: form.teamLead.trim(),
+    teamLeadId: form.teamLeadId || null,
     department: form.department,
     startDate: form.startDate || null,
     endDate: form.endDate || null,
@@ -1347,6 +1409,7 @@ const buildProjectPayload = (form, existingProject = null) => {
     resourceUtilization:
       existingProject?.resourceUtilization || (teamAllocations.length ? 68 : 0),
     siteName: form.siteName.trim(),
+    locationId: form.locationId || null,
     siteAddress: form.siteAddress.trim(),
     city: form.city.trim(),
     state: form.state.trim(),
@@ -1497,6 +1560,8 @@ const ProjectFormModal = ({
   mode,
   project,
   customers,
+  employees,
+  locations,
   onClose,
   onSave,
 }) => {
@@ -1504,6 +1569,33 @@ const ProjectFormModal = ({
     project ? mapProjectToForm(project) : emptyProjectForm
   );
   const [errors, setErrors] = useState({});
+
+  const customerSelectOptions = useMemo(
+    () =>
+      customers.map((customer) => ({
+        value: String(customer.id),
+        label: getCustomerOptionLabel(customer),
+      })),
+    [customers]
+  );
+  const employeeSelectOptions = useMemo(
+    () =>
+      employees.map((employee) => ({
+        value: String(employee.employeeId || employee.id),
+        label: getEmployeeOptionLabel(employee),
+      })),
+    [employees]
+  );
+  const locationSelectOptions = useMemo(
+    () =>
+      locations.map((location) => ({
+        value: String(location.id),
+        label:
+          [location.name, location.code].filter(Boolean).join(" - ") ||
+          "Unnamed location",
+      })),
+    [locations]
+  );
 
   if (!isOpen) return null;
 
@@ -1518,8 +1610,10 @@ const ProjectFormModal = ({
     const nextErrors = {};
     if (!form.name.trim()) nextErrors.name = "Project name is required.";
     if (!form.code.trim()) nextErrors.code = "Project code is required.";
-    if (!form.client.trim()) nextErrors.client = "Client is required.";
-    if (!form.projectManager.trim()) {
+    if (!String(form.customerId || "").trim() && !form.client.trim()) {
+      nextErrors.client = "Client is required.";
+    }
+    if (!String(form.projectManagerId || "").trim() && !form.projectManager.trim()) {
       nextErrors.projectManager = "Project manager is required.";
     }
     if (!form.startDate) nextErrors.startDate = "Start date is required.";
@@ -1531,6 +1625,53 @@ const ProjectFormModal = ({
     return Object.keys(nextErrors).length === 0;
   };
 
+  const updateCustomer = (customerId) => {
+    const selectedCustomer =
+      customers.find((customer) => String(customer.id) === String(customerId)) || null;
+    setForm((prev) => ({
+      ...prev,
+      customerId: selectedCustomer ? String(selectedCustomer.id) : "",
+      clientId: selectedCustomer ? String(selectedCustomer.id) : "",
+      client: selectedCustomer ? getCustomerPrimaryName(selectedCustomer) : "",
+      companyName: selectedCustomer?.companyName || "",
+      customerAddress: selectedCustomer?.address || "",
+      customerGstNumber: selectedCustomer?.gstNumber || "",
+      customerPhone: selectedCustomer?.phone || "",
+      customerEmail: selectedCustomer?.email || "",
+      customerContactPerson: selectedCustomer?.contactPerson || "",
+      customerDesignation: selectedCustomer?.designation || "",
+      siteAddress: prev.siteAddress || selectedCustomer?.address || "",
+      siteContactPerson:
+        prev.siteContactPerson || selectedCustomer?.contactPerson || "",
+      siteContactNumber: prev.siteContactNumber || selectedCustomer?.phone || "",
+    }));
+    if (errors.client) {
+      setErrors((prev) => ({ ...prev, client: undefined }));
+    }
+  };
+
+  const updateEmployee = (field, idField, employeeId) => {
+    const selectedEmployee =
+      employees.find(
+        (employee) =>
+          String(employee.employeeId || employee.id) === String(employeeId)
+      ) || null;
+    updateField(field, selectedEmployee?.name || "");
+    updateField(idField, selectedEmployee ? String(selectedEmployee.employeeId || selectedEmployee.id) : "");
+  };
+
+  const updateLocation = (locationId) => {
+    const selectedLocation =
+      locations.find((location) => String(location.id) === String(locationId)) || null;
+    setForm((prev) => ({
+      ...prev,
+      locationId: selectedLocation ? String(selectedLocation.id) : "",
+      siteName: selectedLocation?.name || "",
+      siteAddress: selectedLocation?.address || prev.siteAddress,
+      siteContactNumber: selectedLocation?.phone || prev.siteContactNumber,
+    }));
+  };
+
   const submitForm = (statusOverride) => {
     const nextForm = statusOverride ? { ...form, status: statusOverride } : form;
     if (!validate()) return;
@@ -1538,6 +1679,17 @@ const ProjectFormModal = ({
   };
 
   const title = mode === "edit" ? "Edit Project" : "Create Project";
+  const legacyCustomerOption = makeLegacySelectOption(form.client, customerSelectOptions);
+  const legacyProjectManagerOption = makeLegacySelectOption(
+    form.projectManager,
+    employeeSelectOptions
+  );
+  const legacySiteEngineerOption = makeLegacySelectOption(
+    form.siteEngineer,
+    employeeSelectOptions
+  );
+  const legacyTeamLeadOption = makeLegacySelectOption(form.teamLead, employeeSelectOptions);
+  const legacyLocationOption = makeLegacySelectOption(form.siteName, locationSelectOptions);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-5 backdrop-blur-sm">
@@ -1611,21 +1763,25 @@ const ProjectFormModal = ({
                     />
                   </Field>
                   <Field label="Client" required error={errors.client}>
-                    <input
-                      value={form.client}
-                      onChange={(event) => updateField("client", event.target.value)}
-                      className={inputClass}
-                      list="pm-client-options"
-                      placeholder="Client or company name"
-                    />
-                    <datalist id="pm-client-options">
-                      {customers.map((customer) => (
-                        <option
-                          key={customer.id}
-                          value={getCustomerOptionLabel(customer)}
-                        />
+                    <SelectField
+                      value={
+                        form.customerId ||
+                        (legacyCustomerOption ? legacyCustomerOption.value : "")
+                      }
+                      onChange={updateCustomer}
+                    >
+                      <option value="">Select customer</option>
+                      {legacyCustomerOption ? (
+                        <option value={legacyCustomerOption.value}>
+                          {legacyCustomerOption.label}
+                        </option>
+                      ) : null}
+                      {customerSelectOptions.map((customer) => (
+                        <option key={customer.value} value={customer.value}>
+                          {customer.label}
+                        </option>
                       ))}
-                    </datalist>
+                    </SelectField>
                   </Field>
                   <Field label="Project Category">
                     <SelectField
@@ -1691,34 +1847,77 @@ const ProjectFormModal = ({
                     required
                     error={errors.projectManager}
                   >
-                    <input
-                      value={form.projectManager}
-                      onChange={(event) =>
-                        updateField("projectManager", event.target.value)
+                    <SelectField
+                      value={
+                        form.projectManagerId ||
+                        (legacyProjectManagerOption
+                          ? legacyProjectManagerOption.value
+                          : "")
                       }
-                      className={inputClass}
-                      placeholder="Project manager"
-                    />
+                      onChange={(value) =>
+                        updateEmployee("projectManager", "projectManagerId", value)
+                      }
+                    >
+                      <option value="">Select project manager</option>
+                      {legacyProjectManagerOption ? (
+                        <option value={legacyProjectManagerOption.value}>
+                          {legacyProjectManagerOption.label}
+                        </option>
+                      ) : null}
+                      {employeeSelectOptions.map((employee) => (
+                        <option key={employee.value} value={employee.value}>
+                          {employee.label}
+                        </option>
+                      ))}
+                    </SelectField>
                   </Field>
                   <Field label="Site Engineer">
-                    <input
-                      value={form.siteEngineer}
-                      onChange={(event) =>
-                        updateField("siteEngineer", event.target.value)
+                    <SelectField
+                      value={
+                        form.siteEngineerId ||
+                        (legacySiteEngineerOption
+                          ? legacySiteEngineerOption.value
+                          : "")
                       }
-                      className={inputClass}
-                      placeholder="Site engineer"
-                    />
+                      onChange={(value) =>
+                        updateEmployee("siteEngineer", "siteEngineerId", value)
+                      }
+                    >
+                      <option value="">Select site engineer</option>
+                      {legacySiteEngineerOption ? (
+                        <option value={legacySiteEngineerOption.value}>
+                          {legacySiteEngineerOption.label}
+                        </option>
+                      ) : null}
+                      {employeeSelectOptions.map((employee) => (
+                        <option key={employee.value} value={employee.value}>
+                          {employee.label}
+                        </option>
+                      ))}
+                    </SelectField>
                   </Field>
                   <Field label="Team Lead">
-                    <input
-                      value={form.teamLead}
-                      onChange={(event) =>
-                        updateField("teamLead", event.target.value)
+                    <SelectField
+                      value={
+                        form.teamLeadId ||
+                        (legacyTeamLeadOption ? legacyTeamLeadOption.value : "")
                       }
-                      className={inputClass}
-                      placeholder="Team lead"
-                    />
+                      onChange={(value) =>
+                        updateEmployee("teamLead", "teamLeadId", value)
+                      }
+                    >
+                      <option value="">Select team lead</option>
+                      {legacyTeamLeadOption ? (
+                        <option value={legacyTeamLeadOption.value}>
+                          {legacyTeamLeadOption.label}
+                        </option>
+                      ) : null}
+                      {employeeSelectOptions.map((employee) => (
+                        <option key={employee.value} value={employee.value}>
+                          {employee.label}
+                        </option>
+                      ))}
+                    </SelectField>
                   </Field>
                   <Field label="Department">
                     <SelectField
@@ -1822,12 +2021,25 @@ const ProjectFormModal = ({
                 />
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field label="Site Name">
-                    <input
-                      value={form.siteName}
-                      onChange={(event) => updateField("siteName", event.target.value)}
-                      className={inputClass}
-                      placeholder="Site name"
-                    />
+                    <SelectField
+                      value={
+                        form.locationId ||
+                        (legacyLocationOption ? legacyLocationOption.value : "")
+                      }
+                      onChange={updateLocation}
+                    >
+                      <option value="">Select location</option>
+                      {legacyLocationOption ? (
+                        <option value={legacyLocationOption.value}>
+                          {legacyLocationOption.label}
+                        </option>
+                      ) : null}
+                      {locationSelectOptions.map((location) => (
+                        <option key={location.value} value={location.value}>
+                          {location.label}
+                        </option>
+                      ))}
+                    </SelectField>
                   </Field>
                   <Field label="Site Address">
                     <input
@@ -3204,6 +3416,9 @@ const ProjectDetailDrawer = ({
 const ProjectManagementProjects = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState(() => getInitialProjects());
+  const [customers, setCustomers] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
   const [projectModalOpen, setProjectModalOpen] = useState(false);
@@ -3215,14 +3430,34 @@ const ProjectManagementProjects = () => {
 
   useEffect(() => {
     const handleProjectsChange = () => setProjects(getProjects());
+    const loadMasterData = async () => {
+      try {
+        const [customerList, employeeResponse, locationList] = await Promise.all([
+          fetchCustomers(),
+          fetchHrmsEmployees(1, 200),
+          fetchLocations(),
+        ]);
+        setCustomers(Array.isArray(customerList) ? customerList : []);
+        setEmployees(Array.isArray(employeeResponse?.employees) ? employeeResponse.employees : []);
+        setLocations(Array.isArray(locationList) ? locationList : []);
+      } catch (error) {
+        console.error("Failed to load project management master data", error);
+        setCustomers([]);
+        setEmployees([]);
+        setLocations([]);
+      }
+    };
 
     if (typeof window !== "undefined") {
       window.addEventListener(
         PROJECT_MANAGEMENT_PROJECTS_EVENT,
         handleProjectsChange
       );
+      window.addEventListener("projects:changed", handleProjectsChange);
       ensureProjectManagementProjects(MOCK_PROJECTS);
     }
+    void hydrateProjectManagementProjects(MOCK_PROJECTS).then(setProjects);
+    void loadMasterData();
 
     return () => {
       if (typeof window !== "undefined") {
@@ -3230,6 +3465,7 @@ const ProjectManagementProjects = () => {
           PROJECT_MANAGEMENT_PROJECTS_EVENT,
           handleProjectsChange
         );
+        window.removeEventListener("projects:changed", handleProjectsChange);
       }
     };
   }, []);
@@ -3290,20 +3526,6 @@ const ProjectManagementProjects = () => {
         .some((value) => String(value).toLowerCase().includes(term));
     });
   }, [activeFilter, projects, search]);
-
-  const customerOptions = useMemo(() => {
-    const seen = new Set();
-    return projects
-      .map((project) => project.client || project.companyName)
-      .filter(Boolean)
-      .filter((name) => {
-        const key = String(name).trim().toLowerCase();
-        if (!key || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .map((name) => ({ id: name, name }));
-  }, [projects]);
 
   const replaceProject = (updatedProject) => {
     const currentProjects = getProjects();
@@ -3647,7 +3869,9 @@ const ProjectManagementProjects = () => {
           isOpen={projectModalOpen}
           mode={editingProject ? "edit" : "create"}
           project={editingProject}
-          customers={customerOptions}
+          customers={customers}
+          employees={employees}
+          locations={locations}
           onClose={() => {
             setProjectModalOpen(false);
             setEditingProject(null);

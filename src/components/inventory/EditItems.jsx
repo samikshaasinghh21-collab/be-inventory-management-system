@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useInventory } from "../../context/InventoryContext";
 import { roundUnitPrice } from "../../utils/formatters";
+import { toSafeUppercase } from "../../utils/inputTransform";
 
 const GST_OPTIONS = [
   "None",
@@ -151,7 +152,7 @@ const EditItems = () => {
                 <label className="text-sm font-medium">Item Name *</label>
                 <input
                   value={itemName}
-                  onChange={(e) => setItemName(e.target.value)}
+                  onChange={(e) => setItemName(toSafeUppercase(e.target.value))}
                   type="text"
                   placeholder="ex: Maggie 20gm"
                   className="w-full mt-1 border rounded px-3 py-2"
@@ -172,7 +173,7 @@ const EditItems = () => {
                 <label className="text-sm font-medium">HSN Code</label>
                 <input
                   value={hsn}
-                  onChange={(e) => setHsn(e.target.value)}
+                  onChange={(e) => setHsn(toSafeUppercase(e.target.value))}
                   type="text"
                   placeholder="ex: 190590"
                   className="w-full mt-1 border rounded px-3 py-2"
@@ -183,7 +184,7 @@ const EditItems = () => {
                 <label className="text-sm font-medium">Description</label>
                 <input
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => setDescription(toSafeUppercase(e.target.value))}
                   type="text"
                   placeholder="Optional description"
                   className="w-full mt-1 border rounded px-3 py-2"

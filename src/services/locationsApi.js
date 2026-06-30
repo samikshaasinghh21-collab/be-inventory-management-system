@@ -25,6 +25,34 @@ const normalizeLocation = (location = {}) => ({
   updatedAt: location.updatedAt ?? location.UpdatedAt ?? null,
 });
 
+const normalizeReallocationLocationLookup = (location = {}) => ({
+  id: location.id ?? location.locationId ?? location.LocationId ?? null,
+  name:
+    location.name ??
+    location.locationName ??
+    location.LocationName ??
+    location.Name ??
+    "",
+  code: location.code ?? location.Code ?? "",
+  type: location.type ?? location.Type ?? "Site",
+  projectId: location.projectId ?? location.ProjectId ?? null,
+  projectName: location.projectName ?? location.ProjectName ?? "",
+  status: location.status ?? location.Status ?? "Active",
+  totalAvailableQty: Number(location.totalAvailableQty ?? location.TotalAvailableQty ?? 0) || 0,
+  stockRows: Number(location.stockRows ?? location.StockRows ?? 0) || 0,
+  sourceTypes: Array.isArray(location.sourceTypes ?? location.SourceTypes)
+    ? location.sourceTypes ?? location.SourceTypes
+    : [],
+  sourceLabels: Array.isArray(location.sourceLabels ?? location.SourceLabels)
+    ? location.sourceLabels ?? location.SourceLabels
+    : [],
+  sourceReferenceIds: Array.isArray(
+    location.sourceReferenceIds ?? location.SourceReferenceIds
+  )
+    ? location.sourceReferenceIds ?? location.SourceReferenceIds
+    : [],
+});
+
 export const fetchLocations = async (projectId = null) => {
   const parsedProjectId = Number.parseInt(projectId, 10);
   const hasProjectFilter = Number.isFinite(parsedProjectId);
@@ -37,6 +65,16 @@ export const fetchLocations = async (projectId = null) => {
     ? response.data
     : [];
   return list.map(normalizeLocation);
+};
+
+export const fetchReallocationLocationLookup = async () => {
+  const response = await api.get("/locations/reallocation-lookup");
+  const list = Array.isArray(response.data?.locations)
+    ? response.data.locations
+    : Array.isArray(response.data)
+    ? response.data
+    : [];
+  return list.map(normalizeReallocationLocationLookup);
 };
 
 export const createLocation = async (payload) => {

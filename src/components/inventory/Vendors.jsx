@@ -6,6 +6,7 @@ import {
   syncVendorsCache,
   updateVendor,
 } from "../../services/vendorsApi";
+import { transformUppercaseFieldValue } from "../../utils/inputTransform";
 
 const emptyForm = {
   VendorName: "",
@@ -24,6 +25,25 @@ const emptyForm = {
   State: "",
   Pincode: "",
 };
+
+const UPPERCASE_FIELDS = [
+  "VendorName",
+  "Phone",
+  "Email",
+  "GSTNumber",
+  "PANNumber",
+  "BankAccountName",
+  "BankAccountNumber",
+  "BankName",
+  "IFSCCode",
+  "BankBranch",
+  "Address",
+  "City",
+  "State",
+  "Pincode",
+];
+
+const UPPERCASE_CONTACT_FIELDS = ["contactName", "email", "designation", "phone"];
 
 const createEmptyContact = () => ({
   id: Date.now() + Math.random(),
@@ -185,7 +205,10 @@ const Vendors = () => {
   };
 
   const updateEditField = (key, value) => {
-    setEditForm((prev) => ({ ...prev, [key]: value }));
+    setEditForm((prev) => ({
+      ...prev,
+      [key]: transformUppercaseFieldValue(key, value, UPPERCASE_FIELDS),
+    }));
     if (editErrors[key]) {
       setEditErrors((prev) => ({ ...prev, [key]: undefined }));
     }
@@ -194,7 +217,16 @@ const Vendors = () => {
   const updateContact = (id, key, value) => {
     setContacts((prev) =>
       prev.map((contact) =>
-        contact.id === id ? { ...contact, [key]: value } : contact
+        contact.id === id
+          ? {
+              ...contact,
+              [key]: transformUppercaseFieldValue(
+                key,
+                value,
+                UPPERCASE_CONTACT_FIELDS
+              ),
+            }
+          : contact
       )
     );
   };

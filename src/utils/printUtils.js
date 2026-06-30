@@ -30,9 +30,9 @@ const commonStyles = `
   }
   .print-page {
     width: 100%;
-    max-width: 190mm;
-    margin: 0 auto;
-    padding: 16px;
+    max-width: 100%;
+    margin: 0;
+    padding: 8mm 6mm;
     transform-origin: top left;
   }
   .print-header {
@@ -120,6 +120,15 @@ const commonStyles = `
     max-width: 100%;
     overflow: visible;
   }
+  .print-panel-body,
+  .print-panel-body .document-view-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+  .print-panel-body .document-view-panel {
+    border: 1px solid #0f172a;
+  }
   .print-body *,
   .document-view-panel * {
     max-width: 100%;
@@ -172,6 +181,17 @@ const commonStyles = `
     white-space: normal !important;
     overflow-wrap: anywhere;
     word-break: break-word;
+  }
+  .print-panel-body table,
+  .print-panel-body .document-view-panel table {
+    table-layout: auto;
+  }
+  .print-panel-body th,
+  .print-panel-body td,
+  .print-panel-body .document-view-panel th,
+  .print-panel-body .document-view-panel td {
+    overflow-wrap: break-word;
+    word-break: normal;
   }
   th {
     background: #f8fafc;
@@ -229,6 +249,7 @@ const commonStyles = `
     }
     .print-page {
       max-width: 100%;
+      margin: 0;
       padding: 0;
     }
     .print-title {
@@ -258,6 +279,10 @@ const commonStyles = `
     }
     .print-register-body table {
       table-layout: auto;
+    }
+    .print-panel-body,
+    .print-panel-body .document-view-panel {
+      margin: 0 !important;
     }
     th, td {
       padding: 0.35rem 0.4rem;
@@ -511,16 +536,6 @@ const fitPrintDocument = (printWindow) => {
       return;
     }
     page.style.removeProperty("zoom");
-    const availableWidth =
-      printWindow.document.documentElement.clientWidth ||
-      printWindow.innerWidth ||
-      page.clientWidth;
-    const contentWidth = page.scrollWidth;
-    if (!availableWidth || !contentWidth || contentWidth <= availableWidth) {
-      return;
-    }
-    const scale = Math.max(0.72, Math.min(1, availableWidth / contentWidth));
-    page.style.zoom = String(scale);
   } catch {
     // Best-effort print fitting only.
   }

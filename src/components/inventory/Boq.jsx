@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
@@ -139,6 +139,7 @@ const buildBoqSerialPreview = (items = []) => {
 
 const Boq = () => {
   const settings = useSettings();
+  const skipAutoProjectRef = useRef(false);
   const [projects, setProjects] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
@@ -190,6 +191,10 @@ const Boq = () => {
 
   useEffect(() => {
     if (editingId || form.projectId || !projects.length) {
+      return;
+    }
+    if (skipAutoProjectRef.current) {
+      skipAutoProjectRef.current = false;
       return;
     }
     const activeProjectId = getActiveProjectId();
@@ -303,6 +308,7 @@ const Boq = () => {
   );
 
   const resetForm = (nextRecords = records) => {
+    skipAutoProjectRef.current = true;
     setForm(createFormState(generateNextBoqNumber(nextRecords)));
     setItems([createLineItem()]);
     setErrors({});

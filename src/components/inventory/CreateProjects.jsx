@@ -3,9 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { fetchCustomers } from "../../services/customersApi";
 import { createProject } from "../../services/projectsApi";
 import { saveProject } from "../../services/projectsStore";
+import { transformUppercaseFieldValue } from "../../utils/inputTransform";
 import DateInput from "../common/DateInput";
 
 const STATUS_OPTIONS = ["Planned", "Active", "On Hold", "Completed"];
+const UPPERCASE_FIELDS = ["name", "code", "notes"];
 
 const emptyForm = {
   name: "",
@@ -80,7 +82,10 @@ const CreateProjects = () => {
   };
 
   const updateField = (key, value) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => ({
+      ...prev,
+      [key]: transformUppercaseFieldValue(key, value, UPPERCASE_FIELDS),
+    }));
     if (errors[key]) {
       setErrors((prev) => ({ ...prev, [key]: undefined }));
     }

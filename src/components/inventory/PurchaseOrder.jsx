@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { getProjects } from "../../services/projectsStore";
+import { fetchProjects } from "../../services/projectsApi";
 import {
   fetchPurchaseOrders,
   createPurchaseOrder,
@@ -32,6 +32,10 @@ import {
 } from "../../services/projectSelectionStore";
 import { DEFAULT_PURCHASE_ORDER_TERMS } from "../../utils/purchaseOrderTerms";
 import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
+import {
+  formatProjectOptionLabel,
+  getProjectLinkedLocations,
+} from "../../utils/projectLocationDisplay";
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
@@ -222,6 +226,14 @@ const PurchaseOrder = () => {
       setLocations([]);
     }
   };
+  const loadProjects = async () => {
+    try {
+      const list = await fetchProjects();
+      setProjects(Array.isArray(list) ? list : []);
+    } catch {
+      setProjects([]);
+    }
+  };
   const loadVendors = async () => {
     try {
       const list = await fetchVendors();
@@ -257,7 +269,7 @@ const PurchaseOrder = () => {
   };
 
   useEffect(() => {
-    setProjects(getProjects());
+    void loadProjects();
     void loadRecords();
     void loadLocations();
     void loadVendors();
@@ -266,13 +278,19 @@ const PurchaseOrder = () => {
 
   useEffect(() => {
     const refreshLinkedData = () => {
+      void loadProjects();
+      void loadLocations();
       void loadRecords();
       void loadBoqs();
     };
 
+    window.addEventListener("projects:changed", refreshLinkedData);
+    window.addEventListener("locations:changed", refreshLinkedData);
     window.addEventListener("purchase-orders:changed", refreshLinkedData);
     window.addEventListener("boqs:changed", refreshLinkedData);
     return () => {
+      window.removeEventListener("projects:changed", refreshLinkedData);
+      window.removeEventListener("locations:changed", refreshLinkedData);
       window.removeEventListener("purchase-orders:changed", refreshLinkedData);
       window.removeEventListener("boqs:changed", refreshLinkedData);
     };
@@ -424,6 +442,12 @@ const PurchaseOrder = () => {
     [vendors]
   );
   const selectedVendor = vendorMap[String(form.vendorId)] ?? null;
+  const selectedProject =
+    projects.find((project) => String(project.id) === String(form.projectId)) ?? null;
+  const selectedProjectLocations = useMemo(
+    () => getProjectLinkedLocations(form.projectId, locations),
+    [form.projectId, locations]
+  );
   const selectedTaxMode = getGstTaxMode({
     vendorState: selectedVendor?.state,
     vendorGstin: selectedVendor?.gstNumber,
@@ -798,10 +822,30 @@ const PurchaseOrder = () => {
                 <option value="">Select project</option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
-                    {project.name}
+                    {formatProjectOptionLabel(project, locations)}
                   </option>
                 ))}
               </select>
+              {selectedProject ? (
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+                    {selectedProject.name}
+                  </span>
+                  {selectedProject.code ? (
+                    <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+                      Code: {selectedProject.code}
+                    </span>
+                  ) : null}
+                  {selectedProjectLocations.map((projectLocation) => (
+                    <span
+                      key={projectLocation.id}
+                      className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700"
+                    >
+                      {projectLocation.name}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               {errors.projectId && (
                 <p className="text-xs text-red-600 mt-1">{errors.projectId}</p>
               )}

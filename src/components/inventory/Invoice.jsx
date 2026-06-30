@@ -1,29 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowLeft,
-  BadgeIndianRupee,
-  Building2,
   CheckCircle2,
-  CircleDot,
-  ClipboardCheck,
-  Copy,
   Download,
-  FileCheck2,
-  FileText,
-  MapPin,
-  PackageCheck,
+  LoaderCircle,
   Paperclip,
   Plus,
   Printer,
   RefreshCw,
   Save,
-  Search,
   Send,
-  ShieldCheck,
   Trash2,
-  UploadCloud,
-  WifiOff,
   XCircle,
 } from "lucide-react";
 import DateInput from "../common/DateInput";
@@ -32,17 +21,14 @@ import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
 import { fetchVendors } from "../../services/vendorsApi";
 import {
-  formatInrCurrency,
-  roundCurrencyValue,
-} from "../../utils/formatters";
+  createInvoice,
+  fetchInvoice,
+  updateInvoice,
+} from "../../services/invoicesApi";
+import { formatInrCurrency, roundCurrencyValue } from "../../utils/formatters";
 
 const inputClass =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400";
-
-const compactInputClass =
-  "w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
-
-const statuses = ["Draft", "Submitted", "Approved", "Rejected"];
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
 
 const statusStyles = {
   Draft: "border-blue-200 bg-blue-50 text-blue-700",
@@ -75,17 +61,39 @@ const defaultPayment = {
   paidAmount: 0,
 };
 
-const uploadedFiles = [
-  { id: "supplier-invoice", name: "Supplier Invoice.pdf", size: "1.2 MB", type: "PDF" },
-  { id: "delivery-challan", name: "Delivery Challan.pdf", size: "2 MB", type: "PDF" },
-];
+const emptyInvoiceForm = {
+  invoiceNumber: "",
+  invoiceDate: "",
+  dueDate: "",
+  poReference: "",
+  paymentTerms: "Net 30 Days",
+  currency: "INR - Indian Rupee",
+  taxMode: "intra",
+  placeOfSupply: "Karnataka",
+  reverseCharge: "No",
+  irn: "",
+  qrReference: "",
+};
 
-const workflowSteps = [
-  { id: "draft", title: "Draft Created", person: "Inventory Team" },
-  { id: "submitted", title: "Submitted", person: "Accounts Team" },
-  { id: "approved", title: "Approved", person: "Approver" },
-  { id: "final", title: "Final Clearance", person: "Finance" },
-];
+const emptyNotes = {
+  internal: "",
+  supplier: "",
+  delivery: "",
+};
+
+const emptySupplier = {
+  id: "",
+  name: "",
+  contactPerson: "",
+  phone: "",
+  email: "",
+  gstNumber: "",
+  address: "",
+  city: "",
+  state: "",
+  stateCode: "",
+  pincode: "",
+};
 
 const toNumber = (value) => {
   if (value === null || value === undefined || value === "") {
@@ -107,7 +115,9 @@ const toIsoDate = (value) => {
   if (!date || Number.isNaN(date.getTime())) {
     return "";
   }
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
 };
 
 const addDays = (isoDate, days) => {
@@ -119,10 +129,9 @@ const addDays = (isoDate, days) => {
     return "";
   }
   date.setDate(date.getDate() + days);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
 };
 
 const formatDate = (value) => {
@@ -134,13 +143,10 @@ const formatDate = (value) => {
   return `${day}/${month}/${year}`;
 };
 
-const normalizeKey = (value) =>
-  value === null || value === undefined ? "" : String(value);
+const normalizeKey = (value) => (value === null || value === undefined ? "" : String(value));
 
 const isValidGstin = (value) =>
-  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/i.test(
-    String(value ?? "").trim()
-  );
+  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/i.test(String(value ?? "").trim());
 
 const stateCodeFromGstin = (value) => {
   const gstin = String(value ?? "").trim();
@@ -165,54 +171,6 @@ const createBlankItem = (overrides = {}) => ({
   expiryDate: "",
   ...overrides,
 });
-
-const findPoItem = (receiptItem, purchaseOrder) => {
-  if (!purchaseOrder?.items?.length) {
-    return null;
-  }
-
-  return (
-    purchaseOrder.items.find(
-      (item) =>
-        normalizeKey(item.poItemId) === normalizeKey(receiptItem.poItemId) ||
-        normalizeKey(item.id) === normalizeKey(receiptItem.poItemId) ||
-        normalizeKey(item.itemId) === normalizeKey(receiptItem.itemId)
-    ) ?? null
-  );
-};
-
-const mapReceiptItemToInvoiceItem = (receiptItem = {}, index, purchaseOrder) => {
-  const poItem = findPoItem(receiptItem, purchaseOrder);
-  const gstRate =
-    receiptItem.gst ||
-    receiptItem.taxPercentage ||
-    poItem?.gst ||
-    poItem?.taxPercentage ||
-    18;
-
-  return createBlankItem({
-    id: `receipt-${receiptItem.id ?? receiptItem.receiveGoodsItemId ?? index}`,
-    sourceItemId: receiptItem.id ?? receiptItem.receiveGoodsItemId ?? null,
-    poItemId: receiptItem.poItemId ?? poItem?.poItemId ?? null,
-    productCode:
-      receiptItem.itemId || poItem?.itemId ? String(receiptItem.itemId ?? poItem?.itemId) : "",
-    productName: receiptItem.name || poItem?.name || "",
-    description: receiptItem.description || poItem?.description || "",
-    hsn: receiptItem.hsn || poItem?.hsn || "",
-    uom: receiptItem.unit || poItem?.unit || "PCS",
-    orderedQty: toNumber(receiptItem.orderedQty || poItem?.orderedQty),
-    receivedQty: toNumber(
-      receiptItem.receiptReceivedQty ||
-        receiptItem.receivedQty ||
-        receiptItem.totalReceivedQty ||
-        poItem?.receivedQty
-    ),
-    unitPrice: toNumber(receiptItem.unitPrice || poItem?.unitPrice),
-    tax: toNumber(gstRate),
-    batchNo: receiptItem.batchNo || receiptItem.batchName || "",
-    expiryDate: toIsoDate(receiptItem.expiryDate || receiptItem.ExpDt),
-  });
-};
 
 const calculateLine = (item, taxMode) => {
   const qty = toNumber(item.receivedQty);
@@ -252,11 +210,45 @@ const mapVendorToSupplier = (vendor = {}) => {
     address: vendor.address ?? "",
     city: vendor.city ?? "",
     state: vendor.state ?? "",
+    stateCode: stateCodeFromGstin(vendor.gstNumber ?? vendor.gst ?? ""),
     pincode: vendor.pincode ?? "",
   };
 };
 
-const emptySupplier = mapVendorToSupplier();
+const mapReceiptItemToInvoiceItem = (receiptItem = {}, index, purchaseOrder) => {
+  const poItem =
+    purchaseOrder?.items?.find(
+      (item) =>
+        normalizeKey(item.poItemId) === normalizeKey(receiptItem.poItemId) ||
+        normalizeKey(item.id) === normalizeKey(receiptItem.poItemId) ||
+        normalizeKey(item.itemId) === normalizeKey(receiptItem.itemId)
+    ) ?? null;
+  const gstRate =
+    receiptItem.gst || receiptItem.taxPercentage || poItem?.gst || poItem?.taxPercentage || 18;
+
+  return createBlankItem({
+    id: `receipt-${receiptItem.id ?? receiptItem.receiveGoodsItemId ?? index}`,
+    sourceItemId: receiptItem.id ?? receiptItem.receiveGoodsItemId ?? null,
+    poItemId: receiptItem.poItemId ?? poItem?.poItemId ?? null,
+    productCode:
+      receiptItem.itemId || poItem?.itemId ? String(receiptItem.itemId ?? poItem?.itemId) : "",
+    productName: receiptItem.name || poItem?.name || "",
+    description: receiptItem.description || poItem?.description || "",
+    hsn: receiptItem.hsn || poItem?.hsn || "",
+    uom: receiptItem.unit || poItem?.unit || "PCS",
+    orderedQty: toNumber(receiptItem.orderedQty || poItem?.orderedQty),
+    receivedQty: toNumber(
+      receiptItem.receiptReceivedQty ||
+        receiptItem.receivedQty ||
+        receiptItem.totalReceivedQty ||
+        poItem?.receivedQty
+    ),
+    unitPrice: toNumber(receiptItem.unitPrice || poItem?.unitPrice),
+    tax: toNumber(gstRate),
+    batchNo: receiptItem.batchNo || receiptItem.batchName || "",
+    expiryDate: toIsoDate(receiptItem.expiryDate || receiptItem.ExpDt),
+  });
+};
 
 const buildReceiptLabel = (receipt, purchaseOrder) => {
   if (!receipt) {
@@ -268,240 +260,172 @@ const buildReceiptLabel = (receipt, purchaseOrder) => {
   return `RG-${receiptId}${poText}${invoiceText}`;
 };
 
-const Card = ({ children, className = "" }) => (
-  <section className={`rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}>
-    {children}
-  </section>
-);
+const cloneValue = (value) => JSON.parse(JSON.stringify(value));
 
-const SectionTitle = ({ icon, title, children, tone = "blue", action = null }) => {
-  const IconComponent = icon;
-  const toneClass =
-    tone === "green"
-      ? "bg-green-50 text-green-700"
-      : tone === "amber"
-      ? "bg-amber-50 text-amber-700"
-      : tone === "red"
-      ? "bg-red-50 text-red-700"
-      : "bg-blue-50 text-blue-700";
+const readDocument = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Failed to read file."));
+    reader.onload = () =>
+      resolve({
+        id: `file-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        uploadedAt: new Date().toISOString(),
+        dataUrl: String(reader.result || ""),
+      });
+    reader.readAsDataURL(file);
+  });
 
-  return (
-    <div className="mb-4 flex items-start justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${toneClass}`}>
-          <IconComponent className="h-4 w-4" />
-        </span>
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-slate-950">{title}</h2>
-          {children ? <p className="mt-1 text-xs text-slate-500">{children}</p> : null}
+const renderInvoiceDocument = ({ status, supplierForm, buyerForm, invoiceForm, items, notes, totals }) => {
+  const escapeHtml = (value) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const rowsHtml = items
+    .map((item, index) => {
+      const line = calculateLine(item, invoiceForm.taxMode);
+      return `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(item.productName || item.productCode)}</td>
+          <td>${escapeHtml(item.hsn)}</td>
+          <td>${escapeHtml(item.uom)}</td>
+          <td>${toNumber(item.receivedQty)}</td>
+          <td>${formatInrCurrency(toNumber(item.unitPrice))}</td>
+          <td>${toNumber(item.tax)}%</td>
+          <td>${formatInrCurrency(line.lineTotal)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(invoiceForm.invoiceNumber || "Invoice")}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }
+          h1, h2, h3, p { margin: 0; }
+          .meta, .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+          .card { border: 1px solid #cbd5e1; border-radius: 10px; padding: 16px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; font-size: 12px; }
+          th { background: #e2e8f0; }
+          .totals { margin-top: 20px; margin-left: auto; width: 320px; }
+          .totals div { display: flex; justify-content: space-between; padding: 6px 0; }
+          .status { display: inline-block; margin-top: 8px; padding: 4px 10px; border-radius: 999px; background: #e0f2fe; }
+        </style>
+      </head>
+      <body>
+        <h1>Purchase Invoice</h1>
+        <p>${escapeHtml(invoiceForm.invoiceNumber || "-")}</p>
+        <div class="status">${escapeHtml(status)}</div>
+        <div class="meta">
+          <div class="card">
+            <h3>Supplier</h3>
+            <p>${escapeHtml(supplierForm.name)}</p>
+            <p>${escapeHtml(supplierForm.address)}</p>
+            <p>${escapeHtml(supplierForm.gstNumber)}</p>
+          </div>
+          <div class="card">
+            <h3>Buyer</h3>
+            <p>${escapeHtml(buyerForm.companyName)}</p>
+            <p>${escapeHtml(buyerForm.address)}</p>
+            <p>${escapeHtml(buyerForm.gstNumber)}</p>
+          </div>
         </div>
-      </div>
-      {action}
-    </div>
-  );
+        <div class="cards">
+          <div class="card">
+            <h3>Invoice Details</h3>
+            <p>Date: ${escapeHtml(formatDate(invoiceForm.invoiceDate))}</p>
+            <p>Due Date: ${escapeHtml(formatDate(invoiceForm.dueDate))}</p>
+            <p>PO Ref: ${escapeHtml(invoiceForm.poReference)}</p>
+            <p>Payment Terms: ${escapeHtml(invoiceForm.paymentTerms)}</p>
+          </div>
+          <div class="card">
+            <h3>Delivery Note</h3>
+            <p>${escapeHtml(notes.delivery || "-")}</p>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item</th>
+              <th>HSN</th>
+              <th>UOM</th>
+              <th>Qty</th>
+              <th>Rate</th>
+              <th>GST</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+        <div class="totals">
+          <div><span>Subtotal</span><strong>${formatInrCurrency(totals.subtotal)}</strong></div>
+          <div><span>Discount</span><strong>${formatInrCurrency(totals.discount)}</strong></div>
+          <div><span>Tax</span><strong>${formatInrCurrency(totals.taxAmount)}</strong></div>
+          <div><span>Grand Total</span><strong>${formatInrCurrency(totals.grandTotal)}</strong></div>
+        </div>
+      </body>
+    </html>
+  `;
 };
 
-const Field = ({ label, required = false, hint = "", children }) => (
+const Field = ({ label, required = false, children }) => (
   <label className="block">
     <span className="mb-1.5 block text-xs font-semibold text-slate-600">
       {label}
       {required ? <span className="text-red-500"> *</span> : null}
     </span>
     {children}
-    {hint ? <span className="mt-1 block text-xs text-slate-400">{hint}</span> : null}
   </label>
 );
 
-const TextInput = ({ label, required = false, hint = "", ...props }) => (
-  <Field label={label} required={required} hint={hint}>
-    <input className={inputClass} {...props} />
-  </Field>
-);
-
-const SelectInput = ({ label, required = false, hint = "", children, ...props }) => (
-  <Field label={label} required={required} hint={hint}>
-    <select className={inputClass} {...props}>
-      {children}
-    </select>
-  </Field>
-);
-
-const ActionButton = ({
-  children,
-  icon: Icon,
-  variant = "secondary",
-  className = "",
-  ...props
-}) => {
-  const variants = {
-    primary: "border-blue-600 bg-blue-600 text-white hover:bg-blue-700",
-    success: "border-green-600 bg-green-600 text-white hover:bg-green-700",
-    danger: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100",
-    secondary: "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
-    ghost: "border-transparent bg-transparent text-slate-600 hover:bg-slate-100 shadow-none",
-  };
-
-  return (
-    <button
-      type="button"
-      className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`}
-      {...props}
-    >
-      {Icon ? <Icon className="h-4 w-4" /> : null}
-      <span>{children}</span>
-    </button>
-  );
-};
-
-const SummaryTile = ({ label, value, icon, tone = "blue" }) => {
-  const IconComponent = icon;
-  const toneClass =
-    tone === "green"
-      ? "bg-green-50 text-green-700"
-      : tone === "amber"
-      ? "bg-amber-50 text-amber-700"
-      : "bg-blue-50 text-blue-700";
-
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-slate-500">{label}</p>
-          <p className="mt-1 truncate text-lg font-bold text-slate-950">{value}</p>
-        </div>
-        <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${toneClass}`}>
-          <IconComponent className="h-5 w-5" />
-        </span>
-      </div>
+const Card = ({ title, action = null, children }) => (
+  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+      {action}
     </div>
-  );
-};
-
-const TaxRow = ({ label, value, strong = false, danger = false }) => (
-  <div
-    className={`flex items-center justify-between gap-4 text-sm ${
-      strong ? "font-bold text-slate-950" : "text-slate-600"
-    }`}
-  >
-    <span>{label}</span>
-    <span className={danger ? "font-semibold text-red-600" : "text-right text-slate-900"}>
-      {value}
-    </span>
-  </div>
+    {children}
+  </section>
 );
-
-const StatusBadge = ({ status }) => (
-  <span
-    className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${
-      statusStyles[status] ?? statusStyles.Draft
-    }`}
-  >
-    {status}
-  </span>
-);
-
-const ValidationPanel = ({ issues, showValidation }) => {
-  const visibleIssues = showValidation ? issues : issues.filter((issue) => issue.severity === "error");
-  const errorCount = issues.filter((issue) => issue.severity === "error").length;
-
-  return (
-    <Card className="p-5">
-      <SectionTitle
-        icon={errorCount ? AlertTriangle : CheckCircle2}
-        title="Validation"
-        tone={errorCount ? "red" : "green"}
-      >
-        {errorCount ? `${errorCount} item needs attention` : "Invoice data is ready"}
-      </SectionTitle>
-      {visibleIssues.length ? (
-        <div className="space-y-2">
-          {visibleIssues.map((issue) => (
-            <div
-              key={issue.id}
-              className={`rounded-lg border px-3 py-2 text-sm ${
-                issue.severity === "error"
-                  ? "border-red-100 bg-red-50 text-red-700"
-                  : "border-amber-100 bg-amber-50 text-amber-700"
-              }`}
-            >
-              {issue.message}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-700">
-          Required invoice, GST, quantity, and tax details look complete.
-        </div>
-      )}
-    </Card>
-  );
-};
 
 const Invoice = () => {
-  const [status, setStatus] = useState("Draft");
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const fileInputRef = useRef(null);
+  const baselineRef = useRef(null);
   const [receipts, setReceipts] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [selectedReceiptId, setSelectedReceiptId] = useState("");
+  const [invoiceId, setInvoiceId] = useState("");
+  const [status, setStatus] = useState("Draft");
   const [supplierForm, setSupplierForm] = useState(emptySupplier);
   const [buyerForm, setBuyerForm] = useState(defaultBuyer);
-  const [invoiceForm, setInvoiceForm] = useState({
-    invoiceNumber: "",
-    invoiceDate: "",
-    dueDate: "",
-    poReference: "",
-    paymentTerms: "Net 30 Days",
-    currency: "INR - Indian Rupee",
-    taxMode: "intra",
-    placeOfSupply: "Karnataka",
-    reverseCharge: "No",
-    irn: "",
-    qrReference: "",
-  });
+  const [invoiceForm, setInvoiceForm] = useState(emptyInvoiceForm);
   const [items, setItems] = useState([]);
-  const [productSearch, setProductSearch] = useState("");
-  const [files, setFiles] = useState(uploadedFiles);
-  const [notes, setNotes] = useState({
-    internal: "",
-    supplier: "",
-    delivery: "",
-  });
   const [payment, setPayment] = useState(defaultPayment);
+  const [notes, setNotes] = useState(emptyNotes);
+  const [files, setFiles] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
   const [showValidation, setShowValidation] = useState(false);
-  const [actionNotice, setActionNotice] = useState("");
 
-  const loadRecords = async () => {
-    setIsLoading(true);
-    setLoadError("");
-    try {
-      const [receiptList, purchaseOrderList, vendorList] = await Promise.all([
-        fetchReceiveGoods(),
-        fetchPurchaseOrders(),
-        fetchVendors(),
-      ]);
-      setReceipts(receiptList);
-      setPurchaseOrders(purchaseOrderList);
-      setVendors(vendorList);
-      setSelectedReceiptId((current) => current || normalizeKey(receiptList[0]?.receiveGoodsId ?? receiptList[0]?.id));
-    } catch (error) {
-      setLoadError(
-        error?.response?.data?.error ||
-          error?.message ||
-          "Failed to load invoice source data."
-      );
-      setReceipts([]);
-      setPurchaseOrders([]);
-      setVendors([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadRecords();
-  }, []);
+  const invoiceIdFromSearch = searchParams.get("invoiceId") || "";
+  const receiptIdFromSearch = searchParams.get("receiptId") || "";
 
   const purchaseOrderMap = useMemo(
     () =>
@@ -510,15 +434,6 @@ const Invoice = () => {
         return acc;
       }, new Map()),
     [purchaseOrders]
-  );
-
-  const vendorMap = useMemo(
-    () =>
-      vendors.reduce((acc, vendor) => {
-        acc.set(normalizeKey(vendor.id), vendor);
-        return acc;
-      }, new Map()),
-    [vendors]
   );
 
   const selectedReceipt = useMemo(
@@ -530,121 +445,212 @@ const Invoice = () => {
     [receipts, selectedReceiptId]
   );
 
-  const selectedPurchaseOrder = useMemo(
-    () => purchaseOrderMap.get(normalizeKey(selectedReceipt?.purchaseOrderId)) ?? null,
-    [purchaseOrderMap, selectedReceipt]
-  );
+  const snapshotState = () => ({
+    invoiceId,
+    selectedReceiptId,
+    status,
+    supplierForm: cloneValue(supplierForm),
+    buyerForm: cloneValue(buyerForm),
+    invoiceForm: cloneValue(invoiceForm),
+    items: cloneValue(items),
+    payment: cloneValue(payment),
+    notes: cloneValue(notes),
+    files: cloneValue(files),
+  });
 
-  const selectedVendor = useMemo(
-    () => vendorMap.get(normalizeKey(selectedReceipt?.vendorId)) ?? null,
-    [vendorMap, selectedReceipt]
-  );
-
-  useEffect(() => {
-    if (!selectedReceipt) {
-      setSupplierForm(emptySupplier);
-      setItems([]);
-      setInvoiceForm((current) => ({
-        ...current,
-        invoiceNumber: "",
-        invoiceDate: "",
-        dueDate: "",
-        poReference: "",
-      }));
+  const applySnapshot = (snapshot) => {
+    if (!snapshot) {
       return;
     }
+    setInvoiceId(String(snapshot.invoiceId || ""));
+    setSelectedReceiptId(String(snapshot.selectedReceiptId || ""));
+    setStatus(snapshot.status || "Draft");
+    setSupplierForm(snapshot.supplierForm || emptySupplier);
+    setBuyerForm(snapshot.buyerForm || defaultBuyer);
+    setInvoiceForm(snapshot.invoiceForm || emptyInvoiceForm);
+    setItems(Array.isArray(snapshot.items) ? snapshot.items : []);
+    setPayment(snapshot.payment || defaultPayment);
+    setNotes(snapshot.notes || emptyNotes);
+    setFiles(Array.isArray(snapshot.files) ? snapshot.files : []);
+  };
 
-    const invoiceDate = toIsoDate(selectedReceipt.invoiceDate || selectedReceipt.receivedDate);
-    const poReference =
-      selectedPurchaseOrder?.poNumber ||
-      (selectedReceipt.purchaseOrderId ? `PO-${selectedReceipt.purchaseOrderId}` : "");
-    const supplier = selectedVendor ? mapVendorToSupplier(selectedVendor) : emptySupplier;
-    const taxMode = selectedReceipt.taxMode === "inter" ? "inter" : "intra";
-    const mappedItems = Array.isArray(selectedReceipt.items)
-      ? selectedReceipt.items.map((item, index) =>
-          mapReceiptItemToInvoiceItem(item, index, selectedPurchaseOrder)
-        )
-      : [];
+  const setBaseline = () => {
+    baselineRef.current = snapshotState();
+  };
 
+  const hydrateFromReceipt = useCallback((receipt, sourcePurchaseOrders = purchaseOrders, sourceVendors = vendors) => {
+    const purchaseOrder =
+      sourcePurchaseOrders.find((record) => normalizeKey(record.id) === normalizeKey(receipt?.purchaseOrderId)) ??
+      null;
+    const vendor =
+      sourceVendors.find((record) => normalizeKey(record.id) === normalizeKey(receipt?.vendorId)) ??
+      null;
+    const supplier = vendor ? mapVendorToSupplier(vendor) : emptySupplier;
+    const invoiceDate = toIsoDate(receipt?.invoiceDate || receipt?.receivedDate);
+
+    setInvoiceId("");
+    setStatus("Draft");
     setSupplierForm(supplier);
-    setInvoiceForm((current) => ({
-      ...current,
-      invoiceNumber: selectedReceipt.invoiceNumber || current.invoiceNumber || "",
-      invoiceDate,
-      dueDate: invoiceDate ? addDays(invoiceDate, 30) : "",
-      poReference,
-      taxMode,
-      placeOfSupply: supplier.state || current.placeOfSupply || defaultBuyer.state,
-      irn: "",
-      qrReference: "",
-    }));
     setBuyerForm((current) => ({
       ...current,
       stateCode: stateCodeFromGstin(current.gstNumber) || current.stateCode,
     }));
-    setItems(mappedItems);
-    setNotes((current) => ({
-      ...current,
-      delivery: selectedReceipt.shipTo || selectedReceipt.billTo || current.delivery,
-      internal: selectedReceipt.notes || current.internal,
-    }));
-    setStatus("Draft");
-    setShowValidation(false);
-    setActionNotice("");
-  }, [selectedReceipt, selectedPurchaseOrder, selectedVendor]);
-
-  const filteredItems = useMemo(() => {
-    const query = productSearch.trim().toLowerCase();
-    if (!query) {
-      return items;
-    }
-    return items.filter((item) =>
-      [
-        item.productCode,
-        item.productName,
-        item.description,
-        item.hsn,
-        item.batchNo,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(query)
-    );
-  }, [items, productSearch]);
-
-  const itemIssuesById = useMemo(() => {
-    const map = new Map();
-    items.forEach((item, index) => {
-      const issues = [];
-      const label = item.productName || item.productCode || `Row ${index + 1}`;
-      const orderedQty = toNumber(item.orderedQty);
-      const receivedQty = toNumber(item.receivedQty);
-      const unitPrice = toNumber(item.unitPrice);
-      const tax = toNumber(item.tax);
-
-      if (!String(item.hsn || "").trim()) {
-        issues.push(`${label}: HSN is required.`);
-      }
-      if (receivedQty <= 0) {
-        issues.push(`${label}: received quantity must be greater than zero.`);
-      }
-      if (orderedQty > 0 && receivedQty > orderedQty) {
-        issues.push(`${label}: received quantity cannot exceed ordered quantity.`);
-      }
-      if (unitPrice < 0) {
-        issues.push(`${label}: unit price cannot be negative.`);
-      }
-      if (tax < 0) {
-        issues.push(`${label}: GST rate cannot be negative.`);
-      }
-
-      if (issues.length) {
-        map.set(item.id, issues);
-      }
+    setInvoiceForm({
+      ...emptyInvoiceForm,
+      invoiceNumber: receipt?.invoiceNumber || "",
+      invoiceDate,
+      dueDate: invoiceDate ? addDays(invoiceDate, 30) : "",
+      poReference:
+        purchaseOrder?.poNumber ||
+        (receipt?.purchaseOrderId ? `PO-${receipt.purchaseOrderId}` : ""),
+      taxMode: receipt?.taxMode === "inter" ? "inter" : "intra",
+      placeOfSupply: supplier.state || defaultBuyer.state,
     });
-    return map;
-  }, [items]);
+    setItems(
+      Array.isArray(receipt?.items)
+        ? receipt.items.map((item, index) => mapReceiptItemToInvoiceItem(item, index, purchaseOrder))
+        : []
+    );
+    setPayment(defaultPayment);
+    setNotes({
+      internal: receipt?.notes || "",
+      supplier: "",
+      delivery: receipt?.shipTo || receipt?.billTo || "",
+    });
+    setFiles([]);
+    setShowValidation(false);
+    setSaveMessage("");
+  }, [purchaseOrders, vendors]);
+
+  const hydrateFromInvoice = (invoice) => {
+    setInvoiceId(String(invoice.invoiceId || ""));
+    setSelectedReceiptId(normalizeKey(invoice.receiveGoodsId));
+    setStatus(invoice.status || "Draft");
+    setSupplierForm(invoice.supplier || emptySupplier);
+    setBuyerForm({
+      ...defaultBuyer,
+      ...(invoice.buyer || {}),
+      stateCode:
+        stateCodeFromGstin(invoice?.buyer?.gstNumber) ||
+        invoice?.buyer?.stateCode ||
+        defaultBuyer.stateCode,
+    });
+    setInvoiceForm({
+      ...emptyInvoiceForm,
+      invoiceNumber: invoice.invoiceNumber || "",
+      invoiceDate: toIsoDate(invoice.invoiceDate),
+      dueDate: toIsoDate(invoice.dueDate),
+      poReference: invoice.poReference || "",
+      paymentTerms: invoice.paymentTerms || emptyInvoiceForm.paymentTerms,
+      currency: invoice.currency || emptyInvoiceForm.currency,
+      taxMode: invoice.taxMode === "inter" ? "inter" : "intra",
+      placeOfSupply: invoice.placeOfSupply || "",
+      reverseCharge: invoice.reverseCharge || "No",
+      irn: invoice.irn || "",
+      qrReference: invoice.qrReference || "",
+    });
+    setItems(Array.isArray(invoice.items) ? invoice.items : []);
+    setPayment({ ...defaultPayment, ...(invoice.payment || {}) });
+    setNotes({ ...emptyNotes, ...(invoice.notes || {}) });
+    setFiles(Array.isArray(invoice.documents) ? invoice.documents : []);
+    setShowValidation(false);
+    setSaveMessage("");
+  };
+
+  const loadSources = async () => {
+    setIsLoading(true);
+    setLoadError("");
+    try {
+      const [receiptList, purchaseOrderList, vendorList] = await Promise.all([
+        fetchReceiveGoods(),
+        fetchPurchaseOrders(),
+        fetchVendors(),
+      ]);
+      setReceipts(receiptList);
+      setPurchaseOrders(purchaseOrderList);
+      setVendors(vendorList);
+
+      const fallbackReceiptId = receiptIdFromSearch || normalizeKey(receiptList[0]?.receiveGoodsId);
+      if (!invoiceIdFromSearch) {
+        setSelectedReceiptId((current) => current || fallbackReceiptId);
+        const seedReceipt =
+          receiptList.find(
+            (receipt) =>
+              normalizeKey(receipt.receiveGoodsId ?? receipt.id) === normalizeKey(fallbackReceiptId)
+          ) ?? receiptList[0] ?? null;
+        if (seedReceipt) {
+          hydrateFromReceipt(seedReceipt, purchaseOrderList, vendorList);
+          setTimeout(setBaseline, 0);
+        }
+      }
+    } catch (error) {
+      setLoadError(error?.response?.data?.error || error?.message || "Failed to load invoice data.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadSources();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const refresh = () => {
+      void loadSources();
+    };
+    window.addEventListener("receive-goods:changed", refresh);
+    window.addEventListener("purchase-orders:changed", refresh);
+    return () => {
+      window.removeEventListener("receive-goods:changed", refresh);
+      window.removeEventListener("purchase-orders:changed", refresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!invoiceIdFromSearch) {
+      return;
+    }
+
+    let cancelled = false;
+    const loadSavedInvoice = async () => {
+      try {
+        setIsLoading(true);
+        const savedInvoice = await fetchInvoice(invoiceIdFromSearch);
+        if (cancelled) {
+          return;
+        }
+        hydrateFromInvoice(savedInvoice);
+        setTimeout(setBaseline, 0);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(
+            error?.response?.data?.error || error?.message || "Failed to load saved invoice."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void loadSavedInvoice();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceIdFromSearch]);
+
+  useEffect(() => {
+    if (invoiceIdFromSearch || !selectedReceipt) {
+      return;
+    }
+    hydrateFromReceipt(selectedReceipt);
+    setTimeout(setBaseline, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrateFromReceipt, invoiceIdFromSearch, selectedReceipt]);
 
   const totals = useMemo(() => {
     const summary = items.reduce(
@@ -687,202 +693,203 @@ const Invoice = () => {
 
   const validationIssues = useMemo(() => {
     const issues = [];
-
-    if (!selectedReceipt) {
-      issues.push({
-        id: "receipt",
-        severity: "error",
-        message: "Select a received-goods record before submitting the invoice.",
-      });
+    if (!selectedReceiptId) {
+      issues.push("Select a received-goods record.");
     }
     if (!invoiceForm.invoiceNumber.trim()) {
-      issues.push({
-        id: "invoice-number",
-        severity: "error",
-        message: "Invoice number is required.",
-      });
+      issues.push("Invoice number is required.");
     }
     if (!invoiceForm.invoiceDate) {
-      issues.push({
-        id: "invoice-date",
-        severity: "error",
-        message: "Invoice date is required.",
-      });
+      issues.push("Invoice date is required.");
     }
     if (!invoiceForm.poReference.trim()) {
-      issues.push({
-        id: "po-reference",
-        severity: "error",
-        message: "PO reference is required for invoice acceptance.",
-      });
+      issues.push("PO reference is required.");
     }
     if (!isValidGstin(supplierForm.gstNumber)) {
-      issues.push({
-        id: "supplier-gstin",
-        severity: "error",
-        message: "Supplier GSTIN must be a valid 15-character GST number.",
-      });
+      issues.push("Supplier GSTIN must be a valid 15-character GST number.");
     }
     if (!isValidGstin(buyerForm.gstNumber)) {
-      issues.push({
-        id: "buyer-gstin",
-        severity: "error",
-        message: "Buyer GSTIN must be a valid 15-character GST number.",
-      });
+      issues.push("Buyer GSTIN must be a valid 15-character GST number.");
     }
     if (
       invoiceForm.invoiceDate &&
       invoiceForm.dueDate &&
       new Date(invoiceForm.dueDate) < new Date(invoiceForm.invoiceDate)
     ) {
-      issues.push({
-        id: "due-date",
-        severity: "error",
-        message: "Due date cannot be earlier than invoice date.",
-      });
+      issues.push("Due date cannot be earlier than invoice date.");
     }
     if (!items.length) {
-      issues.push({
-        id: "items",
-        severity: "error",
-        message: "At least one invoice item is required.",
-      });
+      issues.push("At least one invoice item is required.");
     }
-
-    itemIssuesById.forEach((rowIssues, itemId) => {
-      rowIssues.forEach((message, index) => {
-        issues.push({
-          id: `${itemId}-${index}`,
-          severity: "error",
-          message,
-        });
-      });
+    items.forEach((item, index) => {
+      const label = item.productName || item.productCode || `Row ${index + 1}`;
+      if (!String(item.hsn || "").trim()) {
+        issues.push(`${label}: HSN is required.`);
+      }
+      if (toNumber(item.receivedQty) <= 0) {
+        issues.push(`${label}: quantity must be greater than zero.`);
+      }
+      if (toNumber(item.orderedQty) > 0 && toNumber(item.receivedQty) > toNumber(item.orderedQty)) {
+        issues.push(`${label}: quantity cannot exceed ordered quantity.`);
+      }
     });
-
-    if (!invoiceForm.irn.trim()) {
-      issues.push({
-        id: "irn",
-        severity: "warning",
-        message: "IRN is empty. Keep this as a placeholder until IRP integration is added.",
-      });
-    }
-    if (!invoiceForm.qrReference.trim()) {
-      issues.push({
-        id: "qr",
-        severity: "warning",
-        message: "QR reference is empty. Keep this as a placeholder until PDF/IRP output is added.",
-      });
-    }
-
     return issues;
-  }, [
-    buyerForm.gstNumber,
-    invoiceForm,
-    itemIssuesById,
-    items.length,
-    selectedReceipt,
-    supplierForm.gstNumber,
-  ]);
+  }, [buyerForm.gstNumber, invoiceForm, items, selectedReceiptId, supplierForm.gstNumber]);
 
-  const criticalIssueCount = validationIssues.filter(
-    (issue) => issue.severity === "error"
-  ).length;
-
-  const inventoryImpactItems = items
-    .filter((item) => item.productName || item.productCode)
-    .slice(0, 5);
-
-  const updateSupplier = (field, value) => {
-    setSupplierForm((current) => ({ ...current, [field]: value }));
+  const updateItem = (id, field, value) => {
+    setItems((current) => current.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
   };
 
-  const updateBuyer = (field, value) => {
-    setBuyerForm((current) => ({
+  const updateParty = (setter, field, value) => {
+    setter((current) => ({
       ...current,
       [field]: value,
-      ...(field === "gstNumber"
-        ? { stateCode: stateCodeFromGstin(value) || current.stateCode }
-        : {}),
+      ...(field === "gstNumber" ? { stateCode: stateCodeFromGstin(value) || current.stateCode } : {}),
     }));
   };
 
-  const updateInvoiceForm = (field, value) => {
-    setInvoiceForm((current) => ({ ...current, [field]: value }));
+  const upsertSearchParams = (nextInvoiceId, nextReceiptId) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextInvoiceId) {
+      nextParams.set("invoiceId", String(nextInvoiceId));
+    } else {
+      nextParams.delete("invoiceId");
+    }
+    if (nextReceiptId) {
+      nextParams.set("receiptId", String(nextReceiptId));
+    } else {
+      nextParams.delete("receiptId");
+    }
+    setSearchParams(nextParams, { replace: true });
   };
 
-  const updatePayment = (field, value) => {
-    setPayment((current) => ({ ...current, [field]: value }));
+  const buildPayload = (nextStatus = status) => ({
+    invoiceNumber: invoiceForm.invoiceNumber.trim(),
+    status: nextStatus,
+    invoiceDate: invoiceForm.invoiceDate || null,
+    dueDate: invoiceForm.dueDate || null,
+    poReference: invoiceForm.poReference.trim(),
+    paymentTerms: invoiceForm.paymentTerms,
+    currency: invoiceForm.currency,
+    taxMode: invoiceForm.taxMode,
+    placeOfSupply: invoiceForm.placeOfSupply.trim(),
+    reverseCharge: invoiceForm.reverseCharge,
+    irn: invoiceForm.irn.trim(),
+    qrReference: invoiceForm.qrReference.trim(),
+    receiveGoodsId: selectedReceipt?.receiveGoodsId ?? selectedReceipt?.id ?? null,
+    purchaseOrderId: selectedReceipt?.purchaseOrderId ?? null,
+    vendorId: selectedReceipt?.vendorId ?? null,
+    projectId: selectedReceipt?.projectId ?? null,
+    supplier: supplierForm,
+    buyer: buyerForm,
+    items,
+    payment,
+    notes,
+    documents: files,
+    totals,
+  });
+
+  const persistInvoice = async (nextStatus) => {
+    setShowValidation(true);
+    if (["Submitted", "Approved"].includes(nextStatus) && validationIssues.length) {
+      setSaveMessage("Fix validation issues before moving the invoice forward.");
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setSaveMessage("");
+      const payload = buildPayload(nextStatus);
+      const savedInvoice = invoiceId
+        ? await updateInvoice(invoiceId, payload)
+        : await createInvoice(payload);
+
+      hydrateFromInvoice(savedInvoice);
+      upsertSearchParams(savedInvoice.invoiceId, savedInvoice.receiveGoodsId);
+      setSaveMessage(`Invoice ${savedInvoice.invoiceNumber} saved as ${savedInvoice.status}.`);
+      setTimeout(setBaseline, 0);
+    } catch (error) {
+      setSaveMessage(error?.response?.data?.error || error?.message || "Failed to save invoice.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const updateItem = (id, field, value) => {
-    setItems((current) =>
-      current.map((item) => (item.id === id ? { ...item, [field]: value } : item))
-    );
+  const handleCancel = () => {
+    if (invoiceId) {
+      navigate("/inventory/invoices");
+      return;
+    }
+    applySnapshot(baselineRef.current);
+    setSaveMessage("Unsaved changes were cleared.");
+    setShowValidation(false);
   };
 
-  const addRow = () => {
+  const handleReceiptChange = (value) => {
+    setSelectedReceiptId(value);
+    setSaveMessage("");
+    if (invoiceId) {
+      setInvoiceId("");
+      upsertSearchParams("", value);
+    } else {
+      upsertSearchParams("", value);
+    }
+  };
+
+  const handleAddRow = () => {
     setItems((current) => [...current, createBlankItem()]);
   };
 
-  const duplicateRow = (id) => {
-    const source = items.find((item) => item.id === id) || items[0];
+  const handleDuplicateRow = (id) => {
+    const source = items.find((item) => item.id === id);
     if (!source) {
-      addRow();
       return;
     }
-    setItems((current) => [
-      ...current,
-      createBlankItem({
-        ...source,
-        id: `item-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        productCode: source.productCode ? `${source.productCode}-COPY` : "",
-      }),
-    ]);
+    setItems((current) => [...current, createBlankItem({ ...source, id: undefined })]);
   };
 
-  const deleteRow = (id) => {
+  const handleDeleteRow = (id) => {
     setItems((current) => current.filter((item) => item.id !== id));
   };
 
-  const reloadReceiptItems = () => {
-    if (!selectedReceipt) {
+  const handleUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
       return;
     }
-    setItems(
-      (selectedReceipt.items ?? []).map((item, index) =>
-        mapReceiptItemToInvoiceItem(item, index, selectedPurchaseOrder)
-      )
-    );
+    try {
+      const document = await readDocument(file);
+      setFiles((current) => [...current, document]);
+    } catch (error) {
+      setSaveMessage(error?.message || "Failed to upload attachment.");
+    } finally {
+      event.target.value = "";
+    }
   };
 
-  const removeFile = (id) => {
-    setFiles((current) => current.filter((file) => file.id !== id));
-  };
-
-  const addDummyFile = () => {
-    setFiles((current) => [
-      ...current,
-      {
-        id: `file-${Date.now()}`,
-        name: "Material Test Certificate.pdf",
-        size: "420 KB",
-        type: "PDF",
-      },
-    ]);
-  };
-
-  const changeStatus = (nextStatus) => {
-    setShowValidation(true);
-    if (["Submitted", "Approved"].includes(nextStatus) && criticalIssueCount > 0) {
-      setActionNotice("Fix validation errors before moving this invoice forward.");
+  const openPrintableWindow = (autoPrint) => {
+    const popup = window.open("", "_blank", "noopener,noreferrer");
+    if (!popup) {
+      setSaveMessage("Allow pop-ups in the browser to print or export this invoice.");
       return;
     }
-    setStatus(nextStatus);
-    setActionNotice(
-      nextStatus === "Draft"
-        ? "Draft saved in this page only."
-        : `${nextStatus} status applied in this page only.`
+    popup.document.open();
+    popup.document.write(
+      renderInvoiceDocument({
+        status,
+        supplierForm,
+        buyerForm,
+        invoiceForm,
+        items,
+        notes,
+        totals,
+      })
     );
+    popup.document.close();
+    if (autoPrint) {
+      popup.focus();
+      popup.print();
+    }
   };
 
   const receiptOptions = receipts.map((receipt) => {
@@ -893,975 +900,711 @@ const Invoice = () => {
     };
   });
 
-  const activityTimeline = [
-    {
-      id: "loaded",
-      title: selectedReceipt ? "Receipt selected" : "Waiting for receipt",
-      by: "System",
-      time: selectedReceipt ? formatDate(selectedReceipt.receivedDate) : "-",
-    },
-    {
-      id: "items",
-      title: `${items.length} invoice item${items.length === 1 ? "" : "s"} prepared`,
-      by: "Invoice page",
-      time: formatDate(invoiceForm.invoiceDate),
-    },
-    {
-      id: "status",
-      title: `Status: ${status}`,
-      by: "Current session",
-      time: "UI only",
-    },
-  ];
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center text-slate-600">
+        <LoaderCircle className="mr-2 h-5 w-5 animate-spin" />
+        Loading invoice workspace...
+      </div>
+    );
+  }
 
   return (
-    <div id="invoice-print-area" className="min-h-screen bg-slate-50 pb-28 text-slate-900">
-      <div className="space-y-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <nav className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-500">
-            <span>Inventory</span>
-            <span>/</span>
-            <span>Invoice</span>
-            <span>/</span>
-            <span className="text-slate-950">Receipt-first invoice</span>
-          </nav>
-          <div className="flex flex-wrap items-center gap-2">
-            {actionNotice ? (
-              <span className="inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
-                <CircleDot className="h-4 w-4" />
-                {actionNotice}
-              </span>
-            ) : null}
-            <select
-              value={status}
-              onChange={(event) => changeStatus(event.target.value)}
-              className={`${inputClass} w-40`}
-              aria-label="Invoice status"
-            >
-              {statuses.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
+    <div className="space-y-6 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Inventory</p>
+          <h1 className="mt-2 text-3xl font-semibold text-slate-900">Purchase Invoice</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Create, edit, submit, approve, and reopen saved invoices from received goods.
+          </p>
         </div>
-
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_21rem]">
-          <Card className="p-5">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-3">
-                  <input
-                    value={invoiceForm.invoiceNumber}
-                    onChange={(event) => updateInvoiceForm("invoiceNumber", event.target.value)}
-                    className="min-w-0 max-w-full rounded-lg border border-transparent bg-transparent px-0 text-2xl font-bold text-slate-950 outline-none transition focus:border-blue-200 focus:bg-blue-50 focus:px-3"
-                    placeholder="Invoice number"
-                    aria-label="Invoice number"
-                  />
-                  <StatusBadge status={status} />
-                </div>
-                <div className="mt-3 grid gap-2 text-sm text-slate-500 sm:grid-cols-2 xl:grid-cols-4">
-                  <span className="inline-flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Invoice: {formatDate(invoiceForm.invoiceDate)}
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <ClipboardCheck className="h-4 w-4" />
-                    Due: {formatDate(invoiceForm.dueDate)}
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <MapPin className="h-4 w-4" />
-                    POS: {invoiceForm.placeOfSupply || "-"}
-                  </span>
-                  <span className="inline-flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4" />
-                    {invoiceForm.taxMode === "inter" ? "IGST" : "CGST + SGST"}
-                  </span>
-                </div>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[30rem]">
-                <SummaryTile
-                  label="Items"
-                  value={totals.totalItems}
-                  icon={PackageCheck}
-                />
-                <SummaryTile
-                  label="Quantity"
-                  value={totals.totalQuantity.toLocaleString("en-IN")}
-                  icon={ClipboardCheck}
-                  tone="green"
-                />
-                <SummaryTile
-                  label="Grand Total"
-                  value={formatInrCurrency(totals.grandTotal)}
-                  icon={BadgeIndianRupee}
-                  tone="amber"
-                />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-5">
-            <SectionTitle
-              icon={FileCheck2}
-              title="Source Receipt"
-              action={
-                <button
-                  type="button"
-                  onClick={loadRecords}
-                  className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"
-                  aria-label="Refresh invoice source data"
-                >
-                  <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-                </button>
-              }
-            >
-              Received goods drives this invoice
-            </SectionTitle>
-            {loadError ? (
-              <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-700">
-                <div className="flex items-start gap-2">
-                  <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{loadError}</span>
-                </div>
-              </div>
-            ) : (
-              <SelectInput
-                label="Received Goods"
-                value={selectedReceiptId}
-                onChange={(event) => setSelectedReceiptId(event.target.value)}
-                disabled={isLoading || receipts.length === 0}
-              >
-                {isLoading ? <option value="">Loading receipts...</option> : null}
-                {!isLoading && receipts.length === 0 ? (
-                  <option value="">No received goods found</option>
-                ) : null}
-                {receiptOptions.map((receipt) => (
-                  <option key={receipt.id} value={receipt.id}>
-                    {receipt.label}
-                  </option>
-                ))}
-              </SelectInput>
-            )}
-            <div className="mt-4 grid gap-3 text-sm text-slate-600">
-              <div className="rounded-lg bg-slate-50 p-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                  PO Reference
-                </p>
-                <p className="mt-1 font-semibold text-slate-800">
-                  {invoiceForm.poReference || "-"}
-                </p>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                  Receipt Date
-                </p>
-                <p className="mt-1 font-semibold text-slate-800">
-                  {formatDate(selectedReceipt?.receivedDate)}
-                </p>
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-          <div className="space-y-5">
-            <Card className="p-5">
-              <div className="grid gap-5 2xl:grid-cols-3">
-                <div>
-                  <SectionTitle icon={Building2} title="Supplier" tone="blue">
-                    Vendor billing and GST details
-                  </SectionTitle>
-                  <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-1">
-                    <TextInput
-                      label="Supplier Name"
-                      required
-                      value={supplierForm.name}
-                      onChange={(event) => updateSupplier("name", event.target.value)}
-                    />
-                    <TextInput
-                      label="GSTIN"
-                      required
-                      value={supplierForm.gstNumber}
-                      onChange={(event) =>
-                        updateSupplier("gstNumber", event.target.value.toUpperCase())
-                      }
-                      hint={`State code: ${stateCodeFromGstin(supplierForm.gstNumber) || "-"}`}
-                    />
-                    <TextInput
-                      label="Contact"
-                      value={supplierForm.contactPerson}
-                      onChange={(event) => updateSupplier("contactPerson", event.target.value)}
-                    />
-                    <TextInput
-                      label="Phone"
-                      value={supplierForm.phone}
-                      onChange={(event) => updateSupplier("phone", event.target.value)}
-                    />
-                    <Field label="Address">
-                      <textarea
-                        value={supplierForm.address}
-                        onChange={(event) => updateSupplier("address", event.target.value)}
-                        className={`${inputClass} min-h-20 resize-none`}
-                      />
-                    </Field>
-                  </div>
-                </div>
-
-                <div>
-                  <SectionTitle icon={Building2} title="Buyer" tone="green">
-                    Company details for invoice print
-                  </SectionTitle>
-                  <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-1">
-                    <TextInput
-                      label="Company Name"
-                      required
-                      value={buyerForm.companyName}
-                      onChange={(event) => updateBuyer("companyName", event.target.value)}
-                    />
-                    <TextInput
-                      label="GSTIN"
-                      required
-                      value={buyerForm.gstNumber}
-                      onChange={(event) => updateBuyer("gstNumber", event.target.value.toUpperCase())}
-                      hint={`State code: ${buyerForm.stateCode || "-"}`}
-                    />
-                    <TextInput
-                      label="State"
-                      value={buyerForm.state}
-                      onChange={(event) => updateBuyer("state", event.target.value)}
-                    />
-                    <TextInput
-                      label="Pincode"
-                      value={buyerForm.pincode}
-                      onChange={(event) => updateBuyer("pincode", event.target.value)}
-                    />
-                    <Field label="Billing Address">
-                      <textarea
-                        value={buyerForm.address}
-                        onChange={(event) => updateBuyer("address", event.target.value)}
-                        className={`${inputClass} min-h-20 resize-none`}
-                      />
-                    </Field>
-                  </div>
-                </div>
-
-                <div>
-                  <SectionTitle icon={FileText} title="Invoice Details" tone="amber">
-                    Commercial terms and e-invoice placeholders
-                  </SectionTitle>
-                  <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-1">
-                    <TextInput
-                      label="PO Reference"
-                      required
-                      value={invoiceForm.poReference}
-                      onChange={(event) => updateInvoiceForm("poReference", event.target.value)}
-                    />
-                    <Field label="Invoice Date" required>
-                      <DateInput
-                        value={invoiceForm.invoiceDate}
-                        onChange={(value) => updateInvoiceForm("invoiceDate", value)}
-                        className={inputClass}
-                      />
-                    </Field>
-                    <Field label="Due Date">
-                      <DateInput
-                        value={invoiceForm.dueDate}
-                        onChange={(value) => updateInvoiceForm("dueDate", value)}
-                        className={inputClass}
-                      />
-                    </Field>
-                    <SelectInput
-                      label="Payment Terms"
-                      value={invoiceForm.paymentTerms}
-                      onChange={(event) => updateInvoiceForm("paymentTerms", event.target.value)}
-                    >
-                      {paymentTerms.map((term) => (
-                        <option key={term} value={term}>
-                          {term}
-                        </option>
-                      ))}
-                    </SelectInput>
-                    <SelectInput
-                      label="Tax Mode"
-                      value={invoiceForm.taxMode}
-                      onChange={(event) => updateInvoiceForm("taxMode", event.target.value)}
-                    >
-                      <option value="intra">Intra-state - CGST + SGST</option>
-                      <option value="inter">Inter-state - IGST</option>
-                    </SelectInput>
-                    <TextInput
-                      label="Place of Supply"
-                      value={invoiceForm.placeOfSupply}
-                      onChange={(event) => updateInvoiceForm("placeOfSupply", event.target.value)}
-                    />
-                    <SelectInput
-                      label="Reverse Charge"
-                      value={invoiceForm.reverseCharge}
-                      onChange={(event) => updateInvoiceForm("reverseCharge", event.target.value)}
-                    >
-                      <option value="No">No</option>
-                      <option value="Yes">Yes</option>
-                    </SelectInput>
-                    <TextInput
-                      label="IRN"
-                      value={invoiceForm.irn}
-                      onChange={(event) => updateInvoiceForm("irn", event.target.value)}
-                      placeholder="Placeholder until IRP integration"
-                    />
-                    <TextInput
-                      label="QR Reference"
-                      value={invoiceForm.qrReference}
-                      onChange={(event) => updateInvoiceForm("qrReference", event.target.value)}
-                      placeholder="Signed QR payload reference"
-                    />
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            <Card className="overflow-hidden">
-              <div className="flex flex-col gap-4 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h2 className="text-base font-bold text-slate-950">Invoice Items</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Received quantities, HSN, GST rate, and tax values.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <ActionButton icon={Plus} variant="primary" onClick={addRow}>
-                    Add Row
-                  </ActionButton>
-                  <ActionButton
-                    icon={RefreshCw}
-                    onClick={reloadReceiptItems}
-                    disabled={!selectedReceipt}
-                  >
-                    Reload Receipt Items
-                  </ActionButton>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between">
-                <div className="relative w-full max-w-xl">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    value={productSearch}
-                    onChange={(event) => setProductSearch(event.target.value)}
-                    className={`${inputClass} pl-10`}
-                    placeholder="Search by item, HSN, code, or batch"
-                  />
-                </div>
-                <div className="text-sm text-slate-500">
-                  Showing {filteredItems.length} of {items.length} rows
-                </div>
-              </div>
-
-              <div className="hidden overflow-x-auto lg:block">
-                <table className="min-w-[1320px] w-full border-separate border-spacing-0 text-left text-sm">
-                  <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                    <tr>
-                      {[
-                        "#",
-                        "Item",
-                        "HSN",
-                        "UOM",
-                        "Ordered",
-                        "Received",
-                        "Unit Price",
-                        "Disc %",
-                        "GST %",
-                        "Taxable",
-                        "CGST",
-                        "SGST",
-                        "IGST",
-                        "Total",
-                        "Actions",
-                      ].map((heading) => (
-                        <th
-                          key={heading}
-                          className={`border-b border-slate-200 px-3 py-3 font-semibold ${
-                            [
-                              "Ordered",
-                              "Received",
-                              "Unit Price",
-                              "Disc %",
-                              "GST %",
-                              "Taxable",
-                              "CGST",
-                              "SGST",
-                              "IGST",
-                              "Total",
-                            ].includes(heading)
-                              ? "text-right"
-                              : ""
-                          }`}
-                        >
-                          {heading}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredItems.map((item, index) => {
-                      const line = calculateLine(item, invoiceForm.taxMode);
-                      const rowIssues = itemIssuesById.get(item.id) ?? [];
-                      return (
-                        <tr key={item.id} className="bg-white hover:bg-slate-50">
-                          <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-500">
-                            {index + 1}
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 align-top">
-                            <div className="space-y-2">
-                              <input
-                                value={item.productName}
-                                onChange={(event) =>
-                                  updateItem(item.id, "productName", event.target.value)
-                                }
-                                className={`${compactInputClass} min-w-[15rem] font-semibold`}
-                                placeholder="Product name"
-                              />
-                              <input
-                                value={item.description}
-                                onChange={(event) =>
-                                  updateItem(item.id, "description", event.target.value)
-                                }
-                                className={`${compactInputClass} min-w-[15rem] text-xs`}
-                                placeholder="Description"
-                              />
-                              {rowIssues.length ? (
-                                <div className="space-y-1">
-                                  {rowIssues.map((issue) => (
-                                    <p key={issue} className="text-xs font-medium text-red-600">
-                                      {issue}
-                                    </p>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 align-top">
-                            <input
-                              value={item.hsn}
-                              onChange={(event) =>
-                                updateItem(item.id, "hsn", event.target.value)
-                              }
-                              className="w-28 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 align-top">
-                            <input
-                              value={item.uom}
-                              onChange={(event) =>
-                                updateItem(item.id, "uom", event.target.value)
-                              }
-                              className="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.orderedQty}
-                              onChange={(event) =>
-                                updateItem(item.id, "orderedQty", event.target.value)
-                              }
-                              className="w-24 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-right text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.receivedQty}
-                              onChange={(event) =>
-                                updateItem(item.id, "receivedQty", event.target.value)
-                              }
-                              className="w-24 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-right text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.unitPrice}
-                              onChange={(event) =>
-                                updateItem(item.id, "unitPrice", event.target.value)
-                              }
-                              className="w-28 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-right text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.discount}
-                              onChange={(event) =>
-                                updateItem(item.id, "discount", event.target.value)
-                              }
-                              className="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-right text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.tax}
-                              onChange={(event) =>
-                                updateItem(item.id, "tax", event.target.value)
-                              }
-                              className="w-20 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-right text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            />
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-800">
-                            {formatInrCurrency(line.taxable)}
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 text-right align-top text-slate-700">
-                            {formatInrCurrency(line.cgstAmount)}
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 text-right align-top text-slate-700">
-                            {formatInrCurrency(line.sgstAmount)}
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 text-right align-top text-slate-700">
-                            {formatInrCurrency(line.igstAmount)}
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-bold text-slate-950">
-                            {formatInrCurrency(line.lineTotal)}
-                          </td>
-                          <td className="border-b border-slate-100 px-3 py-3 align-top">
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => duplicateRow(item.id)}
-                                className="grid h-9 w-9 place-items-center rounded-lg text-blue-600 hover:bg-blue-50"
-                                aria-label="Duplicate row"
-                              >
-                                <Copy className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteRow(item.id)}
-                                className="grid h-9 w-9 place-items-center rounded-lg text-red-600 hover:bg-red-50"
-                                aria-label="Delete row"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot className="bg-slate-50 font-bold text-slate-950">
-                    <tr>
-                      <td className="px-3 py-3" colSpan={4}>
-                        Total
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        {items
-                          .reduce((sum, item) => sum + toNumber(item.orderedQty), 0)
-                          .toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        {totals.totalQuantity.toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-3 py-3" colSpan={3} />
-                      <td className="px-3 py-3 text-right">
-                        {formatInrCurrency(totals.taxable)}
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        {formatInrCurrency(totals.cgst)}
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        {formatInrCurrency(totals.sgst)}
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        {formatInrCurrency(totals.igst)}
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        {formatInrCurrency(totals.grandTotal)}
-                      </td>
-                      <td className="px-3 py-3" />
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-
-              <div className="grid gap-3 p-4 lg:hidden">
-                {filteredItems.map((item, index) => {
-                  const line = calculateLine(item, invoiceForm.taxMode);
-                  const rowIssues = itemIssuesById.get(item.id) ?? [];
-                  return (
-                    <div key={item.id} className="rounded-lg border border-slate-200 bg-white p-3">
-                      <div className="mb-3 flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-semibold text-slate-400">Row {index + 1}</p>
-                          <p className="font-semibold text-slate-900">
-                            {item.productName || "New item"}
-                          </p>
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            type="button"
-                            onClick={() => duplicateRow(item.id)}
-                            className="grid h-8 w-8 place-items-center rounded-lg text-blue-600 hover:bg-blue-50"
-                            aria-label="Duplicate row"
-                          >
-                            <Copy className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteRow(item.id)}
-                            className="grid h-8 w-8 place-items-center rounded-lg text-red-600 hover:bg-red-50"
-                            aria-label="Delete row"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <TextInput
-                          label="Item"
-                          value={item.productName}
-                          onChange={(event) =>
-                            updateItem(item.id, "productName", event.target.value)
-                          }
-                        />
-                        <TextInput
-                          label="HSN"
-                          value={item.hsn}
-                          onChange={(event) => updateItem(item.id, "hsn", event.target.value)}
-                        />
-                        <TextInput
-                          label="UOM"
-                          value={item.uom}
-                          onChange={(event) => updateItem(item.id, "uom", event.target.value)}
-                        />
-                        <TextInput
-                          label="Received Qty"
-                          type="number"
-                          value={item.receivedQty}
-                          onChange={(event) =>
-                            updateItem(item.id, "receivedQty", event.target.value)
-                          }
-                        />
-                        <TextInput
-                          label="Unit Price"
-                          type="number"
-                          value={item.unitPrice}
-                          onChange={(event) =>
-                            updateItem(item.id, "unitPrice", event.target.value)
-                          }
-                        />
-                        <TextInput
-                          label="GST %"
-                          type="number"
-                          value={item.tax}
-                          onChange={(event) => updateItem(item.id, "tax", event.target.value)}
-                        />
-                      </div>
-                      {rowIssues.length ? (
-                        <div className="mt-3 space-y-1">
-                          {rowIssues.map((issue) => (
-                            <p key={issue} className="text-xs font-medium text-red-600">
-                              {issue}
-                            </p>
-                          ))}
-                        </div>
-                      ) : null}
-                      <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm">
-                        <TaxRow label="Taxable" value={formatInrCurrency(line.taxable)} />
-                        <TaxRow label="Tax" value={formatInrCurrency(line.taxAmount)} />
-                        <TaxRow label="Total" value={formatInrCurrency(line.lineTotal)} strong />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {filteredItems.length === 0 ? (
-                <div className="p-8 text-center text-sm text-slate-500">
-                  No invoice items match the current search.
-                </div>
-              ) : null}
-            </Card>
-
-            <div className="grid gap-5 lg:grid-cols-2">
-              <Card className="p-5">
-                <SectionTitle icon={Paperclip} title="Attachments">
-                  Supplier invoice, challan, and support documents
-                </SectionTitle>
-                <button
-                  type="button"
-                  onClick={addDummyFile}
-                  className="grid w-full place-items-center rounded-lg border border-dashed border-blue-300 bg-blue-50/60 px-4 py-7 text-center text-sm text-slate-600 transition hover:bg-blue-50"
-                >
-                  <UploadCloud className="mb-3 h-8 w-8 text-blue-600" />
-                  <span className="font-semibold text-slate-800">Add supporting file</span>
-                  <span className="mt-1 text-blue-600">UI placeholder upload</span>
-                </button>
-                <div className="mt-5 space-y-3">
-                  {files.map((file) => (
-                    <div
-                      key={file.id}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <FileText className="h-4 w-4 shrink-0 text-red-500" />
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-800">
-                            {file.name}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {file.type} - {file.size}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeFile(file.id)}
-                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-red-600 hover:bg-red-50"
-                        aria-label={`Remove ${file.name}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-
-              <Card className="p-5">
-                <SectionTitle icon={FileText} title="Notes">
-                  Internal, supplier, and delivery instructions
-                </SectionTitle>
-                <div className="grid gap-4">
-                  <Field label="Internal Notes">
-                    <textarea
-                      value={notes.internal}
-                      onChange={(event) =>
-                        setNotes((current) => ({ ...current, internal: event.target.value }))
-                      }
-                      className={`${inputClass} min-h-20 resize-none`}
-                    />
-                  </Field>
-                  <Field label="Supplier Notes">
-                    <textarea
-                      value={notes.supplier}
-                      onChange={(event) =>
-                        setNotes((current) => ({ ...current, supplier: event.target.value }))
-                      }
-                      className={`${inputClass} min-h-20 resize-none`}
-                    />
-                  </Field>
-                  <Field label="Delivery Instructions">
-                    <textarea
-                      value={notes.delivery}
-                      onChange={(event) =>
-                        setNotes((current) => ({ ...current, delivery: event.target.value }))
-                      }
-                      className={`${inputClass} min-h-20 resize-none`}
-                    />
-                  </Field>
-                </div>
-              </Card>
-            </div>
-          </div>
-
-          <aside className="space-y-5 xl:sticky xl:top-4 xl:self-start">
-            <ValidationPanel issues={validationIssues} showValidation={showValidation} />
-
-            <Card className="p-5">
-              <SectionTitle icon={BadgeIndianRupee} title="Tax Breakdown">
-                Invoice value summary
-              </SectionTitle>
-              <div className="space-y-4">
-                <TaxRow label="Subtotal" value={formatInrCurrency(totals.subtotal)} />
-                <TaxRow label="Discount" value={`-${formatInrCurrency(totals.discount)}`} danger />
-                <TaxRow label="Taxable Value" value={formatInrCurrency(totals.taxable)} />
-                <TaxRow label="CGST" value={formatInrCurrency(totals.cgst)} />
-                <TaxRow label="SGST" value={formatInrCurrency(totals.sgst)} />
-                <TaxRow label="IGST" value={formatInrCurrency(totals.igst)} />
-                <TaxRow label="Round Off" value={formatInrCurrency(totals.roundOff)} />
-                <div className="border-t border-slate-200 pt-4">
-                  <TaxRow label="Grand Total" value={formatInrCurrency(totals.grandTotal)} strong />
-                </div>
-              </div>
-            </Card>
-
-            <Card className="p-5">
-              <SectionTitle icon={BadgeIndianRupee} tone="green" title="Payment">
-                Settlement method and due amount
-              </SectionTitle>
-              <div className="grid gap-4">
-                <SelectInput
-                  label="Payment Status"
-                  value={payment.status}
-                  onChange={(event) => updatePayment("status", event.target.value)}
-                >
-                  {paymentStatuses.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </SelectInput>
-                <TextInput
-                  label="Payment Method"
-                  list="payment-method-options"
-                  value={payment.mode}
-                  onChange={(event) => updatePayment("mode", event.target.value)}
-                  placeholder="Enter payment method"
-                />
-                <datalist id="payment-method-options">
-                  {paymentModes.map((option) => (
-                    <option key={option} value={option} />
-                  ))}
-                </datalist>
-                <TextInput
-                  label="Paid Amount"
-                  type="number"
-                  min="0"
-                  value={payment.paidAmount}
-                  onChange={(event) => updatePayment("paidAmount", event.target.value)}
-                />
-                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                  <TaxRow label="Due Amount" value={formatInrCurrency(totals.dueAmount)} strong />
-                </div>
-              </div>
-            </Card>
-
-            <Card className="p-5">
-              <SectionTitle icon={PackageCheck} tone="green" title="Inventory Impact">
-                Approval stock preview
-              </SectionTitle>
-              <div className="space-y-3">
-                {inventoryImpactItems.length ? (
-                  inventoryImpactItems.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-800">
-                          {item.productName || item.productCode}
-                        </p>
-                        <p className="text-xs text-slate-500">HSN {item.hsn || "-"}</p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-green-50 px-2.5 py-1 text-xs font-bold text-green-700">
-                        +{toNumber(item.receivedQty).toLocaleString("en-IN")} {item.uom}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-500">No item impact yet.</p>
-                )}
-              </div>
-            </Card>
-
-            <Card className="p-5">
-              <SectionTitle icon={ShieldCheck} tone="green" title="Approval Workflow">
-                UI-only status trail
-              </SectionTitle>
-              <div className="space-y-4">
-                {workflowSteps.map((step, index) => {
-                  const done =
-                    status === "Approved" ||
-                    index === 0 ||
-                    (status === "Submitted" && index <= 1) ||
-                    (status === "Rejected" && index <= 1);
-                  return (
-                    <div key={step.id} className="flex gap-3">
-                      <div className="flex flex-col items-center">
-                        <span
-                          className={`grid h-6 w-6 place-items-center rounded-full border ${
-                            done
-                              ? "border-green-200 bg-green-50 text-green-700"
-                              : "border-slate-200 bg-white text-slate-400"
-                          }`}
-                        >
-                          {done ? (
-                            <CheckCircle2 className="h-4 w-4" />
-                          ) : (
-                            <CircleDot className="h-3 w-3" />
-                          )}
-                        </span>
-                        {index < workflowSteps.length - 1 ? (
-                          <span className="mt-1 h-8 w-px bg-slate-200" />
-                        ) : null}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-800">{step.title}</p>
-                        <p className="text-xs text-slate-500">{done ? step.person : "Pending"}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-
-            <Card className="p-5">
-              <SectionTitle icon={ClipboardCheck} title="Activity Timeline">
-                Recent invoice events
-              </SectionTitle>
-              <div className="space-y-4">
-                {activityTimeline.map((entry, index) => (
-                  <div key={entry.id} className="flex gap-3">
-                    <div className="flex flex-col items-center">
-                      <span className="grid h-5 w-5 place-items-center rounded-full bg-blue-50 text-blue-600">
-                        <CircleDot className="h-3 w-3" />
-                      </span>
-                      {index < activityTimeline.length - 1 ? (
-                        <span className="mt-1 h-8 w-px bg-slate-200" />
-                      ) : null}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm font-semibold text-slate-800">{entry.title}</p>
-                        <span className="shrink-0 text-right text-xs text-slate-500">
-                          {entry.time}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">by {entry.by}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </aside>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/inventory/invoices"
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Invoice Register
+          </Link>
+          <span
+            className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${
+              statusStyles[status] ?? statusStyles.Draft
+            }`}
+          >
+            {status}
+          </span>
         </div>
       </div>
 
-      <div className="sticky bottom-3 z-30 mt-6 rounded-lg border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur">
+      {loadError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+        </div>
+      ) : null}
+      {saveMessage ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+          {saveMessage}
+        </div>
+      ) : null}
+
+      <div className="grid gap-6 xl:grid-cols-[2fr,1fr]">
+        <div className="space-y-6">
+          <Card
+            title="Source Receipt"
+            action={
+              <button
+                type="button"
+                onClick={() => void loadSources()}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </button>
+            }
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Received Goods" required>
+                <select
+                  className={inputClass}
+                  value={selectedReceiptId}
+                  onChange={(event) => handleReceiptChange(event.target.value)}
+                >
+                  <option value="">Select received goods</option>
+                  {receiptOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <div>Receipt Date: {formatDate(selectedReceipt?.receivedDate)}</div>
+                <div className="mt-1">
+                  Purchase Order: {selectedReceipt?.purchaseOrderId ? `PO-${selectedReceipt.purchaseOrderId}` : "-"}
+                </div>
+                <div className="mt-1">
+                  Existing receipt invoice: {selectedReceipt?.invoiceNumber || "-"}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card title="Invoice Details">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <Field label="Invoice Number" required>
+                <input
+                  className={inputClass}
+                  value={invoiceForm.invoiceNumber}
+                  onChange={(event) =>
+                    setInvoiceForm((current) => ({ ...current, invoiceNumber: event.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Invoice Date" required>
+                <DateInput
+                  value={invoiceForm.invoiceDate}
+                  onChange={(value) => setInvoiceForm((current) => ({ ...current, invoiceDate: value }))}
+                />
+              </Field>
+              <Field label="Due Date">
+                <DateInput
+                  value={invoiceForm.dueDate}
+                  onChange={(value) => setInvoiceForm((current) => ({ ...current, dueDate: value }))}
+                />
+              </Field>
+              <Field label="PO Reference" required>
+                <input
+                  className={inputClass}
+                  value={invoiceForm.poReference}
+                  onChange={(event) =>
+                    setInvoiceForm((current) => ({ ...current, poReference: event.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Payment Terms">
+                <select
+                  className={inputClass}
+                  value={invoiceForm.paymentTerms}
+                  onChange={(event) =>
+                    setInvoiceForm((current) => ({ ...current, paymentTerms: event.target.value }))
+                  }
+                >
+                  {paymentTerms.map((term) => (
+                    <option key={term} value={term}>
+                      {term}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Tax Mode">
+                <select
+                  className={inputClass}
+                  value={invoiceForm.taxMode}
+                  onChange={(event) =>
+                    setInvoiceForm((current) => ({ ...current, taxMode: event.target.value }))
+                  }
+                >
+                  <option value="intra">Intra State</option>
+                  <option value="inter">Inter State</option>
+                </select>
+              </Field>
+              <Field label="Place Of Supply">
+                <input
+                  className={inputClass}
+                  value={invoiceForm.placeOfSupply}
+                  onChange={(event) =>
+                    setInvoiceForm((current) => ({ ...current, placeOfSupply: event.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Reverse Charge">
+                <select
+                  className={inputClass}
+                  value={invoiceForm.reverseCharge}
+                  onChange={(event) =>
+                    setInvoiceForm((current) => ({ ...current, reverseCharge: event.target.value }))
+                  }
+                >
+                  <option value="No">No</option>
+                  <option value="Yes">Yes</option>
+                </select>
+              </Field>
+              <Field label="IRN">
+                <input
+                  className={inputClass}
+                  value={invoiceForm.irn}
+                  onChange={(event) =>
+                    setInvoiceForm((current) => ({ ...current, irn: event.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="QR Reference">
+                <input
+                  className={inputClass}
+                  value={invoiceForm.qrReference}
+                  onChange={(event) =>
+                    setInvoiceForm((current) => ({ ...current, qrReference: event.target.value }))
+                  }
+                />
+              </Field>
+            </div>
+          </Card>
+
+          <Card title="Supplier And Buyer">
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-slate-900">Supplier</h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="Vendor Name" required>
+                    <input
+                      className={inputClass}
+                      value={supplierForm.name}
+                      onChange={(event) => updateParty(setSupplierForm, "name", event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Contact Person">
+                    <input
+                      className={inputClass}
+                      value={supplierForm.contactPerson}
+                      onChange={(event) =>
+                        updateParty(setSupplierForm, "contactPerson", event.target.value)
+                      }
+                    />
+                  </Field>
+                  <Field label="Phone">
+                    <input
+                      className={inputClass}
+                      value={supplierForm.phone}
+                      onChange={(event) => updateParty(setSupplierForm, "phone", event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Email">
+                    <input
+                      className={inputClass}
+                      value={supplierForm.email}
+                      onChange={(event) => updateParty(setSupplierForm, "email", event.target.value)}
+                    />
+                  </Field>
+                  <Field label="GSTIN" required>
+                    <input
+                      className={inputClass}
+                      value={supplierForm.gstNumber}
+                      onChange={(event) =>
+                        updateParty(setSupplierForm, "gstNumber", event.target.value.toUpperCase())
+                      }
+                    />
+                  </Field>
+                  <Field label="State">
+                    <input
+                      className={inputClass}
+                      value={supplierForm.state}
+                      onChange={(event) => updateParty(setSupplierForm, "state", event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Address">
+                    <textarea
+                      className={inputClass}
+                      rows={3}
+                      value={supplierForm.address}
+                      onChange={(event) =>
+                        updateParty(setSupplierForm, "address", event.target.value)
+                      }
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-slate-900">Buyer</h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="Company Name" required>
+                    <input
+                      className={inputClass}
+                      value={buyerForm.companyName}
+                      onChange={(event) => updateParty(setBuyerForm, "companyName", event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Contact Person">
+                    <input
+                      className={inputClass}
+                      value={buyerForm.contactPerson}
+                      onChange={(event) =>
+                        updateParty(setBuyerForm, "contactPerson", event.target.value)
+                      }
+                    />
+                  </Field>
+                  <Field label="Email">
+                    <input
+                      className={inputClass}
+                      value={buyerForm.email}
+                      onChange={(event) => updateParty(setBuyerForm, "email", event.target.value)}
+                    />
+                  </Field>
+                  <Field label="GSTIN" required>
+                    <input
+                      className={inputClass}
+                      value={buyerForm.gstNumber}
+                      onChange={(event) =>
+                        updateParty(setBuyerForm, "gstNumber", event.target.value.toUpperCase())
+                      }
+                    />
+                  </Field>
+                  <Field label="State">
+                    <input
+                      className={inputClass}
+                      value={buyerForm.state}
+                      onChange={(event) => updateParty(setBuyerForm, "state", event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Address">
+                    <textarea
+                      className={inputClass}
+                      rows={3}
+                      value={buyerForm.address}
+                      onChange={(event) => updateParty(setBuyerForm, "address", event.target.value)}
+                    />
+                  </Field>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card
+            title="Invoice Items"
+            action={
+              <button
+                type="button"
+                onClick={handleAddRow}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700"
+              >
+                <Plus className="h-4 w-4" />
+                Add Row
+              </button>
+            }
+          >
+            <div className="space-y-4">
+              {items.map((item) => {
+                const line = calculateLine(item, invoiceForm.taxMode);
+                return (
+                  <div key={item.id} className="rounded-lg border border-slate-200 p-4">
+                    <div className="grid gap-4 xl:grid-cols-6">
+                      <Field label="Item Name">
+                        <input
+                          className={inputClass}
+                          value={item.productName}
+                          onChange={(event) => updateItem(item.id, "productName", event.target.value)}
+                        />
+                      </Field>
+                      <Field label="HSN" required>
+                        <input
+                          className={inputClass}
+                          value={item.hsn}
+                          onChange={(event) => updateItem(item.id, "hsn", event.target.value)}
+                        />
+                      </Field>
+                      <Field label="UOM">
+                        <input
+                          className={inputClass}
+                          value={item.uom}
+                          onChange={(event) => updateItem(item.id, "uom", event.target.value)}
+                        />
+                      </Field>
+                      <Field label="Ordered Qty">
+                        <input
+                          className={inputClass}
+                          value={item.orderedQty}
+                          onChange={(event) => updateItem(item.id, "orderedQty", event.target.value)}
+                        />
+                      </Field>
+                      <Field label="Invoice Qty" required>
+                        <input
+                          className={inputClass}
+                          value={item.receivedQty}
+                          onChange={(event) => updateItem(item.id, "receivedQty", event.target.value)}
+                        />
+                      </Field>
+                      <Field label="Unit Price">
+                        <input
+                          className={inputClass}
+                          value={item.unitPrice}
+                          onChange={(event) => updateItem(item.id, "unitPrice", event.target.value)}
+                        />
+                      </Field>
+                      <Field label="Discount %">
+                        <input
+                          className={inputClass}
+                          value={item.discount}
+                          onChange={(event) => updateItem(item.id, "discount", event.target.value)}
+                        />
+                      </Field>
+                      <Field label="GST %">
+                        <input
+                          className={inputClass}
+                          value={item.tax}
+                          onChange={(event) => updateItem(item.id, "tax", event.target.value)}
+                        />
+                      </Field>
+                      <Field label="Batch No">
+                        <input
+                          className={inputClass}
+                          value={item.batchNo}
+                          onChange={(event) => updateItem(item.id, "batchNo", event.target.value)}
+                        />
+                      </Field>
+                      <Field label="Expiry Date">
+                        <DateInput
+                          value={item.expiryDate}
+                          onChange={(value) => updateItem(item.id, "expiryDate", value)}
+                        />
+                      </Field>
+                      <Field label="Description">
+                        <textarea
+                          className={inputClass}
+                          rows={2}
+                          value={item.description}
+                          onChange={(event) => updateItem(item.id, "description", event.target.value)}
+                        />
+                      </Field>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <div>Taxable: {formatInrCurrency(line.taxable)}</div>
+                        <div className="mt-1">Total: {formatInrCurrency(line.lineTotal)}</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateRow(item.id)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                          >
+                            <Plus className="h-4 w-4" />
+                            Duplicate
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRow(item.id)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          <Card title="Attachments">
+            <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700"
+              >
+                <Paperclip className="h-4 w-4" />
+                Upload Attachment
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {files.length ? (
+                files.map((file) => (
+                  <div
+                    key={file.id || file.name}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 px-4 py-3"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">{file.name}</div>
+                      <div className="text-xs text-slate-500">
+                        {file.type || "File"} • {Math.max(1, Math.round((Number(file.size) || 0) / 1024))} KB
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFiles((current) => current.filter((entry) => entry !== file))}
+                      className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Remove
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+                  No attachments uploaded yet.
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Card title="Notes And Payment">
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="space-y-4">
+                <Field label="Internal Notes">
+                  <textarea
+                    className={inputClass}
+                    rows={3}
+                    value={notes.internal}
+                    onChange={(event) =>
+                      setNotes((current) => ({ ...current, internal: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label="Supplier Notes">
+                  <textarea
+                    className={inputClass}
+                    rows={3}
+                    value={notes.supplier}
+                    onChange={(event) =>
+                      setNotes((current) => ({ ...current, supplier: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label="Delivery Notes">
+                  <textarea
+                    className={inputClass}
+                    rows={3}
+                    value={notes.delivery}
+                    onChange={(event) =>
+                      setNotes((current) => ({ ...current, delivery: event.target.value }))
+                    }
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Payment Status">
+                  <select
+                    className={inputClass}
+                    value={payment.status}
+                    onChange={(event) =>
+                      setPayment((current) => ({ ...current, status: event.target.value }))
+                    }
+                  >
+                    {paymentStatuses.map((entry) => (
+                      <option key={entry} value={entry}>
+                        {entry}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Payment Mode">
+                  <select
+                    className={inputClass}
+                    value={payment.mode}
+                    onChange={(event) =>
+                      setPayment((current) => ({ ...current, mode: event.target.value }))
+                    }
+                  >
+                    {paymentModes.map((entry) => (
+                      <option key={entry} value={entry}>
+                        {entry}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Bank Name">
+                  <input
+                    className={inputClass}
+                    value={payment.bankName}
+                    onChange={(event) =>
+                      setPayment((current) => ({ ...current, bankName: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label="Account Number">
+                  <input
+                    className={inputClass}
+                    value={payment.accountNumber}
+                    onChange={(event) =>
+                      setPayment((current) => ({ ...current, accountNumber: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label="IFSC">
+                  <input
+                    className={inputClass}
+                    value={payment.ifsc}
+                    onChange={(event) =>
+                      setPayment((current) => ({ ...current, ifsc: event.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label="Paid Amount">
+                  <input
+                    className={inputClass}
+                    value={payment.paidAmount}
+                    onChange={(event) =>
+                      setPayment((current) => ({ ...current, paidAmount: event.target.value }))
+                    }
+                  />
+                </Field>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          <Card title="Validation">
+            {showValidation && validationIssues.length ? (
+              <div className="space-y-2">
+                {validationIssues.map((issue) => (
+                  <div
+                    key={issue}
+                    className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700"
+                  >
+                    {issue}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-700">
+                <CheckCircle2 className="mr-2 inline h-4 w-4" />
+                {validationIssues.length
+                  ? "Validation will appear when you try to submit or approve."
+                  : "Invoice is ready to save and move forward."}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Totals">
+            <div className="space-y-3 text-sm text-slate-700">
+              <div className="flex items-center justify-between">
+                <span>Total Items</span>
+                <strong>{totals.totalItems}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Total Quantity</span>
+                <strong>{totals.totalQuantity.toLocaleString("en-IN")}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Subtotal</span>
+                <strong>{formatInrCurrency(totals.subtotal)}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Discount</span>
+                <strong>{formatInrCurrency(totals.discount)}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Tax</span>
+                <strong>{formatInrCurrency(totals.taxAmount)}</strong>
+              </div>
+              <div className="flex items-center justify-between text-base font-semibold text-slate-950">
+                <span>Grand Total</span>
+                <span>{formatInrCurrency(totals.grandTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Due Amount</span>
+                <strong>{formatInrCurrency(totals.dueAmount)}</strong>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      <div className="sticky bottom-3 z-30 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <ActionButton icon={ArrowLeft} onClick={() => window.history.back()}>
-            Back
-          </ActionButton>
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm"
+          >
+            <XCircle className="h-4 w-4" />
+            Cancel
+          </button>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <ActionButton onClick={() => setActionNotice("No changes were sent to the server.")}>
-              Cancel
-            </ActionButton>
-            <ActionButton icon={Save} onClick={() => changeStatus("Draft")}>
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => void persistInvoice("Draft")}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm"
+            >
+              <Save className="h-4 w-4" />
               Save Draft
-            </ActionButton>
-            <ActionButton icon={Send} variant="primary" onClick={() => changeStatus("Submitted")}>
+            </button>
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => void persistInvoice("Submitted")}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-blue-600 bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm"
+            >
+              {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Submit
-            </ActionButton>
-            <ActionButton
-              icon={CheckCircle2}
-              variant="success"
-              onClick={() => changeStatus("Approved")}
+            </button>
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => void persistInvoice("Approved")}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-green-600 bg-green-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm"
             >
+              <CheckCircle2 className="h-4 w-4" />
               Approve
-            </ActionButton>
-            <ActionButton icon={XCircle} variant="danger" onClick={() => changeStatus("Rejected")}>
-              Reject
-            </ActionButton>
-            <ActionButton icon={Printer} onClick={() => window.print()}>
-              Print
-            </ActionButton>
-            <ActionButton
-              icon={Download}
-              onClick={() => setActionNotice("PDF export is a placeholder for this pass.")}
+            </button>
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => void persistInvoice("Rejected")}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2 text-sm font-semibold text-red-700 shadow-sm"
             >
+              <AlertTriangle className="h-4 w-4" />
+              Reject
+            </button>
+            <button
+              type="button"
+              onClick={() => openPrintableWindow(true)}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm"
+            >
+              <Printer className="h-4 w-4" />
+              Print
+            </button>
+            <button
+              type="button"
+              onClick={() => openPrintableWindow(true)}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm"
+            >
+              <Download className="h-4 w-4" />
               Download PDF
-            </ActionButton>
+            </button>
           </div>
         </div>
       </div>

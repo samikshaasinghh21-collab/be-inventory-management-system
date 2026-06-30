@@ -37,6 +37,7 @@ export const normalizeProjectRecord = (project = {}) => ({
     project.customerId ??
     project.CustomerId ??
     null,
+  locationId: project.locationId ?? project.LocationId ?? null,
   client: formatCustomerName(project.client ?? project.Client ?? ""),
   companyName:
     formatCustomerName(
@@ -87,8 +88,12 @@ export const normalizeProjectRecord = (project = {}) => ({
   priority: project.priority ?? project.Priority ?? "Medium",
   projectManager:
     project.projectManager ?? project.ProjectManager ?? project.manager ?? "",
+  projectManagerId:
+    project.projectManagerId ?? project.ProjectManagerId ?? null,
   siteEngineer: project.siteEngineer ?? project.SiteEngineer ?? "",
+  siteEngineerId: project.siteEngineerId ?? project.SiteEngineerId ?? null,
   teamLead: project.teamLead ?? project.TeamLead ?? "",
+  teamLeadId: project.teamLeadId ?? project.TeamLeadId ?? null,
   department: project.department ?? project.Department ?? "",
   actualEndDate: normalizeProjectDate(
     project.actualEndDate ?? project.ActualEndDate

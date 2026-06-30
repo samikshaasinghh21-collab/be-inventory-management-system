@@ -8,6 +8,7 @@ import { fetchLocations } from "../../services/locationsApi";
 import { saveProduct } from "../../services/productsStore";
 import { TAX_OPTIONS, formatTaxPercentage } from "../../utils/taxUtils";
 import { roundUnitPrice } from "../../utils/formatters";
+import { transformUppercaseFieldValue } from "../../utils/inputTransform";
 import DateInput from "../common/DateInput";
 
 const UNIT_OPTIONS = [
@@ -24,6 +25,16 @@ const UNIT_OPTIONS = [
 
 const STATUS_OPTIONS = ["Valid", "Inactive"];
 const ADD_NEW_BRAND_VALUE = "__add_new_brand__";
+const UPPERCASE_FIELDS = [
+  "sku",
+  "name",
+  "customBrand",
+  "customCategory",
+  "hsn",
+  "description",
+  "remarks",
+  "prepBy",
+];
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -212,11 +223,13 @@ const CreateProduct = () => {
 
   const updateField = (key, value) => {
     const nextValue =
-      key === "price" && value !== "" ? String(roundUnitPrice(value)) : value;
+      key === "price" && value !== ""
+        ? String(roundUnitPrice(value))
+        : transformUppercaseFieldValue(key, value, UPPERCASE_FIELDS);
     setForm((prev) => {
       const next = { ...prev, [key]: nextValue };
       if (key === "prepBy") {
-        next.updatedBy = value;
+        next.updatedBy = nextValue;
       }
       if (key === "brand" && value !== ADD_NEW_BRAND_VALUE) {
         next.customBrand = "";

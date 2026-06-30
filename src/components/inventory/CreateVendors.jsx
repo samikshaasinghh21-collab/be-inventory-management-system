@@ -5,6 +5,7 @@ import {
   fetchVendors,
   syncVendorsCache,
 } from "../../services/vendorsApi";
+import { transformUppercaseFieldValue } from "../../utils/inputTransform";
 
 const createEmptyContact = () => ({
   id: Date.now() + Math.random(),
@@ -59,6 +60,25 @@ const initialForm = {
   Pincode: "",
 };
 
+const UPPERCASE_FIELDS = [
+  "VendorName",
+  "Phone",
+  "Email",
+  "GSTNumber",
+  "PANNumber",
+  "BankAccountName",
+  "BankAccountNumber",
+  "BankName",
+  "IFSCCode",
+  "BankBranch",
+  "Address",
+  "City",
+  "State",
+  "Pincode",
+];
+
+const UPPERCASE_CONTACT_FIELDS = ["contactName", "email", "designation", "phone"];
+
 const CreateVendors = () => {
   const navigate = useNavigate();
   const [form, setForm] = useState(initialForm);
@@ -68,7 +88,10 @@ const CreateVendors = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const updateField = (key, value) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => ({
+      ...prev,
+      [key]: transformUppercaseFieldValue(key, value, UPPERCASE_FIELDS),
+    }));
     if (errors[key]) {
       setErrors((prev) => ({ ...prev, [key]: undefined }));
     }
@@ -77,7 +100,16 @@ const CreateVendors = () => {
   const updateContact = (id, key, value) => {
     setContacts((prev) =>
       prev.map((contact) =>
-        contact.id === id ? { ...contact, [key]: value } : contact
+        contact.id === id
+          ? {
+              ...contact,
+              [key]: transformUppercaseFieldValue(
+                key,
+                value,
+                UPPERCASE_CONTACT_FIELDS
+              ),
+            }
+          : contact
       )
     );
   };

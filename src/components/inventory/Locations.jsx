@@ -9,6 +9,7 @@ import {
 import useSettings from "../../hooks/useSettings";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
+import { transformUppercaseFieldValue } from "../../utils/inputTransform";
 import DocumentViewPanel from "./DocumentViewPanel";
 
 const createFormState = () => ({
@@ -21,6 +22,8 @@ const createFormState = () => ({
   address: "",
   status: "Active",
 });
+
+const UPPERCASE_FIELDS = ["name", "code", "manager", "phone", "address"];
 
 const Locations = () => {
   const [projects, setProjects] = useState([]);
@@ -71,6 +74,13 @@ const Locations = () => {
     setForm(createFormState());
     setErrors({});
     setEditingId(null);
+  };
+
+  const updateField = (key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      [key]: transformUppercaseFieldValue(key, value, UPPERCASE_FIELDS),
+    }));
   };
 
   const validate = () => {
@@ -189,15 +199,13 @@ const Locations = () => {
               <label className="text-sm font-medium text-slate-700">
                 Location Name *
               </label>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, name: event.target.value }))
-                }
-                placeholder="Main Warehouse"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
-              />
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(event) => updateField("name", event.target.value)}
+                  placeholder="Main Warehouse"
+                  className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                />
               {errors.name && (
                 <p className="text-xs text-red-600 mt-1">{errors.name}</p>
               )}
@@ -206,15 +214,13 @@ const Locations = () => {
               <label className="text-sm font-medium text-slate-700">
                 Code
               </label>
-              <input
-                type="text"
-                value={form.code}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, code: event.target.value }))
-                }
-                placeholder="LOC-01"
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
-              />
+                <input
+                  type="text"
+                  value={form.code}
+                  onChange={(event) => updateField("code", event.target.value)}
+                  placeholder="LOC-01"
+                  className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                />
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
@@ -263,9 +269,7 @@ const Locations = () => {
               <input
                 type="text"
                 value={form.manager}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, manager: event.target.value }))
-                }
+                onChange={(event) => updateField("manager", event.target.value)}
                 placeholder="Contact person"
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
@@ -277,9 +281,7 @@ const Locations = () => {
               <input
                 type="text"
                 value={form.phone}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, phone: event.target.value }))
-                }
+                onChange={(event) => updateField("phone", event.target.value)}
                 placeholder="+1 555 123 4567"
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               />
@@ -290,9 +292,7 @@ const Locations = () => {
               </label>
               <textarea
                 value={form.address}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, address: event.target.value }))
-                }
+                onChange={(event) => updateField("address", event.target.value)}
                 placeholder="Street, city, state, ZIP"
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 min-h-[90px]"
               />

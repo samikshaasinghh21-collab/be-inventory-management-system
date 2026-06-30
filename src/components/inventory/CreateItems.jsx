@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createItem } from "../../services/inventoryApi";
 import { roundUnitPrice } from "../../utils/formatters";
+import { toSafeUppercase } from "../../utils/inputTransform";
 
 const GST_OPTIONS = [
   "None",
@@ -169,7 +170,7 @@ const CreateItems = () => {
                       </label>
                       <input
                         value={itemName}
-                        onChange={(e) => setItemName(e.target.value)}
+                        onChange={(e) => setItemName(toSafeUppercase(e.target.value))}
                         type="text"
                         placeholder="Ex: Maggie 20gm"
                         className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
@@ -203,7 +204,7 @@ const CreateItems = () => {
                     </label>
                     <input
                       value={hsn}
-                      onChange={(e) => setHsn(e.target.value)}
+                      onChange={(e) => setHsn(toSafeUppercase(e.target.value))}
                       type="text"
                       placeholder="Ex: 190590"
                       className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
@@ -216,7 +217,7 @@ const CreateItems = () => {
                     </label>
                     <input
                       value={description}
-                      onChange={(e) => setDescription(e.target.value)}
+                      onChange={(e) => setDescription(toSafeUppercase(e.target.value))}
                       type="text"
                       placeholder="Optional description"
                       className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"

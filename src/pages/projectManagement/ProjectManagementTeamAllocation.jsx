@@ -17,6 +17,7 @@ import DateInput from "../../components/common/DateInput";
 import {
   PROJECT_MANAGEMENT_PROJECTS_EVENT,
   getProjectManagementProjects,
+  hydrateProjectManagementProjects,
   setProjectManagementProjects,
 } from "../../services/projectManagementProjectsStore";
 import {
@@ -342,7 +343,9 @@ const ProjectManagementTeamAllocation = () => {
         PROJECT_MANAGEMENT_PROJECTS_EVENT,
         handleProjectsChange
       );
+      window.addEventListener("projects:changed", handleProjectsChange);
     }
+    void hydrateProjectManagementProjects().then(setProjects);
 
     return () => {
       if (typeof window !== "undefined") {
@@ -350,6 +353,7 @@ const ProjectManagementTeamAllocation = () => {
           PROJECT_MANAGEMENT_PROJECTS_EVENT,
           handleProjectsChange
         );
+        window.removeEventListener("projects:changed", handleProjectsChange);
       }
     };
   }, []);

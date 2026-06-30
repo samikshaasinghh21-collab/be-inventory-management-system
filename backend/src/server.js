@@ -1804,6 +1804,228 @@ const normalizeUploadedDocumentsInput = (documents = []) =>
     }))
     .filter((document) => document.name && document.dataUrl);
 
+const normalizeInvoiceStatus = (value) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "submitted") {
+    return "Submitted";
+  }
+  if (normalized === "approved") {
+    return "Approved";
+  }
+  if (normalized === "rejected") {
+    return "Rejected";
+  }
+  return "Draft";
+};
+
+const normalizeInvoicePartyInput = (party = {}) => ({
+  id: toNullableInt(party?.id ?? party?.Id ?? party?.vendorId ?? party?.VendorId),
+  name: normalizeOptionalString(party?.name ?? party?.Name) ?? "",
+  companyName:
+    normalizeOptionalString(party?.companyName ?? party?.CompanyName ?? party?.name) ?? "",
+  contactPerson:
+    normalizeOptionalString(
+      party?.contactPerson ?? party?.ContactPerson ?? party?.contactName ?? party?.ContactName
+    ) ?? "",
+  phone: normalizeOptionalString(party?.phone ?? party?.Phone) ?? "",
+  email: normalizeOptionalString(party?.email ?? party?.Email) ?? "",
+  gstNumber:
+    normalizeOptionalString(party?.gstNumber ?? party?.GSTNumber ?? party?.gst ?? party?.GST) ??
+    "",
+  address: normalizeOptionalString(party?.address ?? party?.Address) ?? "",
+  city: normalizeOptionalString(party?.city ?? party?.City) ?? "",
+  state: normalizeOptionalString(party?.state ?? party?.State) ?? "",
+  stateCode: normalizeOptionalString(party?.stateCode ?? party?.StateCode) ?? "",
+  pincode: normalizeOptionalString(party?.pincode ?? party?.Pincode) ?? "",
+});
+
+const normalizeInvoicePaymentInput = (payment = {}) => ({
+  status: normalizeOptionalString(payment?.status ?? payment?.Status) ?? "Unpaid",
+  mode: normalizeOptionalString(payment?.mode ?? payment?.Mode) ?? "Bank Transfer",
+  bankName: normalizeOptionalString(payment?.bankName ?? payment?.BankName) ?? "",
+  accountNumber:
+    normalizeOptionalString(payment?.accountNumber ?? payment?.AccountNumber) ?? "",
+  ifsc: normalizeOptionalString(payment?.ifsc ?? payment?.IFSC) ?? "",
+  paidAmount: Number(payment?.paidAmount ?? payment?.PaidAmount ?? 0) || 0,
+});
+
+const normalizeInvoiceNotesInput = (notes = {}) => ({
+  internal: normalizeOptionalString(notes?.internal ?? notes?.Internal) ?? "",
+  supplier: normalizeOptionalString(notes?.supplier ?? notes?.Supplier) ?? "",
+  delivery: normalizeOptionalString(notes?.delivery ?? notes?.Delivery) ?? "",
+});
+
+const roundInvoiceAmount = (value) => {
+  const numeric = Number(value) || 0;
+  return Math.round(numeric * 100) / 100;
+};
+
+const normalizeInvoiceItemInput = (item = {}, index = 0) => ({
+  id:
+    normalizeOptionalString(item?.id ?? item?.Id) ??
+    `item-${Date.now()}-${index}`,
+  sourceItemId: toNullableInt(
+    item?.sourceItemId ?? item?.SourceItemId ?? item?.receiveGoodsItemId ?? item?.ReceiveGoodsItemId
+  ),
+  poItemId: toNullableInt(item?.poItemId ?? item?.POItemId ?? item?.purchaseOrderItemId),
+  productCode: normalizeOptionalString(item?.productCode ?? item?.ProductCode) ?? "",
+  productName:
+    normalizeOptionalString(item?.productName ?? item?.ProductName ?? item?.name ?? item?.Name) ??
+    "",
+  description: normalizeOptionalString(item?.description ?? item?.Description) ?? "",
+  hsn: normalizeOptionalString(item?.hsn ?? item?.HSN) ?? "",
+  uom: normalizeOptionalString(item?.uom ?? item?.UOM ?? item?.unit ?? item?.Unit) ?? "PCS",
+  orderedQty: Number(item?.orderedQty ?? item?.OrderedQty ?? 0) || 0,
+  receivedQty: Number(item?.receivedQty ?? item?.ReceivedQty ?? 0) || 0,
+  unitPrice: Number(item?.unitPrice ?? item?.UnitPrice ?? 0) || 0,
+  discount: Number(item?.discount ?? item?.Discount ?? 0) || 0,
+  tax: Number(item?.tax ?? item?.Tax ?? item?.gst ?? item?.GST ?? 0) || 0,
+  batchNo: normalizeOptionalString(item?.batchNo ?? item?.BatchNo) ?? "",
+  expiryDate: normalizeOptionalString(item?.expiryDate ?? item?.ExpiryDate) ?? "",
+});
+
+const normalizeInvoiceItemsInput = (items = []) =>
+  (Array.isArray(items) ? items : []).map(normalizeInvoiceItemInput);
+
+const calculateInvoiceLine = (item = {}, taxMode = "intra") => {
+  const quantity = Number(item.receivedQty ?? 0) || 0;
+  const unitPrice = Number(item.unitPrice ?? 0) || 0;
+  const discountPercent = Number(item.discount ?? 0) || 0;
+  const taxPercent = Number(item.tax ?? 0) || 0;
+  const gross = quantity * unitPrice;
+  const discountAmount = (gross * discountPercent) / 100;
+  const taxable = Math.max(gross - discountAmount, 0);
+  const taxAmount = (taxable * taxPercent) / 100;
+  const isInter = String(taxMode).trim().toLowerCase() === "inter";
+  const cgstAmount = isInter ? 0 : taxAmount / 2;
+  const sgstAmount = isInter ? 0 : taxAmount / 2;
+  const igstAmount = isInter ? taxAmount : 0;
+
+  return {
+    gross: roundInvoiceAmount(gross),
+    discountAmount: roundInvoiceAmount(discountAmount),
+    taxable: roundInvoiceAmount(taxable),
+    cgstAmount: roundInvoiceAmount(cgstAmount),
+    sgstAmount: roundInvoiceAmount(sgstAmount),
+    igstAmount: roundInvoiceAmount(igstAmount),
+    taxAmount: roundInvoiceAmount(taxAmount),
+    lineTotal: roundInvoiceAmount(taxable + taxAmount),
+  };
+};
+
+const buildInvoiceTotalsSnapshot = (items = [], payment = {}, taxMode = "intra") => {
+  const summary = (Array.isArray(items) ? items : []).reduce(
+    (acc, item) => {
+      const line = calculateInvoiceLine(item, taxMode);
+      acc.totalItems += item.productName || item.productCode ? 1 : 0;
+      acc.totalQuantity += Number(item.receivedQty ?? 0) || 0;
+      acc.subtotal += line.gross;
+      acc.discount += line.discountAmount;
+      acc.taxable += line.taxable;
+      acc.cgst += line.cgstAmount;
+      acc.sgst += line.sgstAmount;
+      acc.igst += line.igstAmount;
+      acc.taxAmount += line.taxAmount;
+      acc.grandTotal += line.lineTotal;
+      return acc;
+    },
+    {
+      totalItems: 0,
+      totalQuantity: 0,
+      subtotal: 0,
+      discount: 0,
+      taxable: 0,
+      cgst: 0,
+      sgst: 0,
+      igst: 0,
+      taxAmount: 0,
+      grandTotal: 0,
+    }
+  );
+
+  const roundedGrandTotal = Math.round(summary.grandTotal);
+  const paidAmount = Number(payment?.paidAmount ?? 0) || 0;
+
+  return {
+    totalItems: summary.totalItems,
+    totalQuantity: roundInvoiceAmount(summary.totalQuantity),
+    subtotal: roundInvoiceAmount(summary.subtotal),
+    discount: roundInvoiceAmount(summary.discount),
+    taxable: roundInvoiceAmount(summary.taxable),
+    cgst: roundInvoiceAmount(summary.cgst),
+    sgst: roundInvoiceAmount(summary.sgst),
+    igst: roundInvoiceAmount(summary.igst),
+    taxAmount: roundInvoiceAmount(summary.taxAmount),
+    roundOff: roundInvoiceAmount(roundedGrandTotal - summary.grandTotal),
+    grandTotal: roundedGrandTotal,
+    dueAmount: roundInvoiceAmount(Math.max(roundedGrandTotal - paidAmount, 0)),
+  };
+};
+
+const normalizeInvoice = (row = {}) => {
+  const invoiceId = row.InvoiceId ?? row.invoiceId ?? row.Id ?? row.id ?? null;
+  const supplier = parseJsonObject(row.SupplierJson ?? row.supplierJson);
+  const buyer = parseJsonObject(row.BuyerJson ?? row.buyerJson);
+  const items = parseJsonArray(row.ItemsJson ?? row.itemsJson).map((item, index) =>
+    normalizeInvoiceItemInput(item, index)
+  );
+  const payment = normalizeInvoicePaymentInput(
+    parseJsonObject(row.PaymentJson ?? row.paymentJson)
+  );
+  const notes = normalizeInvoiceNotesInput(parseJsonObject(row.NotesJson ?? row.notesJson));
+  const documents = normalizeUploadedDocumentsInput(
+    parseJsonArray(row.DocumentsJson ?? row.documentsJson)
+  );
+  const taxMode =
+    String(row.TaxMode ?? row.taxMode ?? "intra").trim().toLowerCase() === "inter"
+      ? "inter"
+      : "intra";
+  const totals =
+    parseJsonObject(row.TotalsJson ?? row.totalsJson) ||
+    buildInvoiceTotalsSnapshot(items, payment, taxMode);
+
+  return {
+    invoiceId,
+    id: invoiceId,
+    invoiceNumber: row.InvoiceNumber ?? row.invoiceNumber ?? "",
+    status: normalizeInvoiceStatus(row.Status ?? row.status),
+    invoiceDate: row.InvoiceDate ?? row.invoiceDate ?? null,
+    dueDate: row.DueDate ?? row.dueDate ?? null,
+    poReference: row.POReference ?? row.poReference ?? "",
+    paymentTerms: row.PaymentTerms ?? row.paymentTerms ?? "Net 30 Days",
+    currency: row.Currency ?? row.currency ?? "INR - Indian Rupee",
+    taxMode,
+    placeOfSupply: row.PlaceOfSupply ?? row.placeOfSupply ?? "",
+    reverseCharge: row.ReverseCharge ?? row.reverseCharge ?? "No",
+    irn: row.IRN ?? row.irn ?? "",
+    qrReference: row.QRReference ?? row.qrReference ?? "",
+    receiveGoodsId: row.ReceiveGoodsId ?? row.receiveGoodsId ?? null,
+    purchaseOrderId: row.PurchaseOrderId ?? row.purchaseOrderId ?? null,
+    vendorId: row.VendorId ?? row.vendorId ?? null,
+    projectId: row.ProjectId ?? row.projectId ?? null,
+    supplier: normalizeInvoicePartyInput(supplier),
+    buyer: normalizeInvoicePartyInput(buyer),
+    items,
+    payment,
+    notes,
+    documents,
+    totals,
+    createdAt: row.CreatedAt ?? row.createdAt ?? null,
+    updatedAt: row.UpdatedAt ?? row.updatedAt ?? null,
+  };
+};
+
+const findInvoiceRow = async (source, id) => {
+  const result = await createDbRequest(source)
+    .input("InvoiceId", sql.Int, id)
+    .query(`
+      SELECT TOP 1 *
+      FROM dbo.Invoices
+      WHERE InvoiceId = @InvoiceId
+    `);
+  return result.recordset?.[0] ?? null;
+};
+
 const getVendorContactsValidationError = (contacts = []) => {
   for (const [index, contact] of contacts.entries()) {
     if (!contact.contactName || !contact.email || !contact.designation) {
@@ -2834,12 +3056,12 @@ const ensureVendorsTable = async () => {
       CREATE TABLE dbo.Vendors (
         VendorId INT IDENTITY(1,1) PRIMARY KEY,
         VendorName NVARCHAR(255) NOT NULL,
-        Phone NVARCHAR(20) NOT NULL,
+        Phone NVARCHAR(50) NOT NULL,
         Email NVARCHAR(255) NULL,
         GSTNumber NVARCHAR(30) NULL,
         PANNumber NVARCHAR(20) NULL,
         BankAccountName NVARCHAR(255) NULL,
-        BankAccountNumber NVARCHAR(80) NULL,
+        BankAccountNumber NVARCHAR(120) NULL,
         BankName NVARCHAR(255) NULL,
         IFSCCode NVARCHAR(30) NULL,
         BankBranch NVARCHAR(255) NULL,
@@ -2861,7 +3083,7 @@ const ensureVendorsTable = async () => {
     END;
     IF COL_LENGTH('dbo.Vendors', 'Phone') IS NULL
     BEGIN
-      ALTER TABLE dbo.Vendors ADD Phone NVARCHAR(20) NULL;
+      ALTER TABLE dbo.Vendors ADD Phone NVARCHAR(50) NULL;
     END;
     IF COL_LENGTH('dbo.Vendors', 'Email') IS NULL
     BEGIN
@@ -2881,7 +3103,7 @@ const ensureVendorsTable = async () => {
     END;
     IF COL_LENGTH('dbo.Vendors', 'BankAccountNumber') IS NULL
     BEGIN
-      ALTER TABLE dbo.Vendors ADD BankAccountNumber NVARCHAR(80) NULL;
+      ALTER TABLE dbo.Vendors ADD BankAccountNumber NVARCHAR(120) NULL;
     END;
     IF COL_LENGTH('dbo.Vendors', 'BankName') IS NULL
     BEGIN
@@ -2925,6 +3147,26 @@ const ensureVendorsTable = async () => {
       ALTER TABLE dbo.Vendors ADD UpdatedAt DATETIME2 NOT NULL
         CONSTRAINT DF_Vendors_UpdatedAt DEFAULT SYSUTCDATETIME();
     END;
+
+    BEGIN TRY
+      IF COL_LENGTH('dbo.Vendors', 'Phone') IS NOT NULL
+         AND COL_LENGTH('dbo.Vendors', 'Phone') < 100
+      BEGIN
+        ALTER TABLE dbo.Vendors ALTER COLUMN Phone NVARCHAR(50) NULL;
+      END;
+    END TRY
+    BEGIN CATCH
+    END CATCH;
+
+    BEGIN TRY
+      IF COL_LENGTH('dbo.Vendors', 'BankAccountNumber') IS NOT NULL
+         AND COL_LENGTH('dbo.Vendors', 'BankAccountNumber') < 240
+      BEGIN
+        ALTER TABLE dbo.Vendors ALTER COLUMN BankAccountNumber NVARCHAR(120) NULL;
+      END;
+    END TRY
+    BEGIN CATCH
+    END CATCH;
   `);
 
   await pool.request().query(`
@@ -2936,7 +3178,7 @@ const ensureVendorsTable = async () => {
         ContactName NVARCHAR(255) NOT NULL,
         Email NVARCHAR(255) NOT NULL,
         Designation NVARCHAR(255) NOT NULL,
-        Phone NVARCHAR(30) NULL,
+        Phone NVARCHAR(50) NULL,
         CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         CONSTRAINT FK_VendorContacts_Vendor FOREIGN KEY (VendorId)
@@ -2964,7 +3206,7 @@ const ensureVendorsTable = async () => {
     END;
     IF COL_LENGTH('dbo.VendorContacts', 'Phone') IS NULL
     BEGIN
-      ALTER TABLE dbo.VendorContacts ADD Phone NVARCHAR(30) NULL;
+      ALTER TABLE dbo.VendorContacts ADD Phone NVARCHAR(50) NULL;
     END;
     IF COL_LENGTH('dbo.VendorContacts', 'CreatedAt') IS NULL
     BEGIN
@@ -2976,6 +3218,16 @@ const ensureVendorsTable = async () => {
       ALTER TABLE dbo.VendorContacts ADD UpdatedAt DATETIME2 NOT NULL
         CONSTRAINT DF_VendorContacts_UpdatedAt DEFAULT SYSUTCDATETIME();
     END;
+
+    BEGIN TRY
+      IF COL_LENGTH('dbo.VendorContacts', 'Phone') IS NOT NULL
+         AND COL_LENGTH('dbo.VendorContacts', 'Phone') < 100
+      BEGIN
+        ALTER TABLE dbo.VendorContacts ALTER COLUMN Phone NVARCHAR(50) NULL;
+      END;
+    END TRY
+    BEGIN CATCH
+    END CATCH;
   `);
 };
 
@@ -2994,7 +3246,7 @@ const ensureCustomersTable = async () => {
         City NVARCHAR(120) NULL,
         State NVARCHAR(120) NULL,
         Pincode NVARCHAR(20) NULL,
-        ContactNumber NVARCHAR(30) NULL,
+        ContactNumber NVARCHAR(50) NULL,
         Email NVARCHAR(255) NULL,
         ContactPerson NVARCHAR(255) NULL,
         Designation NVARCHAR(255) NULL,
@@ -3040,7 +3292,7 @@ const ensureCustomersTable = async () => {
     END;
     IF COL_LENGTH('dbo.Customers', 'ContactNumber') IS NULL
     BEGIN
-      ALTER TABLE dbo.Customers ADD ContactNumber NVARCHAR(30) NULL;
+      ALTER TABLE dbo.Customers ADD ContactNumber NVARCHAR(50) NULL;
     END;
     IF COL_LENGTH('dbo.Customers', 'Email') IS NULL
     BEGIN
@@ -3068,6 +3320,16 @@ const ensureCustomersTable = async () => {
       ALTER TABLE dbo.Customers ADD UpdatedAt DATETIME2 NOT NULL
         CONSTRAINT DF_Customers_UpdatedAt DEFAULT SYSUTCDATETIME();
     END;
+
+    BEGIN TRY
+      IF COL_LENGTH('dbo.Customers', 'ContactNumber') IS NOT NULL
+         AND COL_LENGTH('dbo.Customers', 'ContactNumber') < 100
+      BEGIN
+        ALTER TABLE dbo.Customers ALTER COLUMN ContactNumber NVARCHAR(50) NULL;
+      END;
+    END TRY
+    BEGIN CATCH
+    END CATCH;
   `);
 
   await pool.request().query(`
@@ -3079,7 +3341,7 @@ const ensureCustomersTable = async () => {
         ContactName NVARCHAR(255) NOT NULL,
         Email NVARCHAR(255) NOT NULL,
         Designation NVARCHAR(255) NOT NULL,
-        Phone NVARCHAR(30) NULL,
+        Phone NVARCHAR(50) NULL,
         CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
         CONSTRAINT FK_CustomerContacts_Customer FOREIGN KEY (CustomerId)
@@ -3107,7 +3369,7 @@ const ensureCustomersTable = async () => {
     END;
     IF COL_LENGTH('dbo.CustomerContacts', 'Phone') IS NULL
     BEGIN
-      ALTER TABLE dbo.CustomerContacts ADD Phone NVARCHAR(30) NULL;
+      ALTER TABLE dbo.CustomerContacts ADD Phone NVARCHAR(50) NULL;
     END;
     IF COL_LENGTH('dbo.CustomerContacts', 'CreatedAt') IS NULL
     BEGIN
@@ -3119,6 +3381,16 @@ const ensureCustomersTable = async () => {
       ALTER TABLE dbo.CustomerContacts ADD UpdatedAt DATETIME2 NOT NULL
         CONSTRAINT DF_CustomerContacts_UpdatedAt DEFAULT SYSUTCDATETIME();
     END;
+
+    BEGIN TRY
+      IF COL_LENGTH('dbo.CustomerContacts', 'Phone') IS NOT NULL
+         AND COL_LENGTH('dbo.CustomerContacts', 'Phone') < 100
+      BEGIN
+        ALTER TABLE dbo.CustomerContacts ALTER COLUMN Phone NVARCHAR(50) NULL;
+      END;
+    END TRY
+    BEGIN CATCH
+    END CATCH;
   `);
 };
 
@@ -3136,7 +3408,7 @@ const ensureProjectsTable = async () => {
         ClientCompany NVARCHAR(255) NULL,
         ClientAddress NVARCHAR(MAX) NULL,
         ClientGSTNumber NVARCHAR(30) NULL,
-        ClientPhone NVARCHAR(30) NULL,
+        ClientPhone NVARCHAR(50) NULL,
         ClientEmail NVARCHAR(255) NULL,
         ClientContactPerson NVARCHAR(255) NULL,
         ClientDesignation NVARCHAR(255) NULL,
@@ -3169,7 +3441,7 @@ const ensureProjectsTable = async () => {
     END;
     IF COL_LENGTH('dbo.Projects', 'ClientPhone') IS NULL
     BEGIN
-      ALTER TABLE dbo.Projects ADD ClientPhone NVARCHAR(30) NULL;
+      ALTER TABLE dbo.Projects ADD ClientPhone NVARCHAR(50) NULL;
     END;
     IF COL_LENGTH('dbo.Projects', 'ClientEmail') IS NULL
     BEGIN
@@ -3183,6 +3455,16 @@ const ensureProjectsTable = async () => {
     BEGIN
       ALTER TABLE dbo.Projects ADD ClientDesignation NVARCHAR(255) NULL;
     END;
+
+    BEGIN TRY
+      IF COL_LENGTH('dbo.Projects', 'ClientPhone') IS NOT NULL
+         AND COL_LENGTH('dbo.Projects', 'ClientPhone') < 100
+      BEGIN
+        ALTER TABLE dbo.Projects ALTER COLUMN ClientPhone NVARCHAR(50) NULL;
+      END;
+    END TRY
+    BEGIN CATCH
+    END CATCH;
   `);
 
   await pool.request().query(`
@@ -7603,13 +7885,31 @@ const loadAvailableInventoryRows = async (
     includeZero = false,
   } = {}
 ) => {
-  const safeProjectId = toNullableInt(projectId);
   const safeLocationId = toNullableInt(locationId);
-  if (!safeProjectId || !safeLocationId) {
-    const error = new Error("projectId and locationId are required");
+  if (!safeLocationId) {
+    const error = new Error("locationId is required");
     error.statusCode = 400;
     throw error;
   }
+
+  await ensureLocationsTable();
+  const resolvedLocationResult = await new sql.Request(db)
+    .input("LocationId", sql.Int, safeLocationId)
+    .query(`
+      SELECT TOP 1 *
+      FROM dbo.Locations
+      WHERE LocationId = @LocationId
+    `);
+  const resolvedLocation = normalizeLocation(
+    resolvedLocationResult.recordset?.[0] ?? {}
+  );
+  if (!resolvedLocation?.id) {
+    const error = new Error("Source location not found");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const safeProjectId = toNullableInt(projectId);
 
   await ensureReceiveTables();
   await ensureDeliveryChallanTables();
@@ -7627,10 +7927,9 @@ const loadAvailableInventoryRows = async (
 
   const sourceEntries = new Map();
   const materialIndex = new Map();
-  const makeEntryMapKey = (entry) =>
-    `${entry.projectId}|${entry.locationId}|${entry.sourceKey}`;
+  const makeEntryMapKey = (entry) => `${entry.locationId}|${entry.sourceKey}`;
   const makeMaterialIndexKey = (entry) =>
-    `${entry.projectId}|${entry.locationId}|${entry.materialKey}`;
+    `${entry.locationId}|${entry.materialKey}`;
 
   const indexEntry = (entry) => {
     const indexKey = makeMaterialIndexKey(entry);
@@ -7650,7 +7949,7 @@ const loadAvailableInventoryRows = async (
     const sourceKey = buildAvailabilitySourceKey(rawEntry);
     const entryProjectId = toNullableInt(rawEntry.projectId) ?? safeProjectId;
     const entryLocationId = toNullableInt(rawEntry.locationId) ?? safeLocationId;
-    if (!materialKey || !sourceKey || entryProjectId !== safeProjectId) {
+    if (!materialKey || !sourceKey || entryLocationId !== safeLocationId) {
       return null;
     }
 
@@ -7702,14 +8001,9 @@ const loadAvailableInventoryRows = async (
     field,
     fallbackDeliveryChallanId = null,
   }) => {
-    const safeMovementProjectId = toNullableInt(movementProjectId) ?? safeProjectId;
     const safeMovementLocationId = toNullableInt(movementLocationId);
     const movementQty = toAvailabilityQuantity(quantity);
-    if (
-      safeMovementProjectId !== safeProjectId ||
-      safeMovementLocationId !== safeLocationId ||
-      !movementQty
-    ) {
+    if (safeMovementLocationId !== safeLocationId || !movementQty) {
       return;
     }
 
@@ -7721,9 +8015,7 @@ const loadAvailableInventoryRows = async (
         fallbackDeliveryChallanId,
     });
     if (explicitSourceKey) {
-      const exact = sourceEntries.get(
-        `${safeProjectId}|${safeLocationId}|${explicitSourceKey}`
-      );
+      const exact = sourceEntries.get(`${safeLocationId}|${explicitSourceKey}`);
       if (exact) {
         exact[field] += movementQty;
         return;
@@ -7742,7 +8034,7 @@ const loadAvailableInventoryRows = async (
     let candidates = [];
 
     if (materialKey) {
-      candidates = materialIndex.get(`${safeProjectId}|${safeLocationId}|${materialKey}`) ?? [];
+      candidates = materialIndex.get(`${safeLocationId}|${materialKey}`) ?? [];
     }
 
     if (deliveryChallanId !== null) {
@@ -7790,8 +8082,10 @@ const loadAvailableInventoryRows = async (
   };
 
   const receiveRequest = new sql.Request(db);
-  receiveRequest.input("ProjectId", sql.Int, safeProjectId);
   receiveRequest.input("LocationId", sql.Int, safeLocationId);
+  if (safeProjectId !== null) {
+    receiveRequest.input("ProjectId", sql.Int, safeProjectId);
+  }
   const receiveItemsResult = await receiveRequest.query(`
     SELECT
       rgi.*,
@@ -7803,8 +8097,12 @@ const loadAvailableInventoryRows = async (
     FROM dbo.ReceiveGoods rg
     INNER JOIN dbo.ReceiveGoodsItems rgi
       ON rgi.${toIdentifier(receiveItemsFk)} = rg.${toIdentifier(receivePk)}
-    WHERE rg.ProjectId = @ProjectId
-      AND rg.LocationId = @LocationId
+    WHERE rg.LocationId = @LocationId
+      ${
+        safeProjectId !== null
+          ? "AND rg.ProjectId = @ProjectId"
+          : ""
+      }
   `);
 
   (receiveItemsResult.recordset ?? []).forEach((row) => {
@@ -7834,8 +8132,10 @@ const loadAvailableInventoryRows = async (
   });
 
   const dcSourceRequest = new sql.Request(db);
-  dcSourceRequest.input("ProjectId", sql.Int, safeProjectId);
   dcSourceRequest.input("LocationId", sql.Int, safeLocationId);
+  if (safeProjectId !== null) {
+    dcSourceRequest.input("ProjectId", sql.Int, safeProjectId);
+  }
   const dcItemsAtLocationResult = await dcSourceRequest.query(`
     SELECT
       dci.*,
@@ -7848,8 +8148,12 @@ const loadAvailableInventoryRows = async (
     FROM dbo.DeliveryChallan dc
     INNER JOIN dbo.DeliveryChallanItems dci
       ON dci.${toIdentifier(deliveryFk)} = dc.${toIdentifier(deliveryPk)}
-    WHERE dc.ProjectId = @ProjectId
-      AND dc.ToLocationId = @LocationId
+    WHERE dc.ToLocationId = @LocationId
+      ${
+        safeProjectId !== null
+          ? "AND dc.ProjectId = @ProjectId"
+          : ""
+      }
   `);
 
   (dcItemsAtLocationResult.recordset ?? []).forEach((row) => {
@@ -7877,8 +8181,10 @@ const loadAvailableInventoryRows = async (
   });
 
   const outgoingDcRequest = new sql.Request(db);
-  outgoingDcRequest.input("ProjectId", sql.Int, safeProjectId);
   outgoingDcRequest.input("LocationId", sql.Int, safeLocationId);
+  if (safeProjectId !== null) {
+    outgoingDcRequest.input("ProjectId", sql.Int, safeProjectId);
+  }
   const outgoingDcItemsResult = await outgoingDcRequest.query(`
     SELECT
       dci.*,
@@ -7887,8 +8193,12 @@ const loadAvailableInventoryRows = async (
     FROM dbo.DeliveryChallan dc
     INNER JOIN dbo.DeliveryChallanItems dci
       ON dci.${toIdentifier(deliveryFk)} = dc.${toIdentifier(deliveryPk)}
-    WHERE dc.ProjectId = @ProjectId
-      AND dc.FromLocationId = @LocationId
+    WHERE dc.FromLocationId = @LocationId
+      ${
+        safeProjectId !== null
+          ? "AND dc.ProjectId = @ProjectId"
+          : ""
+      }
   `);
 
   (outgoingDcItemsResult.recordset ?? []).forEach((row) => {
@@ -7938,7 +8248,8 @@ const loadAvailableInventoryRows = async (
     }
     if (
       isInactiveAvailabilityMovementStatus(transfer.status) ||
-      (toNullableInt(transfer.projectId) !== null &&
+      (safeProjectId !== null &&
+        toNullableInt(transfer.projectId) !== null &&
         toNullableInt(transfer.projectId) !== safeProjectId)
     ) {
       return;
@@ -7975,9 +8286,11 @@ const loadAvailableInventoryRows = async (
   });
 
   const consumptionRequest = new sql.Request(db);
-  consumptionRequest.input("ProjectId", sql.Int, safeProjectId);
   consumptionRequest.input("LocationId", sql.Int, safeLocationId);
   consumptionRequest.input("ExcludeConsumptionId", sql.Int, toNullableInt(excludeConsumptionId));
+  if (safeProjectId !== null) {
+    consumptionRequest.input("ProjectId", sql.Int, safeProjectId);
+  }
   const consumptionItemsResult = await consumptionRequest.query(`
     SELECT
       ci.*,
@@ -7988,8 +8301,12 @@ const loadAvailableInventoryRows = async (
     FROM dbo.Consumption c
     INNER JOIN dbo.ConsumptionItems ci
       ON ci.${toIdentifier(consumptionFk)} = c.${toIdentifier(consumptionPk)}
-    WHERE c.ProjectId = @ProjectId
-      AND c.LocationId = @LocationId
+    WHERE c.LocationId = @LocationId
+      ${
+        safeProjectId !== null
+          ? "AND c.ProjectId = @ProjectId"
+          : ""
+      }
       AND (
         @ExcludeConsumptionId IS NULL
         OR c.${toIdentifier(consumptionPk)} <> @ExcludeConsumptionId
@@ -8054,7 +8371,8 @@ const loadAvailableInventoryRows = async (
     }
     if (
       isInactiveAvailabilityMovementStatus(transfer.status) ||
-      (toNullableInt(transfer.projectId) !== null &&
+      (safeProjectId !== null &&
+        toNullableInt(transfer.projectId) !== null &&
         toNullableInt(transfer.projectId) !== safeProjectId)
     ) {
       return;
@@ -8158,6 +8476,126 @@ const validateAvailableInventorySelection = async (
       throw error;
     }
   }
+};
+
+const isInactiveReallocationLookupStatus = (value = "") =>
+  ["inactive", "completed", "complete", "closed", "cancelled", "canceled", "archived"].includes(
+    normalizeInventoryKeyValue(value)
+  );
+
+const classifyReallocationLookupSourceType = (sourceType = "", location = {}) => {
+  const normalizedSourceType = normalizeAvailabilitySourceType(sourceType);
+  if (normalizedSourceType === "dc") {
+    return "DC";
+  }
+  if (normalizedSourceType === "consumption") {
+    return "Consumption";
+  }
+
+  const normalizedLocationType = normalizeInventoryKeyValue(location.type);
+  const isDcLikeLocation =
+    !toNullableInt(location.projectId) ||
+    ["dc", "warehouse", "depot", "distribution center", "distributioncentre"].includes(
+      normalizedLocationType
+    );
+  return isDcLikeLocation ? "DC" : "Project";
+};
+
+const loadReallocationLocationLookupRows = async (db) => {
+  await ensureProjectsTable();
+  await ensureLocationsTable();
+
+  const projectRowsResult = await new sql.Request(db).query(`
+    SELECT ProjectId, ProjectName, ProjectCode, Status
+    FROM dbo.Projects
+  `);
+  const projectMap = new Map(
+    (projectRowsResult.recordset ?? [])
+      .map((row) => normalizeProject(row))
+      .filter((project) => project?.id && !isInactiveReallocationLookupStatus(project.status))
+      .map((project) => [String(project.id), project])
+  );
+
+  const locationRowsResult = await new sql.Request(db).query(`
+    SELECT *
+    FROM dbo.Locations
+    ORDER BY LocationId DESC
+  `);
+  const activeLocations = (locationRowsResult.recordset ?? [])
+    .map(normalizeLocation)
+    .filter((location) => location?.id && !isInactiveReallocationLookupStatus(location.status));
+
+  const lookupRows = [];
+  for (const location of activeLocations) {
+    const explicitProjectId = toNullableInt(location.projectId);
+    const projectIdsToTry = [
+      null,
+      explicitProjectId,
+      ...Array.from(projectMap.keys()).map((value) => toNullableInt(value)),
+    ].filter((value, index, array) => {
+      if (value === null) {
+        return array.indexOf(null) === index;
+      }
+      return Number.isFinite(value) && array.findIndex((candidate) => candidate === value) === index;
+    });
+
+    let availableRows = [];
+    let resolvedProjectId = explicitProjectId;
+    for (const projectId of projectIdsToTry) {
+      const rows = await loadAvailableInventoryRows(db, {
+        locationId: location.id,
+        projectId: projectId ?? undefined,
+      }).catch(() => []);
+      if (rows.length) {
+        availableRows = rows;
+        if (projectId !== null && projectId !== undefined) {
+          resolvedProjectId = projectId;
+        }
+        break;
+      }
+    }
+
+    if (!availableRows.length) {
+      continue;
+    }
+
+    const sourceLabels = Array.from(
+      new Set(
+        availableRows
+          .map((row) => classifyReallocationLookupSourceType(row.sourceType, location))
+          .filter(Boolean)
+      )
+    );
+    const sourceReferenceIds = Array.from(
+      new Set(
+        availableRows
+          .map((row) => row.sourceKey || row.sourceRef || "")
+          .filter(Boolean)
+      )
+    );
+
+    lookupRows.push({
+      locationId: location.id,
+      locationName: location.name,
+      code: location.code,
+      type: location.type,
+      projectId: resolvedProjectId,
+      projectName: projectMap.get(String(resolvedProjectId))?.name ?? "",
+      status: location.status,
+      totalAvailableQty: availableRows.reduce(
+        (sum, row) => sum + toAvailabilityQuantity(row.availableQty),
+        0
+      ),
+      stockRows: availableRows.length,
+      sourceTypes: sourceLabels.map((label) => normalizeInventoryKeyValue(label)),
+      sourceLabels,
+      sourceReferenceIds,
+    });
+  }
+
+  return lookupRows.sort((left, right) =>
+    String(left.locationName || "").localeCompare(String(right.locationName || ""))
+  );
 };
 
 let ensureHrmsEmployeesTablePromise = null;
@@ -11743,10 +12181,10 @@ app.get("/api/available-inventory", async (req, res) => {
     req.query.excludeReallocateInventoryId
   );
 
-  if (!projectId || !locationId) {
+  if (!locationId) {
     return res.status(400).json({
       ok: false,
-      error: "projectId and locationId are required",
+      error: "locationId is required",
     });
   }
 
@@ -11953,12 +12391,12 @@ app.post("/api/vendors", async (req, res) => {
     try {
       const result = await new sql.Request(tx)
         .input("VendorName", sql.NVarChar(255), nextName)
-        .input("Phone", sql.NVarChar(20), nextPhone)
+        .input("Phone", sql.NVarChar(50), nextPhone)
         .input("Email", sql.NVarChar(255), nextEmail)
         .input("GSTNumber", sql.NVarChar(30), nextGstNumber)
         .input("PANNumber", sql.NVarChar(20), nextPanNumber || null)
         .input("BankAccountName", sql.NVarChar(255), nextBankAccountName || null)
-        .input("BankAccountNumber", sql.NVarChar(80), nextBankAccountNumber || null)
+        .input("BankAccountNumber", sql.NVarChar(120), nextBankAccountNumber || null)
         .input("BankName", sql.NVarChar(255), nextBankName || null)
         .input("IFSCCode", sql.NVarChar(30), nextIfscCode || null)
         .input("BankBranch", sql.NVarChar(255), nextBankBranch || null)
@@ -11980,7 +12418,7 @@ app.post("/api/vendors", async (req, res) => {
           .input("ContactName", sql.NVarChar(255), contact.contactName)
           .input("Email", sql.NVarChar(255), contact.email)
           .input("Designation", sql.NVarChar(255), contact.designation)
-          .input("Phone", sql.NVarChar(30), contact.phone || null)
+          .input("Phone", sql.NVarChar(50), contact.phone || null)
           .query(`
             INSERT INTO dbo.VendorContacts
               (VendorId, ContactName, Email, Designation, Phone)
@@ -12115,12 +12553,12 @@ app.put("/api/vendors/:id", async (req, res) => {
       const result = await new sql.Request(tx)
         .input("VendorId", sql.Int, id)
         .input("VendorName", sql.NVarChar(255), nextName)
-        .input("Phone", sql.NVarChar(20), nextPhone)
+        .input("Phone", sql.NVarChar(50), nextPhone)
         .input("Email", sql.NVarChar(255), nextEmail)
         .input("GSTNumber", sql.NVarChar(30), nextGstNumber)
         .input("PANNumber", sql.NVarChar(20), nextPanNumber || null)
         .input("BankAccountName", sql.NVarChar(255), nextBankAccountName || null)
-        .input("BankAccountNumber", sql.NVarChar(80), nextBankAccountNumber || null)
+        .input("BankAccountNumber", sql.NVarChar(120), nextBankAccountNumber || null)
         .input("BankName", sql.NVarChar(255), nextBankName || null)
         .input("IFSCCode", sql.NVarChar(30), nextIfscCode || null)
         .input("BankBranch", sql.NVarChar(255), nextBankBranch || null)
@@ -12172,7 +12610,7 @@ app.put("/api/vendors/:id", async (req, res) => {
             .input("ContactName", sql.NVarChar(255), contact.contactName)
             .input("Email", sql.NVarChar(255), contact.email)
             .input("Designation", sql.NVarChar(255), contact.designation)
-            .input("Phone", sql.NVarChar(30), contact.phone || null)
+            .input("Phone", sql.NVarChar(50), contact.phone || null)
             .query(`
               INSERT INTO dbo.VendorContacts
                 (VendorId, ContactName, Email, Designation, Phone)
@@ -12416,7 +12854,7 @@ app.post("/api/customers", async (req, res) => {
         )
         .input(
           "ContactNumber",
-          sql.NVarChar(30),
+          sql.NVarChar(50),
           normalizeOptionalString(phone ?? ContactNumber)
         )
         .input("Email", sql.NVarChar(255), normalizeOptionalString(email ?? Email))
@@ -12454,7 +12892,7 @@ app.post("/api/customers", async (req, res) => {
           .input("ContactName", sql.NVarChar(255), contact.contactName)
           .input("Email", sql.NVarChar(255), contact.email)
           .input("Designation", sql.NVarChar(255), contact.designation)
-          .input("Phone", sql.NVarChar(30), contact.phone || null)
+          .input("Phone", sql.NVarChar(50), contact.phone || null)
           .query(`
             INSERT INTO dbo.CustomerContacts
               (CustomerId, ContactName, Email, Designation, Phone)
@@ -12579,7 +13017,7 @@ app.put("/api/customers/:id", async (req, res) => {
         )
         .input(
           "ContactNumber",
-          sql.NVarChar(30),
+          sql.NVarChar(50),
           normalizeOptionalString(phone ?? ContactNumber)
         )
         .input("Email", sql.NVarChar(255), normalizeOptionalString(email ?? Email))
@@ -12639,7 +13077,7 @@ app.put("/api/customers/:id", async (req, res) => {
             .input("ContactName", sql.NVarChar(255), contact.contactName)
             .input("Email", sql.NVarChar(255), contact.email)
             .input("Designation", sql.NVarChar(255), contact.designation)
-            .input("Phone", sql.NVarChar(30), contact.phone || null)
+            .input("Phone", sql.NVarChar(50), contact.phone || null)
             .query(`
               INSERT INTO dbo.CustomerContacts
                 (CustomerId, ContactName, Email, Designation, Phone)
@@ -12900,7 +13338,7 @@ app.post("/api/projects", async (req, res) => {
       .input("ClientCompany", sql.NVarChar(255), finalSnapshot.companyName)
       .input("ClientAddress", sql.NVarChar(sql.MAX), finalSnapshot.address)
       .input("ClientGSTNumber", sql.NVarChar(30), finalSnapshot.gstNumber)
-      .input("ClientPhone", sql.NVarChar(30), finalSnapshot.phone)
+      .input("ClientPhone", sql.NVarChar(50), finalSnapshot.phone)
       .input("ClientEmail", sql.NVarChar(255), finalSnapshot.email)
       .input(
         "ClientContactPerson",
@@ -13119,7 +13557,7 @@ app.put("/api/projects/:id", async (req, res) => {
       .input("ClientCompany", sql.NVarChar(255), finalSnapshot.companyName)
       .input("ClientAddress", sql.NVarChar(sql.MAX), finalSnapshot.address)
       .input("ClientGSTNumber", sql.NVarChar(30), finalSnapshot.gstNumber)
-      .input("ClientPhone", sql.NVarChar(30), finalSnapshot.phone)
+      .input("ClientPhone", sql.NVarChar(50), finalSnapshot.phone)
       .input("ClientEmail", sql.NVarChar(255), finalSnapshot.email)
       .input(
         "ClientContactPerson",
@@ -13256,6 +13694,19 @@ app.get("/api/locations", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to fetch locations",
+    });
+  }
+});
+
+app.get("/api/locations/reallocation-lookup", async (_req, res) => {
+  try {
+    const pool = await getPool();
+    const locations = await loadReallocationLocationLookupRows(pool);
+    return res.json({ ok: true, locations });
+  } catch (error) {
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to fetch reallocation locations",
     });
   }
 });
@@ -14155,6 +14606,686 @@ app.delete("/api/purchase-orders/:id", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to delete purchase order",
+    });
+  }
+});
+
+let ensureInvoicesTablesPromise = null;
+
+const ensureInvoicesTables = async () => {
+  if (ensureInvoicesTablesPromise) {
+    return ensureInvoicesTablesPromise;
+  }
+
+  ensureInvoicesTablesPromise = (async () => {
+    const pool = await getPool();
+
+    await pool.request().query(`
+      IF OBJECT_ID('dbo.Invoices', 'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.Invoices (
+          InvoiceId INT IDENTITY(1,1) PRIMARY KEY,
+          InvoiceNumber NVARCHAR(100) NOT NULL,
+          Status NVARCHAR(50) NOT NULL DEFAULT N'Draft',
+          InvoiceDate DATE NULL,
+          DueDate DATE NULL,
+          POReference NVARCHAR(100) NULL,
+          PaymentTerms NVARCHAR(100) NULL,
+          Currency NVARCHAR(100) NULL,
+          TaxMode NVARCHAR(20) NULL,
+          PlaceOfSupply NVARCHAR(120) NULL,
+          ReverseCharge NVARCHAR(20) NULL,
+          IRN NVARCHAR(255) NULL,
+          QRReference NVARCHAR(255) NULL,
+          ReceiveGoodsId INT NULL,
+          PurchaseOrderId INT NULL,
+          VendorId INT NULL,
+          ProjectId INT NULL,
+          SupplierJson NVARCHAR(MAX) NULL,
+          BuyerJson NVARCHAR(MAX) NULL,
+          ItemsJson NVARCHAR(MAX) NULL,
+          PaymentJson NVARCHAR(MAX) NULL,
+          NotesJson NVARCHAR(MAX) NULL,
+          DocumentsJson NVARCHAR(MAX) NULL,
+          TotalsJson NVARCHAR(MAX) NULL,
+          CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        )
+      END
+    `);
+
+    await pool.request().query(`
+      IF COL_LENGTH('dbo.Invoices', 'InvoiceNumber') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD InvoiceNumber NVARCHAR(100) NOT NULL CONSTRAINT DF_Invoices_InvoiceNumber DEFAULT N'';
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'Status') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD Status NVARCHAR(50) NOT NULL CONSTRAINT DF_Invoices_Status DEFAULT N'Draft';
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'InvoiceDate') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD InvoiceDate DATE NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'DueDate') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD DueDate DATE NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'POReference') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD POReference NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'PaymentTerms') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD PaymentTerms NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'Currency') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD Currency NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'TaxMode') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD TaxMode NVARCHAR(20) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'PlaceOfSupply') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD PlaceOfSupply NVARCHAR(120) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'ReverseCharge') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD ReverseCharge NVARCHAR(20) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'IRN') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD IRN NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'QRReference') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD QRReference NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'ReceiveGoodsId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD ReceiveGoodsId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'PurchaseOrderId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD PurchaseOrderId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'VendorId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD VendorId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'ProjectId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD ProjectId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'SupplierJson') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD SupplierJson NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'BuyerJson') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD BuyerJson NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'ItemsJson') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD ItemsJson NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'PaymentJson') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD PaymentJson NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'NotesJson') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD NotesJson NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'DocumentsJson') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD DocumentsJson NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'TotalsJson') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD TotalsJson NVARCHAR(MAX) NULL;
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'CreatedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_Invoices_CreatedAt DEFAULT SYSUTCDATETIME();
+      END;
+      IF COL_LENGTH('dbo.Invoices', 'UpdatedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Invoices ADD UpdatedAt DATETIME2 NOT NULL CONSTRAINT DF_Invoices_UpdatedAt DEFAULT SYSUTCDATETIME();
+      END;
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE name = 'IX_Invoices_ReceiveGoodsId'
+          AND object_id = OBJECT_ID('dbo.Invoices')
+      )
+      BEGIN
+        CREATE INDEX IX_Invoices_ReceiveGoodsId ON dbo.Invoices (ReceiveGoodsId);
+      END;
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE name = 'IX_Invoices_PurchaseOrderId'
+          AND object_id = OBJECT_ID('dbo.Invoices')
+      )
+      BEGIN
+        CREATE INDEX IX_Invoices_PurchaseOrderId ON dbo.Invoices (PurchaseOrderId);
+      END;
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE name = 'IX_Invoices_Status'
+          AND object_id = OBJECT_ID('dbo.Invoices')
+      )
+      BEGIN
+        CREATE INDEX IX_Invoices_Status ON dbo.Invoices (Status);
+      END;
+    `);
+  })();
+
+  try {
+    await ensureInvoicesTablesPromise;
+  } finally {
+    ensureInvoicesTablesPromise = null;
+  }
+};
+
+app.get("/api/invoices", async (req, res) => {
+  try {
+    if (ensureSchemaOnRequest) {
+      await ensureInvoicesTables();
+      await ensureReceiveTables();
+    }
+
+    const pool = await getPool();
+    const receiveGoodsId = toNullableInt(req.query?.receiveGoodsId);
+    const purchaseOrderId = toNullableInt(req.query?.purchaseOrderId);
+    const status = normalizeOptionalString(req.query?.status);
+    const request = pool.request();
+    const whereClauses = [];
+
+    if (receiveGoodsId !== null) {
+      request.input("ReceiveGoodsId", sql.Int, receiveGoodsId);
+      whereClauses.push("ReceiveGoodsId = @ReceiveGoodsId");
+    }
+    if (purchaseOrderId !== null) {
+      request.input("PurchaseOrderId", sql.Int, purchaseOrderId);
+      whereClauses.push("PurchaseOrderId = @PurchaseOrderId");
+    }
+    if (status) {
+      request.input("Status", sql.NVarChar(50), normalizeInvoiceStatus(status));
+      whereClauses.push("Status = @Status");
+    }
+
+    const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const result = await request.query(withSqlLockTimeout(`
+      SELECT *
+      FROM dbo.Invoices
+      ${whereSql}
+      ORDER BY InvoiceId DESC
+    `));
+
+    return res.json({
+      ok: true,
+      invoices: (result.recordset ?? []).map(normalizeInvoice),
+    });
+  } catch (error) {
+    console.error("GET /api/invoices failed:", error?.message ?? error);
+    return res.status(isSqlLockTimeoutError(error) ? 503 : 500).json({
+      ok: false,
+      error: isSqlLockTimeoutError(error)
+        ? RECEIVE_GOODS_LOCK_MESSAGE
+        : error?.message ?? "Failed to fetch invoices",
+    });
+  }
+});
+
+app.get("/api/invoices/:id", async (req, res) => {
+  const invoiceId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(invoiceId)) {
+    return res.status(400).json({ ok: false, error: "Invalid invoice id" });
+  }
+
+  try {
+    if (ensureSchemaOnRequest) {
+      await ensureInvoicesTables();
+    }
+    const pool = await getPool();
+    const row = await findInvoiceRow(pool, invoiceId);
+    if (!row) {
+      return res.status(404).json({ ok: false, error: "Invoice not found" });
+    }
+    return res.json({ ok: true, invoice: normalizeInvoice(row) });
+  } catch (error) {
+    console.error("GET /api/invoices/:id failed:", error?.message ?? error);
+    return res.status(isSqlLockTimeoutError(error) ? 503 : 500).json({
+      ok: false,
+      error: isSqlLockTimeoutError(error)
+        ? RECEIVE_GOODS_LOCK_MESSAGE
+        : error?.message ?? "Failed to fetch invoice",
+    });
+  }
+});
+
+app.post("/api/invoices", async (req, res) => {
+  const {
+    invoiceNumber = null,
+    status = "Draft",
+    invoiceDate = null,
+    dueDate = null,
+    poReference = null,
+    paymentTerms = "Net 30 Days",
+    currency = "INR - Indian Rupee",
+    taxMode = "intra",
+    placeOfSupply = null,
+    reverseCharge = "No",
+    irn = null,
+    qrReference = null,
+    receiveGoodsId = null,
+    purchaseOrderId = null,
+    vendorId = null,
+    projectId = null,
+    supplier = {},
+    buyer = {},
+    items = [],
+    payment = {},
+    notes = {},
+    documents = [],
+  } = req.body ?? {};
+
+  const safeInvoiceNumber = normalizeOptionalString(invoiceNumber);
+  if (!safeInvoiceNumber) {
+    return res.status(400).json({ ok: false, error: "invoiceNumber is required" });
+  }
+
+  const parsedInvoiceDate = parseDateInput(invoiceDate);
+  const parsedDueDate = parseDateInput(dueDate);
+  if (Number.isNaN(parsedInvoiceDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid invoiceDate" });
+  }
+  if (Number.isNaN(parsedDueDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid dueDate" });
+  }
+
+  const normalizedItems = normalizeInvoiceItemsInput(items);
+  if (!normalizedItems.length) {
+    return res.status(400).json({ ok: false, error: "At least one invoice item is required" });
+  }
+
+  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
+  const normalizedStatus = normalizeInvoiceStatus(status);
+  const normalizedTaxMode =
+    String(taxMode).trim().toLowerCase() === "inter" ? "inter" : "intra";
+  const normalizedSupplier = normalizeInvoicePartyInput(supplier);
+  const normalizedBuyer = normalizeInvoicePartyInput(buyer);
+  const normalizedPayment = normalizeInvoicePaymentInput(payment);
+  const normalizedNotes = normalizeInvoiceNotesInput(notes);
+  const normalizedDocuments = normalizeUploadedDocumentsInput(documents);
+  const totals = buildInvoiceTotalsSnapshot(
+    normalizedItems,
+    normalizedPayment,
+    normalizedTaxMode
+  );
+
+  try {
+    if (ensureSchemaOnRequest) {
+      await ensureInvoicesTables();
+      await ensureReceiveTables();
+    }
+    const pool = await getPool();
+    let receiptRow = null;
+    if (safeReceiveGoodsId !== null) {
+      receiptRow = await findReceiveGoodsRow(pool, safeReceiveGoodsId);
+      if (!receiptRow) {
+        return res.status(404).json({ ok: false, error: "Source receipt not found" });
+      }
+    }
+
+    const request = pool.request();
+    request.input("InvoiceNumber", sql.NVarChar(100), safeInvoiceNumber);
+    request.input("Status", sql.NVarChar(50), normalizedStatus);
+    request.input("InvoiceDate", sql.Date, parsedInvoiceDate ?? null);
+    request.input("DueDate", sql.Date, parsedDueDate ?? null);
+    request.input("POReference", sql.NVarChar(100), normalizeOptionalString(poReference) ?? null);
+    request.input(
+      "PaymentTerms",
+      sql.NVarChar(100),
+      normalizeOptionalString(paymentTerms) ?? "Net 30 Days"
+    );
+    request.input(
+      "Currency",
+      sql.NVarChar(100),
+      normalizeOptionalString(currency) ?? "INR - Indian Rupee"
+    );
+    request.input("TaxMode", sql.NVarChar(20), normalizedTaxMode);
+    request.input(
+      "PlaceOfSupply",
+      sql.NVarChar(120),
+      normalizeOptionalString(placeOfSupply) ?? null
+    );
+    request.input(
+      "ReverseCharge",
+      sql.NVarChar(20),
+      normalizeOptionalString(reverseCharge) ?? "No"
+    );
+    request.input("IRN", sql.NVarChar(255), normalizeOptionalString(irn) ?? null);
+    request.input(
+      "QRReference",
+      sql.NVarChar(255),
+      normalizeOptionalString(qrReference) ?? null
+    );
+    request.input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId);
+    request.input(
+      "PurchaseOrderId",
+      sql.Int,
+      toNullableInt(purchaseOrderId) ?? toNullableInt(receiptRow?.PurchaseOrderId)
+    );
+    request.input(
+      "VendorId",
+      sql.Int,
+      toNullableInt(vendorId) ?? toNullableInt(receiptRow?.VendorId)
+    );
+    request.input(
+      "ProjectId",
+      sql.Int,
+      toNullableInt(projectId) ?? toNullableInt(receiptRow?.ProjectId)
+    );
+    request.input("SupplierJson", sql.NVarChar(sql.MAX), serializeJson(normalizedSupplier));
+    request.input("BuyerJson", sql.NVarChar(sql.MAX), serializeJson(normalizedBuyer));
+    request.input("ItemsJson", sql.NVarChar(sql.MAX), serializeJson(normalizedItems));
+    request.input("PaymentJson", sql.NVarChar(sql.MAX), serializeJson(normalizedPayment));
+    request.input("NotesJson", sql.NVarChar(sql.MAX), serializeJson(normalizedNotes));
+    request.input("DocumentsJson", sql.NVarChar(sql.MAX), serializeJson(normalizedDocuments));
+    request.input("TotalsJson", sql.NVarChar(sql.MAX), serializeJson(totals));
+
+    const result = await request.query(`
+      INSERT INTO dbo.Invoices
+        (InvoiceNumber, Status, InvoiceDate, DueDate, POReference, PaymentTerms, Currency, TaxMode, PlaceOfSupply, ReverseCharge, IRN, QRReference, ReceiveGoodsId, PurchaseOrderId, VendorId, ProjectId, SupplierJson, BuyerJson, ItemsJson, PaymentJson, NotesJson, DocumentsJson, TotalsJson)
+      OUTPUT INSERTED.*
+      VALUES
+        (@InvoiceNumber, @Status, @InvoiceDate, @DueDate, @POReference, @PaymentTerms, @Currency, @TaxMode, @PlaceOfSupply, @ReverseCharge, @IRN, @QRReference, @ReceiveGoodsId, @PurchaseOrderId, @VendorId, @ProjectId, @SupplierJson, @BuyerJson, @ItemsJson, @PaymentJson, @NotesJson, @DocumentsJson, @TotalsJson)
+    `);
+
+    return res.status(201).json({
+      ok: true,
+      invoice: normalizeInvoice(result.recordset?.[0] ?? {}),
+    });
+  } catch (error) {
+    console.error("POST /api/invoices failed:", error?.message ?? error);
+    return res.status(isSqlLockTimeoutError(error) ? 503 : 500).json({
+      ok: false,
+      error: isSqlLockTimeoutError(error)
+        ? RECEIVE_GOODS_LOCK_MESSAGE
+        : error?.message ?? "Failed to save invoice",
+    });
+  }
+});
+
+app.put("/api/invoices/:id", async (req, res) => {
+  const invoiceId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(invoiceId)) {
+    return res.status(400).json({ ok: false, error: "Invalid invoice id" });
+  }
+
+  const {
+    invoiceNumber = null,
+    status = "Draft",
+    invoiceDate = null,
+    dueDate = null,
+    poReference = null,
+    paymentTerms = "Net 30 Days",
+    currency = "INR - Indian Rupee",
+    taxMode = "intra",
+    placeOfSupply = null,
+    reverseCharge = "No",
+    irn = null,
+    qrReference = null,
+    receiveGoodsId = null,
+    purchaseOrderId = null,
+    vendorId = null,
+    projectId = null,
+    supplier = {},
+    buyer = {},
+    items = [],
+    payment = {},
+    notes = {},
+    documents = [],
+  } = req.body ?? {};
+
+  const safeInvoiceNumber = normalizeOptionalString(invoiceNumber);
+  if (!safeInvoiceNumber) {
+    return res.status(400).json({ ok: false, error: "invoiceNumber is required" });
+  }
+
+  const parsedInvoiceDate = parseDateInput(invoiceDate);
+  const parsedDueDate = parseDateInput(dueDate);
+  if (Number.isNaN(parsedInvoiceDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid invoiceDate" });
+  }
+  if (Number.isNaN(parsedDueDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid dueDate" });
+  }
+
+  const normalizedItems = normalizeInvoiceItemsInput(items);
+  if (!normalizedItems.length) {
+    return res.status(400).json({ ok: false, error: "At least one invoice item is required" });
+  }
+
+  const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
+  const normalizedStatus = normalizeInvoiceStatus(status);
+  const normalizedTaxMode =
+    String(taxMode).trim().toLowerCase() === "inter" ? "inter" : "intra";
+  const normalizedSupplier = normalizeInvoicePartyInput(supplier);
+  const normalizedBuyer = normalizeInvoicePartyInput(buyer);
+  const normalizedPayment = normalizeInvoicePaymentInput(payment);
+  const normalizedNotes = normalizeInvoiceNotesInput(notes);
+  const normalizedDocuments = normalizeUploadedDocumentsInput(documents);
+  const totals = buildInvoiceTotalsSnapshot(
+    normalizedItems,
+    normalizedPayment,
+    normalizedTaxMode
+  );
+
+  try {
+    if (ensureSchemaOnRequest) {
+      await ensureInvoicesTables();
+      await ensureReceiveTables();
+    }
+    const pool = await getPool();
+    const existing = await findInvoiceRow(pool, invoiceId);
+    if (!existing) {
+      return res.status(404).json({ ok: false, error: "Invoice not found" });
+    }
+
+    let receiptRow = null;
+    if (safeReceiveGoodsId !== null) {
+      receiptRow = await findReceiveGoodsRow(pool, safeReceiveGoodsId);
+      if (!receiptRow) {
+        return res.status(404).json({ ok: false, error: "Source receipt not found" });
+      }
+    }
+
+    const request = pool.request();
+    request.input("InvoiceId", sql.Int, invoiceId);
+    request.input("InvoiceNumber", sql.NVarChar(100), safeInvoiceNumber);
+    request.input("Status", sql.NVarChar(50), normalizedStatus);
+    request.input("InvoiceDate", sql.Date, parsedInvoiceDate ?? null);
+    request.input("DueDate", sql.Date, parsedDueDate ?? null);
+    request.input("POReference", sql.NVarChar(100), normalizeOptionalString(poReference) ?? null);
+    request.input(
+      "PaymentTerms",
+      sql.NVarChar(100),
+      normalizeOptionalString(paymentTerms) ?? "Net 30 Days"
+    );
+    request.input(
+      "Currency",
+      sql.NVarChar(100),
+      normalizeOptionalString(currency) ?? "INR - Indian Rupee"
+    );
+    request.input("TaxMode", sql.NVarChar(20), normalizedTaxMode);
+    request.input(
+      "PlaceOfSupply",
+      sql.NVarChar(120),
+      normalizeOptionalString(placeOfSupply) ?? null
+    );
+    request.input(
+      "ReverseCharge",
+      sql.NVarChar(20),
+      normalizeOptionalString(reverseCharge) ?? "No"
+    );
+    request.input("IRN", sql.NVarChar(255), normalizeOptionalString(irn) ?? null);
+    request.input(
+      "QRReference",
+      sql.NVarChar(255),
+      normalizeOptionalString(qrReference) ?? null
+    );
+    request.input("ReceiveGoodsId", sql.Int, safeReceiveGoodsId);
+    request.input(
+      "PurchaseOrderId",
+      sql.Int,
+      toNullableInt(purchaseOrderId) ?? toNullableInt(receiptRow?.PurchaseOrderId)
+    );
+    request.input(
+      "VendorId",
+      sql.Int,
+      toNullableInt(vendorId) ?? toNullableInt(receiptRow?.VendorId)
+    );
+    request.input(
+      "ProjectId",
+      sql.Int,
+      toNullableInt(projectId) ?? toNullableInt(receiptRow?.ProjectId)
+    );
+    request.input("SupplierJson", sql.NVarChar(sql.MAX), serializeJson(normalizedSupplier));
+    request.input("BuyerJson", sql.NVarChar(sql.MAX), serializeJson(normalizedBuyer));
+    request.input("ItemsJson", sql.NVarChar(sql.MAX), serializeJson(normalizedItems));
+    request.input("PaymentJson", sql.NVarChar(sql.MAX), serializeJson(normalizedPayment));
+    request.input("NotesJson", sql.NVarChar(sql.MAX), serializeJson(normalizedNotes));
+    request.input("DocumentsJson", sql.NVarChar(sql.MAX), serializeJson(normalizedDocuments));
+    request.input("TotalsJson", sql.NVarChar(sql.MAX), serializeJson(totals));
+
+    await request.query(`
+      UPDATE dbo.Invoices
+      SET InvoiceNumber = @InvoiceNumber,
+          Status = @Status,
+          InvoiceDate = @InvoiceDate,
+          DueDate = @DueDate,
+          POReference = @POReference,
+          PaymentTerms = @PaymentTerms,
+          Currency = @Currency,
+          TaxMode = @TaxMode,
+          PlaceOfSupply = @PlaceOfSupply,
+          ReverseCharge = @ReverseCharge,
+          IRN = @IRN,
+          QRReference = @QRReference,
+          ReceiveGoodsId = @ReceiveGoodsId,
+          PurchaseOrderId = @PurchaseOrderId,
+          VendorId = @VendorId,
+          ProjectId = @ProjectId,
+          SupplierJson = @SupplierJson,
+          BuyerJson = @BuyerJson,
+          ItemsJson = @ItemsJson,
+          PaymentJson = @PaymentJson,
+          NotesJson = @NotesJson,
+          DocumentsJson = @DocumentsJson,
+          TotalsJson = @TotalsJson,
+          UpdatedAt = SYSUTCDATETIME()
+      WHERE InvoiceId = @InvoiceId
+    `);
+
+    const updated = await findInvoiceRow(pool, invoiceId);
+    return res.json({ ok: true, invoice: normalizeInvoice(updated ?? existing) });
+  } catch (error) {
+    console.error("PUT /api/invoices/:id failed:", error?.message ?? error);
+    return res.status(isSqlLockTimeoutError(error) ? 503 : 500).json({
+      ok: false,
+      error: isSqlLockTimeoutError(error)
+        ? RECEIVE_GOODS_LOCK_MESSAGE
+        : error?.message ?? "Failed to update invoice",
+    });
+  }
+});
+
+app.put("/api/invoices/:id/status", async (req, res) => {
+  const invoiceId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(invoiceId)) {
+    return res.status(400).json({ ok: false, error: "Invalid invoice id" });
+  }
+
+  const status = normalizeOptionalString(req.body?.status);
+  if (!status) {
+    return res.status(400).json({ ok: false, error: "status is required" });
+  }
+
+  try {
+    if (ensureSchemaOnRequest) {
+      await ensureInvoicesTables();
+    }
+    const pool = await getPool();
+    const existing = await findInvoiceRow(pool, invoiceId);
+    if (!existing) {
+      return res.status(404).json({ ok: false, error: "Invoice not found" });
+    }
+
+    await pool
+      .request()
+      .input("InvoiceId", sql.Int, invoiceId)
+      .input("Status", sql.NVarChar(50), normalizeInvoiceStatus(status))
+      .query(`
+        UPDATE dbo.Invoices
+        SET Status = @Status,
+            UpdatedAt = SYSUTCDATETIME()
+        WHERE InvoiceId = @InvoiceId
+      `);
+
+    const updated = await findInvoiceRow(pool, invoiceId);
+    return res.json({ ok: true, invoice: normalizeInvoice(updated ?? existing) });
+  } catch (error) {
+    console.error("PUT /api/invoices/:id/status failed:", error?.message ?? error);
+    return res.status(isSqlLockTimeoutError(error) ? 503 : 500).json({
+      ok: false,
+      error: isSqlLockTimeoutError(error)
+        ? RECEIVE_GOODS_LOCK_MESSAGE
+        : error?.message ?? "Failed to update invoice status",
+    });
+  }
+});
+
+app.delete("/api/invoices/:id", async (req, res) => {
+  const invoiceId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(invoiceId)) {
+    return res.status(400).json({ ok: false, error: "Invalid invoice id" });
+  }
+
+  try {
+    if (ensureSchemaOnRequest) {
+      await ensureInvoicesTables();
+    }
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("InvoiceId", sql.Int, invoiceId)
+      .query(`
+        DELETE FROM dbo.Invoices
+        WHERE InvoiceId = @InvoiceId
+      `);
+
+    if ((result.rowsAffected?.[0] ?? 0) === 0) {
+      return res.status(404).json({ ok: false, error: "Invoice not found" });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("DELETE /api/invoices/:id failed:", error?.message ?? error);
+    return res.status(isSqlLockTimeoutError(error) ? 503 : 500).json({
+      ok: false,
+      error: isSqlLockTimeoutError(error)
+        ? RECEIVE_GOODS_LOCK_MESSAGE
+        : error?.message ?? "Failed to delete invoice",
     });
   }
 });
@@ -17832,12 +18963,6 @@ app.post("/api/reallocate-inventory", async (req, res) => {
   const safeNotes = normalizeOptionalString(notes) ?? "";
   const parsedRequestDate = parseDateInput(requestDate);
 
-  if (!safeProjectId) {
-    return res.status(400).json({
-      ok: false,
-      error: "projectId is required",
-    });
-  }
   if (!safeFromLocationId) {
     return res.status(400).json({
       ok: false,
@@ -17910,6 +19035,20 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
+    await ensureLocationsTable();
+    const resolvedSourceContext = await new sql.Request(tx)
+      .input("LocationId", sql.Int, safeFromLocationId)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.Locations
+        WHERE LocationId = @LocationId
+      `);
+    const resolvedSourceLocation = normalizeLocation(
+      resolvedSourceContext.recordset?.[0] ?? {}
+    );
+    const effectiveProjectId =
+      safeProjectId ?? toNullableInt(resolvedSourceLocation.projectId);
+
     await validateAvailableInventorySelection(tx, {
       projectId: safeProjectId,
       locationId: safeFromLocationId,
@@ -17925,7 +19064,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       type: safeType,
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
-      projectId: safeProjectId,
+      projectId: effectiveProjectId,
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,
@@ -17968,7 +19107,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       type: safeType,
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
-      projectId: safeProjectId,
+      projectId: effectiveProjectId,
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,
@@ -18096,12 +19235,6 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
   const safeNotes = normalizeOptionalString(notes) ?? "";
   const parsedRequestDate = parseDateInput(requestDate);
 
-  if (!safeProjectId) {
-    return res.status(400).json({
-      ok: false,
-      error: "projectId is required",
-    });
-  }
   if (!safeFromLocationId) {
     return res.status(400).json({
       ok: false,
@@ -18174,6 +19307,20 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
+    await ensureLocationsTable();
+    const resolvedSourceContext = await new sql.Request(tx)
+      .input("LocationId", sql.Int, safeFromLocationId)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.Locations
+        WHERE LocationId = @LocationId
+      `);
+    const resolvedSourceLocation = normalizeLocation(
+      resolvedSourceContext.recordset?.[0] ?? {}
+    );
+    const effectiveProjectId =
+      safeProjectId ?? toNullableInt(resolvedSourceLocation.projectId);
+
     const currentResult = await new sql.Request(tx)
       .input("TransferId", sql.Int, id)
       .query(`
@@ -18206,7 +19353,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
       type: safeType,
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
-      projectId: safeProjectId,
+      projectId: effectiveProjectId,
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,
@@ -18366,6 +19513,7 @@ const warmupSchema = async () => {
       ensureLocationsTable(),
       ensurePurchaseTables(),
       ensureReceiveTables(),
+      ensureInvoicesTables(),
       ensureBoqTables(),
       ensureDeliveryChallanTables(),
       ensureConsumptionTables(),

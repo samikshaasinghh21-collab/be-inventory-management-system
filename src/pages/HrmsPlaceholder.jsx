@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import DateInput from "../components/common/DateInput";
 import PasswordPromptModal from "../components/common/PasswordPromptModal";
 import useSettings from "../hooks/useSettings";
@@ -4128,6 +4128,7 @@ const EmployeeProfilePage = () => {
 };
 
 const ReviewsPage = () => {
+  const location = useLocation();
   const settings = useSettings();
   const role = String(settings?.profile?.role || "").toLowerCase();
   const canAddReview = ["admin", "hr manager", "manager"].includes(role);
@@ -4156,6 +4157,9 @@ const ReviewsPage = () => {
   });
   const selectedEmployee =
     employees.find((employee) => employee.id === form.employeeId) || null;
+  const isHistoryPage =
+    location.pathname === "/reviews/history" ||
+    location.pathname === "/hrms/reviews/history";
   const reviewRows = useMemo(
     () =>
       [...reviews].sort((first, second) =>
@@ -4356,23 +4360,40 @@ const ReviewsPage = () => {
           </Notice>
         </div>
         <div className="flex flex-wrap gap-1 border-b border-slate-200">
-          {["Review Details", "Salary Reassessment"].map((item, index) => (
-            <button
-              key={item}
-              type="button"
+          {[
+            {
+              label: "Review",
+              to: "/reviews",
+              active:
+                location.pathname === "/reviews" ||
+                location.pathname === "/reviews/add" ||
+                location.pathname === "/hrms/reviews/add",
+            },
+            {
+              label: "Salary Reassessment",
+              to: "/reviews/salary-reassessment",
+              active:
+                location.pathname === "/reviews/salary-reassessment" ||
+                location.pathname === "/hrms/reviews/salary-reassessment",
+            },
+          ].map((item) => (
+            <Link
+              key={item.label}
+              to={item.to}
               className={[
                 "min-h-10 border-b-2 px-4 text-sm font-bold",
-                index === 0
-                  ? "border-blue-700 text-blue-700"
+                item.active
+                  ? "border-slate-800 text-slate-800"
                   : "border-transparent text-slate-500",
               ].join(" ")}
             >
-              {item}
-            </button>
+              {item.label}
+            </Link>
           ))}
         </div>
 
-        <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveReview}>
+        {!isHistoryPage && (
+          <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={saveReview}>
           <div className="grid gap-4">
             <Field label="Employee">
               <Input
@@ -4508,27 +4529,30 @@ const ReviewsPage = () => {
               {saving ? "Saving..." : "Save Review"}
             </Button>
           </div>
-        </form>
+          </form>
+        )}
       </Panel>
 
       <Panel>
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-base font-bold">Review Register</h2>
+            <h2 className="text-base font-bold">Review History</h2>
             <p className="text-sm text-slate-500">
               Saved review details from HRMS database.
             </p>
           </div>
-          <Link to="/reviews/history">
-            <Button variant="secondary">Review History</Button>
-          </Link>
+          {!isHistoryPage && (
+            <Link to="/reviews/history">
+              <Button variant="secondary">Review History</Button>
+            </Link>
+          )}
         </div>
 
         <div className="mt-5 overflow-x-auto">
-          <table className="min-w-[920px] w-full text-left text-sm">
+          <table className="min-w-[760px] w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
               <tr>
-                {["Saved Date", "Employee", "Start Date", "End Date", "Period", "Type", "Rating", "Reviewer", "Action"].map(
+                {["Saved Date", "Employee", "Review Period", "Reviewer", "Rating", "Action"].map(
                   (heading) => (
                     <th key={heading} className="px-3 py-3 font-bold">
                       {heading}
@@ -4555,12 +4579,9 @@ const ReviewsPage = () => {
                     <strong>{record.employeeName}</strong>
                     <p className="text-xs text-slate-500">{record.employeeId}</p>
                   </td>
-                  <td className="px-3 py-3">{formatDate(record.reviewStartDate)}</td>
-                  <td className="px-3 py-3">{formatDate(record.reviewEndDate)}</td>
                   <td className="px-3 py-3">{record.period}</td>
-                  <td className="px-3 py-3">{record.type}</td>
-                  <td className="px-3 py-3">{record.rating || 0} / 5</td>
                   <td className="px-3 py-3">{displayValue(record.reviewer)}</td>
+                  <td className="px-3 py-3">{record.rating || 0} / 5</td>
                   <td className="px-3 py-3">
                     <Button
                       className="min-h-8 px-2 text-xs"
@@ -4574,7 +4595,7 @@ const ReviewsPage = () => {
               ))}
               {!reviewRows.length && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
                     No registered review details found. Save a review to create an entry.
                   </td>
                 </tr>
@@ -4673,9 +4694,11 @@ const SalaryReassessmentPage = () => {
   const [employees, setEmployees] = useHrmsEmployees();
   const [salaryHistory, setSalaryHistory, salaryReassessmentsState] =
     useHrmsSalaryReassessments();
+  const currentReviewYear = new Date().getFullYear();
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(
     employees[0]?.id || ""
   );
+  const [employeeSearch, setEmployeeSearch] = useState("");
   const [metrics, setMetrics] = useState(defaultReassessmentMetrics);
   const [documents, setDocuments] = useState([]);
   const [message, setMessage] = useState("");
@@ -4706,7 +4729,12 @@ const SalaryReassessmentPage = () => {
     promotionRecommendation: "No Promotion",
     proposedRole: "",
     reviewDate: todayValue(),
-    reviewPeriod: "Jan 2026 - Dec 2026",
+    reviewEndDate: `${currentReviewYear}-12-31`,
+    reviewPeriod: buildReviewPeriod(
+      `${currentReviewYear}-01-01`,
+      `${currentReviewYear}-12-31`
+    ),
+    reviewStartDate: `${currentReviewYear}-01-01`,
     reviewerName: "",
     salaryStatus: "Pending",
     strengths: "",
@@ -4719,6 +4747,23 @@ const SalaryReassessmentPage = () => {
   });
   const selectedEmployee =
     employees.find((employee) => employee.id === selectedEmployeeId) || null;
+  const filteredEmployees = useMemo(() => {
+    const query = String(employeeSearch || "").trim().toLowerCase();
+    if (!query) {
+      return employees;
+    }
+    return employees.filter((employee) =>
+      [
+        employee.id,
+        employee.name,
+        employee.department,
+        employee.designation,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [employeeSearch, employees]);
   const currentSalary = Number(selectedEmployee?.salary || 0);
   const incrementPercent = clampNumber(form.incrementPercent, 0, 100);
   const incrementAmount = Math.round((currentSalary * incrementPercent) / 100);
@@ -4832,7 +4877,7 @@ const SalaryReassessmentPage = () => {
         current.departmentTransfer || selectedEmployee.department || "",
       proposedRole: current.proposedRole || selectedEmployee.designation || "",
     }));
-  }, [selectedEmployee?.id]);
+  }, [selectedEmployee]);
 
   const updateForm = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -4842,6 +4887,21 @@ const SalaryReassessmentPage = () => {
 
   const updateMetric = (key, value) => {
     setMetrics((current) => ({ ...current, [key]: clampNumber(value) }));
+    setMessage("");
+    setError("");
+  };
+
+  const updateReviewPeriodDate = (field, value) => {
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      return {
+        ...next,
+        reviewPeriod: buildReviewPeriod(
+          next.reviewStartDate || next.reviewDate,
+          next.reviewEndDate || next.reviewDate
+        ),
+      };
+    });
     setMessage("");
     setError("");
   };
@@ -4892,7 +4952,9 @@ const SalaryReassessmentPage = () => {
       resignationRisk,
       revisedSalary,
       reviewDate: form.reviewDate,
+      reviewEndDate: form.reviewEndDate,
       reviewPeriod: form.reviewPeriod,
+      reviewStartDate: form.reviewStartDate,
       reviewerName: form.reviewerName.trim(),
       reviewScore,
       salaryStatus: status,
@@ -5001,7 +5063,15 @@ const SalaryReassessmentPage = () => {
       promotionRecommendation: record.promotionRecommendation || "No Promotion",
       proposedRole: record.proposedRole || record.currentRole || "",
       reviewDate: record.reviewDate || todayValue(),
+      reviewEndDate:
+        record.reviewEndDate ||
+        record.reviewDate ||
+        current.reviewEndDate,
       reviewPeriod: record.reviewPeriod || current.reviewPeriod,
+      reviewStartDate:
+        record.reviewStartDate ||
+        record.reviewDate ||
+        current.reviewStartDate,
       reviewerName: record.reviewerName || "",
       salaryStatus: record.salaryStatus || "Pending",
       strengths: record.strengths || "",
@@ -5349,7 +5419,14 @@ const SalaryReassessmentPage = () => {
     <div className="grid gap-4">
       <Panel>
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label="Search Employee">
+              <Input
+                value={employeeSearch}
+                onChange={(event) => setEmployeeSearch(event.target.value)}
+                placeholder="Search by employee ID, name, department, or designation"
+              />
+            </Field>
             <Field label="Employee">
               <Input
                 as="select"
@@ -5359,26 +5436,36 @@ const SalaryReassessmentPage = () => {
                 }}
               >
                 <option value="">Select Employee</option>
-                {employees.map((employee) => (
+                {filteredEmployees.map((employee) => (
                   <option key={employee.id} value={employee.id}>
                     {employee.id} - {employee.name}
                   </option>
                 ))}
               </Input>
             </Field>
-            <Notice>{message}</Notice>
+            <div className="md:col-span-2">
+              <Notice>{message}</Notice>
+              <Notice tone="warning">
+                {error || salaryReassessmentsState.error}
+              </Notice>
+              <Notice>
+                {salaryReassessmentsState.loading && !salaryHistory.length
+                  ? "Loading salary reassessment records from the HRMS database..."
+                  : ""}
+              </Notice>
+            </div>
           </div>
           <div className="flex flex-wrap items-end gap-2">
+            <Link to="/reviews">
+              <Button variant="secondary">
+                <AppIcon name="clipboard" className="h-4 w-4" />
+                Review
+              </Button>
+            </Link>
             <Button
               variant="secondary"
-              onClick={() =>
-                printAppraisalPdf(activeRegisterRecord || buildRecord("Report Generated"))
-              }
+              onClick={printRevisionLetter}
             >
-              <AppIcon name="file" className="h-4 w-4" />
-              Appraisal PDF
-            </Button>
-            <Button variant="secondary" onClick={printRevisionLetter}>
               <AppIcon name="receipt" className="h-4 w-4" />
               Revision Letter
             </Button>
@@ -5404,102 +5491,44 @@ const SalaryReassessmentPage = () => {
 
       {selectedEmployee && (
         <>
-          <section className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)_360px]">
-            <Panel>
-              <div className="flex gap-4">
-                <Avatar
-                  initials={selectedEmployee.avatar}
-                  size="lg"
-                  src={selectedEmployee.photo}
-                />
-                <div>
-                  <h2 className="text-xl font-bold">{selectedEmployee.name}</h2>
-                  <p className="text-sm font-semibold text-slate-500">
-                    {selectedEmployee.id}
-                  </p>
-                  <p className="text-sm text-slate-500">
-                    {displayValue(selectedEmployee.designation)}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-5 grid gap-3 text-sm">
-                {[
-                  ["Department", displayValue(selectedEmployee.department)],
-                  ["Joining Date", displayValue(selectedEmployee.joined)],
-                  ["Current Salary", money(currentSalary)],
-                  [
-                    "Last Increment",
-                    lastIncrement?.effectiveDate
-                      ? formatDate(lastIncrement.effectiveDate)
-                      : "Not provided",
-                  ],
-                ].map(([label, value]) => (
-                  <div key={label} className="flex justify-between gap-4">
-                    <span className="text-slate-500">{label}</span>
-                    <strong>{value}</strong>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-
-            <Panel>
-              <div className="grid gap-4 md:grid-cols-4">
-                {[
-                  ["Overall", `${reviewScore}%`, `Grade ${grade}`],
-                  ["KPI", `${form.kpiScore}%`, "Core score"],
-                  ["Attendance", `${form.attendanceScore}%`, "Payroll linked"],
-                  ["Productivity", `${form.productivityScore}%`, "Delivery score"],
-                ].map(([label, value, helper]) => (
-                  <div key={label} className="rounded-lg border border-slate-200 p-3">
-                    <p className="text-xs font-bold text-slate-500">{label}</p>
-                    <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
-                    <p className="mt-1 text-xs text-slate-500">{helper}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                <RadarChart metrics={metricRows} />
-                <div className="grid content-center gap-3">
-                  <ScoreBar label="Metric Average" value={metricAverage} tone="emerald" />
-                  <ScoreBar label="Behavior Score" value={form.behaviorScore} tone="violet" />
-                  <ScoreBar label="Promotion Readiness" value={reviewScore} tone="amber" />
-                </div>
-              </div>
-            </Panel>
-
-            <Panel>
-              <h2 className="text-sm font-bold">AI Recommendation</h2>
-              <div className="mt-4 grid gap-3 text-sm">
-                {[
-                  ["Suggested Increment", `${aiIncrement}%`],
-                  ["Promotion Eligibility", promotionReadiness],
-                  ["Resignation Risk", resignationRisk],
-                  ["Performance Trend", reviewScore >= 80 ? "Positive" : "Needs attention"],
-                ].map(([label, value]) => (
-                  <div key={label} className="flex justify-between gap-4 rounded-md bg-slate-50 px-3 py-2">
-                    <span className="text-slate-500">{label}</span>
-                    <strong>{value}</strong>
-                  </div>
-                ))}
-              </div>
-              <Button
-                className="mt-4 w-full"
-                variant="secondary"
-                onClick={() => updateForm("incrementPercent", aiIncrement)}
-              >
-                Apply AI Increment
-              </Button>
-            </Panel>
-          </section>
-
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
             <Panel>
               <h2 className="text-sm font-bold">Performance Review</h2>
+              <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm md:grid-cols-2">
+                <div className="flex justify-between gap-4 md:block">
+                  <span className="text-slate-500">Employee</span>
+                  <strong className="md:block">{selectedEmployee.name}</strong>
+                </div>
+                <div className="flex justify-between gap-4 md:block">
+                  <span className="text-slate-500">Employee ID</span>
+                  <strong className="md:block">{selectedEmployee.id}</strong>
+                </div>
+                <div className="flex justify-between gap-4 md:block">
+                  <span className="text-slate-500">Department</span>
+                  <strong className="md:block">
+                    {displayValue(selectedEmployee.department)}
+                  </strong>
+                </div>
+                <div className="flex justify-between gap-4 md:block">
+                  <span className="text-slate-500">Current Role</span>
+                  <strong className="md:block">
+                    {displayValue(selectedEmployee.designation)}
+                  </strong>
+                </div>
+              </div>
               <div className="mt-4 grid gap-4 md:grid-cols-3">
-                <Field label="Review Period">
-                  <Input
-                    value={form.reviewPeriod}
-                    onChange={(event) => updateForm("reviewPeriod", event.target.value)}
+                <Field label="Review Start Date">
+                  <DateInput
+                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                    value={form.reviewStartDate}
+                    onChange={(value) => updateReviewPeriodDate("reviewStartDate", value)}
+                  />
+                </Field>
+                <Field label="Review End Date">
+                  <DateInput
+                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                    value={form.reviewEndDate}
+                    onChange={(value) => updateReviewPeriodDate("reviewEndDate", value)}
                   />
                 </Field>
                 <Field label="Reviewer Name">
@@ -5511,11 +5540,34 @@ const SalaryReassessmentPage = () => {
                 </Field>
                 <Field label="Review Date">
                   <DateInput
-                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
                     value={form.reviewDate}
                     onChange={(value) => updateForm("reviewDate", value)}
                   />
                 </Field>
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Field label="Review Period">
+                  <Input value={form.reviewPeriod} disabled />
+                </Field>
+                <div className="grid gap-3 rounded-lg border border-slate-200 p-4 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Overall Score</span>
+                    <strong>{reviewScore}%</strong>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Grade</span>
+                    <strong>{grade}</strong>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Last Increment</span>
+                    <strong>
+                      {lastIncrement?.effectiveDate
+                        ? formatDate(lastIncrement.effectiveDate)
+                        : "Not provided"}
+                    </strong>
+                  </div>
+                </div>
               </div>
               <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {[
@@ -5540,14 +5592,14 @@ const SalaryReassessmentPage = () => {
                     type="button"
                     onClick={() => updateForm("overallRating", star)}
                     className={[
-                      "grid h-9 w-9 place-items-center rounded-md border text-xl font-bold",
+                      "grid h-9 w-9 place-items-center rounded-md border text-base font-semibold",
                       star <= form.overallRating
-                        ? "border-amber-300 bg-amber-50 text-amber-500"
+                        ? "border-slate-500 bg-slate-100 text-slate-700"
                         : "border-slate-200 text-slate-300",
                     ].join(" ")}
                     aria-label={`${star} star rating`}
                   >
-                    *
+                    {star}
                   </button>
                 ))}
                 <StatusBadge status={`Grade ${grade}`} />
@@ -5582,7 +5634,7 @@ const SalaryReassessmentPage = () => {
                   </Field>
                   <Field label="Effective Date">
                     <DateInput
-                      className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                      className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
                       value={form.effectiveDate}
                       onChange={(value) => updateForm("effectiveDate", value)}
                     />
@@ -5599,13 +5651,13 @@ const SalaryReassessmentPage = () => {
                     </Input>
                   </Field>
                 </div>
-                <div className="grid gap-2 rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm">
+                <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
                   <div className="flex justify-between gap-4">
-                    <span>Increment Amount</span>
+                    <span className="text-slate-600">Increment Amount</span>
                     <strong>{money(incrementAmount)}</strong>
                   </div>
                   <div className="flex justify-between gap-4 text-base">
-                    <span>Revised Salary</span>
+                    <span className="text-slate-600">Revised Salary</span>
                     <strong>{money(revisedSalary)}</strong>
                   </div>
                   <div className="flex justify-between gap-4 text-slate-600">
@@ -5647,7 +5699,7 @@ const SalaryReassessmentPage = () => {
                 </Field>
                 <Field label="Promotion Effective Date">
                   <DateInput
-                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
+                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
                     value={form.promotionEffectiveDate}
                     onChange={(value) =>
                       updateForm("promotionEffectiveDate", value)
@@ -5689,7 +5741,7 @@ const SalaryReassessmentPage = () => {
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_430px]">
             <Panel>
               <h2 className="text-sm font-bold">Approval Workflow</h2>
-              <div className="mt-5 grid gap-3 md:grid-cols-4">
+              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 {[
                   ["Manager Review", "managerStatus"],
                   ["HR Approval", "hrStatus"],
@@ -5697,11 +5749,11 @@ const SalaryReassessmentPage = () => {
                   ["Salary Activated", "salaryStatus"],
                 ].map(([label, key], index) => (
                   <div key={key} className="rounded-lg border border-slate-200 p-3">
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className="grid h-7 w-7 place-items-center rounded-full bg-blue-700 text-xs font-bold text-white">
-                        {index + 1}
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <strong className="text-sm text-slate-800">{label}</strong>
+                      <span className="text-xs font-semibold text-slate-400">
+                        Step {index + 1}
                       </span>
-                      <strong className="text-sm">{label}</strong>
                     </div>
                     <Input
                       as="select"
@@ -5739,16 +5791,30 @@ const SalaryReassessmentPage = () => {
             </Panel>
 
             <Panel>
-              <h2 className="text-sm font-bold">Analytics & Charts</h2>
-              <SalaryGrowthChart
-                records={[...employeeHistory].reverse()}
-                currentSalary={currentSalary}
-              />
-              <div className="mt-4 grid gap-3">
-                <ScoreBar label="Department Comparison" value={reviewScore - 4} tone="blue" />
-                <ScoreBar label="Top Performer Index" value={reviewScore + 3} tone="emerald" />
-                <ScoreBar label="Compensation Benchmark" value={incrementPercent * 7} tone="amber" />
+              <h2 className="text-sm font-bold">Assessment Summary</h2>
+              <div className="mt-4 grid gap-3 text-sm">
+                {[
+                  ["Suggested Increment", `${aiIncrement}%`],
+                  ["Promotion Eligibility", promotionReadiness],
+                  ["Resignation Risk", resignationRisk],
+                  ["Metric Average", `${metricAverage}%`],
+                ].map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="flex justify-between gap-4 rounded-md border border-slate-200 px-3 py-2"
+                  >
+                    <span className="text-slate-500">{label}</span>
+                    <strong>{value}</strong>
+                  </div>
+                ))}
               </div>
+              <Button
+                className="mt-4 w-full"
+                variant="secondary"
+                onClick={() => updateForm("incrementPercent", aiIncrement)}
+              >
+                Apply Suggested Increment
+              </Button>
             </Panel>
           </section>
 
@@ -5787,7 +5853,7 @@ const SalaryReassessmentPage = () => {
                     <span className="text-slate-500">No documents attached.</span>
                   )}
                 </div>
-                {[
+                {[ 
                   ["Increment approval email", "notifyEmail"],
                   ["Promotion notice", "notifyPromotion"],
                   ["HR alerts", "notifyHr"],
@@ -5798,7 +5864,7 @@ const SalaryReassessmentPage = () => {
                       type="checkbox"
                       checked={form[key]}
                       onChange={(event) => updateForm(key, event.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-blue-700"
+                      className="h-4 w-4 rounded border-slate-300 text-slate-700"
                     />
                     {label}
                   </label>
@@ -6022,6 +6088,18 @@ const SalaryReassessmentPage = () => {
           </table>
         </div>
       </Panel>
+
+      <div className="flex justify-end">
+        <Button
+          variant="secondary"
+          onClick={() =>
+            printAppraisalPdf(activeRegisterRecord || buildRecord("Report Generated"))
+          }
+        >
+          <AppIcon name="download" className="h-4 w-4" />
+          Download PDF
+        </Button>
+      </div>
 
       {activeRegisterRecord && (
         <RegisterDocumentView

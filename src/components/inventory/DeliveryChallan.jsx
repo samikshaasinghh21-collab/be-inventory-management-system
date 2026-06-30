@@ -190,6 +190,18 @@ const POD_DETAIL_TITLES = {
 const getReceiptReference = (receipt = {}) =>
   `RG-${String(receipt.receiveGoodsId ?? receipt.id ?? "").padStart(3, "0")}`;
 
+const resolveProjectPreferredLocation = (locations = [], projectId) => {
+  const normalizedProjectId = String(projectId ?? "").trim();
+  if (!normalizedProjectId) {
+    return null;
+  }
+  return (
+    locations.find(
+      (location) => String(location.projectId ?? "").trim() === normalizedProjectId
+    ) || null
+  );
+};
+
 const buildReceiptReferenceLabel = (receipt = {}, projectName = "") => {
   const receiptNumber = getReceiptReference(receipt);
   const invoiceDateText = formatDate(receipt.invoiceDate ?? receipt.receivedDate ?? receipt.createdAt);
@@ -1350,7 +1362,11 @@ const DeliveryChallan = () => {
     if (!selectedReceipts.length) {
       setItems([]);
       setLoadedReceiptIds([]);
-      setForm((prev) => ({ ...prev, receiveGoodsId: "" }));
+      setForm((prev) => ({
+        ...prev,
+        receiveGoodsId: "",
+        fromLocationId: "",
+      }));
       return;
     }
     const selectedLocationIds = Array.from(
@@ -1378,6 +1394,18 @@ const DeliveryChallan = () => {
     const primaryReceipt = selectedReceipts[0];
     const primaryPurchaseOrder =
       purchaseOrderMap[String(primaryReceipt?.purchaseOrderId)] || null;
+    const nextProjectId =
+      primaryReceipt?.projectId
+        ? String(primaryReceipt.projectId)
+        : primaryPurchaseOrder?.projectId
+        ? String(primaryPurchaseOrder.projectId)
+        : "";
+    const nextFromLocationId =
+      primaryReceipt?.locationId
+        ? String(primaryReceipt.locationId)
+        : primaryPurchaseOrder?.locationId
+        ? String(primaryPurchaseOrder.locationId)
+        : "";
     setItems(
       nextItems.map((item) => ({
         ...item,
@@ -1385,20 +1413,29 @@ const DeliveryChallan = () => {
       }))
     );
     setLoadedReceiptIds([...selectedReceiptIds]);
-    setForm((prev) => ({
-      ...prev,
-      receiveGoodsId: primaryReceipt?.id ? String(primaryReceipt.id) : "",
-      projectId: primaryReceipt?.projectId
-        ? String(primaryReceipt.projectId)
-        : primaryPurchaseOrder?.projectId
-        ? String(primaryPurchaseOrder.projectId)
-        : prev.projectId,
-      fromLocationId: primaryReceipt?.locationId
-        ? String(primaryReceipt.locationId)
-        : primaryPurchaseOrder?.locationId
-        ? String(primaryPurchaseOrder.locationId)
-        : prev.fromLocationId,
-    }));
+    setForm((prev) => {
+      const currentDestination = locations.find(
+        (location) => String(location.id) === String(prev.toLocationId)
+      );
+      const projectPreferredLocation =
+        resolveProjectPreferredLocation(locations, nextProjectId) ||
+        resolveProjectPreferredLocation(locations, prev.projectId);
+      const resolvedToLocation =
+        currentDestination &&
+        (!nextProjectId ||
+          String(currentDestination.projectId ?? "") === String(nextProjectId))
+          ? currentDestination
+          : projectPreferredLocation;
+
+      return {
+        ...prev,
+        receiveGoodsId: primaryReceipt?.id ? String(primaryReceipt.id) : "",
+        projectId: nextProjectId || prev.projectId,
+        fromLocationId: nextFromLocationId,
+        toLocationId: resolvedToLocation ? String(resolvedToLocation.id) : "",
+        toLocation: resolvedToLocation?.name || "",
+      };
+    });
     setReceiptError("");
   };
 

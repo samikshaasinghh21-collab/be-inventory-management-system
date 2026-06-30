@@ -37,7 +37,6 @@ const issuedByOptions = [
 const statusOptions = ["Logged", "Reviewed", "Approved"];
 const lookupSourceOptions = [
   { value: "dc", label: "DC Lookup" },
-  { value: "reallocation", label: "Reallocation Lookup" },
 ];
 
 const toNumber = (value) => {
@@ -428,16 +427,19 @@ const statusPillClass = (status) => {
 
 const sourceTypeLabel = (row = {}) => {
   if (normalizeText(row.sourceRef).startsWith("rel-")) {
-    return "Reallocation";
+    return "Transfer";
   }
   if (normalizeText(row.sourceType) === "dc") {
     return "DC";
   }
   if (normalizeText(row.sourceType) === "reallocation") {
-    return "Reallocation";
+    return "Transfer";
   }
   return row.sourceType || "Receive";
 };
+
+const isReallocationSource = (value = "") =>
+  ["reallocate", "reallocation"].includes(normalizeText(value));
 
 const Consumption = () => {
   const navigate = useNavigate();
@@ -697,6 +699,16 @@ const Consumption = () => {
   const availableReallocations = useMemo(() => {
     const selectedProjectId = String(form.projectId || "");
     const selectedLocationId = String(form.locationId || "");
+    const availableReallocationRefs = new Set(
+      availableInventory
+        .filter(
+          (row) =>
+            String(row.locationId ?? "") === selectedLocationId &&
+            isReallocationSource(row.sourceType) &&
+            normalizeText(row.sourceRef)
+        )
+        .map((row) => normalizeText(row.sourceRef))
+    );
     return reallocations.filter((record) => {
       if (String(record.type || "Reallocate") !== "Reallocate") {
         return false;
@@ -707,9 +719,15 @@ const Consumption = () => {
       if (selectedLocationId && String(record.toLocationId ?? "") !== selectedLocationId) {
         return false;
       }
+      if (
+        selectedLocationId &&
+        !availableReallocationRefs.has(normalizeText(record.referenceNumber))
+      ) {
+        return false;
+      }
       return true;
     });
-  }, [form.locationId, form.projectId, reallocations]);
+  }, [availableInventory, form.locationId, form.projectId, reallocations]);
 
   const filteredDeliveryChallansForSelection = useMemo(() => {
     const keyword = normalizeText(deliveryChallanFilter);
@@ -892,7 +910,8 @@ const Consumption = () => {
         return 0;
       }
       return availableInventory.reduce((sum, row) => {
-        return normalizeText(row.sourceRef) === reference
+        return isReallocationSource(row.sourceType) &&
+          normalizeText(row.sourceRef) === reference
           ? sum + Math.max(toNumber(row.availableQty), 0)
           : sum;
       }, 0);
@@ -1232,8 +1251,11 @@ const Consumption = () => {
         .map((record) => normalizeText(record.referenceNumber))
         .filter(Boolean)
     );
-    const filteredInventoryRows = availableInventory.filter((row) =>
-      selectedRefs.has(normalizeText(row.sourceRef))
+    const filteredInventoryRows = availableInventory.filter(
+      (row) =>
+        String(row.locationId ?? "") === String(form.locationId || "") &&
+        isReallocationSource(row.sourceType) &&
+        selectedRefs.has(normalizeText(row.sourceRef))
     );
     const nextRows = buildRowsFromAvailableInventory({
       rows: filteredInventoryRows,
@@ -1681,13 +1703,6 @@ const Consumption = () => {
         >
           DC Option
         </button>
-        <button
-          type="button"
-          onClick={() => navigate("/inventory/reallocate-return")}
-          className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800"
-        >
-          Reallocation
-        </button>
       </section>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1918,40 +1933,18 @@ const Consumption = () => {
           <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 className="text-2xl font-semibold text-violet-800">
-                Optional DC / Reallocation Lookup
+                Optional DC Lookup
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                Available inventory loads automatically from the selected project and location. Use this lookup only when you want to narrow the list to specific DC or reallocation records.
+                Available inventory loads automatically from the selected project and location. Use this lookup only when you want to narrow the list to specific DC records.
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <select
-                value={lookupSource}
-                onChange={(event) => {
-                  setLookupSource(event.target.value);
-                  setDeliveryChallanFilter("");
-                  setSelectedDeliveryChallanIds([]);
-                  setSelectedReallocationIds([]);
-                  setLoadedDeliveryChallanIds([]);
-                  clearError("deliveryChallanId");
-                }}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100 sm:w-52"
-              >
-                {lookupSourceOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
               <input
                 type="search"
                 value={deliveryChallanFilter}
                 onChange={(event) => setDeliveryChallanFilter(event.target.value)}
-                placeholder={
-                  lookupSource === "reallocation"
-                    ? "Search reallocation ref or location..."
-                    : "Search DC number or location..."
-                }
+                placeholder="Search DC number or location..."
                 className="w-full min-w-[260px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
               />
               <button
@@ -1990,11 +1983,11 @@ const Consumption = () => {
                           }
                         />
                       </th>
-                      <th className="px-3 py-3 text-left">
-                        {lookupSource === "reallocation" ? "Reallocation Ref" : "DC Number"}
+                  <th className="px-3 py-3 text-left">
+                        DC Number
                       </th>
                       <th className="px-3 py-3 text-left">
-                        {lookupSource === "reallocation" ? "Reallocation Date" : "DC Date"}
+                        DC Date
                       </th>
                       <th className="px-3 py-3 text-left">From</th>
                       <th className="px-3 py-3 text-left">To</th>
@@ -2122,24 +2115,16 @@ const Consumption = () => {
               </div>
               <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-slate-500">
-                  {lookupSource === "reallocation"
-                    ? `Showing ${filteredReallocationsForSelection.length} of ${availableReallocations.length} reallocations`
-                    : `Showing ${filteredDeliveryChallansForSelection.length} of ${availableChallans.length} DCs`}
+                  {`Showing ${filteredDeliveryChallansForSelection.length} of ${availableChallans.length} DCs`}
                 </p>
                 <div className="flex items-center gap-4">
                   <span className="font-semibold text-violet-800">
-                    {lookupSource === "reallocation"
-                      ? selectedReallocationIds.length
-                      : selectedDeliveryChallanIds.length} selected
+                    {selectedDeliveryChallanIds.length} selected
                   </span>
                   <button
                     type="button"
                     onClick={clearDeliveryChallanSelection}
-                    disabled={
-                      lookupSource === "reallocation"
-                        ? !selectedReallocationIds.length
-                        : !selectedDeliveryChallanIds.length
-                    }
+                    disabled={!selectedDeliveryChallanIds.length}
                     className="text-sm font-semibold text-violet-700 disabled:cursor-not-allowed disabled:text-slate-400"
                   >
                     Clear Selection
@@ -2153,62 +2138,38 @@ const Consumption = () => {
               <div className="mt-4 space-y-3 text-sm">
                 <div className="flex justify-between gap-3">
                   <span className="text-slate-600">
-                    {lookupSource === "reallocation"
-                      ? "Total Reallocations Selected"
-                      : "Total DCs Selected"}
+                    Total DCs Selected
                   </span>
                   <span className="font-semibold text-slate-900">
-                    {lookupSource === "reallocation"
-                      ? selectedReallocationsSummary.records
-                      : selectedDeliveryChallansSummary.challans}
+                    {selectedDeliveryChallansSummary.challans}
                   </span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span className="text-slate-600">Total Items</span>
                   <span className="font-semibold text-slate-900">
-                    {lookupSource === "reallocation"
-                      ? selectedReallocationsSummary.items
-                      : selectedDeliveryChallansSummary.items}
+                    {selectedDeliveryChallansSummary.items}
                   </span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span className="text-slate-600">Total Quantity</span>
                   <span className="font-semibold text-slate-900">
-                    {formatQty(
-                      lookupSource === "reallocation"
-                        ? selectedReallocationsSummary.quantity
-                        : selectedDeliveryChallansSummary.quantity
-                    )}
+                    {formatQty(selectedDeliveryChallansSummary.quantity)}
                   </span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span className="text-slate-600">Total Available Qty</span>
                   <span className="font-semibold text-slate-900">
-                    {formatQty(
-                      lookupSource === "reallocation"
-                        ? selectedReallocationsSummary.availableQuantity
-                        : selectedDeliveryChallansSummary.availableQuantity
-                    )}
+                    {formatQty(selectedDeliveryChallansSummary.availableQuantity)}
                   </span>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={
-                  lookupSource === "reallocation"
-                    ? handleLoadSelectedReallocations
-                    : handleLoadSelectedDeliveryChallans
-                }
-                disabled={
-                  lookupSource === "reallocation"
-                    ? !selectedReallocationIds.length
-                    : !selectedDeliveryChallanIds.length
-                }
+                onClick={handleLoadSelectedDeliveryChallans}
+                disabled={!selectedDeliveryChallanIds.length}
                 className="mt-5 w-full rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                {lookupSource === "reallocation"
-                  ? "Load Selected Reallocations"
-                  : "Load Selected DCs"}
+                Load Selected DCs
               </button>
               <p className="mt-3 text-xs text-slate-500">
                 Loading lookup records is optional; location inventory is already loaded below.
@@ -2235,7 +2196,7 @@ const Consumption = () => {
                 ) : null}
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                Select items and provide consumption quantity. Available quantity includes Receive and DC stock minus prior consumption and reallocation.
+                Select items and provide consumption quantity. Available quantity includes Receive and DC stock minus prior consumption.
               </p>
               {inventoryLoading && (
                 <p className="mt-2 text-xs font-semibold text-violet-700">
@@ -2294,7 +2255,7 @@ const Consumption = () => {
                     Previously Consumed
                   </th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[150px]">
-                    Reallocated
+                    Adjusted
                   </th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[120px]">
                     Available Qty

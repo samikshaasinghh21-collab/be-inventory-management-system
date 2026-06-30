@@ -14,10 +14,12 @@ import {
   updateProjectApi,
 } from "../services/projectsApi";
 import { fetchCustomers } from "../services/customersApi";
+import { transformUppercaseFieldValue } from "../utils/inputTransform";
 import DateInput from "../components/common/DateInput";
 import { formatTimelineRange } from "../utils/dateFormat";
 
 const STATUS_OPTIONS = ["Planned", "Active", "On Hold", "Completed"];
+const UPPERCASE_FIELDS = ["name", "code", "notes"];
 
 const emptyForm = {
   name: "",
@@ -214,7 +216,10 @@ const ProjectsHome = () => {
   };
 
   const updateField = (key, value) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => ({
+      ...prev,
+      [key]: transformUppercaseFieldValue(key, value, UPPERCASE_FIELDS),
+    }));
     if (errors[key]) {
       setErrors((prev) => ({ ...prev, [key]: undefined }));
     }

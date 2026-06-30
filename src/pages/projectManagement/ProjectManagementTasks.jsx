@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import {
   PROJECT_MANAGEMENT_PROJECTS_EVENT,
+  hydrateProjectManagementProjects,
   getProjectManagementProjects,
 } from "../../services/projectManagementProjectsStore";
 import { formatDate } from "../../utils/dateFormat";
@@ -319,7 +320,9 @@ const ProjectManagementTasks = () => {
         PROJECT_MANAGEMENT_PROJECTS_EVENT,
         handleProjectsChange
       );
+      window.addEventListener("projects:changed", handleProjectsChange);
     }
+    void hydrateProjectManagementProjects().then(setProjects);
 
     return () => {
       if (typeof window !== "undefined") {
@@ -327,6 +330,7 @@ const ProjectManagementTasks = () => {
           PROJECT_MANAGEMENT_PROJECTS_EVENT,
           handleProjectsChange
         );
+        window.removeEventListener("projects:changed", handleProjectsChange);
       }
     };
   }, []);

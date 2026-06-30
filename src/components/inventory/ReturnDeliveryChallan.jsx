@@ -9,7 +9,7 @@ const ReturnDeliveryChallan = () => {
             Logistics
           </p>
           <h1 className="text-3xl font-semibold text-slate-800">
-            Delivery Challan (Return / Reallocation)
+            Delivery Challan (Return)
           </h1>
         </div>
         <button className="bg-indigo-600 text-white px-6 py-3 rounded-md text-base font-medium hover:bg-indigo-700">

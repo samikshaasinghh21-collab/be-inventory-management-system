@@ -2,7 +2,7 @@ export const normalizeInventorySourceType = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "dc" || normalized === "delivery challan") return "dc";
   if (normalized === "consumption") return "consumption";
-  if (normalized === "reallocation" || normalized === "reallocate") return "reallocation";
+  if (normalized === "reallocation" || normalized === "reallocate") return "transfer";
   if (normalized === "receive" || normalized === "receipt" || normalized === "receive goods") {
     return "receive";
   }
@@ -13,7 +13,7 @@ export const getInventorySourceLabel = (sourceType) => {
   const normalized = normalizeInventorySourceType(sourceType);
   if (normalized === "dc") return "DC";
   if (normalized === "consumption") return "Consumption";
-  if (normalized === "reallocation") return "Reallocation";
+  if (normalized === "transfer") return "Transfer";
   return "Receive";
 };
 
