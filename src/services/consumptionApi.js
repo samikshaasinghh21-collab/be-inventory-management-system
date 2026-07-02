@@ -115,6 +115,7 @@ const normalizeConsumption = (consumption = {}) => ({
   consumptionNumber:
     consumption.consumptionNumber ?? consumption.ConsumptionNumber ?? "",
   projectId: consumption.projectId ?? consumption.ProjectId ?? null,
+  fromLocationId: consumption.fromLocationId ?? consumption.FromLocationId ?? null,
   locationId: consumption.locationId ?? consumption.LocationId ?? null,
   receiveGoodsId: consumption.receiveGoodsId ?? consumption.ReceiveGoodsId ?? null,
   deliveryChallanId:
@@ -178,6 +179,7 @@ const buildConsumptionRecordKey = (record = {}, index = 0) => {
     .join(",");
   const compositeParts = [
     record.projectId ?? "",
+    record.fromLocationId ?? "",
     record.locationId ?? "",
     record.deliveryChallanId ?? challanIds ?? "",
     String(record.deliveryChallanRef ?? "").trim().toLowerCase(),

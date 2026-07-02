@@ -1502,6 +1502,7 @@ const normalizeConsumption = (row = {}) => {
     consumptionId: id,
     consumptionNumber: row.ConsumptionNumber ?? row.consumptionNumber ?? "",
     projectId: row.ProjectId ?? row.projectId ?? null,
+    fromLocationId: row.FromLocationId ?? row.fromLocationId ?? null,
     locationId: row.LocationId ?? row.locationId ?? null,
     receiveGoodsId: row.ReceiveGoodsId ?? row.receiveGoodsId ?? null,
     deliveryChallanId: primaryDeliveryChallanId,
@@ -1685,6 +1686,264 @@ const buildReallocateNotesPayload = ({
     createdAt,
     updatedAt,
   });
+
+const loadLinkedConsumptionTransfer = async (
+  tx,
+  { consumptionId = null, consumptionNumber = "" } = {}
+) => {
+  await ensureReallocateInventoryTables();
+  const pkCol = await refreshReallocateInventoryPk();
+  const fkCol = await refreshReallocateInventoryItemsFk();
+  const safeConsumptionId = toNullableInt(consumptionId);
+  const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
+
+  const transfersResult = await new sql.Request(tx).query(`
+    SELECT * FROM dbo.ReallocateInventory ORDER BY ${toIdentifier(pkCol)} DESC
+  `);
+  const matchedTransferRow = (transfersResult.recordset ?? []).find((row) => {
+    const transfer = normalizeReallocateInventory(row);
+    if (transfer.type !== "Reallocate") {
+      return false;
+    }
+    if (normalizeInventoryKeyValue(transfer.referenceType) !== "consumption") {
+      return false;
+    }
+    if (safeConsumptionId !== null) {
+      return (
+        toNullableInt(transfer.referenceId) === safeConsumptionId ||
+        toNullableInt(transfer.consumptionId) === safeConsumptionId
+      );
+    }
+    return (
+      safeConsumptionNumber &&
+      normalizeInventoryKeyValue(transfer.referenceNo) ===
+        normalizeInventoryKeyValue(safeConsumptionNumber)
+    );
+  });
+
+  if (!matchedTransferRow) {
+    return null;
+  }
+
+  const transfer = normalizeReallocateInventory(matchedTransferRow);
+  const transferId = toNullableInt(transfer.id);
+  if (transferId === null) {
+    return null;
+  }
+
+  const itemsResult = await new sql.Request(tx)
+    .input("TransferId", sql.Int, transferId)
+    .query(`
+      SELECT * FROM dbo.ReallocateInventoryItems
+      WHERE ${toIdentifier(fkCol)} = @TransferId
+    `);
+
+  return {
+    ...transfer,
+    items: (itemsResult.recordset ?? []).map(normalizeReallocateInventoryItem),
+  };
+};
+
+const deleteReallocateInventoryRecord = async (tx, transferId) => {
+  const safeTransferId = toNullableInt(transferId);
+  if (safeTransferId === null) {
+    return;
+  }
+  await ensureReallocateInventoryTables();
+  const pkCol = await refreshReallocateInventoryPk();
+  const fkCol = await refreshReallocateInventoryItemsFk();
+
+  await new sql.Request(tx)
+    .input("TransferId", sql.Int, safeTransferId)
+    .query(`
+      DELETE FROM dbo.ReallocateInventoryItems
+      WHERE ${toIdentifier(fkCol)} = @TransferId
+    `);
+
+  await new sql.Request(tx)
+    .input("TransferId", sql.Int, safeTransferId)
+    .query(`
+      DELETE FROM dbo.ReallocateInventory
+      WHERE ${toIdentifier(pkCol)} = @TransferId
+    `);
+};
+
+const upsertConsumptionTransfer = async (
+  tx,
+  {
+    existingTransferId = null,
+    consumptionId = null,
+    consumptionNumber = "",
+    projectId = null,
+    fromLocationId,
+    toLocationId,
+    requestDate = null,
+    requestedBy = "",
+    notes = "",
+    items = [],
+  } = {}
+) => {
+  await ensureReallocateInventoryTables();
+  const pkCol = await refreshReallocateInventoryPk();
+  const fkCol = await refreshReallocateInventoryItemsFk();
+
+  const safeTransferId = toNullableInt(existingTransferId);
+  const safeFromLocationId = toNullableInt(fromLocationId);
+  const safeToLocationId = toNullableInt(toLocationId);
+  const safeConsumptionId = toNullableInt(consumptionId);
+  const safeProjectId = toNullableInt(projectId);
+  const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
+  const safeRequestedBy = normalizeOptionalString(requestedBy) ?? "";
+  const safeNotes = normalizeOptionalString(notes) ?? "";
+  const parsedRequestDate = parseDateInput(requestDate);
+  const now = new Date().toISOString();
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      name: String(item.name ?? item.item ?? item.Item ?? "").trim(),
+      description:
+        normalizeOptionalString(item.description ?? item.Description) ?? null,
+      unit: normalizeOptionalString(item.unit ?? item.Unit) ?? "PCS",
+      quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+      receiveGoodsItemId: toNullableInt(
+        item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+      ),
+      deliveryChallanId: toNullableInt(
+        item.deliveryChallanId ?? item.DeliveryChallanId
+      ),
+      deliveryChallanItemId: toNullableInt(
+        item.deliveryChallanItemId ??
+          item.DeliveryChallanItemId ??
+          item.deliveryChallanLineItemId ??
+          item.DeliveryChallanLineItemId
+      ),
+      sourceType:
+        normalizeAvailabilitySourceType(item.sourceType ?? item.SourceType) ||
+        (toNullableInt(item.deliveryChallanId ?? item.DeliveryChallanId) !== null
+          ? "dc"
+          : "receive"),
+      sourceKey:
+        normalizeOptionalString(item.sourceKey ?? item.SourceKey) ??
+        buildAvailabilitySourceKey(item),
+      sourceRef: normalizeOptionalString(item.sourceRef ?? item.SourceRef) ?? null,
+    }))
+    .filter((item) => item.name && item.quantity > 0);
+
+  const upsertMetadata = (transferId, createdAt = null) =>
+    buildReallocateNotesPayload({
+      referenceNumber: generateReallocateReferenceNumber(transferId),
+      referenceType: "consumption",
+      referenceId: safeConsumptionId,
+      referenceNo: safeConsumptionNumber,
+      type: "Reallocate",
+      consumptionId: safeConsumptionId,
+      consumptionNumber: safeConsumptionNumber,
+      projectId: safeProjectId,
+      requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
+      requestedBy: safeRequestedBy,
+      status: "Completed",
+      notes: safeNotes,
+      createdAt: createdAt ?? now,
+      updatedAt: now,
+    });
+
+  let transferId = safeTransferId;
+  let createdAt = now;
+
+  if (transferId === null) {
+    const insertHeaderReq = new sql.Request(tx);
+    insertHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
+    insertHeaderReq.input("ToLocationId", sql.Int, safeToLocationId);
+    insertHeaderReq.input("TransferDate", sql.DateTime, parsedRequestDate ?? null);
+    insertHeaderReq.input("Notes", sql.NVarChar(sql.MAX), buildReallocateNotesPayload({
+      referenceNumber: null,
+      referenceType: "consumption",
+      referenceId: safeConsumptionId,
+      referenceNo: safeConsumptionNumber,
+      type: "Reallocate",
+      consumptionId: safeConsumptionId,
+      consumptionNumber: safeConsumptionNumber,
+      projectId: safeProjectId,
+      requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
+      requestedBy: safeRequestedBy,
+      status: "Completed",
+      notes: safeNotes,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    const headerResult = await insertHeaderReq.query(`
+      INSERT INTO dbo.ReallocateInventory
+        (FromLocationId, ToLocationId, TransferDate, Notes)
+      OUTPUT INSERTED.*
+      VALUES
+        (@FromLocationId, @ToLocationId, @TransferDate, @Notes)
+    `);
+    const headerRow = headerResult.recordset?.[0];
+    transferId =
+      headerRow?.[pkCol] ?? headerRow?.Id ?? headerRow?.TransferId ?? null;
+    if (!transferId) {
+      throw new Error("Failed to create linked reallocation");
+    }
+  } else {
+    const existingTransfer = await loadLinkedConsumptionTransfer(tx, {
+      consumptionId: safeConsumptionId,
+      consumptionNumber: safeConsumptionNumber,
+    });
+    createdAt = existingTransfer?.createdAt ?? now;
+    await new sql.Request(tx)
+      .input("TransferId", sql.Int, transferId)
+      .input("FromLocationId", sql.Int, safeFromLocationId)
+      .input("ToLocationId", sql.Int, safeToLocationId)
+      .input("TransferDate", sql.DateTime, parsedRequestDate ?? null)
+      .input("Notes", sql.NVarChar(sql.MAX), upsertMetadata(transferId, createdAt))
+      .query(`
+        UPDATE dbo.ReallocateInventory
+        SET FromLocationId = @FromLocationId,
+            ToLocationId = @ToLocationId,
+            TransferDate = @TransferDate,
+            Notes = @Notes
+        WHERE ${toIdentifier(pkCol)} = @TransferId
+      `);
+
+    await new sql.Request(tx)
+      .input("TransferId", sql.Int, transferId)
+      .query(`
+        DELETE FROM dbo.ReallocateInventoryItems
+        WHERE ${toIdentifier(fkCol)} = @TransferId
+      `);
+  }
+
+  await new sql.Request(tx)
+    .input("TransferId", sql.Int, transferId)
+    .input("Notes", sql.NVarChar(sql.MAX), upsertMetadata(transferId, createdAt))
+    .query(`
+      UPDATE dbo.ReallocateInventory
+      SET Notes = @Notes
+      WHERE ${toIdentifier(pkCol)} = @TransferId
+    `);
+
+  for (const item of normalizedItems) {
+    await new sql.Request(tx)
+      .input("TransferId", sql.Int, transferId)
+      .input("ReceiveGoodsItemId", sql.Int, item.receiveGoodsItemId)
+      .input("DeliveryChallanId", sql.Int, item.deliveryChallanId)
+      .input("DeliveryChallanItemId", sql.BigInt, item.deliveryChallanItemId)
+      .input("SourceType", sql.NVarChar(50), item.sourceType)
+      .input("SourceKey", sql.NVarChar(200), item.sourceKey)
+      .input("SourceRef", sql.NVarChar(255), item.sourceRef)
+      .input("Item", sql.NVarChar(200), item.name)
+      .input("Description", sql.NVarChar(500), item.description)
+      .input("Unit", sql.NVarChar(100), item.unit)
+      .input("Quantity", sql.Decimal(18, 2), item.quantity)
+      .query(`
+        INSERT INTO dbo.ReallocateInventoryItems
+          (${toIdentifier(fkCol)}, ReceiveGoodsItemId, DeliveryChallanId, DeliveryChallanItemId, SourceType, SourceKey, SourceRef, Item, Description, Unit, Quantity)
+        VALUES
+          (@TransferId, @ReceiveGoodsItemId, @DeliveryChallanId, @DeliveryChallanItemId, @SourceType, @SourceKey, @SourceRef, @Item, @Description, @Unit, @Quantity)
+      `);
+  }
+
+  return transferId;
+};
 
 const normalizeOptionalString = (value) => {
   if (value === undefined) {
@@ -6918,6 +7177,7 @@ const ensureConsumptionTables = async () => {
           Id INT IDENTITY(1,1) PRIMARY KEY,
           ConsumptionNumber NVARCHAR(50) NULL,
           ProjectId INT NULL,
+          FromLocationId INT NULL,
           LocationId INT NULL,
           ReceiveGoodsId INT NULL,
           DeliveryChallanId INT NULL,
@@ -6968,6 +7228,10 @@ const ensureConsumptionTables = async () => {
       IF COL_LENGTH('dbo.Consumption', 'ProjectId') IS NULL
       BEGIN
         ALTER TABLE dbo.Consumption ADD ProjectId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.Consumption', 'FromLocationId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.Consumption ADD FromLocationId INT NULL;
       END;
       IF COL_LENGTH('dbo.Consumption', 'LocationId') IS NULL
       BEGIN
@@ -8296,12 +8560,13 @@ const loadAvailableInventoryRows = async (
       ci.*,
       c.${toIdentifier(consumptionPk)} AS HeaderConsumptionId,
       c.ProjectId AS HeaderProjectId,
+      c.FromLocationId AS HeaderFromLocationId,
       c.LocationId AS HeaderLocationId,
       c.DeliveryChallanId AS HeaderDeliveryChallanId
     FROM dbo.Consumption c
     INNER JOIN dbo.ConsumptionItems ci
       ON ci.${toIdentifier(consumptionFk)} = c.${toIdentifier(consumptionPk)}
-    WHERE c.LocationId = @LocationId
+    WHERE (c.LocationId = @LocationId OR c.FromLocationId = @LocationId)
       ${
         safeProjectId !== null
           ? "AND c.ProjectId = @ProjectId"
@@ -8317,7 +8582,7 @@ const loadAvailableInventoryRows = async (
     const item = normalizeConsumptionItem(row);
     applyMovementQuantity({
       projectId: row.HeaderProjectId,
-      locationId: row.HeaderLocationId,
+      locationId: row.HeaderFromLocationId ?? row.HeaderLocationId,
       item,
       quantity: item.quantity,
       field: "consumedQty",
@@ -18182,6 +18447,7 @@ app.post("/api/consumptions", async (req, res) => {
   const {
     consumptionNumber,
     projectId,
+    fromLocationId = null,
     locationId,
     receiveGoodsId = null,
     deliveryChallanId = null,
@@ -18200,6 +18466,7 @@ app.post("/api/consumptions", async (req, res) => {
 
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber);
   const safeProjectId = toNullableInt(projectId);
+  const safeFromLocationId = toNullableInt(fromLocationId) ?? toNullableInt(locationId);
   const safeLocationId = toNullableInt(locationId);
   const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
   const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
@@ -18231,6 +18498,9 @@ app.post("/api/consumptions", async (req, res) => {
   }
   if (!safeProjectId) {
     return res.status(400).json({ ok: false, error: "projectId is required" });
+  }
+  if (!safeFromLocationId) {
+    return res.status(400).json({ ok: false, error: "fromLocationId is required" });
   }
   if (!safeLocationId) {
     return res.status(400).json({ ok: false, error: "locationId is required" });
@@ -18302,6 +18572,7 @@ app.post("/api/consumptions", async (req, res) => {
   try {
     await ensureConsumptionTables();
     await ensureReceiveTables();
+    await ensureReallocateInventoryTables();
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
@@ -18313,11 +18584,19 @@ app.post("/api/consumptions", async (req, res) => {
       sourceKey: item.sourceKey || buildAvailabilitySourceKey(item),
     }));
 
-    await validateAvailableInventorySelection(tx, {
-      projectId: safeProjectId,
-      locationId: safeLocationId,
-      items: mappedItems,
-    });
+    let linkedTransferId = null;
+    if (safeFromLocationId !== safeLocationId) {
+      linkedTransferId = await upsertConsumptionTransfer(tx, {
+        consumptionNumber: safeConsumptionNumber,
+        projectId: safeProjectId,
+        fromLocationId: safeFromLocationId,
+        toLocationId: safeLocationId,
+        requestDate: parsedConsumptionDate ?? consumptionDate ?? null,
+        requestedBy: safeIssuedBy,
+        notes: safeNotes,
+        items: mappedItems,
+      });
+    }
 
     const resolvedDeliveryChallanIds = Array.from(
       new Set(
@@ -18338,6 +18617,7 @@ app.post("/api/consumptions", async (req, res) => {
     const insertHeaderReq = new sql.Request(tx);
     insertHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
     insertHeaderReq.input("ProjectId", sql.Int, safeProjectId);
+    insertHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
     insertHeaderReq.input("LocationId", sql.Int, safeLocationId);
     insertHeaderReq.input("ReceiveGoodsId", sql.Int, resolvedReceiveGoodsId);
     insertHeaderReq.input(
@@ -18366,10 +18646,10 @@ app.post("/api/consumptions", async (req, res) => {
 
     const headerResult = await insertHeaderReq.query(`
       INSERT INTO dbo.Consumption
-        (ConsumptionNumber, ProjectId, LocationId, ReceiveGoodsId, DeliveryChallanId, DeliveryChallanIds, DeliveryChallanRef, ConsumptionDate, IssuedBy, Status, Notes, CompanyAddress, CompanyGstin, CompanyPhone, CompanyEmail)
+        (ConsumptionNumber, ProjectId, FromLocationId, LocationId, ReceiveGoodsId, DeliveryChallanId, DeliveryChallanIds, DeliveryChallanRef, ConsumptionDate, IssuedBy, Status, Notes, CompanyAddress, CompanyGstin, CompanyPhone, CompanyEmail)
       OUTPUT INSERTED.*
       VALUES
-        (@ConsumptionNumber, @ProjectId, @LocationId, @ReceiveGoodsId, @DeliveryChallanId, @DeliveryChallanIds, @DeliveryChallanRef, @ConsumptionDate, @IssuedBy, @Status, @Notes, @CompanyAddress, @CompanyGstin, @CompanyPhone, @CompanyEmail)
+        (@ConsumptionNumber, @ProjectId, @FromLocationId, @LocationId, @ReceiveGoodsId, @DeliveryChallanId, @DeliveryChallanIds, @DeliveryChallanRef, @ConsumptionDate, @IssuedBy, @Status, @Notes, @CompanyAddress, @CompanyGstin, @CompanyPhone, @CompanyEmail)
     `);
 
     const headerRow = headerResult.recordset?.[0];
@@ -18413,6 +18693,21 @@ app.post("/api/consumptions", async (req, res) => {
       `);
     }
 
+    if (linkedTransferId !== null) {
+      await upsertConsumptionTransfer(tx, {
+        existingTransferId: linkedTransferId,
+        consumptionId,
+        consumptionNumber: safeConsumptionNumber,
+        projectId: safeProjectId,
+        fromLocationId: safeFromLocationId,
+        toLocationId: safeLocationId,
+        requestDate: parsedConsumptionDate ?? consumptionDate ?? null,
+        requestedBy: safeIssuedBy,
+        notes: safeNotes,
+        items: mappedItems,
+      });
+    }
+
     await applyConsumptionStockDelta(tx, [], mappedItems);
 
     await tx.commit();
@@ -18449,6 +18744,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
   const {
     consumptionNumber,
     projectId,
+    fromLocationId = null,
     locationId,
     receiveGoodsId = null,
     deliveryChallanId = null,
@@ -18467,6 +18763,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
 
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber);
   const safeProjectId = toNullableInt(projectId);
+  const safeFromLocationId = toNullableInt(fromLocationId) ?? toNullableInt(locationId);
   const safeLocationId = toNullableInt(locationId);
   const safeReceiveGoodsId = toNullableInt(receiveGoodsId);
   const safeDeliveryChallanId = toNullableInt(deliveryChallanId);
@@ -18498,6 +18795,9 @@ app.put("/api/consumptions/:id", async (req, res) => {
   }
   if (!safeProjectId) {
     return res.status(400).json({ ok: false, error: "projectId is required" });
+  }
+  if (!safeFromLocationId) {
+    return res.status(400).json({ ok: false, error: "fromLocationId is required" });
   }
   if (!safeLocationId) {
     return res.status(400).json({ ok: false, error: "locationId is required" });
@@ -18569,6 +18869,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
   try {
     await ensureConsumptionTables();
     await ensureReceiveTables();
+    await ensureReallocateInventoryTables();
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
@@ -18596,6 +18897,13 @@ app.put("/api/consumptions/:id", async (req, res) => {
         WHERE ${fkCol} = @ConsumptionId
       `);
     const currentItems = (currentItemsResult.recordset ?? []).map(normalizeConsumptionItem);
+    const linkedTransfer = await loadLinkedConsumptionTransfer(tx, {
+      consumptionId: id,
+      consumptionNumber:
+        safeConsumptionNumber ??
+        normalizeOptionalString(currentConsumptionRow?.ConsumptionNumber) ??
+        "",
+    });
 
     const currentDeliveryChallanIds = parseJsonArray(
       currentConsumptionRow?.DeliveryChallanIds
@@ -18607,12 +18915,22 @@ app.put("/api/consumptions/:id", async (req, res) => {
       sourceKey: item.sourceKey || buildAvailabilitySourceKey(item),
     }));
 
-    await validateAvailableInventorySelection(tx, {
-      projectId: safeProjectId,
-      locationId: safeLocationId,
-      items: mappedItems,
-      excludeConsumptionId: id,
-    });
+    if (safeFromLocationId !== safeLocationId) {
+      await upsertConsumptionTransfer(tx, {
+        existingTransferId: linkedTransfer?.id ?? null,
+        consumptionId: id,
+        consumptionNumber: safeConsumptionNumber,
+        projectId: safeProjectId,
+        fromLocationId: safeFromLocationId,
+        toLocationId: safeLocationId,
+        requestDate: parsedConsumptionDate ?? consumptionDate ?? null,
+        requestedBy: safeIssuedBy,
+        notes: safeNotes,
+        items: mappedItems,
+      });
+    } else if (linkedTransfer?.id) {
+      await deleteReallocateInventoryRecord(tx, linkedTransfer.id);
+    }
 
     const resolvedDeliveryChallanIds = Array.from(
       new Set(
@@ -18638,6 +18956,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
     updateHeaderReq.input("ConsumptionId", sql.Int, id);
     updateHeaderReq.input("ConsumptionNumber", sql.NVarChar(50), safeConsumptionNumber);
     updateHeaderReq.input("ProjectId", sql.Int, safeProjectId);
+    updateHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
     updateHeaderReq.input("LocationId", sql.Int, safeLocationId);
     updateHeaderReq.input("ReceiveGoodsId", sql.Int, resolvedReceiveGoodsId);
     updateHeaderReq.input(
@@ -18670,6 +18989,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
       UPDATE dbo.Consumption
       SET ConsumptionNumber = @ConsumptionNumber,
           ProjectId = @ProjectId,
+          FromLocationId = @FromLocationId,
           LocationId = @LocationId,
           ReceiveGoodsId = @ReceiveGoodsId,
           DeliveryChallanId = @DeliveryChallanId,
@@ -18771,6 +19091,7 @@ app.delete("/api/consumptions/:id", async (req, res) => {
   try {
     await ensureConsumptionTables();
     await ensureBoqTables();
+    await ensureReallocateInventoryTables();
     const pkCol = await refreshConsumptionPk();
     const fkCol = await refreshConsumptionItemsFk();
     const pool = await getPool();
@@ -18783,6 +19104,18 @@ app.delete("/api/consumptions/:id", async (req, res) => {
         SELECT * FROM dbo.ConsumptionItems WHERE ${fkCol} = @ConsumptionId
       `);
     const existingItems = (existingItemsResult.recordset ?? []).map(normalizeConsumptionItem);
+    const existingHeaderResult = await new sql.Request(tx)
+      .input("ConsumptionId", sql.Int, id)
+      .query(`
+        SELECT *
+        FROM dbo.Consumption
+        WHERE ${pkCol} = @ConsumptionId
+      `);
+    const existingConsumptionRow = existingHeaderResult.recordset?.[0] ?? null;
+    const linkedTransfer = await loadLinkedConsumptionTransfer(tx, {
+      consumptionId: id,
+      consumptionNumber: existingConsumptionRow?.ConsumptionNumber ?? "",
+    });
     const existingBoqItemIds = (existingItemsResult.recordset ?? []).map(
       (row) => row.BoqItemId ?? row.BOQItemId ?? row.boqItemId ?? null
     );
@@ -18798,6 +19131,10 @@ app.delete("/api/consumptions/:id", async (req, res) => {
     const deleteResult = await deleteHeaderReq.query(`
       DELETE FROM dbo.Consumption WHERE ${pkCol} = @ConsumptionId
     `);
+
+    if (linkedTransfer?.id) {
+      await deleteReallocateInventoryRecord(tx, linkedTransfer.id);
+    }
 
     await refreshBoqAvailability(tx, existingBoqItemIds);
     await applyConsumptionStockDelta(tx, existingItems, []);
