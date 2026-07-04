@@ -1111,9 +1111,6 @@ const hydrateBoqItemsWithInventoryStock = async (items = []) => {
       inventoryQty: stock,
       currentStock: stock,
       stock,
-      quantity: stock,
-      availableQty: stock,
-      amount: stock * (Number(item.rate ?? item.unitPrice ?? 0) || 0),
     };
   });
 };
@@ -2105,6 +2102,12 @@ const normalizeInvoicePaymentInput = (payment = {}) => ({
   accountNumber:
     normalizeOptionalString(payment?.accountNumber ?? payment?.AccountNumber) ?? "",
   ifsc: normalizeOptionalString(payment?.ifsc ?? payment?.IFSC) ?? "",
+  referenceNumber:
+    normalizeOptionalString(payment?.referenceNumber ?? payment?.ReferenceNumber) ?? "",
+  paymentDate: (() => {
+    const parsed = parseDateInput(payment?.paymentDate ?? payment?.PaymentDate);
+    return Number.isNaN(parsed) ? null : parsed;
+  })(),
   paidAmount: Number(payment?.paidAmount ?? payment?.PaidAmount ?? 0) || 0,
 });
 
@@ -2112,6 +2115,14 @@ const normalizeInvoiceNotesInput = (notes = {}) => ({
   internal: normalizeOptionalString(notes?.internal ?? notes?.Internal) ?? "",
   supplier: normalizeOptionalString(notes?.supplier ?? notes?.Supplier) ?? "",
   delivery: normalizeOptionalString(notes?.delivery ?? notes?.Delivery) ?? "",
+  billTo: normalizeOptionalString(notes?.billTo ?? notes?.BillTo) ?? "",
+  shipTo: normalizeOptionalString(notes?.shipTo ?? notes?.ShipTo) ?? "",
+  terms: normalizeOptionalString(notes?.terms ?? notes?.Terms) ?? "",
+  footerNote: normalizeOptionalString(notes?.footerNote ?? notes?.FooterNote) ?? "",
+  approvalComment:
+    normalizeOptionalString(notes?.approvalComment ?? notes?.ApprovalComment) ?? "",
+  rejectionReason:
+    normalizeOptionalString(notes?.rejectionReason ?? notes?.RejectionReason) ?? "",
 });
 
 const roundInvoiceAmount = (value) => {
@@ -4023,6 +4034,20 @@ const ensurePurchaseTables = async () => {
       SELECT 1
       FROM sys.columns
       WHERE object_id = OBJECT_ID('dbo.PurchaseOrderItems')
+        AND name = 'Quantity'
+        AND (
+          system_type_id <> TYPE_ID('decimal')
+          OR [precision] < 18
+          OR [scale] <> 2
+        )
+    )
+    BEGIN
+      ALTER TABLE dbo.PurchaseOrderItems ALTER COLUMN Quantity DECIMAL(18,2) NOT NULL;
+    END;
+    IF EXISTS (
+      SELECT 1
+      FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.PurchaseOrderItems')
         AND name = 'Rate'
         AND ([precision] < 18 OR [scale] <> 2)
     )
@@ -4038,6 +4063,19 @@ const ensurePurchaseTables = async () => {
     )
     BEGIN
       ALTER TABLE dbo.PurchaseOrderItems ALTER COLUMN TotalPrice DECIMAL(18,2) NULL;
+    END;
+    IF COL_LENGTH('dbo.PurchaseOrderItems', 'BoqItemId') IS NOT NULL
+      AND OBJECT_ID('dbo.BOQLineItems', 'U') IS NOT NULL
+    BEGIN
+      UPDATE poi
+      SET poi.Quantity = bi.Quantity,
+          poi.TotalPrice = ROUND(
+            bi.Quantity * COALESCE(poi.UnitPrice, poi.Rate, 0),
+            2
+          )
+      FROM dbo.PurchaseOrderItems poi
+      INNER JOIN dbo.BOQLineItems bi
+        ON bi.LineItemId = poi.BoqItemId;
     END;
   `);
   })();
@@ -4144,57 +4182,32 @@ const validatePurchaseOrderItemsInput = (items = []) => {
 
 const validatePurchaseOrderBoqItemsAvailable = async (
   tx,
-  { items = [], excludePurchaseOrderId = null } = {}
+  { boqId = null } = {}
 ) => {
-  const boqItemIds = Array.from(
-    new Set(
-      (Array.isArray(items) ? items : [])
-        .map((item) => toNullableInt(item.boqItemId ?? item.BoqItemId ?? item.BOQItemId))
-        .filter((value) => value !== null)
-    )
-  );
-  if (!boqItemIds.length) {
+  const safeBoqId = toNullableInt(boqId);
+  if (safeBoqId === null) {
     return;
   }
 
-  const config = await loadPurchaseOrderItemsConfig(tx);
-  if (!config.hasPoId || !config.boqItemIdCol) {
-    return;
-  }
-
-  const request = new sql.Request(tx);
-  request.input("ExcludePurchaseOrderId", sql.Int, toNullableInt(excludePurchaseOrderId));
-  const inClause = buildPurchaseOrderItemInClause(
-    request,
-    boqItemIds,
-    "ExistingBoqItemId"
-  );
-  const result = await request.query(`
-    SELECT TOP 1
-      poi.${toIdentifier(config.boqItemIdCol)} AS BoqItemId,
-      poi.PurchaseOrderId,
-      po.PONumber,
-      bi.ItemName
-    FROM dbo.PurchaseOrderItems poi
-    INNER JOIN dbo.PurchaseOrders po
-      ON po.Id = poi.PurchaseOrderId
-    LEFT JOIN dbo.BOQLineItems bi
-      ON bi.LineItemId = poi.${toIdentifier(config.boqItemIdCol)}
-    WHERE poi.${toIdentifier(config.boqItemIdCol)} IN (${inClause})
-      AND (
-        @ExcludePurchaseOrderId IS NULL
-        OR poi.PurchaseOrderId <> @ExcludePurchaseOrderId
-      )
-      AND LOWER(LTRIM(RTRIM(COALESCE(po.Status, '')))) NOT IN ('cancelled', 'canceled')
-    ORDER BY poi.PurchaseOrderId DESC
+  await ensureBoqTables();
+  const result = await new sql.Request(tx)
+    .input("BOQId", sql.Int, safeBoqId)
+    .query(`
+      SELECT TOP 1 BOQId, BOQNumber, Status
+      FROM dbo.BOQProjects
+      WHERE BOQId = @BOQId
   `);
 
-  const conflict = result.recordset?.[0] ?? null;
-  if (conflict) {
-    const label = conflict.ItemName || "this BOQ item";
-    const poNumber = conflict.PONumber || conflict.PurchaseOrderId;
+  const boq = result.recordset?.[0] ?? null;
+  if (!boq) {
+    const error = new Error("Selected BOQ was not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (normalizeInventoryKeyValue(boq.Status) === "closed") {
     const error = new Error(
-      `A purchase order already exists for ${label} from this BOQ (${poNumber}). Edit the existing PO instead of creating another PO for the same quantity.`
+      `BOQ ${boq.BOQNumber || safeBoqId} is closed and cannot be linked to a purchase order.`
     );
     error.statusCode = 409;
     throw error;
@@ -4662,6 +4675,27 @@ const syncPurchaseOrderItemsFromBoq = async (tx, boqItemIds = []) => {
 
   const unitPriceExpr = buildPurchaseOrderUnitPriceExpression(config, "poi");
   const setClauses = [`poi.${toIdentifier(config.qtyCol)} = bi.Quantity`];
+  if (config.nameCol) {
+    setClauses.push(`poi.${toIdentifier(config.nameCol)} = bi.ItemName`);
+  }
+  if (config.descCol) {
+    setClauses.push(`poi.${toIdentifier(config.descCol)} = bi.Description`);
+  }
+  if (config.hsnCol) {
+    setClauses.push(`poi.${toIdentifier(config.hsnCol)} = bi.HSN`);
+  }
+  if (config.gstCol) {
+    setClauses.push(`poi.${toIdentifier(config.gstCol)} = bi.GST`);
+  }
+  if (config.serialNumberCol) {
+    setClauses.push(`poi.${toIdentifier(config.serialNumberCol)} = bi.SerialNumber`);
+  }
+  if (config.unitCol) {
+    setClauses.push(`poi.${toIdentifier(config.unitCol)} = bi.Unit`);
+  }
+  if (config.notesCol) {
+    setClauses.push(`poi.${toIdentifier(config.notesCol)} = bi.Notes`);
+  }
   if (config.totalCol) {
     setClauses.push(
       `poi.${toIdentifier(config.totalCol)} = ROUND(bi.Quantity * ${unitPriceExpr}, 2)`
@@ -7607,7 +7641,11 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
   );
 
   if (!safeReceiveGoodsIds.length && !requestedReceiveGoodsItemIds.length) {
-    return null;
+    const error = new Error(
+      "Delivery challan items must be loaded from receive receipts."
+    );
+    error.statusCode = 400;
+    throw error;
   }
 
   await ensureReceiveTables();
@@ -7855,21 +7893,8 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
   requestedItems.forEach((item) => {
     const materialKey = resolveReceiptMaterialKey(item);
     if (!materialKey) {
-      const hasLinkedReceiptIdentity =
-        toNullableInt(item.receiveGoodsItemId ?? item.ReceiveGoodsItemId) !== null ||
-        toNullableInt(
-          item.poItemId ??
-            item.POItemId ??
-            item.purchaseOrderItemId ??
-            item.PurchaseOrderItemId
-        ) !== null;
-      if (!hasLinkedReceiptIdentity) {
-        // Allow manually added non-receipt lines; receipt validations apply
-        // only to lines linked back to selected receipt items/PO items.
-        return;
-      }
       const error = new Error(
-        `${item.name || "This material"} is not present in the selected receipt.`
+        `${item.name || "This material"} must be loaded from the selected receive receipt.`
       );
       error.statusCode = 400;
       throw error;
@@ -8095,6 +8120,12 @@ const buildAvailabilitySourceKey = (item = {}) => {
   const receiveGoodsItemId = toNullableInt(
     item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
   );
+  const deliveryChallanItemId = toNullableInt(
+    item.deliveryChallanItemId ??
+      item.DeliveryChallanItemId ??
+      item.deliveryChallanLineItemId ??
+      item.DeliveryChallanLineItemId
+  );
   const consumptionId = toNullableInt(
     item.consumptionId ?? item.ConsumptionId ?? item.ConsumptionID
   );
@@ -8102,7 +8133,8 @@ const buildAvailabilitySourceKey = (item = {}) => {
   const materialKey = buildInventoryMaterialKey(item);
 
   if (sourceType === "dc" || deliveryChallanId !== null) {
-    const identity = receiveGoodsItemId ?? itemId ?? materialKey;
+    const identity =
+      deliveryChallanItemId ?? receiveGoodsItemId ?? itemId ?? materialKey;
     return identity ? `dc:${deliveryChallanId ?? "unknown"}:${identity}` : "";
   }
 
@@ -8119,6 +8151,7 @@ const buildAvailabilitySourceKey = (item = {}) => {
     const identity =
       item.id ??
       item.Id ??
+      deliveryChallanItemId ??
       receiveGoodsItemId ??
       deliveryChallanId ??
       itemId ??
@@ -8129,15 +8162,54 @@ const buildAvailabilitySourceKey = (item = {}) => {
   return "";
 };
 
+const buildReallocationAvailabilitySourceKey = ({
+  transferId = null,
+  item = {},
+} = {}) => {
+  const safeTransferId = toNullableInt(transferId);
+  const itemId = toNullableInt(item.id ?? item.Id);
+  const deliveryChallanItemId = toNullableInt(
+    item.deliveryChallanItemId ??
+      item.DeliveryChallanItemId ??
+      item.deliveryChallanLineItemId ??
+      item.DeliveryChallanLineItemId
+  );
+  const receiveGoodsItemId = toNullableInt(
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+  );
+  const sourceKey = normalizeOptionalString(item.sourceKey ?? item.SourceKey);
+  const materialKey = buildInventoryMaterialKey(item);
+  const identity =
+    itemId ?? deliveryChallanItemId ?? receiveGoodsItemId ?? sourceKey ?? materialKey;
+
+  return safeTransferId !== null && identity
+    ? `reallocation:${safeTransferId}:${identity}`
+    : "";
+};
+
 const isInactiveAvailabilityMovementStatus = (status = "") =>
   ["cancelled", "canceled", "rejected", "void"].includes(
     normalizeInventoryKeyValue(status)
   );
 
-const isCompletedAvailabilityMovementStatus = (status = "") =>
-  normalizeInventoryKeyValue(status) === "completed";
-
 const toAvailabilityQuantity = (value) => Math.max(Number(value ?? 0) || 0, 0);
+
+const findNegativeQuantityInput = (items = [], fieldNames = []) => {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  for (const item of normalizedItems) {
+    const matchedField = fieldNames.find(
+      (fieldName) => item?.[fieldName] !== undefined && item?.[fieldName] !== null
+    );
+    if (!matchedField) {
+      continue;
+    }
+    const quantity = Number(item?.[matchedField]);
+    if (Number.isFinite(quantity) && quantity < 0) {
+      return item;
+    }
+  }
+  return null;
+};
 
 const loadAvailableInventoryRows = async (
   db,
@@ -8520,7 +8592,6 @@ const loadAvailableInventoryRows = async (
     }
     if (
       transfer.type !== "Reallocate" ||
-      !isCompletedAvailabilityMovementStatus(transfer.status) ||
       toNullableInt(transfer.toLocationId) !== safeLocationId
     ) {
       return;
@@ -8532,13 +8603,12 @@ const loadAvailableInventoryRows = async (
       return;
     }
     const sourceKey =
-      buildAvailabilitySourceKey(item) ||
+      buildReallocationAvailabilitySourceKey({ transferId, item }) ||
       `reallocation:${transferId ?? "record"}:${item.id ?? buildInventoryMaterialKey(item)}`;
     addSourceEntry(
       {
         ...item,
-        sourceType:
-          normalizeAvailabilitySourceType(item.sourceType) || "reallocation",
+        sourceType: "reallocation",
         sourceKey,
         projectId: toNullableInt(transfer.projectId) ?? safeProjectId,
         locationId: transfer.toLocationId,
@@ -14351,7 +14421,7 @@ app.post("/api/purchase-orders", async (req, res) => {
     const safeLocationId = toNullableInt(locationId ?? shipToLocationId);
 
     await validatePurchaseOrderBoqItemsAvailable(tx, {
-      items: normalizedItems,
+      boqId,
     });
 
     const insertOrder = new sql.Request(tx);
@@ -14540,8 +14610,7 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
     }
 
     await validatePurchaseOrderBoqItemsAvailable(tx, {
-      items: normalizedItems,
-      excludePurchaseOrderId: id,
+      boqId,
     });
 
     const finalPONumber =
@@ -15736,6 +15805,19 @@ app.post("/api/receive-goods", async (req, res) => {
   const safeProjectId = toNullableInt(projectId);
   const safeVendorId = toNullableInt(vendorId);
   const safeLocationId = toNullableInt(locationId);
+  const negativeItem = findNegativeQuantityInput(items, [
+    "receivedQty",
+    "ReceivedQty",
+    "received",
+  ]);
+  if (negativeItem) {
+    return res.status(400).json({
+      ok: false,
+      error: `Received quantity for ${
+        negativeItem.name ?? negativeItem.Name ?? "item"
+      } cannot be negative.`,
+    });
+  }
   const normalizedItems = normalizeReceiveGoodsItemsInput(items);
   const hasItems = normalizedItems.ordered.some(
     (item) => item.receivedQty > 0
@@ -15992,6 +16074,19 @@ app.put("/api/receive-goods/:id", async (req, res) => {
 
   const allowLockedEdit =
     req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true;
+  const negativeItem = findNegativeQuantityInput(items, [
+    "receivedQty",
+    "ReceivedQty",
+    "received",
+  ]);
+  if (negativeItem) {
+    return res.status(400).json({
+      ok: false,
+      error: `Received quantity for ${
+        negativeItem.name ?? negativeItem.Name ?? "item"
+      } cannot be negative.`,
+    });
+  }
   const normalizedItems = normalizeReceiveGoodsItemsInput(items);
   const hasItems = normalizedItems.ordered.some((item) => item.receivedQty > 0);
   if (!hasItems) {
@@ -17257,6 +17352,15 @@ app.post("/api/delivery-challans", async (req, res) => {
   if (Number.isNaN(parsedIssueDate)) {
     return res.status(400).json({ ok: false, error: "Invalid issueDate" });
   }
+  const negativeItem = findNegativeQuantityInput(items, ["quantity", "Quantity"]);
+  if (negativeItem) {
+    return res.status(400).json({
+      ok: false,
+      error: `DC quantity for ${
+        negativeItem.name ?? negativeItem.Item ?? negativeItem.ItemName ?? "item"
+      } cannot be negative.`,
+    });
+  }
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
       const name = String(item.name ?? item.Item ?? "").trim();
@@ -17458,6 +17562,15 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
   }
   if (Number.isNaN(parsedIssueDate)) {
     return res.status(400).json({ ok: false, error: "Invalid issueDate" });
+  }
+  const negativeItem = findNegativeQuantityInput(items, ["quantity", "Quantity"]);
+  if (negativeItem) {
+    return res.status(400).json({
+      ok: false,
+      error: `DC quantity for ${
+        negativeItem.name ?? negativeItem.Item ?? negativeItem.ItemName ?? "item"
+      } cannot be negative.`,
+    });
   }
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
@@ -18509,6 +18622,20 @@ app.post("/api/consumptions", async (req, res) => {
     return res.status(400).json({ ok: false, error: "Invalid consumptionDate" });
   }
 
+  const negativeItem = findNegativeQuantityInput(items, [
+    "consumeQty",
+    "ConsumeQty",
+    "quantity",
+    "Quantity",
+  ]);
+  if (negativeItem) {
+    return res.status(400).json({
+      ok: false,
+      error: `Consumed quantity for ${
+        negativeItem.name ?? negativeItem.Item ?? "item"
+      } cannot be negative.`,
+    });
+  }
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
       const name = String(item.name ?? item.Item ?? "").trim();
@@ -18583,6 +18710,12 @@ app.post("/api/consumptions", async (req, res) => {
       ...item,
       sourceKey: item.sourceKey || buildAvailabilitySourceKey(item),
     }));
+
+    await validateAvailableInventorySelection(tx, {
+      projectId: safeProjectId,
+      locationId: safeFromLocationId,
+      items: mappedItems,
+    });
 
     let linkedTransferId = null;
     if (safeFromLocationId !== safeLocationId) {
@@ -18806,6 +18939,20 @@ app.put("/api/consumptions/:id", async (req, res) => {
     return res.status(400).json({ ok: false, error: "Invalid consumptionDate" });
   }
 
+  const negativeItem = findNegativeQuantityInput(items, [
+    "consumeQty",
+    "ConsumeQty",
+    "quantity",
+    "Quantity",
+  ]);
+  if (negativeItem) {
+    return res.status(400).json({
+      ok: false,
+      error: `Consumed quantity for ${
+        negativeItem.name ?? negativeItem.Item ?? "item"
+      } cannot be negative.`,
+    });
+  }
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
       const name = String(item.name ?? item.Item ?? "").trim();
@@ -18914,6 +19061,13 @@ app.put("/api/consumptions/:id", async (req, res) => {
       ...item,
       sourceKey: item.sourceKey || buildAvailabilitySourceKey(item),
     }));
+
+    await validateAvailableInventorySelection(tx, {
+      projectId: safeProjectId,
+      locationId: safeFromLocationId,
+      items: mappedItems,
+      excludeConsumptionId: id,
+    });
 
     if (safeFromLocationId !== safeLocationId) {
       await upsertConsumptionTransfer(tx, {
@@ -19319,6 +19473,15 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     });
   }
 
+  const negativeItem = findNegativeQuantityInput(items, ["quantity", "Quantity"]);
+  if (negativeItem) {
+    return res.status(400).json({
+      ok: false,
+      error: `Reallocation quantity for ${
+        negativeItem.name ?? negativeItem.item ?? negativeItem.Item ?? "item"
+      } cannot be negative.`,
+    });
+  }
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
       const name = String(item.name ?? item.item ?? item.Item ?? "").trim();
@@ -19591,6 +19754,15 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     });
   }
 
+  const negativeItem = findNegativeQuantityInput(items, ["quantity", "Quantity"]);
+  if (negativeItem) {
+    return res.status(400).json({
+      ok: false,
+      error: `Reallocation quantity for ${
+        negativeItem.name ?? negativeItem.item ?? negativeItem.Item ?? "item"
+      } cannot be negative.`,
+    });
+  }
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => {
       const name = String(item.name ?? item.item ?? item.Item ?? "").trim();

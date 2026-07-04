@@ -137,6 +137,29 @@ const buildBoqSerialPreview = (items = []) => {
   return `${serials.slice(0, 2).join(", ")} +${serials.length - 2} more`;
 };
 
+const buildBoqLinePreview = (items = []) => {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  if (!normalizedItems.length) {
+    return "-";
+  }
+
+  const preview = normalizedItems.slice(0, 2).map((item) => {
+    const qty = Number(item?.quantity ?? 0) || 0;
+    const unit = String(item?.unit ?? "").trim() || "PCS";
+    const hsn = String(item?.hsn ?? "").trim();
+    const gst = String(item?.gst ?? "").trim();
+    const note = String(item?.notes ?? "").trim();
+    const meta = [hsn ? `HSN ${hsn}` : "", gst ? `GST ${gst}` : "", note ? note : ""]
+      .filter(Boolean)
+      .join(" | ");
+    return `${item?.name || "Item"} - ${qty} ${unit}${meta ? ` (${meta})` : ""}`;
+  });
+
+  return normalizedItems.length > 2
+    ? `${preview.join("; ")} +${normalizedItems.length - 2} more`
+    : preview.join("; ");
+};
+
 const Boq = () => {
   const settings = useSettings();
   const skipAutoProjectRef = useRef(false);
@@ -721,6 +744,7 @@ const Boq = () => {
               <th className="p-3 text-left min-w-[90px]">Version</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[110px]">Items</th>
+              <th className="p-3 text-left min-w-[260px]">Line Item Preview</th>
               <th className="p-3 text-left min-w-[180px]">Serial Numbers</th>
               <th className="p-3 text-left min-w-[220px]">Tax Details</th>
               <th className="p-3 text-left min-w-[140px]">Total Value</th>
@@ -731,14 +755,14 @@ const Boq = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="10" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   Loading BOQs...
                 </td>
               </tr>
             )}
             {!loading && records.length === 0 && (
               <tr>
-                <td colSpan="10" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   No BOQs created yet.
                 </td>
               </tr>
@@ -756,6 +780,9 @@ const Boq = () => {
                   <td className="p-3">{record.version || "-"}</td>
                   <td className="p-3">{record.status || "-"}</td>
                   <td className="p-3">{record.items?.length || 0}</td>
+                  <td className="p-3 text-xs text-slate-600">
+                    {buildBoqLinePreview(record.items)}
+                  </td>
                   <td className="p-3 text-xs text-slate-600">
                     {buildBoqSerialPreview(record.items)}
                   </td>
@@ -830,6 +857,7 @@ const Boq = () => {
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
+            { key: "description", label: "Description" },
             { key: "serialNumber", label: "Serial Number", widthClass: "w-28" },
             { key: "hsn", label: "HSN", widthClass: "w-20" },
             { key: "gst", label: "GST", widthClass: "w-20" },
@@ -856,6 +884,7 @@ const Boq = () => {
               id: item.id || index,
               serial: index + 1,
               name: item.name || "-",
+              description: item.description || item.notes || "-",
               serialNumber: item.serialNumber || "-",
               hsn: item.hsn || "-",
               gst: item.gst || "-",

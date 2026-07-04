@@ -36,6 +36,8 @@ const normalizePayment = (payment = {}) => ({
   bankName: payment.bankName ?? payment.BankName ?? "",
   accountNumber: payment.accountNumber ?? payment.AccountNumber ?? "",
   ifsc: payment.ifsc ?? payment.IFSC ?? "",
+  referenceNumber: payment.referenceNumber ?? payment.ReferenceNumber ?? "",
+  paymentDate: payment.paymentDate ?? payment.PaymentDate ?? "",
   paidAmount: Number(payment.paidAmount ?? payment.PaidAmount ?? 0) || 0,
 });
 
@@ -43,6 +45,12 @@ const normalizeNotes = (notes = {}) => ({
   internal: notes.internal ?? notes.Internal ?? "",
   supplier: notes.supplier ?? notes.Supplier ?? "",
   delivery: notes.delivery ?? notes.Delivery ?? "",
+  billTo: notes.billTo ?? notes.BillTo ?? "",
+  shipTo: notes.shipTo ?? notes.ShipTo ?? "",
+  terms: notes.terms ?? notes.Terms ?? "",
+  footerNote: notes.footerNote ?? notes.FooterNote ?? "",
+  approvalComment: notes.approvalComment ?? notes.ApprovalComment ?? "",
+  rejectionReason: notes.rejectionReason ?? notes.RejectionReason ?? "",
 });
 
 const normalizeItem = (item = {}) => ({

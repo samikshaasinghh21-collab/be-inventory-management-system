@@ -21,7 +21,6 @@ import { getGstTaxMode } from "../../utils/gstUtils";
 import { generateNextPurchaseOrderNumber } from "../../utils/purchaseOrderNumber";
 import {
   getPurchaseOrderLockMessage,
-  isCancelledPurchaseOrder,
   isLockedPurchaseOrder,
 } from "../../utils/purchaseOrderStatus";
 import PasswordPromptModal from "../common/PasswordPromptModal";
@@ -96,6 +95,9 @@ const createFormState = () => ({
   notes: "",
   termsAndConditions: DEFAULT_PURCHASE_ORDER_TERMS,
 });
+
+const isClosedBoq = (status = "") =>
+  String(status ?? "").trim().toLowerCase() === "closed";
 
 const formatAddressLine = (vendor) => {
   const {
@@ -388,7 +390,8 @@ const PurchaseOrder = () => {
       const match = boqs.find(
         (boq) =>
           String(boq.id) === String(selectedBoqId) &&
-          String(boq.projectId) === String(form.projectId)
+          String(boq.projectId) === String(form.projectId) &&
+          !isClosedBoq(boq.status)
       );
       if (!match) {
         setSelectedBoqId("");
@@ -399,39 +402,11 @@ const PurchaseOrder = () => {
   const boqsForProject = useMemo(() => {
     if (!form.projectId) return [];
     return boqs.filter(
-      (boq) => String(boq.projectId) === String(form.projectId)
+      (boq) =>
+        String(boq.projectId) === String(form.projectId) &&
+        !isClosedBoq(boq.status)
     );
   }, [boqs, form.projectId]);
-
-  const orderedBoqItemIds = useMemo(() => {
-    const ids = new Set();
-    records.forEach((record) => {
-      if (String(record.id ?? "") === String(editingId ?? "")) {
-        return;
-      }
-      if (isCancelledPurchaseOrder(record.status)) {
-        return;
-      }
-      (record.items || []).forEach((item) => {
-        const boqItemId = item.boqItemId ?? item.BoqItemId ?? item.BOQItemId;
-        if (boqItemId !== null && boqItemId !== undefined && boqItemId !== "") {
-          ids.add(String(boqItemId));
-        }
-      });
-    });
-    return ids;
-  }, [records, editingId]);
-
-  const getAvailableBoqItems = (boq = {}) =>
-    (Array.isArray(boq.items) ? boq.items : []).filter((item) => {
-      const boqItemId = item.id ?? item.boqItemId ?? item.BoqItemId ?? item.BOQItemId;
-      return (
-        boqItemId === null ||
-        boqItemId === undefined ||
-        boqItemId === "" ||
-        !orderedBoqItemIds.has(String(boqItemId))
-      );
-    });
 
   const vendorMap = useMemo(
     () =>
@@ -505,10 +480,6 @@ const PurchaseOrder = () => {
         const itemId = Number.parseInt(item.itemId ?? item.ItemId ?? "", 10);
         const normalizedName = name.toLowerCase();
         const normalizedUnit = String(item.unit || "0").trim().toUpperCase() || "0";
-        if (item.unit && !/^\d+$/.test(String(item.unit))) {
-          nextErrors.items = "Line item Unit accepts numeric values only.";
-          break;
-        }
         const identityKey = Number.isFinite(itemId) && itemId > 0
           ? `id:${itemId}`
           : `name:${normalizedName}::${normalizedUnit}`;
@@ -517,23 +488,6 @@ const PurchaseOrder = () => {
           break;
         }
         seen.add(identityKey);
-
-      }
-      if (!nextErrors.items) {
-        const usedBoqItem = items.find((item) => {
-          const boqItemId = item.boqItemId ?? item.BoqItemId ?? item.BOQItemId;
-          return (
-            boqItemId !== null &&
-            boqItemId !== undefined &&
-            boqItemId !== "" &&
-            orderedBoqItemIds.has(String(boqItemId))
-          );
-        });
-        if (usedBoqItem) {
-          nextErrors.items = `${
-            usedBoqItem.name || "This BOQ item"
-          } is already linked to an active purchase order. Edit the existing PO instead of creating another PO for the same quantity.`;
-        }
       }
     }
     setErrors(nextErrors);
@@ -615,17 +569,13 @@ const PurchaseOrder = () => {
       setBoqError("Select a BOQ to import.");
       return;
     }
-
-    const availableItems = getAvailableBoqItems(boq);
-    const skippedCount = (Array.isArray(boq.items) ? boq.items.length : 0) - availableItems.length;
-    if (!availableItems.length) {
-      setBoqError(
-        "All items in this BOQ are already linked to an active purchase order. Edit the existing PO instead of creating another PO for the same quantity."
-      );
+    if (isClosedBoq(boq.status)) {
+      setBoqError("Closed BOQs cannot be linked to a purchase order.");
       return;
     }
+    const boqItems = Array.isArray(boq.items) ? boq.items : [];
 
-    const mapped = availableItems.map((item) => {
+    const mapped = boqItems.map((item) => {
       const qty = getBoqLineQuantity(item);
       const directRate = Number(item.rate ?? item.Rate);
       const rate =
@@ -661,11 +611,7 @@ const PurchaseOrder = () => {
     }
 
     setItems(mapped);
-    setBoqError(
-      skippedCount > 0
-        ? `${skippedCount} BOQ item${skippedCount === 1 ? "" : "s"} already linked to active purchase orders were skipped.`
-        : ""
-    );
+    setBoqError("");
   };
 
   const goPickProducts = () => {
@@ -1014,20 +960,10 @@ const PurchaseOrder = () => {
                     </option>
                     {boqsForProject.map((boq) => {
                       const totalLines = Array.isArray(boq.items) ? boq.items.length : 0;
-                      const availableLines = getAvailableBoqItems(boq).length;
-                      const isFullyOrdered = totalLines > 0 && availableLines === 0;
                       return (
-                        <option
-                          key={boq.id}
-                          value={boq.id}
-                          disabled={isFullyOrdered}
-                        >
+                        <option key={boq.id} value={boq.id}>
                           {boq.boqNumber} | v{boq.version} | {boq.status || "Draft"}
-                          {isFullyOrdered
-                            ? " | all items already in PO"
-                            : totalLines
-                            ? ` | ${availableLines}/${totalLines} items available`
-                            : ""}
+                          {totalLines ? ` | ${totalLines} items` : ""}
                         </option>
                       );
                     })}
@@ -1139,7 +1075,6 @@ const PurchaseOrder = () => {
             extraFieldPlaceholder="Ship-to note"
             hideSelectedCatalogItems
             readOnly={isEditingLockedWithoutOverride}
-            unitNumericOnly
           />
         </div>
         {errors.items && (

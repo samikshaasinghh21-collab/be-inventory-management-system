@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   Ban,
@@ -325,8 +325,14 @@ const areReceiptSelectionsEqual = (left = [], right = []) => {
   );
 };
 
+const DELIVERY_CHALLAN_WORKFLOW = {
+  RECEIPTS: "receipts",
+  REMAINING_DC: "remaining-dc",
+};
+
 const DeliveryChallan = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const prefillSignatureRef = useRef("");
   const [projects, setProjects] = useState(() => getProjects());
   const [locations, setLocations] = useState([]);
@@ -339,6 +345,9 @@ const DeliveryChallan = () => {
   const [receiptFilters, setReceiptFilters] = useState({
     search: "",
   });
+  const [workflowSource, setWorkflowSource] = useState(
+    DELIVERY_CHALLAN_WORKFLOW.RECEIPTS
+  );
   const [selectedReceiptIds, setSelectedReceiptIds] = useState([]);
   const [errors, setErrors] = useState({});
   const [receiptsLoading, setReceiptsLoading] = useState(false);
@@ -777,6 +786,7 @@ const DeliveryChallan = () => {
     setForm(createFormState());
     setItems([]);
     setLoadedReceiptIds([]);
+    setWorkflowSource(DELIVERY_CHALLAN_WORKFLOW.RECEIPTS);
     setReceiptFilters({
       search: "",
     });
@@ -1310,6 +1320,19 @@ const DeliveryChallan = () => {
     setLoadedReceiptIds([]);
     setItems([]);
     setReceiptError("");
+  };
+
+  const handleWorkflowSourceChange = (nextWorkflowSource) => {
+    setWorkflowSource(nextWorkflowSource);
+    setReceiptError("");
+    setErrors((prev) => {
+      if (!prev.items) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next.items;
+      return next;
+    });
   };
 
   const handleToLocationChange = (nextLocationId) => {
@@ -1898,98 +1921,299 @@ const DeliveryChallan = () => {
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-indigo-800">
-                Select Receive Receipts (All under selected Project)
+                Inventory Source Workflow
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                All receive receipts from purchase orders under the selected project are listed below.
+                Delivery Challan remains a receipt-to-dispatch document. Leftover stock from an already issued DC moves through Reallocation in the Consumption workflow.
               </p>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <input
-                type="search"
-                value={receiptFilters.search}
-                onChange={(event) => handleReceiptFilterChange(event.target.value)}
-                placeholder="Search receipts or PO..."
-                className="w-full min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-              />
-              <button
-                type="button"
-                onClick={() => loadReceipts(form.projectId || null)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-indigo-300"
+            <div className="w-full max-w-sm">
+              <label className="text-sm font-medium text-slate-700">
+                Source / Workflow
+              </label>
+              <select
+                value={workflowSource}
+                onChange={(event) => handleWorkflowSourceChange(event.target.value)}
+                disabled={Boolean(editingId)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-500"
               >
-                Refresh
-              </button>
+                <option value={DELIVERY_CHALLAN_WORKFLOW.RECEIPTS}>
+                  Receive Receipts
+                </option>
+                <option value={DELIVERY_CHALLAN_WORKFLOW.REMAINING_DC}>
+                  Remaining DC Stock
+                </option>
+              </select>
+              {editingId ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  Existing delivery challans stay on the receipt-based workflow.
+                </p>
+              ) : null}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_260px]">
+          {workflowSource === DELIVERY_CHALLAN_WORKFLOW.RECEIPTS ? (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_260px]">
+              <div className="overflow-hidden rounded-lg border border-slate-200">
+                <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-indigo-900">
+                      Select Receive Receipts (All under selected Project)
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Only receive receipts appear here. Leftover stock from older delivery challans is handled through Reallocation in Consumption.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      type="search"
+                      value={receiptFilters.search}
+                      onChange={(event) => handleReceiptFilterChange(event.target.value)}
+                      placeholder="Search receipts or PO..."
+                      className="w-full min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => loadReceipts(form.projectId || null)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-indigo-300"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-[330px] overflow-auto">
+                  <table className="min-w-[980px] w-full text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="w-12 px-3 py-3 text-left">
+                          <input
+                            type="checkbox"
+                            checked={allFilteredReceiptsSelected}
+                            onChange={toggleAllFilteredReceipts}
+                            disabled={!filteredReceiptsForSelection.length}
+                            className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                          />
+                        </th>
+                        <th className="px-3 py-3 text-left">Receive Receipt Reference</th>
+                        <th className="px-3 py-3 text-left">Purchase Order Number</th>
+                        <th className="px-3 py-3 text-left">Received Date</th>
+                        <th className="px-3 py-3 text-right">Item Count</th>
+                        <th className="px-3 py-3 text-right">Total Quantity</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {receiptsLoading ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                            Loading receipts for the selected project...
+                          </td>
+                        </tr>
+                      ) : !form.projectId ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                            Select a project to load receive receipts.
+                          </td>
+                        </tr>
+                      ) : filteredReceiptsForSelection.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                            No receive receipts found for this project.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredReceiptsForSelection.map((receipt) => {
+                          const isSelected = selectedReceiptIds.includes(String(receipt.id));
+                          return (
+                            <tr key={receipt.id} className="border-t border-slate-200 bg-white hover:bg-indigo-50/30">
+                              <td className="px-3 py-3">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleReceiptSelection(receipt.id)}
+                                  className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                                />
+                              </td>
+                              <td className="px-3 py-3 font-semibold text-slate-800">
+                                {getReceiptReference(receipt)}
+                              </td>
+                              <td className="px-3 py-3 text-slate-700">
+                                {getReceiptPurchaseOrderNumber(receipt)}
+                              </td>
+                              <td className="px-3 py-3 text-slate-700">
+                                {formatDate(receipt.receivedDate || receipt.invoiceDate || receipt.createdAt)}
+                              </td>
+                              <td className="px-3 py-3 text-right text-slate-700">
+                                {getReceiptItemCount(receipt)}
+                              </td>
+                              <td className="px-3 py-3 text-right font-semibold text-slate-800">
+                                {fmtQty(getReceiptTotalQuantity(receipt))}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-slate-500">
+                    Showing {filteredReceiptsForSelection.length} of {receiptsForSelection.length} receipts
+                  </p>
+                  <div className="flex items-center gap-4">
+                    <span className="font-medium text-indigo-800">
+                      {selectedReceiptIds.length} selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedReceiptIds([])}
+                      disabled={!selectedReceiptIds.length}
+                      className="text-sm font-semibold text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <aside className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+                <p className="text-sm font-semibold text-indigo-900">Selection Summary</p>
+                <div className="mt-4 space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Total Receipts Selected</span>
+                    <span className="font-semibold text-slate-900">{selectedReceiptsSummary.receipts}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Total Items</span>
+                    <span className="font-semibold text-slate-900">{selectedReceiptsSummary.items}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Total Quantity</span>
+                    <span className="font-semibold text-slate-900">{fmtQty(selectedReceiptsSummary.quantity)}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLoadSelectedReceipts}
+                  disabled={!selectedReceiptIds.length}
+                  className="mt-5 w-full rounded-lg bg-indigo-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  Load Selected Receipts
+                </button>
+              </aside>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6">
+              <div className="max-w-3xl">
+                <p className="text-sm font-semibold uppercase tracking-wide text-amber-800">
+                  Remaining DC Stock
+                </p>
+                <h3 className="mt-2 text-xl font-semibold text-slate-900">
+                  Use Reallocation from the Consumption workflow
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-700">
+                  To move leftover stock from an already issued DC, use Reallocation from the Consumption workflow. This Delivery Challan screen only creates new dispatches from receive receipts.
+                </p>
+                <p className="mt-2 text-sm text-slate-600">
+                  We&apos;ll carry the selected project and source location into Consumption and open the Reallocation Records lookup for you.
+                </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate("/inventory/consumption", {
+                      state: {
+                        lookupSource: "reallocation",
+                        projectId: form.projectId || undefined,
+                        fromLocationId: form.fromLocationId || undefined,
+                      },
+                    })
+                  }
+                  className="mt-5 inline-flex rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700"
+                >
+                  Go to Consumption Reallocation
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {workflowSource === DELIVERY_CHALLAN_WORKFLOW.RECEIPTS ? (
+          <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+            <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <h2 className="text-lg font-semibold text-indigo-800">Line Items</h2>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <span className="font-semibold text-indigo-700">
+                  {loadedReceiptsSummary.receipts} Receipts Selected
+                </span>
+                <span className="text-slate-600">
+                  Total Items: <strong className="text-slate-900">{loadedReceiptsSummary.items}</strong>
+                </span>
+                <span className="text-slate-600">
+                  Total Quantity: <strong className="text-slate-900">{fmtQty(loadedReceiptsSummary.quantity)}</strong>
+                </span>
+              </div>
+            </div>
             <div className="overflow-hidden rounded-lg border border-slate-200">
-              <div className="max-h-[330px] overflow-auto">
-                <table className="min-w-[980px] w-full text-sm">
+              <div className="overflow-x-auto">
+                <table className="min-w-[1180px] w-full text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="w-12 px-3 py-3 text-left">
-                        <input
-                          type="checkbox"
-                          checked={allFilteredReceiptsSelected}
-                          onChange={toggleAllFilteredReceipts}
-                          disabled={!filteredReceiptsForSelection.length}
-                          className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
-                        />
-                      </th>
-                      <th className="px-3 py-3 text-left">Receive Receipt Reference</th>
-                      <th className="px-3 py-3 text-left">Purchase Order Number</th>
-                      <th className="px-3 py-3 text-left">Received Date</th>
-                      <th className="px-3 py-3 text-right">Item Count</th>
-                      <th className="px-3 py-3 text-right">Total Quantity</th>
+                      <th className="px-3 py-3 text-left w-12">#</th>
+                      <th className="px-3 py-3 text-left min-w-[210px]">Item Name</th>
+                      <th className="px-3 py-3 text-left min-w-[110px]">HSN / SAC</th>
+                      <th className="px-3 py-3 text-left min-w-[90px]">Unit</th>
+                      <th className="px-3 py-3 text-right min-w-[140px]">Received Quantity</th>
+                      <th className="px-3 py-3 text-right min-w-[150px]">Previously Used Quantity</th>
+                      <th className="px-3 py-3 text-right min-w-[130px]">Available Quantity</th>
+                      <th className="px-3 py-3 text-right min-w-[140px]">DC Quantity</th>
+                      <th className="px-3 py-3 text-right w-16">Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {receiptsLoading ? (
+                    {!items.length ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
-                          Loading receipts for the selected project...
-                        </td>
-                      </tr>
-                    ) : !form.projectId ? (
-                      <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
-                          Select a project to load receive receipts.
-                        </td>
-                      </tr>
-                    ) : filteredReceiptsForSelection.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
-                          No receive receipts found for this project.
+                        <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                          Select receipts and load them to populate delivery challan line items.
                         </td>
                       </tr>
                     ) : (
-                      filteredReceiptsForSelection.map((receipt) => {
-                        const isSelected = selectedReceiptIds.includes(String(receipt.id));
+                      items.map((item, index) => {
+                        const quantity = toQuantity(item.quantity);
+                        const availableQty = toQuantity(item.availableQty);
+                        const hasError = quantity > availableQty;
                         return (
-                          <tr key={receipt.id} className="border-t border-slate-200 bg-white hover:bg-indigo-50/30">
+                          <tr key={item.id} className="border-t border-slate-200 bg-white">
+                            <td className="px-3 py-3 text-slate-600">{index + 1}</td>
+                            <td className="px-3 py-3 font-medium text-slate-800">{item.name || "-"}</td>
+                            <td className="px-3 py-3 text-slate-700">{item.hsn || "-"}</td>
+                            <td className="px-3 py-3 text-slate-700">{item.unit || "PCS"}</td>
+                            <td className="px-3 py-3 text-right text-slate-800">{fmtQty(item.receivedQty)}</td>
+                            <td className="px-3 py-3 text-right text-slate-700">{fmtQty(item.previouslyUsedQty)}</td>
+                            <td className="px-3 py-3 text-right font-semibold text-emerald-600">{fmtQty(item.availableQty)}</td>
                             <td className="px-3 py-3">
                               <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => toggleReceiptSelection(receipt.id)}
-                                className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                                type="number"
+                                min="0"
+                                max={availableQty}
+                                step="0.01"
+                                value={item.quantity}
+                                onChange={(event) =>
+                                  handleLineItemQuantityChange(item.id, event.target.value)
+                                }
+                                className={`ml-auto block w-32 rounded-lg border px-3 py-2 text-right text-sm outline-none transition focus:ring-2 ${
+                                  hasError
+                                    ? "border-red-300 focus:border-red-500 focus:ring-red-100"
+                                    : "border-slate-200 focus:border-indigo-500 focus:ring-indigo-100"
+                                }`}
                               />
                             </td>
-                            <td className="px-3 py-3 font-semibold text-slate-800">
-                              {getReceiptReference(receipt)}
-                            </td>
-                            <td className="px-3 py-3 text-slate-700">
-                              {getReceiptPurchaseOrderNumber(receipt)}
-                            </td>
-                            <td className="px-3 py-3 text-slate-700">
-                              {formatDate(receipt.receivedDate || receipt.invoiceDate || receipt.createdAt)}
-                            </td>
-                            <td className="px-3 py-3 text-right text-slate-700">
-                              {getReceiptItemCount(receipt)}
-                            </td>
-                            <td className="px-3 py-3 text-right font-semibold text-slate-800">
-                              {fmtQty(getReceiptTotalQuantity(receipt))}
+                            <td className="px-3 py-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveLineItem(item.id)}
+                                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:border-red-200 hover:text-red-600"
+                              >
+                                Delete
+                              </button>
                             </td>
                           </tr>
                         );
@@ -1998,141 +2222,9 @@ const DeliveryChallan = () => {
                   </tbody>
                 </table>
               </div>
-              <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-slate-500">
-                  Showing {filteredReceiptsForSelection.length} of {receiptsForSelection.length} receipts
-                </p>
-                <div className="flex items-center gap-4">
-                  <span className="font-medium text-indigo-800">
-                    {selectedReceiptIds.length} selected
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedReceiptIds([])}
-                    disabled={!selectedReceiptIds.length}
-                    className="text-sm font-semibold text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400"
-                  >
-                    Clear Selection
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <aside className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
-              <p className="text-sm font-semibold text-indigo-900">Selection Summary</p>
-              <div className="mt-4 space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Total Receipts Selected</span>
-                  <span className="font-semibold text-slate-900">{selectedReceiptsSummary.receipts}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Total Items</span>
-                  <span className="font-semibold text-slate-900">{selectedReceiptsSummary.items}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Total Quantity</span>
-                  <span className="font-semibold text-slate-900">{fmtQty(selectedReceiptsSummary.quantity)}</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleLoadSelectedReceipts}
-                disabled={!selectedReceiptIds.length}
-                className="mt-5 w-full rounded-lg bg-indigo-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                Load Selected Receipts
-              </button>
-            </aside>
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
-          <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-            <h2 className="text-lg font-semibold text-indigo-800">Line Items</h2>
-            <div className="flex flex-wrap gap-4 text-sm">
-              <span className="font-semibold text-indigo-700">
-                {loadedReceiptsSummary.receipts} Receipts Selected
-              </span>
-              <span className="text-slate-600">
-                Total Items: <strong className="text-slate-900">{loadedReceiptsSummary.items}</strong>
-              </span>
-              <span className="text-slate-600">
-                Total Quantity: <strong className="text-slate-900">{fmtQty(loadedReceiptsSummary.quantity)}</strong>
-              </span>
             </div>
           </div>
-          <div className="overflow-hidden rounded-lg border border-slate-200">
-            <div className="overflow-x-auto">
-              <table className="min-w-[1180px] w-full text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-3 py-3 text-left w-12">#</th>
-                    <th className="px-3 py-3 text-left min-w-[210px]">Item Name</th>
-                    <th className="px-3 py-3 text-left min-w-[110px]">HSN / SAC</th>
-                    <th className="px-3 py-3 text-left min-w-[90px]">Unit</th>
-                    <th className="px-3 py-3 text-right min-w-[140px]">Received Quantity</th>
-                    <th className="px-3 py-3 text-right min-w-[150px]">Previously Used Quantity</th>
-                    <th className="px-3 py-3 text-right min-w-[130px]">Available Quantity</th>
-                    <th className="px-3 py-3 text-right min-w-[140px]">DC Quantity</th>
-                    <th className="px-3 py-3 text-right w-16">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!items.length ? (
-                    <tr>
-                      <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
-                        Select receipts and load them to populate delivery challan line items.
-                      </td>
-                    </tr>
-                  ) : (
-                    items.map((item, index) => {
-                      const quantity = toQuantity(item.quantity);
-                      const availableQty = toQuantity(item.availableQty);
-                      const hasError = quantity > availableQty;
-                      return (
-                        <tr key={item.id} className="border-t border-slate-200 bg-white">
-                          <td className="px-3 py-3 text-slate-600">{index + 1}</td>
-                          <td className="px-3 py-3 font-medium text-slate-800">{item.name || "-"}</td>
-                          <td className="px-3 py-3 text-slate-700">{item.hsn || "-"}</td>
-                          <td className="px-3 py-3 text-slate-700">{item.unit || "PCS"}</td>
-                          <td className="px-3 py-3 text-right text-slate-800">{fmtQty(item.receivedQty)}</td>
-                          <td className="px-3 py-3 text-right text-slate-700">{fmtQty(item.previouslyUsedQty)}</td>
-                          <td className="px-3 py-3 text-right font-semibold text-emerald-600">{fmtQty(item.availableQty)}</td>
-                          <td className="px-3 py-3">
-                            <input
-                              type="number"
-                              min="0"
-                              max={availableQty}
-                              step="0.01"
-                              value={item.quantity}
-                              onChange={(event) =>
-                                handleLineItemQuantityChange(item.id, event.target.value)
-                              }
-                              className={`ml-auto block w-32 rounded-lg border px-3 py-2 text-right text-sm outline-none transition focus:ring-2 ${
-                                hasError
-                                  ? "border-red-300 focus:border-red-500 focus:ring-red-100"
-                                  : "border-slate-200 focus:border-indigo-500 focus:ring-indigo-100"
-                              }`}
-                            />
-                          </td>
-                          <td className="px-3 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveLineItem(item.id)}
-                              className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:border-red-200 hover:text-red-600"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        ) : null}
         {receiptError && <p className="text-xs text-red-600">{receiptError}</p>}
         {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
 
@@ -2146,7 +2238,8 @@ const DeliveryChallan = () => {
           </button>
           <button
             type="submit"
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            disabled={workflowSource !== DELIVERY_CHALLAN_WORKFLOW.RECEIPTS}
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             {editingId ? "Update Challan" : "Save Challan"}
           </button>

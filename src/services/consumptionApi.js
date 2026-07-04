@@ -65,7 +65,12 @@ const buildConsumptionItemKey = (item = {}, index = 0) => {
   if (id !== null && id !== undefined && id !== "") {
     return `id:${id}`;
   }
+  const sourceKey = String(item.sourceKey ?? item.SourceKey ?? "").trim();
+  if (sourceKey) {
+    return `source-key:${sourceKey}`;
+  }
   const sourceIds = [
+    item.deliveryChallanItemId ?? item.DeliveryChallanItemId,
     item.receiveGoodsItemId ?? item.ReceiveGoodsItemId,
     item.boqItemId ?? item.BoqItemId ?? item.BOQItemId,
     item.itemId ?? item.ItemId,
