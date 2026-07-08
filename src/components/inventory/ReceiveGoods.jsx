@@ -1803,7 +1803,7 @@ const ReceiveGoods = () => {
                             </div>
                             <div>
                               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                                Available Qty
+                                Pending Qty
                               </p>
                               <p className="mt-1 font-semibold text-slate-900">
                                 {historyTotals.available}
@@ -2108,7 +2108,7 @@ const ReceiveGoods = () => {
                         <tr>
                           <th className="p-3 text-left min-w-[160px]">Item</th>
                           <th className="p-3 text-left min-w-[90px]">Unit</th>
-                          <th className="p-3 text-left min-w-[100px]">Available Qty</th>
+                          <th className="p-3 text-left min-w-[100px]">Pending Qty</th>
                           <th className="p-3 text-left min-w-[110px]">Receive Qty</th>
                           <th className="p-3 text-left min-w-[100px]">PO Balance</th>
                         </tr>
@@ -2254,7 +2254,7 @@ const ReceiveGoods = () => {
 
                   <div className="mt-4 flex flex-col gap-3 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex flex-wrap gap-4">
-                      <span>Available Qty: {totals.pending}</span>
+                      <span>Pending Qty: {totals.pending}</span>
                       <span>Received: {totals.received}</span>
                       <span>PO Balance: {totals.balance}</span>
                     </div>
@@ -2385,7 +2385,7 @@ const ReceiveGoods = () => {
             { key: "name", label: "Item" },
             { key: "serialNumbers", label: "Serial Numbers", widthClass: "w-32" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
-            { key: "ordered", label: "Available Qty", align: "right", widthClass: "w-24" },
+            { key: "ordered", label: "Pending Qty", align: "right", widthClass: "w-24" },
             { key: "received", label: "Received", align: "right", widthClass: "w-24" },
             { key: "balance", label: "PO Balance", align: "right", widthClass: "w-24" },
           ]}

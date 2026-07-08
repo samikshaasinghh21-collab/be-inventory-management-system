@@ -152,11 +152,11 @@ export const updatePurchaseOrderStatus = async (id, status, options = {}) => {
     allowLockedEdit: options.allowLockedEdit === true,
   });
   const normalized = normalizePurchaseOrder(response.data?.purchaseOrder ?? response.data);
-  emitPurchaseOrdersChange({ includeReceiveGoods: true });
+  emitPurchaseOrdersChange({ includeBoqs: true, includeReceiveGoods: true });
   return normalized;
 };
 
 export const deletePurchaseOrder = async (id) => {
   await api.delete(`/purchase-orders/${id}`);
-  emitPurchaseOrdersChange({ includeReceiveGoods: true });
+  emitPurchaseOrdersChange({ includeBoqs: true, includeReceiveGoods: true });
 };

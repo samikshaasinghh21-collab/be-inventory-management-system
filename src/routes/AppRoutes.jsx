@@ -47,6 +47,7 @@ import Invoices from "../components/inventory/Invoices";
 import ReceiveGoodsRegister from "../components/inventory/ReceiveGoodsRegister";
 import Consumption from "../components/inventory/Consumption";
 import BoqDetail from "../components/inventory/BoqDetail";
+import ReallocationRegister from "../components/inventory/ReallocationRegister";
 import ReportsPage from "../components/inventory/ReportsPage";
 
 const HRMS_PAGE_ROUTES = [
@@ -175,7 +176,7 @@ const AppRoutes = () => {
         <Route path="/inventory/consumption" element={<Consumption />} />
         <Route path="/inventory/return-dc" element={<Navigate replace to="/inventory/delivery-challan" />} />
         <Route path="/inventory/reallocate-return" element={<Navigate replace to="/inventory/delivery-challan" />} />
-        <Route path="/inventory/reallocation-register" element={<Navigate replace to="/inventory/delivery-challan" />} />
+        <Route path="/inventory/reallocation-register" element={<ReallocationRegister />} />
         <Route path="/inventory/reports" element={<ReportsPage />} />
         {HRMS_PAGE_ROUTES.map((screen) => (
           <Route

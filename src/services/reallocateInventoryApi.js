@@ -79,6 +79,7 @@ const normalizeReallocateInventory = (record = {}) => {
     consumptionNumber:
       record.consumptionNumber ?? record.ConsumptionNumber ?? "",
     projectId: record.projectId ?? record.ProjectId ?? null,
+    sourceProjectId: record.sourceProjectId ?? record.SourceProjectId ?? null,
     fromLocationId: record.fromLocationId ?? record.FromLocationId ?? null,
     toLocationId: record.toLocationId ?? record.ToLocationId ?? null,
     returnVendorId: record.returnVendorId ?? record.ReturnVendorId ?? null,

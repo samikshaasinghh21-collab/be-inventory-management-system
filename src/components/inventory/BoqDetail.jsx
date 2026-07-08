@@ -4,6 +4,31 @@ import { fetchBoq } from "../../services/boqApi";
 import { fetchProjects } from "../../services/projectsApi";
 import { formatInrCurrency } from "../../utils/formatters";
 
+const getLinkedPurchaseOrders = (boq = {}) => {
+  if (Array.isArray(boq?.linkedPurchaseOrders) && boq.linkedPurchaseOrders.length) {
+    return boq.linkedPurchaseOrders;
+  }
+  return boq?.latestPurchaseOrder ? [boq.latestPurchaseOrder] : [];
+};
+
+const formatLinkedPurchaseOrderSummary = (boq = {}) => {
+  const linkedPurchaseOrders = getLinkedPurchaseOrders(boq);
+  if (!linkedPurchaseOrders.length) {
+    return "Not linked";
+  }
+
+  const latestPurchaseOrder = linkedPurchaseOrders[0];
+  const reference =
+    latestPurchaseOrder?.poNumber ||
+    (latestPurchaseOrder?.id ? `PO #${latestPurchaseOrder.id}` : "Linked PO");
+  const status = latestPurchaseOrder?.status || "Draft";
+  const extraCount = linkedPurchaseOrders.length - 1;
+
+  return extraCount > 0
+    ? `${reference} | ${status} +${extraCount} more`
+    : `${reference} | ${status}`;
+};
+
 const BoqDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -34,6 +59,7 @@ const BoqDetail = () => {
         ["Version", boq.version ?? ""],
         ["Prepared By", boq.preparedBy ?? ""],
         ["Date", boq.date ?? ""],
+        ["PO Sync", formatLinkedPurchaseOrderSummary(boq)],
         ["Notes", (boq.notes ?? "").replace(/\r?\n/g, " ")],
         [],
         [
@@ -42,8 +68,6 @@ const BoqDetail = () => {
           "Serial Number",
           "Unit",
           "Planned Qty",
-          "Consumed Qty",
-          "Available Qty",
           "Unit Price",
           "Amount",
           "Notes",
@@ -56,8 +80,6 @@ const BoqDetail = () => {
         item.serialNumber ?? "",
         item.unit ?? "",
         item.quantity ?? "",
-        item.consumedQty ?? "",
-        item.availableQty ?? "",
         item.rate ?? "",
         item.amount ?? "",
         (item.notes ?? "").replace(/\r?\n/g, " "),
@@ -173,7 +195,7 @@ const BoqDetail = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-lg border border-slate-200">
           <p className="text-sm text-slate-500">Status</p>
           <p className="text-lg font-semibold text-slate-800">{boq.status || "-"}</p>
@@ -185,6 +207,12 @@ const BoqDetail = () => {
         <div className="bg-white p-4 rounded-lg border border-slate-200">
           <p className="text-sm text-slate-500">Value</p>
           <p className="text-lg font-semibold text-slate-800">{formatCurrency(total)}</p>
+        </div>
+        <div className="bg-white p-4 rounded-lg border border-slate-200">
+          <p className="text-sm text-slate-500">PO Sync</p>
+          <p className="text-lg font-semibold text-slate-800">
+            {formatLinkedPurchaseOrderSummary(boq)}
+          </p>
         </div>
       </div>
 
@@ -222,8 +250,6 @@ const BoqDetail = () => {
               <th className="p-3 text-left min-w-[150px]">Serial Number</th>
               <th className="p-3 text-left min-w-[80px]">Unit</th>
               <th className="p-3 text-left min-w-[90px]">Planned Qty</th>
-              <th className="p-3 text-left min-w-[110px]">Consumed Qty</th>
-              <th className="p-3 text-left min-w-[110px]">Available Qty</th>
               <th className="p-3 text-left min-w-[100px]">Unit Price</th>
               <th className="p-3 text-left min-w-[110px]">Amount</th>
               <th className="p-3 text-left min-w-[160px]">Notes</th>
@@ -232,7 +258,7 @@ const BoqDetail = () => {
           <tbody>
             {boq.items?.length === 0 && (
               <tr>
-                <td colSpan="10" className="p-6 text-center text-slate-500">
+                <td colSpan="8" className="p-6 text-center text-slate-500">
                   No items.
                 </td>
               </tr>
@@ -244,8 +270,6 @@ const BoqDetail = () => {
                 <td className="p-3">{item.serialNumber || "-"}</td>
                 <td className="p-3">{item.unit || "-"}</td>
                 <td className="p-3">{item.quantity ?? "-"}</td>
-                <td className="p-3">{item.consumedQty ?? 0}</td>
-                <td className="p-3">{item.availableQty ?? "-"}</td>
                 <td className="p-3">{formatCurrency(item.rate)}</td>
                 <td className="p-3 font-semibold">{formatCurrency(item.amount)}</td>
                 <td className="p-3">{item.notes || "-"}</td>

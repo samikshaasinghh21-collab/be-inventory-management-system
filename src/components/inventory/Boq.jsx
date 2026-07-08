@@ -160,6 +160,31 @@ const buildBoqLinePreview = (items = []) => {
     : preview.join("; ");
 };
 
+const getLinkedPurchaseOrders = (record = {}) => {
+  if (Array.isArray(record?.linkedPurchaseOrders) && record.linkedPurchaseOrders.length) {
+    return record.linkedPurchaseOrders;
+  }
+  return record?.latestPurchaseOrder ? [record.latestPurchaseOrder] : [];
+};
+
+const formatLinkedPurchaseOrderSummary = (record = {}) => {
+  const linkedPurchaseOrders = getLinkedPurchaseOrders(record);
+  if (!linkedPurchaseOrders.length) {
+    return "Not linked";
+  }
+
+  const latestPurchaseOrder = linkedPurchaseOrders[0];
+  const reference =
+    latestPurchaseOrder?.poNumber ||
+    (latestPurchaseOrder?.id ? `PO #${latestPurchaseOrder.id}` : "Linked PO");
+  const status = latestPurchaseOrder?.status || "Draft";
+  const extraCount = linkedPurchaseOrders.length - 1;
+
+  return extraCount > 0
+    ? `${reference} | ${status} +${extraCount} more`
+    : `${reference} | ${status}`;
+};
+
 const Boq = () => {
   const settings = useSettings();
   const skipAutoProjectRef = useRef(false);
@@ -743,6 +768,7 @@ const Boq = () => {
               <th className="p-3 text-left min-w-[180px]">Project</th>
               <th className="p-3 text-left min-w-[90px]">Version</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
+              <th className="p-3 text-left min-w-[200px]">PO Sync</th>
               <th className="p-3 text-left min-w-[110px]">Items</th>
               <th className="p-3 text-left min-w-[260px]">Line Item Preview</th>
               <th className="p-3 text-left min-w-[180px]">Serial Numbers</th>
@@ -755,14 +781,14 @@ const Boq = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   Loading BOQs...
                 </td>
               </tr>
             )}
             {!loading && records.length === 0 && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   No BOQs created yet.
                 </td>
               </tr>
@@ -779,6 +805,9 @@ const Boq = () => {
                   </td>
                   <td className="p-3">{record.version || "-"}</td>
                   <td className="p-3">{record.status || "-"}</td>
+                  <td className="p-3 text-xs text-slate-600">
+                    {formatLinkedPurchaseOrderSummary(record)}
+                  </td>
                   <td className="p-3">{record.items?.length || 0}</td>
                   <td className="p-3 text-xs text-slate-600">
                     {buildBoqLinePreview(record.items)}
@@ -849,6 +878,7 @@ const Boq = () => {
             { label: "Date", value: formatDate(viewRecord.date) },
             { label: "Version", value: viewRecord.version },
             { label: "Status", value: viewRecord.status },
+            { label: "PO Sync", value: formatLinkedPurchaseOrderSummary(viewRecord) },
           ]}
           leftBlockTitle="Project"
           leftBlockLines={[projectMap[String(viewRecord.projectId)]?.name || "-"]}
@@ -863,8 +893,6 @@ const Boq = () => {
             { key: "gst", label: "GST", widthClass: "w-20" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "quantity", label: "Planned", align: "right", widthClass: "w-20" },
-            { key: "consumedQty", label: "Consumed", align: "right", widthClass: "w-20" },
-            { key: "availableQty", label: "Available", align: "right", widthClass: "w-20" },
             {
               key: "rate",
               label: "Unit Price",
@@ -876,10 +904,6 @@ const Boq = () => {
           tableRows={(viewRecord.items || []).map((item, index) => {
             const qty = Number(item.quantity || 0);
             const rate = roundUnitPrice(item.rate);
-            const consumed = Number(item.consumedQty ?? 0) || 0;
-            const available = Number.isFinite(Number(item.availableQty))
-              ? Number(item.availableQty)
-              : Math.max(qty - consumed, 0);
             return {
               id: item.id || index,
               serial: index + 1,
@@ -890,8 +914,6 @@ const Boq = () => {
               gst: item.gst || "-",
               unit: item.unit || "-",
               quantity: qty,
-              consumedQty: consumed,
-              availableQty: available,
               rate: formatCurrency(rate),
               amount: formatCurrency(qty * rate),
             };

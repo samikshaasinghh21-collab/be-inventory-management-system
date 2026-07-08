@@ -127,11 +127,16 @@ const commonStyles = `
     margin: 0 !important;
   }
   .print-panel-body .document-view-panel {
-    border: 1px solid #0f172a;
+    border: 2px solid #1e293b;
+    box-shadow: none !important;
   }
   .print-body *,
   .document-view-panel * {
     max-width: 100%;
+  }
+  .print-body [class*="shadow"],
+  .document-view-panel [class*="shadow"] {
+    box-shadow: none !important;
   }
   .print-body .overflow-x-auto,
   .print-body .app-scroll-region {
@@ -158,7 +163,9 @@ const commonStyles = `
   }
   table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid #cbd5e1;
     margin-top: 1rem;
     table-layout: fixed;
     page-break-inside: auto;
@@ -173,7 +180,8 @@ const commonStyles = `
     page-break-inside: avoid;
   }
   th, td {
-    border: 1px solid #e2e8f0;
+    border-right: 1px solid #cbd5e1;
+    border-bottom: 1px solid #cbd5e1;
     padding: 0.55rem 0.65rem;
     font-size: 0.9rem;
     text-align: left;
@@ -181,6 +189,14 @@ const commonStyles = `
     white-space: normal !important;
     overflow-wrap: anywhere;
     word-break: break-word;
+    background-clip: padding-box;
+  }
+  table tr > *:last-child {
+    border-right: 0;
+  }
+  table tbody tr:last-child > *,
+  table tfoot tr:last-child > * {
+    border-bottom: 0;
   }
   .print-panel-body table,
   .print-panel-body .document-view-panel table {

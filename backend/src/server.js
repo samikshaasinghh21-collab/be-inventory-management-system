@@ -978,6 +978,90 @@ const normalizeBoq = (row = {}) => ({
   updatedAt: row.UpdatedAt ?? row.updatedAt ?? null,
 });
 
+const normalizeLinkedPurchaseOrderSummary = (row = {}) => ({
+  id: row.Id ?? row.id ?? row.PurchaseOrderId ?? null,
+  boqId: row.BOQId ?? row.boqId ?? row.BoqId ?? null,
+  poNumber: row.PONumber ?? row.poNumber ?? "",
+  status: row.Status ?? row.status ?? "",
+  orderDate: row.OrderDate ?? row.orderDate ?? null,
+  expectedDate:
+    row.ExpectedDeliveryDate ??
+    row.expectedDeliveryDate ??
+    row.ExpectedDate ??
+    row.expectedDate ??
+    null,
+  total: Number(row.Total ?? row.total ?? 0) || 0,
+  updatedAt: row.UpdatedAt ?? row.updatedAt ?? row.CreatedAt ?? row.createdAt ?? null,
+});
+
+const loadLinkedPurchaseOrdersByBoqIds = async (db, boqIds = []) => {
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(boqIds) ? boqIds : [])
+        .map((value) => toNullableInt(value))
+        .filter((value) => value !== null)
+    )
+  );
+  if (!ids.length) {
+    return new Map();
+  }
+
+  await ensurePurchaseTables();
+
+  const request = new sql.Request(db);
+  const inClause = buildPurchaseOrderItemInClause(request, ids, "BoqId");
+  const result = await request.query(`
+    SELECT
+      Id,
+      BOQId,
+      PONumber,
+      Status,
+      OrderDate,
+      ExpectedDate,
+      ExpectedDeliveryDate,
+      Total,
+      UpdatedAt,
+      CreatedAt
+    FROM dbo.PurchaseOrders
+    WHERE BOQId IN (${inClause})
+    ORDER BY BOQId ASC, COALESCE(UpdatedAt, CreatedAt, OrderDate) DESC, Id DESC
+  `);
+
+  return (result.recordset ?? []).reduce((acc, row) => {
+    const boqId = toNullableInt(row.BOQId);
+    if (boqId === null) {
+      return acc;
+    }
+    if (!acc.has(boqId)) {
+      acc.set(boqId, []);
+    }
+    acc.get(boqId).push(normalizeLinkedPurchaseOrderSummary(row));
+    return acc;
+  }, new Map());
+};
+
+const attachLinkedPurchaseOrdersToBoqs = async (db, boqs = []) => {
+  const normalizedBoqs = Array.isArray(boqs) ? boqs : [];
+  if (!normalizedBoqs.length) {
+    return [];
+  }
+
+  const linkedPurchaseOrdersByBoqId = await loadLinkedPurchaseOrdersByBoqIds(
+    db,
+    normalizedBoqs.map((boq) => boq?.id)
+  );
+
+  return normalizedBoqs.map((boq) => {
+    const linkedPurchaseOrders = linkedPurchaseOrdersByBoqId.get(boq.id) ?? [];
+    return {
+      ...boq,
+      linkedPurchaseOrders,
+      linkedPurchaseOrderCount: linkedPurchaseOrders.length,
+      latestPurchaseOrder: linkedPurchaseOrders[0] ?? null,
+    };
+  });
+};
+
 const normalizeBoqItem = (row = {}) => {
   const quantity =
     Number(
@@ -1309,6 +1393,9 @@ const normalizeDeliveryChallanItem = (row = {}) => ({
     null,
   receiveGoodsItemId:
     row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? null,
+  sourceType: row.SourceType ?? row.sourceType ?? "",
+  sourceKey: row.SourceKey ?? row.sourceKey ?? "",
+  sourceRef: row.SourceRef ?? row.sourceRef ?? "",
   poItemId:
     row.PurchaseOrderItemId ??
     row.purchaseOrderItemId ??
@@ -1604,6 +1691,7 @@ const normalizeReallocateInventory = (row = {}) => {
     consumptionId: metadata.consumptionId ?? null,
     consumptionNumber: metadata.consumptionNumber ?? "",
     projectId: row.ProjectId ?? row.projectId ?? metadata.projectId ?? null,
+    sourceProjectId: metadata.sourceProjectId ?? null,
     fromLocationId: row.FromLocationId ?? row.fromLocationId ?? null,
     toLocationId: row.ToLocationId ?? row.toLocationId ?? null,
     returnVendorId: metadata.returnVendorId ?? null,
@@ -1656,6 +1744,7 @@ const buildReallocateNotesPayload = ({
   consumptionId = null,
   consumptionNumber = "",
   projectId = null,
+  sourceProjectId = null,
   returnVendorId = null,
   requestDate = null,
   requestedBy = "",
@@ -1674,6 +1763,7 @@ const buildReallocateNotesPayload = ({
     consumptionId,
     consumptionNumber,
     projectId,
+    sourceProjectId,
     returnVendorId,
     requestDate,
     requestedBy,
@@ -7071,6 +7161,9 @@ const ensureDeliveryChallanTables = async () => {
           GST NVARCHAR(100) NULL,
           Quantity DECIMAL(18,2) NOT NULL DEFAULT 0,
           Rate DECIMAL(18,2) NOT NULL DEFAULT 0,
+          SourceType NVARCHAR(50) NULL,
+          SourceKey NVARCHAR(200) NULL,
+          SourceRef NVARCHAR(255) NULL,
           Notes NVARCHAR(500) NULL
         )
       END
@@ -7105,6 +7198,18 @@ const ensureDeliveryChallanTables = async () => {
       IF COL_LENGTH('dbo.DeliveryChallanItems', 'ReceiveGoodsItemId') IS NULL
       BEGIN
         ALTER TABLE dbo.DeliveryChallanItems ADD ReceiveGoodsItemId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'SourceType') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD SourceType NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'SourceKey') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD SourceKey NVARCHAR(200) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallanItems', 'SourceRef') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallanItems ADD SourceRef NVARCHAR(255) NULL;
       END;
       IF COL_LENGTH('dbo.DeliveryChallanItems', 'PurchaseOrderItemId') IS NULL
       BEGIN
@@ -7924,6 +8029,46 @@ const validateDeliveryChallanAgainstReceivedGoods = async (
   return effectiveReceiveGoodsIds[0] ?? null;
 };
 
+const resolvePrimaryReceiveGoodsIdForDeliveryChallan = async (
+  tx,
+  { receiveGoodsId = null, receiveGoodsIds = [], items = [] } = {}
+) => {
+  const directIds = uniqueReceiveGoodsIdsFromSelections([
+    ...(Array.isArray(receiveGoodsIds) ? receiveGoodsIds : []),
+    resolveReceiveGoodsSelectionId(receiveGoodsId),
+  ]);
+  if (directIds.length) {
+    return directIds[0];
+  }
+
+  const receiveGoodsItemIds = uniqueReceiveGoodsItemIds(
+    (Array.isArray(items) ? items : []).map((item) =>
+      toNullableInt(item.receiveGoodsItemId ?? item.ReceiveGoodsItemId)
+    )
+  );
+  if (!receiveGoodsItemIds.length) {
+    return null;
+  }
+
+  await ensureReceiveTables();
+  const receiveItemsPk = await refreshReceiveGoodsItemsPk();
+  const request = new sql.Request(tx);
+  const inClause = buildPurchaseOrderItemInClause(
+    request,
+    receiveGoodsItemIds,
+    "ReceiveGoodsItemId"
+  );
+  const result = await request.query(`
+    SELECT TOP 1 ReceiveGoodsId
+    FROM dbo.ReceiveGoodsItems
+    WHERE ${toIdentifier(receiveItemsPk)} IN (${inClause})
+      AND ReceiveGoodsId IS NOT NULL
+    ORDER BY ReceiveGoodsId ASC
+  `);
+
+  return toNullableInt(result.recordset?.[0]?.ReceiveGoodsId);
+};
+
 let reallocateInventoryPk = "Id";
 let reallocateInventoryItemsFk = "TransferId";
 let ensureReallocateInventoryTablesPromise = null;
@@ -8216,6 +8361,7 @@ const loadAvailableInventoryRows = async (
   {
     projectId = null,
     locationId = null,
+    excludeDeliveryChallanId = null,
     excludeConsumptionId = null,
     excludeReallocateInventoryId = null,
     includeZero = false,
@@ -8518,6 +8664,11 @@ const loadAvailableInventoryRows = async (
 
   const outgoingDcRequest = new sql.Request(db);
   outgoingDcRequest.input("LocationId", sql.Int, safeLocationId);
+  outgoingDcRequest.input(
+    "ExcludeDeliveryChallanId",
+    sql.BigInt,
+    toNullableInt(excludeDeliveryChallanId)
+  );
   if (safeProjectId !== null) {
     outgoingDcRequest.input("ProjectId", sql.Int, safeProjectId);
   }
@@ -8535,19 +8686,32 @@ const loadAvailableInventoryRows = async (
           ? "AND dc.ProjectId = @ProjectId"
           : ""
       }
+      AND (
+        @ExcludeDeliveryChallanId IS NULL
+        OR dc.${toIdentifier(deliveryPk)} <> @ExcludeDeliveryChallanId
+      )
   `);
 
   (outgoingDcItemsResult.recordset ?? []).forEach((row) => {
     const item = normalizeDeliveryChallanItem(row);
+    const sourceType =
+      normalizeAvailabilitySourceType(item.sourceType) ||
+      (item.receiveGoodsItemId ? "receive" : "");
+    const sourceKey =
+      normalizeOptionalString(item.sourceKey) ||
+      (sourceType === "receive" && item.receiveGoodsItemId
+        ? `receive:${item.receiveGoodsItemId}`
+        : buildAvailabilitySourceKey({
+            ...item,
+            sourceType,
+          }));
     applyMovementQuantity({
       projectId: row.HeaderProjectId,
       locationId: row.HeaderLocationId,
       item: {
         ...item,
-        sourceType: "receive",
-        sourceKey: item.receiveGoodsItemId
-          ? `receive:${item.receiveGoodsItemId}`
-          : "",
+        sourceType,
+        sourceKey,
       },
       quantity: item.quantity,
       field: "reallocatedQty",
@@ -8575,6 +8739,7 @@ const loadAvailableInventoryRows = async (
       TransferDate: row.HeaderTransferDate,
       Notes: row.HeaderNotes,
     });
+    const targetProjectId = toNullableInt(transfer.projectId);
     const transferId = toNullableInt(transfer.id);
     if (
       toNullableInt(excludeReallocateInventoryId) !== null &&
@@ -8585,8 +8750,8 @@ const loadAvailableInventoryRows = async (
     if (
       isInactiveAvailabilityMovementStatus(transfer.status) ||
       (safeProjectId !== null &&
-        toNullableInt(transfer.projectId) !== null &&
-        toNullableInt(transfer.projectId) !== safeProjectId)
+        targetProjectId !== null &&
+        targetProjectId !== safeProjectId)
     ) {
       return;
     }
@@ -8610,7 +8775,7 @@ const loadAvailableInventoryRows = async (
         ...item,
         sourceType: "reallocation",
         sourceKey,
-        projectId: toNullableInt(transfer.projectId) ?? safeProjectId,
+        projectId: targetProjectId ?? safeProjectId,
         locationId: transfer.toLocationId,
         sourceRef: transfer.referenceNumber,
         sourceDate: transfer.transferDate ?? transfer.requestDate,
@@ -8697,6 +8862,8 @@ const loadAvailableInventoryRows = async (
       TransferDate: row.HeaderTransferDate,
       Notes: row.HeaderNotes,
     });
+    const sourceProjectId =
+      toNullableInt(transfer.sourceProjectId) ?? toNullableInt(transfer.projectId);
     const transferId = toNullableInt(transfer.id);
     if (
       toNullableInt(excludeReallocateInventoryId) !== null &&
@@ -8707,8 +8874,8 @@ const loadAvailableInventoryRows = async (
     if (
       isInactiveAvailabilityMovementStatus(transfer.status) ||
       (safeProjectId !== null &&
-        toNullableInt(transfer.projectId) !== null &&
-        toNullableInt(transfer.projectId) !== safeProjectId)
+        sourceProjectId !== null &&
+        sourceProjectId !== safeProjectId)
     ) {
       return;
     }
@@ -8720,7 +8887,7 @@ const loadAvailableInventoryRows = async (
     }
 
     applyMovementQuantity({
-      projectId: toNullableInt(transfer.projectId) ?? safeProjectId,
+      projectId: sourceProjectId ?? safeProjectId,
       locationId: transfer.fromLocationId,
       item,
       quantity: itemQty,
@@ -8753,6 +8920,7 @@ const validateAvailableInventorySelection = async (
     projectId = null,
     locationId = null,
     items = [],
+    excludeDeliveryChallanId = null,
     excludeConsumptionId = null,
     excludeReallocateInventoryId = null,
   } = {}
@@ -8765,6 +8933,7 @@ const validateAvailableInventorySelection = async (
   const availableRows = await loadAvailableInventoryRows(tx, {
     projectId,
     locationId,
+    excludeDeliveryChallanId,
     excludeConsumptionId,
     excludeReallocateInventoryId,
     includeZero: true,
@@ -16517,7 +16686,9 @@ app.get("/api/boqs", async (_req, res) => {
       return { ...normalizeBoq(row), items, total };
     });
 
-    return res.json({ ok: true, boqs: data });
+    const hydratedBoqs = await attachLinkedPurchaseOrdersToBoqs(pool, data);
+
+    return res.json({ ok: true, boqs: hydratedBoqs });
   } catch (error) {
     return res.status(500).json({
       ok: false,
@@ -16555,9 +16726,13 @@ app.get("/api/boqs/:id", async (req, res) => {
     );
     const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
+    const [hydratedBoq] = await attachLinkedPurchaseOrdersToBoqs(pool, [
+      { ...normalizeBoq(boqRow), items, total },
+    ]);
+
     return res.json({
       ok: true,
-      boq: { ...normalizeBoq(boqRow), items, total },
+      boq: hydratedBoq,
     });
   } catch (error) {
     return res.status(500).json({
@@ -17366,10 +17541,21 @@ app.post("/api/delivery-challans", async (req, res) => {
       const name = String(item.name ?? item.Item ?? "").trim();
       const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
+      const receiveGoodsItemId = toNullableInt(
+        item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+      );
+      const sourceType =
+        normalizeAvailabilitySourceType(item.sourceType ?? item.SourceType) ||
+        (receiveGoodsItemId !== null ? "receive" : "");
+      const sourceKey =
+        normalizeOptionalString(item.sourceKey ?? item.SourceKey) ??
+        buildAvailabilitySourceKey({
+          ...item,
+          receiveGoodsItemId,
+          sourceType,
+        });
       return {
-        receiveGoodsItemId: toNullableInt(
-          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
-        ),
+        receiveGoodsItemId,
         purchaseOrderItemId: toNullableInt(
           item.poItemId ??
             item.POItemId ??
@@ -17384,6 +17570,9 @@ app.post("/api/delivery-challans", async (req, res) => {
         gst: normalizeOptionalString(item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate) ?? null,
         quantity,
         rate,
+        sourceType,
+        sourceKey,
+        sourceRef: normalizeOptionalString(item.sourceRef ?? item.SourceRef) ?? null,
         notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
       };
     })
@@ -17411,13 +17600,17 @@ app.post("/api/delivery-challans", async (req, res) => {
       toLocationId: safeToLocationId,
       toLocation: safeToLocation,
     });
-    const resolvedReceiveGoodsId = await validateDeliveryChallanAgainstReceivedGoods(tx, {
-      deliveryChallanId: null,
-      receiveGoodsId: safeReceiveGoodsId,
-      receiveGoodsIds: safeReceiveGoodsIds,
+    await validateAvailableInventorySelection(tx, {
       projectId: safeProjectId,
+      locationId: safeFromLocationId,
       items: normalizedItems,
     });
+    const resolvedReceiveGoodsId =
+      await resolvePrimaryReceiveGoodsIdForDeliveryChallan(tx, {
+        receiveGoodsId: safeReceiveGoodsId,
+        receiveGoodsIds: safeReceiveGoodsIds,
+        items: normalizedItems,
+      });
 
     const insertHeaderReq = new sql.Request(tx);
     insertHeaderReq.input("DCNumber", sql.NVarChar(100), resolvedDcNumber);
@@ -17462,12 +17655,15 @@ app.post("/api/delivery-challans", async (req, res) => {
       insertItemReq.input("GST", sql.NVarChar(100), item.gst);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
+      insertItemReq.input("SourceType", sql.NVarChar(50), item.sourceType || null);
+      insertItemReq.input("SourceKey", sql.NVarChar(200), item.sourceKey || null);
+      insertItemReq.input("SourceRef", sql.NVarChar(255), item.sourceRef || null);
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.DeliveryChallanItems
-          (${fkCol}, ReceiveGoodsItemId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, HSN, GST, Quantity, Rate, Notes)
+          (${fkCol}, ReceiveGoodsItemId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, HSN, GST, Quantity, Rate, SourceType, SourceKey, SourceRef, Notes)
         VALUES
-          (@DeliveryChallanId, @ReceiveGoodsItemId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
+          (@DeliveryChallanId, @ReceiveGoodsItemId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @SourceType, @SourceKey, @SourceRef, @Notes)
       `);
     }
 
@@ -17577,10 +17773,21 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       const name = String(item.name ?? item.Item ?? "").trim();
       const quantity = Number(item.quantity ?? item.Quantity ?? 0) || 0;
       const rate = Number(item.rate ?? item.Rate ?? 0) || 0;
+      const receiveGoodsItemId = toNullableInt(
+        item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+      );
+      const sourceType =
+        normalizeAvailabilitySourceType(item.sourceType ?? item.SourceType) ||
+        (receiveGoodsItemId !== null ? "receive" : "");
+      const sourceKey =
+        normalizeOptionalString(item.sourceKey ?? item.SourceKey) ??
+        buildAvailabilitySourceKey({
+          ...item,
+          receiveGoodsItemId,
+          sourceType,
+        });
       return {
-        receiveGoodsItemId: toNullableInt(
-          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
-        ),
+        receiveGoodsItemId,
         purchaseOrderItemId: toNullableInt(
           item.poItemId ??
             item.POItemId ??
@@ -17595,6 +17802,9 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
         gst: normalizeOptionalString(item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate) ?? null,
         quantity,
         rate,
+        sourceType,
+        sourceKey,
+        sourceRef: normalizeOptionalString(item.sourceRef ?? item.SourceRef) ?? null,
         notes: normalizeOptionalString(item.notes ?? item.Notes) ?? null,
       };
     })
@@ -17645,13 +17855,18 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       toLocationId: safeToLocationId,
       toLocation: safeToLocation,
     });
-    const resolvedReceiveGoodsId = await validateDeliveryChallanAgainstReceivedGoods(tx, {
-      deliveryChallanId: id,
-      receiveGoodsId: safeReceiveGoodsId,
-      receiveGoodsIds: safeReceiveGoodsIds,
+    await validateAvailableInventorySelection(tx, {
       projectId: safeProjectId,
+      locationId: safeFromLocationId,
       items: normalizedItems,
+      excludeDeliveryChallanId: id,
     });
+    const resolvedReceiveGoodsId =
+      await resolvePrimaryReceiveGoodsIdForDeliveryChallan(tx, {
+        receiveGoodsId: safeReceiveGoodsId,
+        receiveGoodsIds: safeReceiveGoodsIds,
+        items: normalizedItems,
+      });
 
     const updateHeaderReq = new sql.Request(tx);
     updateHeaderReq.input("DeliveryChallanId", sql.BigInt, id);
@@ -17720,12 +17935,15 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       insertItemReq.input("GST", sql.NVarChar(100), item.gst);
       insertItemReq.input("Quantity", sql.Decimal(18, 2), item.quantity);
       insertItemReq.input("Rate", sql.Decimal(18, 2), item.rate);
+      insertItemReq.input("SourceType", sql.NVarChar(50), item.sourceType || null);
+      insertItemReq.input("SourceKey", sql.NVarChar(200), item.sourceKey || null);
+      insertItemReq.input("SourceRef", sql.NVarChar(255), item.sourceRef || null);
       insertItemReq.input("Notes", sql.NVarChar(500), item.notes);
       await insertItemReq.query(`
         INSERT INTO dbo.DeliveryChallanItems
-          (${fkCol}, ReceiveGoodsItemId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, HSN, GST, Quantity, Rate, Notes)
+          (${fkCol}, ReceiveGoodsItemId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, HSN, GST, Quantity, Rate, SourceType, SourceKey, SourceRef, Notes)
         VALUES
-          (@DeliveryChallanId, @ReceiveGoodsItemId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @Notes)
+          (@DeliveryChallanId, @ReceiveGoodsItemId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @SourceType, @SourceKey, @SourceRef, @Notes)
       `);
     }
 
@@ -19416,6 +19634,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     consumptionId = null,
     consumptionNumber = "",
     projectId = null,
+    sourceProjectId = null,
     fromLocationId,
     toLocationId = null,
     returnVendorId = null,
@@ -19445,6 +19664,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
   const safeConsumptionId = toNullableInt(consumptionId);
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
   const safeProjectId = toNullableInt(projectId);
+  const safeSourceProjectId = toNullableInt(sourceProjectId);
   const safeFromLocationId = toNullableInt(fromLocationId);
   const safeToLocationId = toNullableInt(toLocationId);
   const safeReturnVendorId = toNullableInt(returnVendorId);
@@ -19548,9 +19768,13 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     );
     const effectiveProjectId =
       safeProjectId ?? toNullableInt(resolvedSourceLocation.projectId);
+    const effectiveSourceProjectId =
+      safeSourceProjectId ??
+      toNullableInt(resolvedSourceLocation.projectId) ??
+      effectiveProjectId;
 
     await validateAvailableInventorySelection(tx, {
-      projectId: safeProjectId,
+      projectId: effectiveSourceProjectId,
       locationId: safeFromLocationId,
       items: normalizedItems,
     });
@@ -19565,6 +19789,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
       projectId: effectiveProjectId,
+      sourceProjectId: effectiveSourceProjectId,
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,
@@ -19608,6 +19833,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
       projectId: effectiveProjectId,
+      sourceProjectId: effectiveSourceProjectId,
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,
@@ -19697,6 +19923,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     consumptionId = null,
     consumptionNumber = "",
     projectId = null,
+    sourceProjectId = null,
     fromLocationId,
     toLocationId = null,
     returnVendorId = null,
@@ -19726,6 +19953,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
   const safeConsumptionId = toNullableInt(consumptionId);
   const safeConsumptionNumber = normalizeOptionalString(consumptionNumber) ?? "";
   const safeProjectId = toNullableInt(projectId);
+  const safeSourceProjectId = toNullableInt(sourceProjectId);
   const safeFromLocationId = toNullableInt(fromLocationId);
   const safeToLocationId = toNullableInt(toLocationId);
   const safeReturnVendorId = toNullableInt(returnVendorId);
@@ -19829,6 +20057,10 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     );
     const effectiveProjectId =
       safeProjectId ?? toNullableInt(resolvedSourceLocation.projectId);
+    const effectiveSourceProjectId =
+      safeSourceProjectId ??
+      toNullableInt(resolvedSourceLocation.projectId) ??
+      effectiveProjectId;
 
     const currentResult = await new sql.Request(tx)
       .input("TransferId", sql.Int, id)
@@ -19848,7 +20080,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
 
     const previousRecord = normalizeReallocateInventory(currentRow);
     await validateAvailableInventorySelection(tx, {
-      projectId: safeProjectId,
+      projectId: effectiveSourceProjectId,
       locationId: safeFromLocationId,
       items: normalizedItems,
       excludeReallocateInventoryId: id,
@@ -19863,6 +20095,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
       consumptionId: safeConsumptionId,
       consumptionNumber: safeConsumptionNumber,
       projectId: effectiveProjectId,
+      sourceProjectId: effectiveSourceProjectId,
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,

@@ -128,6 +128,15 @@ export const NAVIGATION_SECTIONS = [
         searchKeywords: ["dispatch", "dc", "allocation"],
       }),
       createNavItem({
+        id: "reallocation-register",
+        label: "Reallocation Register",
+        to: "/inventory/reallocation-register",
+        icon: "table",
+        matchPrefixes: ["/inventory/reallocation-register"],
+        subtitle: "Review saved DC reallocations and follow transfer history.",
+        searchKeywords: ["reallocation", "transfer register", "dc history"],
+      }),
+      createNavItem({
         id: "consumption",
         label: "Consumption",
         to: "/inventory/consumption",

@@ -22,6 +22,22 @@ const parseQuantity = (...values) => {
   return 0;
 };
 
+const normalizeLinkedPurchaseOrder = (order = {}) => ({
+  id: order.id ?? order.Id ?? order.PurchaseOrderId ?? null,
+  boqId: order.boqId ?? order.BOQId ?? order.BoqId ?? null,
+  poNumber: order.poNumber ?? order.PONumber ?? "",
+  status: order.status ?? order.Status ?? "",
+  orderDate: order.orderDate ?? order.OrderDate ?? null,
+  expectedDate:
+    order.expectedDate ??
+    order.ExpectedDate ??
+    order.expectedDeliveryDate ??
+    order.ExpectedDeliveryDate ??
+    null,
+  total: Number(order.total ?? order.Total ?? 0) || 0,
+  updatedAt: order.updatedAt ?? order.UpdatedAt ?? null,
+});
+
 const normalizeBoqItem = (item = {}) => {
   const rate = roundUnitPrice(item.rate ?? item.Rate ?? item.unitPrice ?? item.UnitPrice ?? 0);
   const rawInventoryQty =
@@ -81,6 +97,9 @@ const normalizeBoqItem = (item = {}) => {
 };
 
 const normalizeBoq = (boq = {}) => {
+  const linkedPurchaseOrders = Array.isArray(boq.linkedPurchaseOrders)
+    ? boq.linkedPurchaseOrders.map(normalizeLinkedPurchaseOrder)
+    : [];
   const items = Array.isArray(boq.items)
     ? boq.items.map(normalizeBoqItem)
     : Array.isArray(boq.BOQLineItems)
@@ -98,6 +117,16 @@ const normalizeBoq = (boq = {}) => {
     status: boq.status ?? boq.Status ?? "",
     date: boq.date ?? boq.BOQDate ?? boq.Date ?? null,
     notes: boq.notes ?? boq.Notes ?? "",
+    linkedPurchaseOrders,
+    linkedPurchaseOrderCount:
+      Number(boq.linkedPurchaseOrderCount ?? boq.LinkedPurchaseOrderCount ?? 0) ||
+      linkedPurchaseOrders.length,
+    latestPurchaseOrder:
+      boq.latestPurchaseOrder || boq.LatestPurchaseOrder
+        ? normalizeLinkedPurchaseOrder(
+            boq.latestPurchaseOrder ?? boq.LatestPurchaseOrder
+          )
+        : linkedPurchaseOrders[0] ?? null,
     items,
     total: Number(boq.total ?? boq.Total ?? 0) || computedTotal,
   };

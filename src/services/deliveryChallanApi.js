@@ -85,6 +85,9 @@ const normalizeDeliveryChallanItem = (item = {}) => ({
     null,
   receiveGoodsItemId:
     item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? null,
+  sourceType: item.sourceType ?? item.SourceType ?? "",
+  sourceKey: item.sourceKey ?? item.SourceKey ?? "",
+  sourceRef: item.sourceRef ?? item.SourceRef ?? "",
   poItemId:
     item.poItemId ??
     item.POItemId ??

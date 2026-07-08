@@ -72,7 +72,7 @@ const DocumentViewPanel = ({
   return (
     <div
       id={id}
-      className="document-view-panel mt-4 border border-slate-800 text-xs text-slate-900 bg-white"
+      className="document-view-panel mt-4 border-2 border-slate-800 text-xs text-slate-900 bg-white"
     >
       <div className="border-b border-slate-800 p-2">
         <div className="flex items-center justify-between text-[11px] font-semibold tracking-wide">

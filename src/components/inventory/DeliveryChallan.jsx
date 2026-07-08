@@ -15,6 +15,7 @@ import {
 import useSettings from "../../hooks/useSettings";
 import { getProjects } from "../../services/projectsStore";
 import { fetchLocations } from "../../services/locationsApi";
+import { fetchAvailableInventory } from "../../services/availableInventoryApi";
 import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
 import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import {
@@ -31,10 +32,15 @@ import {
   updateDeliveryChallan,
   uploadDeliveryChallanPod,
 } from "../../services/deliveryChallanApi";
+import {
+  createReallocateInventory,
+  fetchReallocateInventory,
+} from "../../services/reallocateInventoryApi";
 import DateInput from "../common/DateInput";
+import DocumentViewPanel from "./DocumentViewPanel";
 import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
-import { defaultBrandLogoUrl, resolveBrandLogo } from "../../utils/branding";
+import { resolveBrandLogo } from "../../utils/branding";
 import {
   getActiveProjectId,
   setActiveProjectId,
@@ -246,9 +252,14 @@ const mapReceiptItemsToChallanItems = (
       const availableQty = Math.max(Number(resolveAvailableQty(item)) || 0, 0);
       const quantity = availableQty;
       const receivedQty = getReceiptItemReceivedQty(item);
+      const receiveGoodsItemId =
+        item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? null;
       return {
         id: item.id ?? `${Date.now()}-${index}`,
-        receiveGoodsItemId: item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? null,
+        sourceType: "receive",
+        sourceKey: receiveGoodsItemId ? `receive:${receiveGoodsItemId}` : "",
+        sourceRef: getReceiptReference(receipt),
+        receiveGoodsItemId,
         poItemId:
           item.poItemId ??
           item.POItemId ??
@@ -299,6 +310,56 @@ const getDeliveryChallanRegisterStatus = (record = {}) => {
   return "Pending";
 };
 
+const getInventorySourceLabel = (sourceType = "") => {
+  const normalized = normalizeLookupText(sourceType);
+  if (normalized === "receive") {
+    return "Receive Receipt Stock";
+  }
+  if (normalized === "consumption") {
+    return "Consumption Leftover Stock";
+  }
+  if (normalized === "dc") {
+    return "Delivery Challan Stock";
+  }
+  if (normalized === "reallocation") {
+    return "Reallocated Stock";
+  }
+  return "Inventory Stock";
+};
+
+const mapAvailableInventoryRowToChallanItem = (row = {}, index = 0) => {
+  const sourceType = row.sourceType || "consumption";
+  const sourceKey =
+    row.sourceKey ||
+    `${sourceType}:${row.receiveGoodsItemId ?? row.deliveryChallanItemId ?? row.itemId ?? index}`;
+  const sourceQty = Number(row.sourceQty ?? row.availableQty ?? 0) || 0;
+  const availableQty = Math.max(Number(row.availableQty ?? 0) || 0, 0);
+  return {
+    id: sourceKey || `${Date.now()}-${index}`,
+    sourceType,
+    sourceKey,
+    sourceRef: row.sourceRef || "",
+    receiveGoodsItemId: row.receiveGoodsItemId ?? null,
+    deliveryChallanId: row.deliveryChallanId ?? null,
+    deliveryChallanItemId: row.deliveryChallanItemId ?? null,
+    itemId: row.itemId ?? null,
+    name: row.name || "",
+    description: row.description || "",
+    unit: row.unit || "PCS",
+    hsn: row.hsn || "",
+    gst: row.gst || "",
+    receivedQty: sourceQty,
+    previouslyUsedQty: Math.max(
+      sourceQty - availableQty,
+      Number(row.consumedQty ?? 0) + Number(row.reallocatedQty ?? 0) || 0
+    ),
+    availableQty,
+    quantity: availableQty,
+    rate: Number(row.rate ?? 0) || 0,
+    notes: row.notes || "",
+  };
+};
+
 const parseNumberValue = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -325,15 +386,215 @@ const areReceiptSelectionsEqual = (left = [], right = []) => {
   );
 };
 
-const DELIVERY_CHALLAN_WORKFLOW = {
-  RECEIPTS: "receipts",
-  REMAINING_DC: "remaining-dc",
+const CHALLAN_DETAIL_TABS = {
+  DETAILS: "details",
+  ITEMS: "items",
+  HISTORY: "history",
 };
+
+const createReallocationModalState = (requestedBy = "") => ({
+  open: false,
+  record: null,
+  targetLocationId: "",
+  reallocationType: "partial",
+  requestDate: new Date().toISOString().slice(0, 10),
+  requestedBy,
+  notes: "",
+  items: [],
+  loading: false,
+  submitting: false,
+  error: "",
+});
+
+const isInactiveReallocationStatus = (status = "") =>
+  ["cancelled", "canceled", "rejected", "void"].includes(
+    normalizeLookupText(status)
+  );
+
+const isReallocationItemLinkedToChallan = (item = {}, challan = {}) => {
+  const challanId = String(challan.id ?? "").trim();
+  const challanItemIds = new Set(
+    (challan.items || [])
+      .map((challanItem) => String(challanItem.id ?? "").trim())
+      .filter(Boolean)
+  );
+  const receiptItemIds = new Set(
+    (challan.items || [])
+      .map((challanItem) => String(challanItem.receiveGoodsItemId ?? "").trim())
+      .filter(Boolean)
+  );
+  const itemChallanId = String(item.deliveryChallanId ?? "").trim();
+  const itemChallanItemId = String(item.deliveryChallanItemId ?? "").trim();
+  const itemReceiptId = String(item.receiveGoodsItemId ?? "").trim();
+  const challanRef = normalizeLookupText(challan.dcNumber);
+  const itemRef = normalizeLookupText(item.sourceRef);
+
+  return Boolean(
+    (challanId && itemChallanId && challanId === itemChallanId) ||
+      (itemChallanItemId && challanItemIds.has(itemChallanItemId)) ||
+      (itemReceiptId && receiptItemIds.has(itemReceiptId)) ||
+      (challanRef && itemRef && challanRef === itemRef)
+  );
+};
+
+const isReallocationLinkedToChallan = (transfer = {}, challan = {}) => {
+  const challanId = String(challan.id ?? "").trim();
+  const transferReferenceType = normalizeLookupText(transfer.referenceType).replace(
+    /[\s-]+/g,
+    "_"
+  );
+  const transferReferenceId = String(transfer.referenceId ?? "").trim();
+  const challanRef = normalizeLookupText(challan.dcNumber);
+  const transferRef = normalizeLookupText(transfer.referenceNo);
+
+  if (
+    challanId &&
+    transferReferenceType === "delivery_challan" &&
+    transferReferenceId &&
+    transferReferenceId === challanId
+  ) {
+    return true;
+  }
+  if (challanRef && transferRef && challanRef === transferRef) {
+    return true;
+  }
+  return (transfer.items || []).some((item) =>
+    isReallocationItemLinkedToChallan(item, challan)
+  );
+};
+
+const getChallanReallocationHistory = (challan = {}, reallocations = []) =>
+  (Array.isArray(reallocations) ? reallocations : [])
+    .filter((transfer) => !isInactiveReallocationStatus(transfer.status))
+    .map((transfer) => {
+      const linkedItems = (transfer.items || []).filter((item) =>
+        isReallocationItemLinkedToChallan(item, challan)
+      );
+      return linkedItems.length || isReallocationLinkedToChallan(transfer, challan)
+        ? { ...transfer, linkedItems }
+        : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftDate = new Date(
+        left.transferDate ?? left.requestDate ?? left.updatedAt ?? left.createdAt ?? 0
+      ).getTime();
+      const rightDate = new Date(
+        right.transferDate ?? right.requestDate ?? right.updatedAt ?? right.createdAt ?? 0
+      ).getTime();
+      return rightDate - leftDate;
+    });
+
+const getChallanReallocationMetrics = (challan = {}, reallocations = []) => {
+  const history = getChallanReallocationHistory(challan, reallocations);
+  const totalReallocatedQty = history.reduce(
+    (sum, transfer) =>
+      sum +
+      (transfer.linkedItems || []).reduce(
+        (itemSum, item) => itemSum + (Number(item.quantity) || 0),
+        0
+      ),
+    0
+  );
+  const remainingBalanceQty = Math.max(
+    toQuantity(challan.balanceQty) - totalReallocatedQty,
+    0
+  );
+
+  if (totalReallocatedQty <= 0) {
+    return {
+      history,
+      historyCount: 0,
+      totalReallocatedQty: 0,
+      remainingBalanceQty,
+      reallocationStatusKey: "not_reallocated",
+      reallocationStatusLabel: "Not Reallocated",
+      dcTypeKey: "original",
+      dcTypeLabel: "Original DC",
+    };
+  }
+
+  if (remainingBalanceQty > 0) {
+    return {
+      history,
+      historyCount: history.length,
+      totalReallocatedQty,
+      remainingBalanceQty,
+      reallocationStatusKey: "partially_reallocated",
+      reallocationStatusLabel: "Partially Reallocated",
+      dcTypeKey: "partially_reallocated",
+      dcTypeLabel: "Partially Reallocated DC",
+    };
+  }
+
+  return {
+    history,
+    historyCount: history.length,
+    totalReallocatedQty,
+    remainingBalanceQty,
+    reallocationStatusKey: "fully_reallocated",
+    reallocationStatusLabel: "Fully Reallocated",
+    dcTypeKey: "reallocated",
+    dcTypeLabel: "Reallocated DC",
+  };
+};
+
+const getReallocationStatusTone = (statusKey = "") => {
+  if (statusKey === "fully_reallocated") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (statusKey === "partially_reallocated") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+  return "border-slate-200 bg-slate-100 text-slate-700";
+};
+
+const isReallocationItemMatchChallanItem = (reallocationItem = {}, challanItem = {}) => {
+  const challanItemId = String(challanItem.id ?? "").trim();
+  const reallocationChallanItemId = String(
+    reallocationItem.deliveryChallanItemId ?? ""
+  ).trim();
+  if (challanItemId && reallocationChallanItemId && challanItemId === reallocationChallanItemId) {
+    return true;
+  }
+
+  const challanReceiptItemId = String(challanItem.receiveGoodsItemId ?? "").trim();
+  const reallocationReceiptItemId = String(
+    reallocationItem.receiveGoodsItemId ?? ""
+  ).trim();
+  if (
+    challanReceiptItemId &&
+    reallocationReceiptItemId &&
+    challanReceiptItemId === reallocationReceiptItemId
+  ) {
+    return true;
+  }
+
+  return (
+    normalizeLookupText(reallocationItem.name) === normalizeLookupText(challanItem.name) &&
+    normalizeLookupText(reallocationItem.unit || "PCS") ===
+      normalizeLookupText(challanItem.unit || "PCS")
+  );
+};
+
+const getChallanItemReallocatedQty = (challanItem = {}, history = []) =>
+  (Array.isArray(history) ? history : []).reduce(
+    (sum, transfer) =>
+      sum +
+      (transfer.linkedItems || []).reduce((itemSum, reallocationItem) => {
+        if (!isReallocationItemMatchChallanItem(reallocationItem, challanItem)) {
+          return itemSum;
+        }
+        return itemSum + (Number(reallocationItem.quantity) || 0);
+      }, 0),
+    0
+  );
 
 const DeliveryChallan = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const prefillSignatureRef = useRef("");
+  const openChallanSignatureRef = useRef("");
   const [projects, setProjects] = useState(() => getProjects());
   const [locations, setLocations] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
@@ -345,17 +606,30 @@ const DeliveryChallan = () => {
   const [receiptFilters, setReceiptFilters] = useState({
     search: "",
   });
-  const [workflowSource, setWorkflowSource] = useState(
-    DELIVERY_CHALLAN_WORKFLOW.RECEIPTS
-  );
+  const [stockSources, setStockSources] = useState({
+    receipts: true,
+    consumptionLeftover: false,
+  });
   const [selectedReceiptIds, setSelectedReceiptIds] = useState([]);
   const [errors, setErrors] = useState({});
   const [receiptsLoading, setReceiptsLoading] = useState(false);
+  const [leftoverLoading, setLeftoverLoading] = useState(false);
   const [receiptError, setReceiptError] = useState("");
   const [updateProof, setUpdateProof] = useState("");
   const [dcStatusFilter, setDcStatusFilter] = useState("all");
+  const [dcTypeFilter, setDcTypeFilter] = useState("all");
+  const [reallocationStatusFilter, setReallocationStatusFilter] = useState("all");
   const [editingId, setEditingId] = useState(null);
+  const [viewChallanRecord, setViewChallanRecord] = useState(null);
   const [selectedChallan, setSelectedChallan] = useState(null);
+  const [challanDetailTab, setChallanDetailTab] = useState(
+    CHALLAN_DETAIL_TABS.DETAILS
+  );
+  const [printChallan, setPrintChallan] = useState(null);
+  const [reallocations, setReallocations] = useState([]);
+  const [reallocationModal, setReallocationModal] = useState(
+    createReallocationModalState()
+  );
   const [podModal, setPodModal] = useState({ type: "", record: null });
   const [podForm, setPodForm] = useState(createPodFormState);
   const [podAuditEntries, setPodAuditEntries] = useState([]);
@@ -393,6 +667,15 @@ const DeliveryChallan = () => {
       setPurchaseOrders(Array.isArray(list) ? list : []);
     } catch {
       setPurchaseOrders([]);
+    }
+  };
+  const loadReallocations = async () => {
+    try {
+      const list = await fetchReallocateInventory();
+      setReallocations(Array.isArray(list) ? list : []);
+    } catch (error) {
+      console.error("Failed to load reallocation history:", error);
+      setReallocations([]);
     }
   };
   const loadReceipts = async (projectId = null) => {
@@ -438,6 +721,7 @@ const DeliveryChallan = () => {
     void loadRecords();
     void loadLocations();
     void loadPurchaseOrders();
+    void loadReallocations();
     void loadNextDcNumber();
   }, []);
 
@@ -464,24 +748,70 @@ const DeliveryChallan = () => {
     const refreshNumber = () => {
       void loadNextDcNumber();
     };
+    const refreshReallocations = () => {
+      void loadReallocations();
+    };
 
     window.addEventListener("delivery-challans:changed", refreshRecords);
     window.addEventListener("consumptions:changed", refreshRecords);
+    window.addEventListener("reallocate-inventory:changed", refreshRecords);
     window.addEventListener("locations:changed", refreshLocations);
     window.addEventListener("projects:changed", refreshProjects);
     window.addEventListener("purchase-orders:changed", refreshPurchaseOrders);
     window.addEventListener("receive-goods:changed", refreshReceipts);
     window.addEventListener("delivery-challans:changed", refreshNumber);
+    window.addEventListener("reallocate-inventory:changed", refreshReallocations);
     return () => {
       window.removeEventListener("delivery-challans:changed", refreshRecords);
       window.removeEventListener("consumptions:changed", refreshRecords);
+      window.removeEventListener("reallocate-inventory:changed", refreshRecords);
       window.removeEventListener("locations:changed", refreshLocations);
       window.removeEventListener("projects:changed", refreshProjects);
       window.removeEventListener("purchase-orders:changed", refreshPurchaseOrders);
       window.removeEventListener("receive-goods:changed", refreshReceipts);
       window.removeEventListener("delivery-challans:changed", refreshNumber);
+      window.removeEventListener(
+        "reallocate-inventory:changed",
+        refreshReallocations
+      );
     };
   }, [form.projectId]);
+
+  useEffect(() => {
+    if (!viewChallanRecord?.id) {
+      return;
+    }
+    const matchedRecord = records.find(
+      (record) => String(record.id) === String(viewChallanRecord.id)
+    );
+    if (matchedRecord) {
+      setViewChallanRecord(matchedRecord);
+    }
+  }, [records, viewChallanRecord?.id]);
+
+  useEffect(() => {
+    if (!selectedChallan?.id) {
+      return;
+    }
+    const matchedRecord = records.find(
+      (record) => String(record.id) === String(selectedChallan.id)
+    );
+    if (matchedRecord) {
+      setSelectedChallan(matchedRecord);
+    }
+  }, [records, selectedChallan?.id]);
+
+  useEffect(() => {
+    if (!printChallan?.id) {
+      return;
+    }
+    const matchedRecord = records.find(
+      (record) => String(record.id) === String(printChallan.id)
+    );
+    if (matchedRecord) {
+      setPrintChallan(matchedRecord);
+    }
+  }, [printChallan?.id, records]);
 
   useEffect(() => {
     if (editingId || form.projectId || !projects.length) {
@@ -786,7 +1116,10 @@ const DeliveryChallan = () => {
     setForm(createFormState());
     setItems([]);
     setLoadedReceiptIds([]);
-    setWorkflowSource(DELIVERY_CHALLAN_WORKFLOW.RECEIPTS);
+    setStockSources({
+      receipts: true,
+      consumptionLeftover: false,
+    });
     setReceiptFilters({
       search: "",
     });
@@ -830,6 +1163,33 @@ const DeliveryChallan = () => {
     }));
     setSelectedReceiptIds(preselectedIds);
   }, [location.key, location.state]);
+
+  useEffect(() => {
+    const openChallanId = String(location.state?.openChallanId ?? "").trim();
+    const requestedTab = String(location.state?.openChallanTab ?? "").trim();
+    if (!openChallanId || !records.length) {
+      return;
+    }
+
+    const nextTab = Object.values(CHALLAN_DETAIL_TABS).includes(requestedTab)
+      ? requestedTab
+      : CHALLAN_DETAIL_TABS.DETAILS;
+    const matchedRecord = records.find(
+      (record) => String(record.id) === openChallanId
+    );
+    if (!matchedRecord) {
+      return;
+    }
+
+    const signature = `${location.key}:${openChallanId}:${nextTab}`;
+    if (openChallanSignatureRef.current === signature) {
+      return;
+    }
+    openChallanSignatureRef.current = signature;
+
+    setSelectedChallan(matchedRecord);
+    setChallanDetailTab(nextTab);
+  }, [location.key, location.state, records]);
 
   const validate = () => {
     const nextErrors = {};
@@ -1077,18 +1437,31 @@ const DeliveryChallan = () => {
   }, [records]);
 
   const filteredRecords = useMemo(() => {
-    if (dcStatusFilter === "all") {
-      return records;
-    }
-    return records.filter(
-      (record) =>
-        getDeliveryChallanRegisterStatus(record).toLowerCase() === dcStatusFilter
-    );
-  }, [dcStatusFilter, records]);
+    return records.filter((record) => {
+      const registerStatus = getDeliveryChallanRegisterStatus(record).toLowerCase();
+      const reallocationMetrics = getChallanReallocationMetrics(record, reallocations);
+      if (dcStatusFilter !== "all" && registerStatus !== dcStatusFilter) {
+        return false;
+      }
+      if (
+        dcTypeFilter !== "all" &&
+        reallocationMetrics.dcTypeKey !== dcTypeFilter
+      ) {
+        return false;
+      }
+      if (
+        reallocationStatusFilter !== "all" &&
+        reallocationMetrics.reallocationStatusKey !== reallocationStatusFilter
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [dcStatusFilter, dcTypeFilter, reallocationStatusFilter, records, reallocations]);
 
   const handlePrint = async (record) => {
     if (!record) return;
-    setSelectedChallan(record);
+    setPrintChallan(record);
     window.setTimeout(() => {
       void printSection({
         selector: "#delivery-challan-print-area",
@@ -1101,9 +1474,239 @@ const DeliveryChallan = () => {
     }, 80);
   };
 
-  const handleViewChallan = (record) => {
+  const handleViewChallan = (
+    record
+  ) => {
+    if (!record) return;
+    setViewChallanRecord(record);
+  };
+
+  const handleOpenChallanDetail = (
+    record,
+    tab = CHALLAN_DETAIL_TABS.DETAILS
+  ) => {
     if (!record) return;
     setSelectedChallan(record);
+    setChallanDetailTab(tab);
+  };
+
+  const closeChallanDetail = () => {
+    setSelectedChallan(null);
+    setChallanDetailTab(CHALLAN_DETAIL_TABS.DETAILS);
+  };
+
+  const closeReallocationModal = () => {
+    setReallocationModal(createReallocationModalState(profileName));
+  };
+
+  const handleOpenReallocation = async (record) => {
+    if (!record?.id) {
+      return;
+    }
+    if (!record.toLocationId) {
+      setUpdateProof("Reallocation requires a valid DC destination location.");
+      return;
+    }
+
+    setReallocationModal({
+      ...createReallocationModalState(profileName),
+      open: true,
+      record,
+      loading: true,
+    });
+
+    try {
+      const availableRows = await fetchAvailableInventory({
+        projectId: parseNumberValue(record.projectId),
+        locationId: parseNumberValue(record.toLocationId),
+      });
+      const linkedRows = availableRows
+        .filter((row) => {
+          const sourceType = normalizeLookupText(row.sourceType);
+          return (
+            sourceType === "dc" &&
+            String(row.deliveryChallanId ?? "").trim() === String(record.id)
+          );
+        })
+        .map((row, index) => ({
+          id:
+            row.sourceKey ||
+            row.deliveryChallanItemId ||
+            row.receiveGoodsItemId ||
+            `${record.id}-${index}`,
+          name: row.name || `Item ${index + 1}`,
+          description: row.description || "",
+          unit: row.unit || "PCS",
+          quantity: "",
+          availableQty: Math.max(Number(row.availableQty) || 0, 0),
+          sourceQty: Math.max(Number(row.sourceQty) || 0, 0),
+          sourceKey: row.sourceKey || "",
+          sourceRef: row.sourceRef || record.dcNumber || "",
+          receiveGoodsItemId: row.receiveGoodsItemId ?? null,
+          deliveryChallanId: row.deliveryChallanId ?? record.id,
+          deliveryChallanItemId: row.deliveryChallanItemId ?? null,
+          itemId: row.itemId ?? null,
+        }))
+        .filter((item) => item.availableQty > 0);
+
+      setReallocationModal((prev) => ({
+        ...prev,
+        loading: false,
+        items: linkedRows,
+        error: linkedRows.length
+          ? ""
+          : "No remaining DC balance is available for reallocation.",
+      }));
+    } catch (error) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        loading: false,
+        error:
+          error?.response?.data?.error ||
+          error?.message ||
+          "Failed to load DC balance for reallocation.",
+      }));
+    }
+  };
+
+  const handleReallocationItemChange = (itemId, value) => {
+    setReallocationModal((prev) => ({
+      ...prev,
+      reallocationType: "partial",
+      items: prev.items.map((item) =>
+        String(item.id) === String(itemId)
+          ? { ...item, quantity: value }
+          : item
+      ),
+    }));
+  };
+
+  const handleReallocationTypeChange = (nextType) => {
+    setReallocationModal((prev) => ({
+      ...prev,
+      reallocationType: nextType,
+      items: prev.items.map((item) => ({
+        ...item,
+        quantity:
+          nextType === "full"
+            ? String(Math.max(Number(item.availableQty) || 0, 0))
+            : item.quantity,
+      })),
+    }));
+  };
+
+  const handleReallocationSubmit = async (event) => {
+    event.preventDefault();
+    const challan = reallocationModal.record;
+    if (!challan?.id) {
+      return;
+    }
+
+    const targetLocation = locations.find(
+      (locationItem) =>
+        String(locationItem.id) === String(reallocationModal.targetLocationId)
+    );
+    if (!targetLocation) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        error: "Select a destination location for this reallocation.",
+      }));
+      return;
+    }
+    if (String(targetLocation.id) === String(challan.toLocationId)) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        error: "Destination location must be different from the current DC location.",
+      }));
+      return;
+    }
+
+    const positiveItems = reallocationModal.items
+      .map((item) => ({
+        ...item,
+        quantity: Number(item.quantity) || 0,
+      }))
+      .filter((item) => item.quantity > 0);
+
+    if (!positiveItems.length) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        error: "Enter at least one reallocation quantity.",
+      }));
+      return;
+    }
+
+    const invalidItem = positiveItems.find(
+      (item) => item.quantity > (Number(item.availableQty) || 0)
+    );
+    if (invalidItem) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        error: `${invalidItem.name} cannot exceed the available balance (${fmtQty(
+          invalidItem.availableQty
+        )}).`,
+      }));
+      return;
+    }
+
+    setReallocationModal((prev) => ({
+      ...prev,
+      submitting: true,
+      error: "",
+    }));
+
+    try {
+      const savedReallocation = await createReallocateInventory({
+        type: "Reallocate",
+        referenceType: "delivery_challan",
+        referenceId: parseNumberValue(challan.id),
+        referenceNo: challan.dcNumber || "",
+        projectId:
+          parseNumberValue(targetLocation.projectId) ??
+          parseNumberValue(challan.projectId),
+        sourceProjectId: parseNumberValue(challan.projectId),
+        fromLocationId: parseNumberValue(challan.toLocationId),
+        toLocationId: parseNumberValue(targetLocation.id),
+        requestDate: reallocationModal.requestDate || null,
+        requestedBy:
+          String(reallocationModal.requestedBy || "").trim() || profileName,
+        status: "Completed",
+        notes: String(reallocationModal.notes || "").trim() || null,
+        items: positiveItems.map((item) => ({
+          itemId: item.itemId,
+          name: item.name,
+          description: item.description || null,
+          unit: item.unit || "PCS",
+          quantity: item.quantity,
+          receiveGoodsItemId: item.receiveGoodsItemId,
+          deliveryChallanId: parseNumberValue(challan.id),
+          deliveryChallanItemId: item.deliveryChallanItemId,
+          sourceType: "dc",
+          sourceKey: item.sourceKey || null,
+          sourceRef: item.sourceRef || challan.dcNumber || null,
+        })),
+      });
+      closeReallocationModal();
+      navigate("/inventory/reallocation-register", {
+        state: {
+          highlightReallocationId: String(
+            savedReallocation?.id ?? savedReallocation?.transferId ?? ""
+          ),
+          successMessage: `Reallocation saved for ${
+            challan.dcNumber || "the delivery challan"
+          } to ${targetLocation.name || "the selected location"}.`,
+        },
+      });
+    } catch (error) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        submitting: false,
+        error:
+          error?.response?.data?.error ||
+          error?.message ||
+          "Failed to save reallocation.",
+      }));
+    }
   };
 
   const closePodModal = () => {
@@ -1216,8 +1819,14 @@ const DeliveryChallan = () => {
     if (!updatedChallan?.id) {
       return;
     }
+    if (viewChallanRecord && String(viewChallanRecord.id) === String(updatedChallan.id)) {
+      setViewChallanRecord(updatedChallan);
+    }
     if (selectedChallan && String(selectedChallan.id) === String(updatedChallan.id)) {
       setSelectedChallan(updatedChallan);
+    }
+    if (printChallan && String(printChallan.id) === String(updatedChallan.id)) {
+      setPrintChallan(updatedChallan);
     }
   };
 
@@ -1322,16 +1931,12 @@ const DeliveryChallan = () => {
     setReceiptError("");
   };
 
-  const handleWorkflowSourceChange = (nextWorkflowSource) => {
-    setWorkflowSource(nextWorkflowSource);
-    setReceiptError("");
-    setErrors((prev) => {
-      if (!prev.items) {
-        return prev;
-      }
-      const next = { ...prev };
-      delete next.items;
-      return next;
+  const handleStockSourceToggle = (key) => {
+    setStockSources((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      return next.receipts || next.consumptionLeftover
+        ? next
+        : { ...next, [key]: true };
     });
   };
 
@@ -1460,6 +2065,62 @@ const DeliveryChallan = () => {
       };
     });
     setReceiptError("");
+  };
+
+  const handleLoadConsumptionLeftover = async () => {
+    if (!form.projectId || !form.fromLocationId) {
+      setReceiptError(
+        "Select project and source location before loading consumption leftover stock."
+      );
+      return;
+    }
+
+    try {
+      setLeftoverLoading(true);
+      setReceiptError("");
+      const availableRows = await fetchAvailableInventory({
+        projectId: parseNumberValue(form.projectId),
+        locationId: parseNumberValue(form.fromLocationId),
+      });
+      const leftoverItems = (Array.isArray(availableRows) ? availableRows : [])
+        .filter(
+          (row) =>
+            normalizeLookupText(row.sourceType) === "consumption" &&
+            toQuantity(row.availableQty) > 0
+        )
+        .map(mapAvailableInventoryRowToChallanItem);
+
+      if (!leftoverItems.length) {
+        setReceiptError(
+          "No consumption leftover stock is available for the selected project and source location."
+        );
+        return;
+      }
+
+      setItems((prev) => {
+        const existingKeys = new Set(
+          prev.map((item) => String(item.sourceKey || item.id || "")).filter(Boolean)
+        );
+        const nextItems = leftoverItems.filter(
+          (item) => !existingKeys.has(String(item.sourceKey || item.id || ""))
+        );
+        return [...prev, ...nextItems];
+      });
+      if (!items.some((item) => normalizeLookupText(item.sourceType) === "receive")) {
+        setSelectedReceiptIds([]);
+        setLoadedReceiptIds([]);
+        setForm((prev) => ({ ...prev, receiveGoodsId: "" }));
+      }
+      setReceiptError("");
+    } catch (error) {
+      setReceiptError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Could not load consumption leftover stock."
+      );
+    } finally {
+      setLeftoverLoading(false);
+    }
   };
 
   const handleLineItemQuantityChange = (itemId, nextValue) => {
@@ -1668,6 +2329,24 @@ const DeliveryChallan = () => {
     );
   };
 
+  const selectedChallanReallocationMetrics = useMemo(
+    () => getChallanReallocationMetrics(selectedChallan || {}, reallocations),
+    [reallocations, selectedChallan]
+  );
+  const selectedChallanHistory = selectedChallanReallocationMetrics.history || [];
+  const viewProject = viewChallanRecord
+    ? projectMap[String(viewChallanRecord.projectId)] || {}
+    : {};
+  const viewFromLocation = viewChallanRecord
+    ? locationMap[String(viewChallanRecord.fromLocationId)] || {}
+    : {};
+  const viewToLocation = viewChallanRecord
+    ? locationMap[String(viewChallanRecord.toLocationId)] || {}
+    : {};
+  const viewTotalQty = viewChallanRecord?.items?.reduce(
+    (sum, item) => sum + (Number(item.quantity) || 0),
+    0
+  );
   const selectedProject = selectedChallan
     ? projectMap[String(selectedChallan.projectId)] || {}
     : {};
@@ -1678,6 +2357,35 @@ const DeliveryChallan = () => {
     ? locationMap[String(selectedChallan.toLocationId)] || {}
     : {};
   const totalQty = selectedChallan?.items?.reduce(
+    (sum, item) => sum + (Number(item.quantity) || 0),
+    0
+  );
+  const reallocationTargetLocations = useMemo(() => {
+    if (!reallocationModal.record?.toLocationId) {
+      return locations;
+    }
+    return locations.filter(
+      (locationItem) =>
+        String(locationItem.id) !== String(reallocationModal.record.toLocationId)
+    );
+  }, [locations, reallocationModal.record]);
+  const selectedReallocationTargetLocation = reallocationTargetLocations.find(
+    (locationItem) =>
+      String(locationItem.id) === String(reallocationModal.targetLocationId)
+  );
+  const selectedReallocationTargetProject = selectedReallocationTargetLocation
+    ? projectMap[String(selectedReallocationTargetLocation.projectId)] || {}
+    : {};
+  const printProject = printChallan
+    ? projectMap[String(printChallan.projectId)] || {}
+    : {};
+  const printFromLocation = printChallan
+    ? locationMap[String(printChallan.fromLocationId)] || {}
+    : {};
+  const printToLocation = printChallan
+    ? locationMap[String(printChallan.toLocationId)] || {}
+    : {};
+  const printTotalQty = printChallan?.items?.reduce(
     (sum, item) => sum + (Number(item.quantity) || 0),
     0
   );
@@ -1921,47 +2629,59 @@ const DeliveryChallan = () => {
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-indigo-800">
-                Inventory Source Workflow
+                Select Receive Receipts (All under selected Project)
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                Delivery Challan remains a receipt-to-dispatch document. Leftover stock from an already issued DC moves through Reallocation in the Consumption workflow.
+                All receive receipts from purchase orders under the selected project are listed below.
               </p>
-            </div>
-            <div className="w-full max-w-sm">
-              <label className="text-sm font-medium text-slate-700">
-                Source / Workflow
-              </label>
-              <select
-                value={workflowSource}
-                onChange={(event) => handleWorkflowSourceChange(event.target.value)}
-                disabled={Boolean(editingId)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-500"
-              >
-                <option value={DELIVERY_CHALLAN_WORKFLOW.RECEIPTS}>
-                  Receive Receipts
-                </option>
-                <option value={DELIVERY_CHALLAN_WORKFLOW.REMAINING_DC}>
-                  Remaining DC Stock
-                </option>
-              </select>
-              {editingId ? (
-                <p className="mt-1 text-xs text-slate-500">
-                  Existing delivery challans stay on the receipt-based workflow.
+              <div className="mt-4 rounded-lg bg-slate-50 p-3">
+                <p className="text-xs font-semibold text-slate-700">Stock Source</p>
+                <div className="mt-2 flex flex-wrap gap-4 text-sm text-slate-700">
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={stockSources.receipts}
+                      onChange={() => handleStockSourceToggle("receipts")}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                    />
+                    Receive Receipt Stock
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={stockSources.consumptionLeftover}
+                      onChange={() => handleStockSourceToggle("consumptionLeftover")}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                    />
+                    Consumption Leftover Stock
+                  </label>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Receipt Stock is fresh received inventory. Consumption Leftover is balance quantity from already consumed DC.
                 </p>
-              ) : null}
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                void loadReceipts(form.projectId || null);
+              }}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-indigo-300"
+            >
+              Refresh
+            </button>
           </div>
 
-          {workflowSource === DELIVERY_CHALLAN_WORKFLOW.RECEIPTS ? (
+          {stockSources.receipts ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_260px]">
               <div className="overflow-hidden rounded-lg border border-slate-200">
                 <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-sm font-semibold text-indigo-900">
-                      Select Receive Receipts (All under selected Project)
+                      Receive Receipt Stock
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
-                      Only receive receipts appear here. Leftover stock from older delivery challans is handled through Reallocation in Consumption.
+                      Select one or more receive receipts, then load their available quantities into the DC line items.
                     </p>
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -2099,45 +2819,42 @@ const DeliveryChallan = () => {
                 >
                   Load Selected Receipts
                 </button>
+                {stockSources.consumptionLeftover ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void handleLoadConsumptionLeftover()}
+                      disabled={!form.projectId || !form.fromLocationId || leftoverLoading}
+                      className="mt-3 w-full rounded-lg border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:border-indigo-300 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                    >
+                      {leftoverLoading ? "Loading Leftover..." : "Load Consumption Leftover"}
+                    </button>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Loads leftover quantity from previous DC consumption for the selected project and source location.
+                    </p>
+                  </>
+                ) : null}
               </aside>
             </div>
-          ) : (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6">
-              <div className="max-w-3xl">
-                <p className="text-sm font-semibold uppercase tracking-wide text-amber-800">
-                  Remaining DC Stock
-                </p>
-                <h3 className="mt-2 text-xl font-semibold text-slate-900">
-                  Use Reallocation from the Consumption workflow
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-slate-700">
-                  To move leftover stock from an already issued DC, use Reallocation from the Consumption workflow. This Delivery Challan screen only creates new dispatches from receive receipts.
-                </p>
-                <p className="mt-2 text-sm text-slate-600">
-                  We&apos;ll carry the selected project and source location into Consumption and open the Reallocation Records lookup for you.
-                </p>
-                <button
-                  type="button"
-                  onClick={() =>
-                    navigate("/inventory/consumption", {
-                      state: {
-                        lookupSource: "reallocation",
-                        projectId: form.projectId || undefined,
-                        fromLocationId: form.fromLocationId || undefined,
-                      },
-                    })
-                  }
-                  className="mt-5 inline-flex rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700"
-                >
-                  Go to Consumption Reallocation
-                </button>
-              </div>
+          ) : null}
+          {!stockSources.receipts && stockSources.consumptionLeftover ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <button
+                type="button"
+                onClick={() => void handleLoadConsumptionLeftover()}
+                disabled={!form.projectId || !form.fromLocationId || leftoverLoading}
+                className="rounded-lg border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:border-indigo-300 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+              >
+                {leftoverLoading ? "Loading Leftover..." : "Load Consumption Leftover"}
+              </button>
+              <p className="mt-2 text-xs text-slate-500">
+                Loads leftover quantity from previous DC consumption for the selected project and source location.
+              </p>
             </div>
-          )}
+          ) : null}
         </div>
 
-        {workflowSource === DELIVERY_CHALLAN_WORKFLOW.RECEIPTS ? (
-          <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
+        <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
             <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <h2 className="text-lg font-semibold text-indigo-800">Line Items</h2>
               <div className="flex flex-wrap gap-4 text-sm">
@@ -2145,24 +2862,35 @@ const DeliveryChallan = () => {
                   {loadedReceiptsSummary.receipts} Receipts Selected
                 </span>
                 <span className="text-slate-600">
-                  Total Items: <strong className="text-slate-900">{loadedReceiptsSummary.items}</strong>
+                  Total Items: <strong className="text-slate-900">{items.length}</strong>
                 </span>
                 <span className="text-slate-600">
-                  Total Quantity: <strong className="text-slate-900">{fmtQty(loadedReceiptsSummary.quantity)}</strong>
+                  Total Available Qty:{" "}
+                  <strong className="text-slate-900">
+                    {fmtQty(items.reduce((sum, item) => sum + toQuantity(item.availableQty), 0))}
+                  </strong>
+                </span>
+                <span className="text-slate-600">
+                  Total DC Qty Selected:{" "}
+                  <strong className="text-slate-900">
+                    {fmtQty(items.reduce((sum, item) => sum + toQuantity(item.quantity), 0))}
+                  </strong>
                 </span>
               </div>
             </div>
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <div className="overflow-x-auto">
-                <table className="min-w-[1180px] w-full text-sm">
+                <table className="min-w-[1360px] w-full text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-3 py-3 text-left w-12">#</th>
+                      <th className="px-3 py-3 text-left min-w-[130px]">Source Type</th>
+                      <th className="px-3 py-3 text-left min-w-[150px]">Source Ref</th>
                       <th className="px-3 py-3 text-left min-w-[210px]">Item Name</th>
                       <th className="px-3 py-3 text-left min-w-[110px]">HSN / SAC</th>
                       <th className="px-3 py-3 text-left min-w-[90px]">Unit</th>
-                      <th className="px-3 py-3 text-right min-w-[140px]">Received Quantity</th>
-                      <th className="px-3 py-3 text-right min-w-[150px]">Previously Used Quantity</th>
+                      <th className="px-3 py-3 text-right min-w-[140px]">Original Qty</th>
+                      <th className="px-3 py-3 text-right min-w-[150px]">Used / Consumed Qty</th>
                       <th className="px-3 py-3 text-right min-w-[130px]">Available Quantity</th>
                       <th className="px-3 py-3 text-right min-w-[140px]">DC Quantity</th>
                       <th className="px-3 py-3 text-right w-16">Action</th>
@@ -2171,8 +2899,8 @@ const DeliveryChallan = () => {
                   <tbody>
                     {!items.length ? (
                       <tr>
-                        <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
-                          Select receipts and load them to populate delivery challan line items.
+                        <td colSpan={11} className="px-4 py-10 text-center text-slate-500">
+                          Load receipt stock or consumption leftover stock to populate delivery challan line items.
                         </td>
                       </tr>
                     ) : (
@@ -2183,6 +2911,12 @@ const DeliveryChallan = () => {
                         return (
                           <tr key={item.id} className="border-t border-slate-200 bg-white">
                             <td className="px-3 py-3 text-slate-600">{index + 1}</td>
+                            <td className="px-3 py-3 text-slate-700">
+                              {getInventorySourceLabel(item.sourceType)}
+                            </td>
+                            <td className="px-3 py-3 text-slate-700">
+                              {item.sourceRef || item.sourceKey || "-"}
+                            </td>
                             <td className="px-3 py-3 font-medium text-slate-800">{item.name || "-"}</td>
                             <td className="px-3 py-3 text-slate-700">{item.hsn || "-"}</td>
                             <td className="px-3 py-3 text-slate-700">{item.unit || "PCS"}</td>
@@ -2224,7 +2958,6 @@ const DeliveryChallan = () => {
               </div>
             </div>
           </div>
-        ) : null}
         {receiptError && <p className="text-xs text-red-600">{receiptError}</p>}
         {errors.items && <p className="text-xs text-red-600">{errors.items}</p>}
 
@@ -2238,8 +2971,7 @@ const DeliveryChallan = () => {
           </button>
           <button
             type="submit"
-            disabled={workflowSource !== DELIVERY_CHALLAN_WORKFLOW.RECEIPTS}
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
           >
             {editingId ? "Update Challan" : "Save Challan"}
           </button>
@@ -2254,7 +2986,7 @@ const DeliveryChallan = () => {
           <h3 className="text-lg font-semibold text-slate-800">
             Delivery Challan Register
           </h3>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <select
               value={dcStatusFilter}
               onChange={(event) => setDcStatusFilter(event.target.value)}
@@ -2264,6 +2996,26 @@ const DeliveryChallan = () => {
               <option value="received">Received</option>
               <option value="pending">Pending</option>
               <option value="partially received">Partially Received</option>
+            </select>
+            <select
+              value={dcTypeFilter}
+              onChange={(event) => setDcTypeFilter(event.target.value)}
+              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700"
+            >
+              <option value="all">All DC Types</option>
+              <option value="original">Original DC</option>
+              <option value="reallocated">Reallocated DC</option>
+              <option value="partially_reallocated">Partially Reallocated DC</option>
+            </select>
+            <select
+              value={reallocationStatusFilter}
+              onChange={(event) => setReallocationStatusFilter(event.target.value)}
+              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700"
+            >
+              <option value="all">All Reallocation Status</option>
+              <option value="not_reallocated">Not Reallocated</option>
+              <option value="partially_reallocated">Partially Reallocated</option>
+              <option value="fully_reallocated">Fully Reallocated</option>
             </select>
             <button
               type="button"
@@ -2284,7 +3036,7 @@ const DeliveryChallan = () => {
             </button>
           </div>
         </div>
-        <table className="min-w-[1580px] text-sm">
+        <table className="min-w-[1920px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">DC No</th>
@@ -2292,89 +3044,911 @@ const DeliveryChallan = () => {
               <th className="p-3 text-left min-w-[180px]">Project</th>
               <th className="p-3 text-left min-w-[180px]">From</th>
               <th className="p-3 text-left min-w-[180px]">To</th>
+              <th className="p-3 text-left min-w-[180px]">DC Type</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
+              <th className="p-3 text-left min-w-[180px]">Reallocation Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
-              <th className="p-3 text-right min-w-[140px]">Balance Qty</th>
+              <th className="p-3 text-right min-w-[140px]">Reallocated Qty</th>
+              <th className="p-3 text-right min-w-[140px]">Remaining Balance</th>
+              <th className="p-3 text-left min-w-[220px]">History</th>
               <th className="p-3 text-left min-w-[260px]">POD</th>
-              <th className="p-3 text-left min-w-[120px]">Actions</th>
+              <th className="p-3 text-left min-w-[260px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredRecords.length === 0 && (
               <tr>
-                <td colSpan="10" className="p-6 text-center text-slate-500">
+                <td colSpan="14" className="p-6 text-center text-slate-500">
                   {records.length === 0
                     ? "No delivery challans created yet."
-                    : "No delivery challans match the selected status."}
+                    : "No delivery challans match the selected filters."}
                 </td>
               </tr>
             )}
-            {filteredRecords.map((record) => (
-              <tr key={record.id} className="border-t hover:bg-slate-50">
-                <td className="p-3 font-medium text-slate-800">
-                  {record.dcNumber || "-"}
-                </td>
-                <td className="p-3 text-slate-700">
-                  {formatReceiptReference(
-                    Array.isArray(record.receiveGoodsIds) && record.receiveGoodsIds.length
-                      ? record.receiveGoodsIds
-                      : record.receiveGoodsId
-                  )}
-                </td>
-                <td className="p-3">
-                  {projectMap[String(record.projectId)]?.name || "-"}
-                </td>
-                <td className="p-3">
-                  {locationMap[String(record.fromLocationId)]?.name || "-"}
-                </td>
-                <td className="p-3">
-                  {locationMap[String(record.toLocationId)]?.name || record.toLocation || "-"}
-                </td>
-                <td className="p-3">{getDeliveryChallanRegisterStatus(record)}</td>
-                <td className="p-3">{record.items?.length || 0}</td>
-                <td className="p-3 text-right font-medium text-slate-800">
-                  {fmtQty(record.balanceQty)}
-                </td>
-                <td className="p-3">{renderPodWorkflowCell(record)}</td>
-                <td className="p-3 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleViewChallan(record)}
-                    className="text-slate-700 text-sm underline"
-                  >
-                    View
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleEdit(record)}
-                    disabled={
-                      normalizePodStatus(record.podStatus) === POD_STATUS.VERIFIED &&
-                      !isPodReviewer
-                    }
-                    className="text-indigo-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePrint(record)}
-                    className="text-slate-600 text-sm"
-                  >
-                    Print
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(record.id)}
-                    className="text-red-600 text-sm"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {filteredRecords.map((record) => {
+              const reallocationMetrics = getChallanReallocationMetrics(
+                record,
+                reallocations
+              );
+              const latestHistory = reallocationMetrics.history[0] || null;
+              const latestLocation = latestHistory
+                ? locationMap[String(latestHistory.toLocationId)] || {}
+                : {};
+              return (
+                <tr key={record.id} className="border-t hover:bg-slate-50">
+                  <td className="p-3 font-medium text-slate-800">
+                    {record.dcNumber || "-"}
+                  </td>
+                  <td className="p-3 text-slate-700">
+                    {formatReceiptReference(
+                      Array.isArray(record.receiveGoodsIds) && record.receiveGoodsIds.length
+                        ? record.receiveGoodsIds
+                        : record.receiveGoodsId
+                    )}
+                  </td>
+                  <td className="p-3">
+                    {projectMap[String(record.projectId)]?.name || "-"}
+                  </td>
+                  <td className="p-3">
+                    {locationMap[String(record.fromLocationId)]?.name || "-"}
+                  </td>
+                  <td className="p-3">
+                    {locationMap[String(record.toLocationId)]?.name ||
+                      record.toLocation ||
+                      "-"}
+                  </td>
+                  <td className="p-3">
+                    <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                      {reallocationMetrics.dcTypeLabel}
+                    </span>
+                  </td>
+                  <td className="p-3">{getDeliveryChallanRegisterStatus(record)}</td>
+                  <td className="p-3">
+                    <span
+                      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getReallocationStatusTone(
+                        reallocationMetrics.reallocationStatusKey
+                      )}`}
+                    >
+                      {reallocationMetrics.reallocationStatusLabel}
+                    </span>
+                  </td>
+                  <td className="p-3">{record.items?.length || 0}</td>
+                  <td className="p-3 text-right font-medium text-slate-800">
+                    {fmtQty(reallocationMetrics.totalReallocatedQty)}
+                  </td>
+                  <td className="p-3 text-right font-medium text-slate-800">
+                    {fmtQty(reallocationMetrics.remainingBalanceQty)}
+                  </td>
+                  <td className="p-3 text-xs text-slate-600">
+                    {reallocationMetrics.historyCount > 0 ? (
+                      <div className="space-y-1">
+                        <p className="font-medium text-slate-700">
+                          {reallocationMetrics.historyCount} movement
+                          {reallocationMetrics.historyCount > 1 ? "s" : ""}
+                        </p>
+                        <p>
+                          Latest:{" "}
+                          {latestLocation.name || latestHistory?.referenceNumber || "-"}
+                        </p>
+                        <p>{formatDate(latestHistory?.requestDate || latestHistory?.transferDate)}</p>
+                      </div>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
+                  <td className="p-3">{renderPodWorkflowCell(record)}</td>
+                  <td className="p-3">
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleViewChallan(record)}
+                        className="text-slate-700 text-sm underline"
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleOpenReallocation(record)}
+                        className="text-emerald-700 text-sm"
+                      >
+                        Reallocate
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenChallanDetail(record, CHALLAN_DETAIL_TABS.HISTORY)
+                        }
+                        className="text-amber-700 text-sm"
+                      >
+                        History
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleEdit(record)}
+                        disabled={
+                          normalizePodStatus(record.podStatus) === POD_STATUS.VERIFIED &&
+                          !isPodReviewer
+                        }
+                        className="text-indigo-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePrint(record)}
+                        className="text-slate-600 text-sm"
+                      >
+                        Print
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(record.id)}
+                        className="text-red-600 text-sm"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+
+      {viewChallanRecord ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 px-4 py-6">
+          <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto">
+            <DocumentViewPanel
+              id="delivery-challan-view-panel"
+              title="DELIVERY CHALLAN"
+              onClose={() => setViewChallanRecord(null)}
+              companyName={companyName}
+              companyAddress={company.address || "Company address"}
+              companyGstin={company.gstin}
+              companyPhone={company.phone}
+              companyEmail={company.email}
+              logoUrl={companyLogo}
+              primaryPairs={[
+                {
+                  label: "RE No",
+                  value: viewChallanRecord.id
+                    ? `RE-${String(viewChallanRecord.id).padStart(5, "0")}`
+                    : "-",
+                },
+                { label: "Our Ref", value: viewChallanRecord.dcNumber || "-" },
+                {
+                  label: "Receipt Ref",
+                  value: formatReceiptReference(
+                    Array.isArray(viewChallanRecord.receiveGoodsIds) &&
+                      viewChallanRecord.receiveGoodsIds.length
+                      ? viewChallanRecord.receiveGoodsIds
+                      : viewChallanRecord.receiveGoodsId
+                  ),
+                },
+                { label: "Date", value: formatDate(viewChallanRecord.issueDate) },
+                {
+                  label: "E-Way Bill No",
+                  value: viewChallanRecord.eWayBillNumber || "-",
+                },
+                {
+                  label: "POD",
+                  value:
+                    [
+                      getPodStatusLabel(viewChallanRecord.podStatus),
+                      viewChallanRecord.podReference,
+                      formatDateTime(getPodTimestamp(viewChallanRecord)),
+                    ]
+                      .filter((value) => value && value !== "-")
+                      .join(" | ") || "-",
+                },
+                { label: "Project", value: viewProject.name || "-" },
+                { label: "Client", value: viewProject.client || "-" },
+              ]}
+              leftBlockTitle="From"
+              leftBlockLines={[
+                viewFromLocation.name || "-",
+                viewFromLocation.address || "-",
+                `Contact: ${viewFromLocation.manager || "-"}${
+                  viewFromLocation.phone ? ` (${viewFromLocation.phone})` : ""
+                }`,
+              ]}
+              rightBlockTitle="To"
+              rightBlockLines={[
+                viewToLocation.name || viewProject.name || "-",
+                viewToLocation.address || viewChallanRecord.toLocation || "-",
+                `Status: ${getDeliveryChallanRegisterStatus(viewChallanRecord)}`,
+              ]}
+              tableColumns={[
+                { key: "serial", label: "Sl No", widthClass: "w-16" },
+                { key: "description", label: "Description" },
+                { key: "hsn", label: "HSN", widthClass: "w-20" },
+                { key: "gst", label: "GST", widthClass: "w-20" },
+                { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
+                { key: "unit", label: "Unit", widthClass: "w-20" },
+              ]}
+              tableRows={(viewChallanRecord.items || []).map((item, index) => ({
+                id: item.id || index,
+                serial: index + 1,
+                description: [item.name || "-", item.description, item.notes]
+                  .filter(Boolean)
+                  .join(" | "),
+                hsn: item.hsn || "-",
+                gst: item.gst || "-",
+                quantity: item.quantity || "-",
+                unit: item.unit || "-",
+              }))}
+              bottomLeftContent={
+                <div className="space-y-3 text-left">
+                  <div>
+                    <p className="font-semibold">Vehicle No</p>
+                    <p>{viewChallanRecord.vehicleNumber || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold">Notes</p>
+                    <p className="whitespace-pre-wrap text-slate-700">
+                      {viewChallanRecord.notes || "-"}
+                    </p>
+                  </div>
+                </div>
+              }
+              bottomRightContent={
+                <div className="space-y-3 text-right">
+                  <div>
+                    <p className="font-semibold">Total Qty</p>
+                    <p>{Number.isFinite(viewTotalQty) ? viewTotalQty : "-"}</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold">Reallocation Status</p>
+                    <p>
+                      {getChallanReallocationMetrics(
+                        viewChallanRecord,
+                        reallocations
+                      ).reallocationStatusLabel}
+                    </p>
+                  </div>
+                </div>
+              }
+              footerCompanyName={companyName}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {selectedChallan ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 px-4 py-6">
+          <div className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-slate-400">
+                  Delivery Challan
+                </p>
+                <h3 className="text-xl font-semibold text-slate-800">
+                  {selectedChallan.dcNumber || "DC Details"}
+                </h3>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                    {selectedChallanReallocationMetrics.dcTypeLabel}
+                  </span>
+                  <span
+                    className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getReallocationStatusTone(
+                      selectedChallanReallocationMetrics.reallocationStatusKey
+                    )}`}
+                  >
+                    {selectedChallanReallocationMetrics.reallocationStatusLabel}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeChallanDetail}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="border-b border-slate-200 px-6 py-3">
+              <div className="flex flex-wrap gap-2">
+                {[
+                  {
+                    key: CHALLAN_DETAIL_TABS.DETAILS,
+                    label: "DC Details",
+                  },
+                  {
+                    key: CHALLAN_DETAIL_TABS.ITEMS,
+                    label: "Items",
+                  },
+                  {
+                    key: CHALLAN_DETAIL_TABS.HISTORY,
+                    label: "Reallocation History",
+                  },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setChallanDetailTab(tab.key)}
+                    className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                      challanDetailTab === tab.key
+                        ? "bg-slate-800 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="max-h-[calc(90vh-148px)] overflow-y-auto px-6 py-5">
+              {challanDetailTab === CHALLAN_DETAIL_TABS.DETAILS ? (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                        Project
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-slate-800">
+                        {selectedProject.name || "-"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                        Current DC Location
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-slate-800">
+                        {selectedToLocation.name || selectedChallan.toLocation || "-"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                        Reallocated Qty
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-slate-800">
+                        {fmtQty(selectedChallanReallocationMetrics.totalReallocatedQty)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                        Remaining Balance
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-slate-800">
+                        {fmtQty(selectedChallanReallocationMetrics.remainingBalanceQty)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <h4 className="text-sm font-semibold text-slate-800">
+                        Dispatch Details
+                      </h4>
+                      <dl className="mt-3 space-y-2 text-sm text-slate-600">
+                        <div className="flex justify-between gap-4">
+                          <dt>Receipt Ref</dt>
+                          <dd className="text-right text-slate-800">
+                            {formatReceiptReference(
+                              Array.isArray(selectedChallan.receiveGoodsIds) &&
+                                selectedChallan.receiveGoodsIds.length
+                                ? selectedChallan.receiveGoodsIds
+                                : selectedChallan.receiveGoodsId
+                            )}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt>Issue Date</dt>
+                          <dd className="text-right text-slate-800">
+                            {formatDate(selectedChallan.issueDate)}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt>Status</dt>
+                          <dd className="text-right text-slate-800">
+                            {getDeliveryChallanRegisterStatus(selectedChallan)}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt>Vehicle No</dt>
+                          <dd className="text-right text-slate-800">
+                            {selectedChallan.vehicleNumber || "-"}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt>E-Way Bill</dt>
+                          <dd className="text-right text-slate-800">
+                            {selectedChallan.eWayBillNumber || "-"}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <h4 className="text-sm font-semibold text-slate-800">
+                        Route Details
+                      </h4>
+                      <dl className="mt-3 space-y-2 text-sm text-slate-600">
+                        <div className="flex justify-between gap-4">
+                          <dt>From</dt>
+                          <dd className="text-right text-slate-800">
+                            {selectedFromLocation.name || "-"}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt>To</dt>
+                          <dd className="text-right text-slate-800">
+                            {selectedToLocation.name || selectedProject.name || "-"}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt>Total Qty</dt>
+                          <dd className="text-right text-slate-800">
+                            {fmtQty(totalQty)}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt>Reallocation Movements</dt>
+                          <dd className="text-right text-slate-800">
+                            {selectedChallanReallocationMetrics.historyCount}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt>POD Status</dt>
+                          <dd className="text-right text-slate-800">
+                            {getPodStatusLabel(selectedChallan.podStatus)}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+                  </div>
+
+                  {selectedChallan.notes ? (
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <h4 className="text-sm font-semibold text-slate-800">Notes</h4>
+                      <p className="mt-2 text-sm text-slate-600">
+                        {selectedChallan.notes}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {challanDetailTab === CHALLAN_DETAIL_TABS.ITEMS ? (
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="p-3 text-left">Item</th>
+                        <th className="p-3 text-left">Unit</th>
+                        <th className="p-3 text-right">Issued Qty</th>
+                        <th className="p-3 text-right">Consumed Qty</th>
+                        <th className="p-3 text-right">Reallocated Qty</th>
+                        <th className="p-3 text-right">Remaining Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedChallan.items || []).map((item, index) => {
+                        const itemReallocatedQty = getChallanItemReallocatedQty(
+                          item,
+                          selectedChallanHistory
+                        );
+                        const itemRemainingQty = Math.max(
+                          toQuantity(item.balanceQty) - itemReallocatedQty,
+                          0
+                        );
+                        return (
+                          <tr key={item.id || index} className="border-t border-slate-200">
+                            <td className="p-3">
+                              <p className="font-medium text-slate-800">
+                                {item.name || "-"}
+                              </p>
+                              {item.description ? (
+                                <p className="text-xs text-slate-500">
+                                  {item.description}
+                                </p>
+                              ) : null}
+                            </td>
+                            <td className="p-3 text-slate-700">{item.unit || "PCS"}</td>
+                            <td className="p-3 text-right text-slate-800">
+                              {fmtQty(item.quantity)}
+                            </td>
+                            <td className="p-3 text-right text-slate-800">
+                              {fmtQty(item.consumedQty)}
+                            </td>
+                            <td className="p-3 text-right text-slate-800">
+                              {fmtQty(itemReallocatedQty)}
+                            </td>
+                            <td className="p-3 text-right font-medium text-slate-800">
+                              {fmtQty(itemRemainingQty)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+
+              {challanDetailTab === CHALLAN_DETAIL_TABS.HISTORY ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <span>
+                      Reallocation movements:{" "}
+                      <strong className="text-slate-800">
+                        {selectedChallanReallocationMetrics.historyCount}
+                      </strong>
+                    </span>
+                    <span>
+                      Remaining balance:{" "}
+                      <strong className="text-slate-800">
+                        {fmtQty(selectedChallanReallocationMetrics.remainingBalanceQty)}
+                      </strong>
+                    </span>
+                  </div>
+
+                  {selectedChallanHistory.length ? (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-slate-50 text-slate-600">
+                          <tr>
+                            <th className="p-3 text-left">Reference</th>
+                            <th className="p-3 text-left">Date</th>
+                            <th className="p-3 text-left">To Location</th>
+                            <th className="p-3 text-left">Project</th>
+                            <th className="p-3 text-left">Status</th>
+                            <th className="p-3 text-right">Qty</th>
+                            <th className="p-3 text-left">Items</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedChallanHistory.map((transfer) => (
+                            <tr
+                              key={transfer.id || transfer.referenceNumber}
+                              className="border-t border-slate-200"
+                            >
+                              <td className="p-3 font-medium text-slate-800">
+                                {transfer.referenceNumber || "-"}
+                              </td>
+                              <td className="p-3 text-slate-700">
+                                {formatDate(transfer.requestDate || transfer.transferDate)}
+                              </td>
+                              <td className="p-3 text-slate-700">
+                                {locationMap[String(transfer.toLocationId)]?.name || "-"}
+                              </td>
+                              <td className="p-3 text-slate-700">
+                                {projectMap[String(transfer.projectId)]?.name || "-"}
+                              </td>
+                              <td className="p-3 text-slate-700">
+                                {transfer.status || "-"}
+                              </td>
+                              <td className="p-3 text-right font-medium text-slate-800">
+                                {fmtQty(
+                                  (transfer.linkedItems || []).reduce(
+                                    (sum, item) => sum + (Number(item.quantity) || 0),
+                                    0
+                                  )
+                                )}
+                              </td>
+                              <td className="p-3 text-xs text-slate-600">
+                                {(transfer.linkedItems || []).map((item) => (
+                                  <p key={item.id || item.sourceKey || item.name}>
+                                    {item.name || "-"}: {fmtQty(item.quantity)} {item.unit || "PCS"}
+                                  </p>
+                                ))}
+                                {transfer.notes ? (
+                                  <p className="mt-1 text-slate-500">{transfer.notes}</p>
+                                ) : null}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-slate-300 px-6 py-10 text-center text-sm text-slate-500">
+                      No reallocation history exists for this delivery challan yet.
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {reallocationModal.open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-6">
+          <form
+            onSubmit={handleReallocationSubmit}
+            className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-slate-400">
+                  Reallocate Delivery Challan
+                </p>
+                <h3 className="text-xl font-semibold text-slate-800">
+                  {reallocationModal.record?.dcNumber || "DC Reallocation"}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Move full or partial DC balance to another site without creating a new DC.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeReallocationModal}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="max-h-[calc(92vh-84px)] overflow-y-auto px-6 py-5">
+              <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Original DC Details
+                </p>
+                <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-4">
+                  <div>
+                    <p className="text-xs text-slate-500">DC Number</p>
+                    <p className="font-semibold text-slate-800">
+                      {reallocationModal.record?.dcNumber || "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Receipt Ref</p>
+                    <p className="font-semibold text-slate-800">
+                      {formatReceiptReference(
+                        Array.isArray(reallocationModal.record?.receiveGoodsIds) &&
+                          reallocationModal.record.receiveGoodsIds.length
+                          ? reallocationModal.record.receiveGoodsIds
+                          : reallocationModal.record?.receiveGoodsId
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Current Project</p>
+                    <p className="font-semibold text-slate-800">
+                      {projectMap[String(reallocationModal.record?.projectId)]?.name || "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">DC Status</p>
+                    <p className="font-semibold text-slate-800">
+                      {getDeliveryChallanRegisterStatus(reallocationModal.record || {})}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Current From</p>
+                    <p className="font-semibold text-slate-800">
+                      {locationMap[String(reallocationModal.record?.fromLocationId)]?.name ||
+                        "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Current To</p>
+                    <p className="font-semibold text-slate-800">
+                      {locationMap[String(reallocationModal.record?.toLocationId)]?.name ||
+                        reallocationModal.record?.toLocation ||
+                        "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Balance Qty</p>
+                    <p className="font-semibold text-slate-800">
+                      {fmtQty(
+                        getChallanReallocationMetrics(
+                          reallocationModal.record || {},
+                          reallocations
+                        ).remainingBalanceQty
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Source Location
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={
+                      locationMap[String(reallocationModal.record?.toLocationId)]?.name ||
+                      reallocationModal.record?.toLocation ||
+                      ""
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Destination Location *
+                  </label>
+                  <select
+                    value={reallocationModal.targetLocationId}
+                    onChange={(event) =>
+                      setReallocationModal((prev) => ({
+                        ...prev,
+                        targetLocationId: event.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                  >
+                    <option value="">Select location</option>
+                    {reallocationTargetLocations.map((locationItem) => (
+                      <option key={locationItem.id} value={locationItem.id}>
+                        {locationItem.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Destination Project
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={selectedReallocationTargetProject.name || ""}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Reallocation Type
+                  </label>
+                  <select
+                    value={reallocationModal.reallocationType}
+                    onChange={(event) => handleReallocationTypeChange(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                  >
+                    <option value="partial">Partial</option>
+                    <option value="full">Full</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Reallocation Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={reallocationModal.requestDate}
+                    onChange={(event) =>
+                      setReallocationModal((prev) => ({
+                        ...prev,
+                        requestDate: event.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Requested By
+                  </label>
+                  <input
+                    type="text"
+                    value={reallocationModal.requestedBy}
+                    onChange={(event) =>
+                      setReallocationModal((prev) => ({
+                        ...prev,
+                        requestedBy: event.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Notes
+                  </label>
+                  <input
+                    type="text"
+                    value={reallocationModal.notes}
+                    onChange={(event) =>
+                      setReallocationModal((prev) => ({
+                        ...prev,
+                        notes: event.target.value,
+                      }))
+                    }
+                    placeholder="Optional remarks for this movement"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                  />
+                </div>
+              </div>
+
+              {reallocationModal.error ? (
+                <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {reallocationModal.error}
+                </div>
+              ) : null}
+
+              <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="p-3 text-left">Item</th>
+                      <th className="p-3 text-left">Unit</th>
+                      <th className="p-3 text-right">Source Qty</th>
+                      <th className="p-3 text-right">Available Qty</th>
+                      <th className="p-3 text-right">Reallocate Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reallocationModal.loading ? (
+                      <tr>
+                        <td colSpan="5" className="p-6 text-center text-slate-500">
+                          Loading current DC balance...
+                        </td>
+                      </tr>
+                    ) : reallocationModal.items.length ? (
+                      reallocationModal.items.map((item) => (
+                        <tr key={item.id} className="border-t border-slate-200">
+                          <td className="p-3">
+                            <p className="font-medium text-slate-800">{item.name}</p>
+                            {item.description ? (
+                              <p className="text-xs text-slate-500">
+                                {item.description}
+                              </p>
+                            ) : null}
+                          </td>
+                          <td className="p-3 text-slate-700">{item.unit || "PCS"}</td>
+                          <td className="p-3 text-right text-slate-800">
+                            {fmtQty(item.sourceQty)}
+                          </td>
+                          <td className="p-3 text-right font-medium text-slate-800">
+                            {fmtQty(item.availableQty)}
+                          </td>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.quantity}
+                              onChange={(event) =>
+                                handleReallocationItemChange(item.id, event.target.value)
+                              }
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-right"
+                            />
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="5" className="p-6 text-center text-slate-500">
+                          No reallocation-ready DC balance found.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-5 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeReallocationModal}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={reallocationModal.loading || reallocationModal.submitting}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {reallocationModal.submitting ? "Saving..." : "Confirm Reallocation"}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       {podModal.type === "upload" && podModal.record ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
@@ -2746,169 +4320,111 @@ const DeliveryChallan = () => {
         : null}
 
       <div id="delivery-challan-print-area">
-        {selectedChallan && (
-          <div className="border border-slate-800 text-xs text-slate-900">
-          <div className="border-b border-slate-800 p-2">
-            <div className="flex items-center justify-between text-[11px] font-semibold tracking-wide">
-              <span>DELIVERY CHALLAN</span>
-              <button
-                type="button"
-                onClick={() => setSelectedChallan(null)}
-                className="print-hidden px-2 py-0.5 text-[10px] uppercase tracking-[0.3em] text-slate-600 border border-slate-300 rounded-full"
-              >
-                Close view
-              </button>
-            </div>
-          </div>
-            <div className="grid grid-cols-2 border-b border-slate-800">
-              <div className="p-3 border-r border-slate-800">
-                {companyLogo ? (
-                  <div className="mb-2">
-                    <img
-                      src={companyLogo}
-                      alt={`${companyName} logo`}
-                      className="h-14 w-auto object-contain"
-                      style={{ height: 56, width: "auto", maxWidth: 260, objectFit: "contain" }}
-                      onError={(event) => {
-                        event.currentTarget.onerror = null;
-                        event.currentTarget.src = defaultBrandLogoUrl;
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <p className="font-semibold">{companyName}</p>
-                )}
-                <p className="text-[11px] whitespace-pre-line">
-                  {company.address || "Company address"}
-                </p>
-                <p className="text-[11px] mt-1">
-                  GST No: {company.gstin || "-"}
-                </p>
-                <p className="text-[11px]">Phone: {company.phone || "-"}</p>
-                <p className="text-[11px]">Email: {company.email || "-"}</p>
-              </div>
-              <div className="p-3">
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <p className="text-slate-600">RE No.:</p>
-                  <p className="font-semibold">
-                    {selectedChallan.id
-                      ? `RE-${String(selectedChallan.id).padStart(5, "0")}`
-                      : "-"}
+        {printChallan && (
+          <DocumentViewPanel
+            id="delivery-challan-print-panel"
+            title="DELIVERY CHALLAN"
+            onClose={() => setPrintChallan(null)}
+            companyName={companyName}
+            companyAddress={company.address || "Company address"}
+            companyGstin={company.gstin}
+            companyPhone={company.phone}
+            companyEmail={company.email}
+            logoUrl={companyLogo}
+            primaryPairs={[
+              {
+                label: "RE No",
+                value: printChallan.id
+                  ? `RE-${String(printChallan.id).padStart(5, "0")}`
+                  : "-",
+              },
+              { label: "Our Ref", value: printChallan.dcNumber || "-" },
+              {
+                label: "Receipt Ref",
+                value: formatReceiptReference(
+                  Array.isArray(printChallan.receiveGoodsIds) &&
+                    printChallan.receiveGoodsIds.length
+                    ? printChallan.receiveGoodsIds
+                    : printChallan.receiveGoodsId
+                ),
+              },
+              { label: "Date", value: formatDate(printChallan.issueDate) },
+              { label: "E-Way Bill No", value: printChallan.eWayBillNumber || "-" },
+              {
+                label: "POD",
+                value:
+                  [
+                    getPodStatusLabel(printChallan.podStatus),
+                    printChallan.podReference,
+                    formatDateTime(getPodTimestamp(printChallan)),
+                  ]
+                    .filter((value) => value && value !== "-")
+                    .join(" | ") || "-",
+              },
+              { label: "Project", value: printProject.name || "-" },
+              { label: "Client", value: printProject.client || "-" },
+            ]}
+            leftBlockTitle="From"
+            leftBlockLines={[
+              printFromLocation.name || "-",
+              printFromLocation.address || "-",
+              `Contact: ${printFromLocation.manager || "-"}${
+                printFromLocation.phone ? ` (${printFromLocation.phone})` : ""
+              }`,
+            ]}
+            rightBlockTitle="To"
+            rightBlockLines={[
+              printToLocation.name || printProject.name || "-",
+              printToLocation.address || printChallan.toLocation || "-",
+              `Status: ${getDeliveryChallanRegisterStatus(printChallan)}`,
+            ]}
+            tableColumns={[
+              { key: "serial", label: "Sl No", widthClass: "w-16" },
+              { key: "description", label: "Description" },
+              { key: "hsn", label: "HSN", widthClass: "w-20" },
+              { key: "gst", label: "GST", widthClass: "w-20" },
+              { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
+              { key: "unit", label: "Unit", widthClass: "w-20" },
+            ]}
+            tableRows={(printChallan.items || []).map((item, index) => ({
+              id: item.id || index,
+              serial: index + 1,
+              description: [item.name || "-", item.description, item.notes]
+                .filter(Boolean)
+                .join(" | "),
+              hsn: item.hsn || "-",
+              gst: item.gst || "-",
+              quantity: item.quantity || "-",
+              unit: item.unit || "-",
+            }))}
+            bottomLeftContent={
+              <div className="space-y-3 text-left">
+                <div>
+                  <p className="font-semibold">Vehicle No</p>
+                  <p>{printChallan.vehicleNumber || "-"}</p>
+                </div>
+                <div>
+                  <p className="font-semibold">Notes</p>
+                  <p className="whitespace-pre-wrap text-slate-700">
+                    {printChallan.notes || "-"}
                   </p>
-                  <p className="text-slate-600">Our Ref:</p>
-                  <p className="font-semibold">{selectedChallan.dcNumber || "-"}</p>
-                  <p className="text-slate-600">Receipt Ref:</p>
-                  <p className="font-semibold">
-                    {formatReceiptReference(
-                      Array.isArray(selectedChallan.receiveGoodsIds) &&
-                        selectedChallan.receiveGoodsIds.length
-                        ? selectedChallan.receiveGoodsIds
-                        : selectedChallan.receiveGoodsId
-                    )}
-                  </p>
-                  <p className="text-slate-600">Date:</p>
-                  <p className="font-semibold">{formatDate(selectedChallan.issueDate)}</p>
-                  <p className="text-slate-600">E-Way Bill No:</p>
-                  <p className="font-semibold">{selectedChallan.eWayBillNumber || "-"}</p>
-                  <p className="text-slate-600">POD:</p>
-                  <p className="font-semibold">
-                    {[
-                      getPodStatusLabel(selectedChallan.podStatus),
-                      selectedChallan.podReference,
-                      formatDateTime(getPodTimestamp(selectedChallan)),
-                    ]
-                      .filter((value) => value && value !== "-")
-                      .join(" | ") || "-"}
-                  </p>
-                  <p className="text-slate-600">Project:</p>
-                  <p className="font-semibold">{selectedProject.name || "-"}</p>
-                  <p className="text-slate-600">Client:</p>
-                  <p className="font-semibold">{selectedProject.client || "-"}</p>
-                  <p className="text-slate-600">To:</p>
-                  <p className="font-semibold">
-                    {selectedToLocation.name || selectedChallan.toLocation || "-"}
-                  </p>
-                  <p className="text-slate-600">From:</p>
-                  <p className="font-semibold">{selectedFromLocation.name || "-"}</p>
                 </div>
               </div>
-            </div>
-
-            <div className="grid grid-cols-2 border-b border-slate-800 text-[11px]">
-              <div className="p-3 border-r border-slate-800">
-                <p className="font-semibold">From</p>
-                <p>{selectedFromLocation.name || "-"}</p>
-                <p className="whitespace-pre-line mt-1">
-                  {selectedFromLocation.address || "-"}
-                </p>
-                <p className="mt-1">
-                  Contact: {selectedFromLocation.manager || "-"}{" "}
-                  {selectedFromLocation.phone ? `(${selectedFromLocation.phone})` : ""}
-                </p>
-              </div>
-              <div className="p-3">
-                <p className="font-semibold">To</p>
-                <p>{selectedToLocation.name || selectedProject.name || "-"}</p>
-                <p className="whitespace-pre-line mt-1">
-                  {selectedToLocation.address || selectedChallan.toLocation || "-"}
-                </p>
-              </div>
-            </div>
-
-            <table className="w-full text-[11px] border-b border-slate-800">
-              <thead>
-                <tr className="border-b border-slate-800">
-                  <th className="p-2 text-left w-10">Sl No</th>
-                  <th className="p-2 text-left">Description</th>
-                  <th className="p-2 text-left w-20">HSN</th>
-                  <th className="p-2 text-left w-20">GST</th>
-                  <th className="p-2 text-right w-20">Qty</th>
-                  <th className="p-2 text-left w-20">Unit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(selectedChallan.items || []).map((item, index) => (
-                  <tr key={item.id || index} className="border-b border-slate-200">
-                    <td className="p-2">{index + 1}</td>
-                    <td className="p-2">
-                      <p className="font-semibold">{item.name || "-"}</p>
-                      {item.description && (
-                        <p className="text-[10px] text-slate-600">{item.description}</p>
-                      )}
-                      {item.notes && (
-                        <p className="text-[10px] text-slate-500">{item.notes}</p>
-                      )}
-                    </td>
-                    <td className="p-2">{item.hsn || "-"}</td>
-                    <td className="p-2">{item.gst || "-"}</td>
-                    <td className="p-2 text-right">{item.quantity || "-"}</td>
-                    <td className="p-2">{item.unit || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div className="grid grid-cols-2 border-b border-slate-800 text-[11px]">
-              <div className="p-3 border-r border-slate-800">
-                <p className="font-semibold">Vehicle No</p>
-                <p>{selectedChallan.vehicleNumber || "-"}</p>
-              </div>
-              <div className="p-3 text-right">
-                <p className="font-semibold">Total Qty</p>
-                <p>{Number.isFinite(totalQty) ? totalQty : "-"}</p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between p-3 text-[11px]">
-              <p>Any changes in GST & taxes are acceptable to you.</p>
-              <div className="text-right">
-                <p className="font-semibold">For {companyName}</p>
-                <div className="mt-8 border-t border-slate-700 pt-2">
-                  Authorised Signatory
+            }
+            bottomRightContent={
+              <div className="space-y-3 text-right">
+                <div>
+                  <p className="font-semibold">Total Qty</p>
+                  <p>{Number.isFinite(printTotalQty) ? printTotalQty : "-"}</p>
+                </div>
+                <div>
+                  <p className="font-semibold">POD Status</p>
+                  <p>{getPodStatusLabel(printChallan.podStatus)}</p>
                 </div>
               </div>
-            </div>
-          </div>
+            }
+            footerCompanyName={companyName}
+          />
         )}
       </div>
     </div>

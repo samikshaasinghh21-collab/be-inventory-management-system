@@ -37,6 +37,8 @@ const UPPERCASE_FIELDS = [
 ];
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
+const isValidNonNegativeNumber = (value) =>
+  value === "" || (Number.isFinite(Number(value)) && Number(value) >= 0);
 
 const createInitialForm = (profileName = "", defaultUnit = "Nos") => ({
   sku: "",
@@ -172,16 +174,6 @@ const CreateProduct = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (!form.locationId) {
-      return;
-    }
-    const exists = locations.some((location) => String(location.id) === String(form.locationId));
-    if (!exists) {
-      setForm((prev) => ({ ...prev, locationId: "" }));
-    }
-  }, [form.locationId, locations]);
-
   const resolvedCategoryOptions = useMemo(() => {
     const values = [...categories];
     const custom = String(form.customCategory || "").trim();
@@ -231,11 +223,16 @@ const CreateProduct = () => {
       if (key === "prepBy") {
         next.updatedBy = nextValue;
       }
+      if (key === "openStock") {
+        next.currentStock = nextValue;
+      }
       if (key === "brand" && value !== ADD_NEW_BRAND_VALUE) {
         next.customBrand = "";
       }
       if (key === "serviceItem" && value) {
         next.serialRequired = false;
+        next.openStock = 0;
+        next.currentStock = 0;
       }
       if (key === "serialRequired" && value) {
         next.serviceItem = false;
@@ -275,6 +272,7 @@ const CreateProduct = () => {
     const nextErrors = {};
     const price = Number(form.price);
     const reorderLevel = Number(form.reOrderLevel);
+    const openStock = Number(form.openStock);
 
     if (!form.name.trim()) {
       nextErrors.name = "Product name is required.";
@@ -294,6 +292,9 @@ const CreateProduct = () => {
     ) {
       nextErrors.reOrderLevel = "Enter a valid reorder level.";
     }
+    if (!isValidNonNegativeNumber(form.openStock) || openStock < 0) {
+      nextErrors.openStock = "Enter a valid opening stock.";
+    }
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -305,6 +306,7 @@ const CreateProduct = () => {
       return;
     }
 
+    const locationId = selectedLocation ? form.locationId : "";
     const locationName = selectedLocation?.name || "";
     const price = roundUnitPrice(form.price);
     const currentStock = Number(form.currentStock) || 0;
@@ -331,7 +333,7 @@ const CreateProduct = () => {
       purchaseUnit: form.purchaseUnit,
       salesUnit: form.salesUnit,
       reOrderLevel: Number(form.reOrderLevel) || 0,
-      locationId: form.locationId || undefined,
+      locationId: locationId || undefined,
       locationName: locationName || undefined,
       itemStatus: form.itemStatus,
       serviceItem,
@@ -362,7 +364,7 @@ const CreateProduct = () => {
         purchaseUnit: form.purchaseUnit,
         unit: form.salesUnit,
         location: locationName,
-        locationId: form.locationId || "",
+        locationId: locationId || "",
         locationName,
         itemStatus: form.itemStatus,
         serviceItem,
@@ -754,10 +756,18 @@ const CreateProduct = () => {
                 <label>
                   <span className="text-sm font-medium text-slate-700">Open Stock</span>
                   <input
-                    readOnly
-                    value={Number(form.openStock || 0).toFixed(2)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={form.openStock}
+                    onChange={(event) => updateField("openStock", event.target.value)}
+                    disabled={form.serviceItem}
+                    placeholder="0"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50"
                   />
+                  {errors.openStock && (
+                    <p className="mt-1 text-sm text-red-600">{errors.openStock}</p>
+                  )}
                 </label>
 
                 <label>
@@ -770,8 +780,9 @@ const CreateProduct = () => {
                 </label>
               </div>
               <p className="mt-3 text-xs text-slate-500">
-                Stock values stay read-only here and should come from receipts,
-                consumption, or other transactions.
+                Opening stock seeds the current stock for a new product. Future
+                stock changes should come from receipts, consumption, or other
+                inventory transactions.
               </p>
             </section>
 
