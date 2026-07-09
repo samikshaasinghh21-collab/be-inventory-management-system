@@ -647,23 +647,7 @@ const getReceiptDisplayQuantities = (item = {}) => {
       item.ReceivedQty ??
       receiptReceived
   );
-  const previouslyReceived = Math.max(
-    toNumber(
-      item.previouslyReceivedQty ??
-        item.PreviouslyReceivedQty ??
-        cumulativeReceived - receiptReceived
-    ),
-    0
-  );
-  const available = Math.max(
-    toNumber(
-      item.availableBalanceQty ??
-        item.AvailableBalanceQty ??
-        Math.max(originalOrdered - previouslyReceived, 0)
-    ),
-    0
-  );
-  const balance = Math.max(
+  const pendingQty = Math.max(
     toNumber(
       item.totalPoBalanceQty ??
         item.TotalPoBalanceQty ??
@@ -677,12 +661,12 @@ const getReceiptDisplayQuantities = (item = {}) => {
   );
 
   return {
-    ordered: available,
+    ordered: pendingQty,
     originalOrdered,
     received: receiptReceived,
     cumulativeReceived,
-    available,
-    balance,
+    available: pendingQty,
+    balance: pendingQty,
   };
 };
 

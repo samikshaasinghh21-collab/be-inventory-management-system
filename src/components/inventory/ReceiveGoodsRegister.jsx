@@ -117,22 +117,6 @@ const getReceiptItemQuantities = (item = {}) => {
       item.ReceivedQty ??
       receiptReceived
   );
-  const previouslyReceived = Math.max(
-    toQuantity(
-      item.previouslyReceivedQty ??
-        item.PreviouslyReceivedQty ??
-        cumulativeReceived - receiptReceived
-    ),
-    0
-  );
-  const availableBalance = Math.max(
-    toQuantity(
-      item.availableBalanceQty ??
-        item.AvailableBalanceQty ??
-        Math.max(originalOrdered - previouslyReceived, 0)
-    ),
-    0
-  );
   const consumed = toQuantity(
     item.receiptConsumedQty ??
       item.ReceiptConsumedQty ??
@@ -165,7 +149,7 @@ const getReceiptItemQuantities = (item = {}) => {
       ? Math.max(originalOrdered - cumulativeReceived, 0)
       : toQuantity(rawPoBalance);
   return {
-    ordered: availableBalance,
+    ordered: originalOrdered,
     originalOrdered,
     received: receiptReceived,
     available,

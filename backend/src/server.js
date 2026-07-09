@@ -4154,19 +4154,6 @@ const ensurePurchaseTables = async () => {
     BEGIN
       ALTER TABLE dbo.PurchaseOrderItems ALTER COLUMN TotalPrice DECIMAL(18,2) NULL;
     END;
-    IF COL_LENGTH('dbo.PurchaseOrderItems', 'BoqItemId') IS NOT NULL
-      AND OBJECT_ID('dbo.BOQLineItems', 'U') IS NOT NULL
-    BEGIN
-      UPDATE poi
-      SET poi.Quantity = bi.Quantity,
-          poi.TotalPrice = ROUND(
-            bi.Quantity * COALESCE(poi.UnitPrice, poi.Rate, 0),
-            2
-          )
-      FROM dbo.PurchaseOrderItems poi
-      INNER JOIN dbo.BOQLineItems bi
-        ON bi.LineItemId = poi.BoqItemId;
-    END;
   `);
   })();
 
@@ -4272,7 +4259,7 @@ const validatePurchaseOrderItemsInput = (items = []) => {
 
 const validatePurchaseOrderBoqItemsAvailable = async (
   tx,
-  { boqId = null } = {}
+  { boqId = null, items = [], excludePurchaseOrderId = null } = {}
 ) => {
   const safeBoqId = toNullableInt(boqId);
   if (safeBoqId === null) {
@@ -4301,6 +4288,68 @@ const validatePurchaseOrderBoqItemsAvailable = async (
     );
     error.statusCode = 409;
     throw error;
+  }
+
+  const linkedItems = (Array.isArray(items) ? items : []).filter(
+    (item) => toNullableInt(item?.boqItemId) !== null
+  );
+  if (!linkedItems.length) {
+    return;
+  }
+
+  const requestedQtyByBoqItemId = new Map();
+  linkedItems.forEach((item) => {
+    const boqItemId = toNullableInt(item.boqItemId);
+    const quantity = Number(item.quantity ?? 0) || 0;
+    if (boqItemId === null || quantity <= 0) {
+      return;
+    }
+    requestedQtyByBoqItemId.set(
+      boqItemId,
+      (requestedQtyByBoqItemId.get(boqItemId) ?? 0) + quantity
+    );
+  });
+
+  const boqItemIds = Array.from(requestedQtyByBoqItemId.keys());
+  if (!boqItemIds.length) {
+    return;
+  }
+
+  const itemReq = new sql.Request(tx);
+  const inClause = buildPurchaseOrderItemInClause(itemReq, boqItemIds, "BoqItemId");
+  const itemResult = await itemReq
+    .input("BOQId", sql.Int, safeBoqId)
+    .query(`
+      SELECT LineItemId, BOQId, ItemName, Quantity
+      FROM dbo.BOQLineItems
+      WHERE BOQId = @BOQId
+        AND LineItemId IN (${inClause})
+    `);
+
+  const boqRows = itemResult.recordset ?? [];
+  if (boqRows.length !== boqItemIds.length) {
+    const error = new Error("One or more linked BOQ items do not belong to the selected BOQ.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const orderedTotals = await loadBoqOrderedTotals(tx, boqItemIds, {
+    excludePurchaseOrderId,
+  });
+  for (const row of boqRows) {
+    const boqItemId = toNullableInt(row.LineItemId);
+    const boqQty = Number(row.Quantity ?? 0) || 0;
+    const existingOrderedQty = orderedTotals.get(boqItemId) ?? 0;
+    const requestedQty = requestedQtyByBoqItemId.get(boqItemId) ?? 0;
+    const boqBalanceQty = Math.max(boqQty - existingOrderedQty, 0);
+
+    if (requestedQty - boqBalanceQty > 0.0001) {
+      const error = new Error(
+        `PO quantity for ${row.ItemName || "the selected BOQ item"} cannot exceed the BOQ balance (${boqBalanceQty}).`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
   }
 };
 
@@ -4586,6 +4635,50 @@ const loadBoqConsumedTotals = async (tx, boqItemIds = []) => {
   }, new Map());
 };
 
+const loadBoqOrderedTotals = async (
+  tx,
+  boqItemIds = [],
+  { excludePurchaseOrderId = null } = {}
+) => {
+  const ids = uniqueBoqItemIds(boqItemIds);
+  if (!ids.length) {
+    return new Map();
+  }
+
+  const config = await loadPurchaseOrderItemsConfig(tx);
+  if (!config.boqItemIdCol || !config.qtyCol) {
+    return new Map();
+  }
+
+  const request = new sql.Request(tx);
+  const inClause = buildPurchaseOrderItemInClause(request, ids, "BoqItemId");
+  const safeExcludePurchaseOrderId = toNullableInt(excludePurchaseOrderId);
+  if (safeExcludePurchaseOrderId !== null && config.hasPoId) {
+    request.input("ExcludePurchaseOrderId", sql.Int, safeExcludePurchaseOrderId);
+  }
+
+  const result = await request.query(`
+    SELECT ${toIdentifier(config.boqItemIdCol)} AS BoqItemId,
+           SUM(${toIdentifier(config.qtyCol)}) AS TotalOrdered
+    FROM dbo.PurchaseOrderItems
+    WHERE ${toIdentifier(config.boqItemIdCol)} IN (${inClause})
+      ${
+        safeExcludePurchaseOrderId !== null && config.hasPoId
+          ? `AND ${toIdentifier(config.poIdCol)} <> @ExcludePurchaseOrderId`
+          : ""
+      }
+    GROUP BY ${toIdentifier(config.boqItemIdCol)}
+  `);
+
+  return (result.recordset ?? []).reduce((acc, row) => {
+    const id = toNullableInt(row.BoqItemId);
+    if (id !== null) {
+      acc.set(id, Number(row.TotalOrdered ?? 0) || 0);
+    }
+    return acc;
+  }, new Map());
+};
+
 const applyBoqQuantitiesFromPurchaseOrderItems = async (
   tx,
   { boqId = null, items = [] } = {}
@@ -4604,18 +4697,10 @@ const applyBoqQuantitiesFromPurchaseOrderItems = async (
       continue;
     }
     const nextQuantity = Number(item.quantity ?? 0) || 0;
-    if (quantityByBoqItemId.has(boqItemId)) {
-      const previousQuantity = quantityByBoqItemId.get(boqItemId);
-      if (previousQuantity !== nextQuantity) {
-        const error = new Error(
-          "The same BOQ item cannot be linked to multiple purchase-order rows with different quantities."
-        );
-        error.statusCode = 400;
-        throw error;
-      }
-      continue;
-    }
-    quantityByBoqItemId.set(boqItemId, nextQuantity);
+    quantityByBoqItemId.set(
+      boqItemId,
+      (quantityByBoqItemId.get(boqItemId) ?? 0) + nextQuantity
+    );
   }
 
   const boqItemIds = Array.from(quantityByBoqItemId.keys());
@@ -4649,38 +4734,29 @@ const applyBoqQuantitiesFromPurchaseOrderItems = async (
   }
 
   const consumedTotals = await loadBoqConsumedTotals(tx, boqItemIds);
+  const orderedTotals = await loadBoqOrderedTotals(tx, boqItemIds);
   for (const row of existingRows) {
     const boqItemId = toNullableInt(row.LineItemId);
-    const nextQuantity = quantityByBoqItemId.get(boqItemId) ?? 0;
+    const boqQuantity = Number(row.Quantity ?? 0) || 0;
     const consumedQty = consumedTotals.get(boqItemId) ?? 0;
-    if (nextQuantity < consumedQty) {
+    const orderedQty = orderedTotals.get(boqItemId) ?? 0;
+    const currentRequestQty = quantityByBoqItemId.get(boqItemId) ?? 0;
+    const priorOrderedQty = Math.max(orderedQty - currentRequestQty, 0);
+    const boqBalanceQty = Math.max(boqQuantity - priorOrderedQty, 0);
+    if (boqQuantity < consumedQty) {
       const error = new Error(
         `Quantity for ${row.ItemName || "the linked BOQ item"} cannot be lower than the consumed quantity (${consumedQty}).`
       );
       error.statusCode = 400;
       throw error;
     }
-  }
-
-  for (const row of existingRows) {
-    const boqItemId = toNullableInt(row.LineItemId);
-    const nextQuantity = quantityByBoqItemId.get(boqItemId) ?? 0;
-    const consumedQty = consumedTotals.get(boqItemId) ?? 0;
-
-    await new sql.Request(tx)
-      .input("BoqItemId", sql.Int, boqItemId)
-      .input("Quantity", sql.Decimal(18, 2), nextQuantity)
-      .input("ConsumedQty", sql.Decimal(18, 2), consumedQty)
-      .query(`
-        UPDATE dbo.BOQLineItems
-        SET Quantity = @Quantity,
-            ConsumedQty = @ConsumedQty,
-            AvailableQty = CASE
-              WHEN @Quantity - @ConsumedQty < 0 THEN 0
-              ELSE @Quantity - @ConsumedQty
-            END
-        WHERE LineItemId = @BoqItemId
-      `);
+    if (orderedQty - boqQuantity > 0.0001) {
+      const error = new Error(
+        `PO quantity for ${row.ItemName || "the linked BOQ item"} cannot exceed the BOQ balance (${boqBalanceQty}).`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
   }
 
   const touchedBoqIds = Array.from(
@@ -4763,8 +4839,7 @@ const syncPurchaseOrderItemsFromBoq = async (tx, boqItemIds = []) => {
     return [];
   }
 
-  const unitPriceExpr = buildPurchaseOrderUnitPriceExpression(config, "poi");
-  const setClauses = [`poi.${toIdentifier(config.qtyCol)} = bi.Quantity`];
+  const setClauses = [];
   if (config.nameCol) {
     setClauses.push(`poi.${toIdentifier(config.nameCol)} = bi.ItemName`);
   }
@@ -4786,10 +4861,8 @@ const syncPurchaseOrderItemsFromBoq = async (tx, boqItemIds = []) => {
   if (config.notesCol) {
     setClauses.push(`poi.${toIdentifier(config.notesCol)} = bi.Notes`);
   }
-  if (config.totalCol) {
-    setClauses.push(
-      `poi.${toIdentifier(config.totalCol)} = ROUND(bi.Quantity * ${unitPriceExpr}, 2)`
-    );
+  if (!setClauses.length) {
+    return affectedPurchaseOrderIds;
   }
 
   const updateReq = new sql.Request(tx);
@@ -5955,34 +6028,23 @@ const refreshBoqAvailability = async (tx, boqItemIds = []) => {
     return;
   }
 
-  const tableCheck = await new sql.Request(tx).query(`
-    SELECT OBJECT_ID('dbo.ConsumptionItems', 'U') AS TableId,
-           COL_LENGTH('dbo.ConsumptionItems', 'BoqItemId') AS BoqItemIdLength
-  `);
-  if (!tableCheck.recordset?.[0]?.TableId || !tableCheck.recordset?.[0]?.BoqItemIdLength) {
-    return;
-  }
+  const consumedTotals = await loadBoqConsumedTotals(tx, ids);
+  const orderedTotals = await loadBoqOrderedTotals(tx, ids);
 
   for (const boqItemId of ids) {
-    const consumedResult = await new sql.Request(tx)
-      .input("BoqItemId", sql.Int, boqItemId)
-      .query(`
-        SELECT SUM(Quantity) AS total
-        FROM dbo.ConsumptionItems
-        WHERE BoqItemId = @BoqItemId
-      `);
-
-    const consumed = Number(consumedResult.recordset?.[0]?.total ?? 0) || 0;
+    const consumedQty = consumedTotals.get(boqItemId) ?? 0;
+    const orderedQty = orderedTotals.get(boqItemId) ?? 0;
 
     const updateReq = new sql.Request(tx);
     updateReq.input("BoqItemId", sql.Int, boqItemId);
-    updateReq.input("ConsumedQty", sql.Decimal(18, 2), consumed);
+    updateReq.input("ConsumedQty", sql.Decimal(18, 2), consumedQty);
+    updateReq.input("OrderedQty", sql.Decimal(18, 2), orderedQty);
     await updateReq.query(`
       UPDATE dbo.BOQLineItems
       SET ConsumedQty = @ConsumedQty,
           AvailableQty = CASE
-            WHEN Quantity - @ConsumedQty < 0 THEN 0
-            ELSE Quantity - @ConsumedQty
+            WHEN Quantity - @OrderedQty < 0 THEN 0
+            ELSE Quantity - @OrderedQty
           END
       WHERE LineItemId = @BoqItemId
     `);
@@ -14596,6 +14658,7 @@ app.post("/api/purchase-orders", async (req, res) => {
 
     await validatePurchaseOrderBoqItemsAvailable(tx, {
       boqId,
+      items: normalizedItems,
     });
 
     const insertOrder = new sql.Request(tx);
@@ -14785,6 +14848,8 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
 
     await validatePurchaseOrderBoqItemsAvailable(tx, {
       boqId,
+      items: normalizedItems,
+      excludePurchaseOrderId: id,
     });
 
     const finalPONumber =
@@ -15090,6 +15155,35 @@ app.delete("/api/purchase-orders/:id", async (req, res) => {
       });
     }
 
+    const linkedReceiptsResult = await new sql.Request(tx)
+      .input("PurchaseOrderId", sql.Int, id)
+      .query(`
+        SELECT COUNT(1) AS Total
+        FROM dbo.ReceiveGoods
+        WHERE PurchaseOrderId = @PurchaseOrderId
+      `);
+    const linkedReceiptCount = Number(linkedReceiptsResult.recordset?.[0]?.Total ?? 0) || 0;
+    if (linkedReceiptCount > 0) {
+      await tx.rollback();
+      return res.status(409).json({
+        ok: false,
+        error:
+          "This purchase order cannot be deleted because receiving entries already exist for it.",
+      });
+    }
+
+    const linkedBoqItemsResult = await new sql.Request(tx)
+      .input("PurchaseOrderId", sql.Int, id)
+      .query(`
+        SELECT BoqItemId
+        FROM dbo.PurchaseOrderItems
+        WHERE PurchaseOrderId = @PurchaseOrderId
+          AND BoqItemId IS NOT NULL
+      `);
+    const linkedBoqItemIds = (linkedBoqItemsResult.recordset ?? [])
+      .map((row) => toNullableInt(row.BoqItemId))
+      .filter((value) => value !== null);
+
     const deleteItems = new sql.Request(tx);
     deleteItems.input("PurchaseOrderId", sql.Int, id);
     await deleteItems.query(`
@@ -15101,6 +15195,8 @@ app.delete("/api/purchase-orders/:id", async (req, res) => {
     const result = await deleteOrder.query(`
       DELETE FROM PurchaseOrders WHERE Id = @Id
     `);
+
+    await refreshBoqAvailability(tx, linkedBoqItemIds);
 
     await tx.commit();
 
@@ -16983,10 +17079,22 @@ app.put("/api/boqs/:id", async (req, res) => {
       ...retainedItemIds,
       ...removedItemIds,
     ]);
+    const orderedTotals = await loadBoqOrderedTotals(tx, [
+      ...retainedItemIds,
+      ...removedItemIds,
+    ]);
 
     for (const row of removedItemRows) {
       const lineItemId = toNullableInt(row.LineItemId);
       const consumedQty = consumedTotals.get(lineItemId) ?? 0;
+      const orderedQty = orderedTotals.get(lineItemId) ?? 0;
+      if (orderedQty > 0) {
+        const error = new Error(
+          `Cannot remove ${row.ItemName || "a BOQ item"} because ${orderedQty} quantity is already linked to purchase orders.`
+        );
+        error.statusCode = 400;
+        throw error;
+      }
       if (consumedQty > 0) {
         const error = new Error(
           `Cannot remove ${row.ItemName || "a BOQ item"} because ${consumedQty} quantity has already been consumed.`
@@ -17010,9 +17118,17 @@ app.put("/api/boqs/:id", async (req, res) => {
       if (existingRow) {
         const consumedQty =
           consumedTotals.get(item.id) ?? (Number(existingRow.ConsumedQty ?? 0) || 0);
+        const orderedQty = orderedTotals.get(item.id) ?? 0;
         if (qty < consumedQty) {
           const error = new Error(
             `Quantity for ${item.name || existingRow.ItemName || "a BOQ item"} cannot be lower than the consumed quantity (${consumedQty}).`
+          );
+          error.statusCode = 400;
+          throw error;
+        }
+        if (qty < orderedQty) {
+          const error = new Error(
+            `Quantity for ${item.name || existingRow.ItemName || "a BOQ item"} cannot be lower than the linked PO quantity (${orderedQty}).`
           );
           error.statusCode = 400;
           throw error;
@@ -17152,7 +17268,37 @@ app.delete("/api/boqs/:id", async (req, res) => {
     const existingItemIds = (existingItemsResult.recordset ?? [])
       .map((row) => toNullableInt(row.LineItemId))
       .filter((lineItemId) => lineItemId !== null);
-    await detachPurchaseOrderItemsFromBoq(tx, existingItemIds);
+    const consumedTotals = await loadBoqConsumedTotals(tx, existingItemIds);
+    const orderedTotals = await loadBoqOrderedTotals(tx, existingItemIds);
+    const linkedItemsResult = await new sql.Request(tx)
+      .input("BOQId", sql.Int, id)
+      .query(`
+        SELECT LineItemId, ItemName, Quantity
+        FROM dbo.BOQLineItems
+        WHERE BOQId = @BOQId
+      `);
+
+    for (const row of linkedItemsResult.recordset ?? []) {
+      const lineItemId = toNullableInt(row.LineItemId);
+      const orderedQty = orderedTotals.get(lineItemId) ?? 0;
+      const consumedQty = consumedTotals.get(lineItemId) ?? 0;
+
+      if (orderedQty > 0) {
+        const error = new Error(
+          `BOQ item ${row.ItemName || lineItemId} cannot be deleted because ${orderedQty} quantity is already linked to purchase orders.`
+        );
+        error.statusCode = 409;
+        throw error;
+      }
+
+      if (consumedQty > 0) {
+        const error = new Error(
+          `BOQ item ${row.ItemName || lineItemId} cannot be deleted because ${consumedQty} quantity is already consumed.`
+        );
+        error.statusCode = 409;
+        throw error;
+      }
+    }
 
     const deleteItems = new sql.Request(tx);
     deleteItems.input("BOQId", sql.Int, id);
@@ -17173,7 +17319,7 @@ app.delete("/api/boqs/:id", async (req, res) => {
     return res.json({ ok: true });
   } catch (error) {
     await rollbackTx(tx);
-    return res.status(500).json({
+    return res.status(error?.statusCode ?? 500).json({
       ok: false,
       error: error?.message ?? "Failed to delete BOQ",
     });
