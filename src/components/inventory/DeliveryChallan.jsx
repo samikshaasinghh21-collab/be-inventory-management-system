@@ -360,6 +360,16 @@ const mapAvailableInventoryRowToChallanItem = (row = {}, index = 0) => {
   };
 };
 
+const isConsumptionLeftoverInventoryRow = (row = {}) => {
+  const normalizedSourceType = normalizeLookupText(row.sourceType);
+  if (normalizedSourceType === "consumption") {
+    return toQuantity(row.availableQty) > 0;
+  }
+  return normalizedSourceType === "dc" &&
+    toQuantity(row.availableQty) > 0 &&
+    toQuantity(row.consumedQty) > 0;
+};
+
 const parseNumberValue = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -2083,12 +2093,16 @@ const DeliveryChallan = () => {
         locationId: parseNumberValue(form.fromLocationId),
       });
       const leftoverItems = (Array.isArray(availableRows) ? availableRows : [])
-        .filter(
-          (row) =>
-            normalizeLookupText(row.sourceType) === "consumption" &&
-            toQuantity(row.availableQty) > 0
-        )
-        .map(mapAvailableInventoryRowToChallanItem);
+        .filter(isConsumptionLeftoverInventoryRow)
+        .map((row, index) =>
+          mapAvailableInventoryRowToChallanItem(
+            {
+              ...row,
+              sourceType: "consumption",
+            },
+            index
+          )
+        );
 
       if (!leftoverItems.length) {
         setReceiptError(

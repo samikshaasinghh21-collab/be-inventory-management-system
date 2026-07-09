@@ -33,8 +33,24 @@ const normalizeAvailableInventoryItem = (item = {}) => ({
   sourceDate: item.sourceDate ?? item.SourceDate ?? null,
   sourceQty: toNumber(item.sourceQty ?? item.SourceQty),
   consumedQty: toNumber(item.consumedQty ?? item.ConsumedQty),
-  reallocatedQty: toNumber(item.reallocatedQty ?? item.ReallocatedQty),
-  availableQty: toNumber(item.availableQty ?? item.AvailableQty),
+  adjustedQty: toNumber(
+    item.adjustedQty ?? item.AdjustedQty ?? item.reallocatedQty ?? item.ReallocatedQty
+  ),
+  reallocatedQty: toNumber(
+    item.reallocatedQty ?? item.ReallocatedQty ?? item.adjustedQty ?? item.AdjustedQty
+  ),
+  remainingAvailableQty: toNumber(
+    item.remainingAvailableQty ??
+      item.RemainingAvailableQty ??
+      item.availableQty ??
+      item.AvailableQty
+  ),
+  availableQty: toNumber(
+    item.availableQty ??
+      item.AvailableQty ??
+      item.remainingAvailableQty ??
+      item.RemainingAvailableQty
+  ),
 });
 
 export const fetchAvailableInventory = async ({

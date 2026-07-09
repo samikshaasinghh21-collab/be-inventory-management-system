@@ -8897,13 +8897,18 @@ const loadAvailableInventoryRows = async (
   });
 
   return Array.from(sourceEntries.values())
-    .map((entry) => ({
-      ...entry,
-      availableQty: Math.max(
+    .map((entry) => {
+      const remainingAvailableQty = Math.max(
         entry.sourceQty - entry.consumedQty - entry.reallocatedQty,
         0
-      ),
-    }))
+      );
+      return {
+        ...entry,
+        adjustedQty: entry.reallocatedQty,
+        availableQty: remainingAvailableQty,
+        remainingAvailableQty,
+      };
+    })
     .filter((entry) => includeZero || entry.availableQty > 0)
     .sort((left, right) => {
       const sourceTypeOrder = left.sourceType.localeCompare(right.sourceType);

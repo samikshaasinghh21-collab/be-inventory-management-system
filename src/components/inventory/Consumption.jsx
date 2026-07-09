@@ -196,6 +196,74 @@ const clampQuantityText = (rawValue) => {
 const clampRequestedQuantity = (value, availableQty) =>
   Math.min(Math.max(toNumber(value), 0), Math.max(toNumber(availableQty), 0));
 
+const hasQuantityValue = (value) =>
+  value !== null && value !== undefined && value !== "";
+
+const resolveBaseAvailableQty = ({
+  sourceQty = null,
+  consumedQty = null,
+  adjustedQty = null,
+  availableQty = null,
+  remainingAvailableQty = null,
+} = {}) => {
+  const normalizedSourceQty = Math.max(toNumber(sourceQty), 0);
+  const normalizedConsumedQty = Math.max(toNumber(consumedQty), 0);
+  const normalizedAdjustedQty = Math.max(toNumber(adjustedQty), 0);
+
+  if (
+    hasQuantityValue(sourceQty) ||
+    hasQuantityValue(consumedQty) ||
+    hasQuantityValue(adjustedQty)
+  ) {
+    return Math.max(
+      normalizedSourceQty - normalizedConsumedQty - normalizedAdjustedQty,
+      0
+    );
+  }
+
+  return Math.max(toNumber(remainingAvailableQty ?? availableQty), 0);
+};
+
+const buildConsumptionRowState = (
+  row = {},
+  { requestedQty = row.consumeQty, selected = row.selected } = {}
+) => {
+  const sourceQty = Math.max(toNumber(row.sourceQty ?? row.dcQty), 0);
+  const consumedQty = Math.max(
+    toNumber(row.consumedQty ?? row.previouslyConsumed),
+    0
+  );
+  const adjustedQty = Math.max(
+    toNumber(row.adjustedQty ?? row.reallocatedQty),
+    0
+  );
+  const maxAvailableQty = resolveBaseAvailableQty({
+    sourceQty: hasQuantityValue(row.sourceQty ?? row.dcQty) ? sourceQty : null,
+    consumedQty:
+      hasQuantityValue(row.consumedQty ?? row.previouslyConsumed) ? consumedQty : null,
+    adjustedQty:
+      hasQuantityValue(row.adjustedQty ?? row.reallocatedQty) ? adjustedQty : null,
+    availableQty: row.availableQty,
+    remainingAvailableQty: row.remainingAvailableQty,
+  });
+  const consumeQty = clampRequestedQuantity(requestedQty, maxAvailableQty);
+
+  return {
+    ...row,
+    sourceQty,
+    dcQty: sourceQty,
+    consumedQty,
+    previouslyConsumed: consumedQty,
+    adjustedQty,
+    reallocatedQty: adjustedQty,
+    maxAvailableQty,
+    availableQty: maxAvailableQty,
+    remainingAvailableQty: Math.max(maxAvailableQty - consumeQty, 0),
+    consumeQty: consumeQty > 0 ? formatQuantityInputText(consumeQty) : "",
+    selected: Boolean(selected) && maxAvailableQty > 0,
+  };
+};
+
 const buildConsumptionReference = (records = []) => {
   const year = new Date().getFullYear();
   const pattern = new RegExp(`^CON-${year}-(\\d+)$`, "i");
@@ -395,7 +463,7 @@ const buildRowsFromSelectedChallan = ({
         ? availableQuantity
         : 0;
 
-    return {
+    return buildConsumptionRowState({
       rowId: `${sourceKey || sourceId || key || "line"}-${index}`,
       index,
       sourceType: "dc",
@@ -420,12 +488,16 @@ const buildRowsFromSelectedChallan = ({
       gst: line.gst ?? line.GST ?? "",
       rate: toNumber(line.rate ?? line.Rate),
       notes: line.notes ?? line.Notes ?? "",
+      sourceQty: dcQuantity,
       dcQty: dcQuantity,
+      consumedQty: previouslyConsumed,
       previouslyConsumed,
+      adjustedQty: 0,
       availableQty: availableQuantity,
+      remainingAvailableQty: availableQuantity,
       selected: shouldSelect,
       consumeQty: selectedQuantity > 0 ? formatQuantityInputText(selectedQuantity) : "",
-    };
+    });
   });
 };
 
@@ -457,7 +529,7 @@ const buildRowsFromAvailableInventory = ({
         ? availableQuantity
         : 0;
 
-    return {
+    return buildConsumptionRowState({
       rowId: `${sourceKey || sourceId || key || "available"}-${index}`,
       index,
       sourceType: line.sourceType || "receive",
@@ -482,12 +554,18 @@ const buildRowsFromAvailableInventory = ({
       rate: toNumber(line.rate),
       notes: line.notes || "",
       dcQty: Math.max(toNumber(line.sourceQty), 0),
+      consumedQty: Math.max(toNumber(line.consumedQty), 0),
       previouslyConsumed: Math.max(toNumber(line.consumedQty), 0),
-      reallocatedQty: Math.max(toNumber(line.reallocatedQty), 0),
+      adjustedQty: Math.max(toNumber(line.adjustedQty ?? line.reallocatedQty), 0),
+      reallocatedQty: Math.max(toNumber(line.adjustedQty ?? line.reallocatedQty), 0),
       availableQty: availableQuantity,
+      remainingAvailableQty: Math.max(
+        toNumber(line.remainingAvailableQty ?? line.availableQty),
+        0
+      ),
       selected: selectedQuantity > 0,
       consumeQty: selectedQuantity > 0 ? formatQuantityInputText(selectedQuantity) : "",
-    };
+    });
   });
 };
 
@@ -1136,7 +1214,7 @@ const Consumption = () => {
   }, [selectableFilteredReallocationIds, selectedReallocationIds]);
 
   const allSelectableRows = useMemo(
-    () => itemRows.filter((row) => row.availableQty > 0),
+    () => itemRows.filter((row) => row.maxAvailableQty > 0),
     [itemRows]
   );
 
@@ -1633,7 +1711,7 @@ const Consumption = () => {
       autoSelectAvailable: true,
     });
 
-    if (!nextRows.length || !nextRows.some((row) => row.availableQty > 0)) {
+    if (!nextRows.length || !nextRows.some((row) => row.maxAvailableQty > 0)) {
       setErrors((prev) => ({
         ...prev,
         items:
@@ -1711,7 +1789,7 @@ const Consumption = () => {
       autoSelectAvailable: true,
     });
 
-    if (!nextRows.length || !nextRows.some((row) => row.availableQty > 0)) {
+    if (!nextRows.length || !nextRows.some((row) => row.maxAvailableQty > 0)) {
       setErrors((prev) => ({
         ...prev,
         items:
@@ -1740,21 +1818,26 @@ const Consumption = () => {
   const onToggleAllRows = (checked) => {
     setItemRows((prevRows) =>
       prevRows.map((row) => {
-        if (row.availableQty <= 0) {
-          return { ...row, selected: false, consumeQty: "" };
+        if (row.maxAvailableQty <= 0) {
+          return buildConsumptionRowState(row, {
+            requestedQty: "",
+            selected: false,
+          });
         }
         if (!checked) {
-          return { ...row, selected: false, consumeQty: "" };
+          return buildConsumptionRowState(row, {
+            requestedQty: "",
+            selected: false,
+          });
         }
         const nextQty =
           row.consumeQty && toNumber(row.consumeQty) > 0
             ? clampQuantityText(row.consumeQty)
-            : formatQuantityInputText(row.availableQty);
-        return {
-          ...row,
+            : formatQuantityInputText(row.maxAvailableQty);
+        return buildConsumptionRowState(row, {
+          requestedQty: nextQty ?? row.consumeQty,
           selected: true,
-          consumeQty: nextQty ?? row.consumeQty,
-        };
+        });
       })
     );
     clearError("items");
@@ -1768,22 +1851,20 @@ const Consumption = () => {
         }
 
         if (!checked) {
-          return {
-            ...row,
+          return buildConsumptionRowState(row, {
+            requestedQty: "",
             selected: false,
-            consumeQty: "",
-          };
+          });
         }
 
-        const fallbackQty = clampQuantityText(String(row.availableQty));
-        return {
-          ...row,
-          selected: true,
-          consumeQty:
+        const fallbackQty = clampQuantityText(String(row.maxAvailableQty));
+        return buildConsumptionRowState(row, {
+          requestedQty:
             row.consumeQty && toNumber(row.consumeQty) > 0
               ? row.consumeQty
               : fallbackQty ?? row.consumeQty,
-        };
+          selected: true,
+        });
       })
     );
     clearError("items");
@@ -1801,12 +1882,11 @@ const Consumption = () => {
           return row;
         }
 
-        const numeric = clampRequestedQuantity(nextValue, row.availableQty);
-        return {
-          ...row,
-          consumeQty: numeric > 0 ? formatQuantityInputText(numeric) : "",
+        const numeric = clampRequestedQuantity(nextValue, row.maxAvailableQty);
+        return buildConsumptionRowState(row, {
+          requestedQty: numeric,
           selected: numeric > 0,
-        };
+        });
       })
     );
     clearError("items");
@@ -1821,12 +1901,14 @@ const Consumption = () => {
 
         const step = 1;
         const current = Math.max(toNumber(row.consumeQty), 0);
-        const next = clampRequestedQuantity(current + direction * step, row.availableQty);
-        return {
-          ...row,
-          consumeQty: next > 0 ? formatQuantityInputText(next) : "",
+        const next = clampRequestedQuantity(
+          current + direction * step,
+          row.maxAvailableQty
+        );
+        return buildConsumptionRowState(row, {
+          requestedQty: next,
           selected: next > 0,
-        };
+        });
       })
     );
     clearError("items");
@@ -1840,8 +1922,8 @@ const Consumption = () => {
     if (!requested) {
       return "Enter consume quantity.";
     }
-    if (requested > Math.max(toNumber(row.availableQty), 0)) {
-      return `Cannot exceed available quantity (${formatQty(row.availableQty)}).`;
+    if (requested > Math.max(toNumber(row.maxAvailableQty), 0)) {
+      return `Cannot exceed available quantity (${formatQty(row.maxAvailableQty)}).`;
     }
     return "";
   };
@@ -1876,15 +1958,17 @@ const Consumption = () => {
         const requested = Math.max(toNumber(row.consumeQty), 0);
         return (
           requested <= 0 ||
-          requested > Math.max(toNumber(row.availableQty), 0)
+          requested > Math.max(toNumber(row.maxAvailableQty), 0)
         );
       });
 
       if (invalidRow) {
         const requested = Math.max(toNumber(invalidRow.consumeQty), 0);
         nextErrors.items =
-          requested > Math.max(toNumber(invalidRow.availableQty), 0)
-            ? `Consume quantity for ${invalidRow.name || "the selected item"} cannot exceed the available quantity.`
+          requested > Math.max(toNumber(invalidRow.maxAvailableQty), 0)
+            ? `Consume quantity for ${invalidRow.name || "the selected item"} cannot exceed available quantity (${formatQty(
+                invalidRow.maxAvailableQty
+              )}).`
             : `Enter a valid consume quantity for ${invalidRow.name || "the selected item"}.`;
       }
     }
@@ -2115,7 +2199,7 @@ const Consumption = () => {
 
     const fallbackRows = (record.items || []).map((item, index) => {
       const consumed = Math.max(toNumber(item.quantity), 0);
-      return {
+      return buildConsumptionRowState({
         rowId: `edit-${index}-${item.id ?? item.name ?? "row"}`,
         index,
         boqItemId: toNullableInt(item.boqItemId),
@@ -2134,12 +2218,16 @@ const Consumption = () => {
         gst: item.gst || "",
         rate: Math.max(toNumber(item.rate), 0),
         notes: item.notes || "",
+        sourceQty: consumed,
         dcQty: consumed,
+        consumedQty: 0,
         previouslyConsumed: 0,
+        adjustedQty: 0,
         availableQty: consumed,
+        remainingAvailableQty: 0,
         selected: consumed > 0,
         consumeQty: consumed > 0 ? String(consumed) : "",
-      };
+      });
     });
     setItemRows(fallbackRows);
   };
@@ -2863,7 +2951,7 @@ const Consumption = () => {
                       <input
                         type="checkbox"
                         checked={row.selected}
-                        disabled={row.availableQty <= 0}
+                        disabled={row.maxAvailableQty <= 0}
                         onChange={(event) => onToggleRow(row.rowId, event.target.checked)}
                       />
                     </td>
@@ -2891,7 +2979,7 @@ const Consumption = () => {
                       {formatQty(row.reallocatedQty)}
                     </td>
                     <td className="px-3 py-2 text-right font-semibold text-emerald-600">
-                      {formatQty(row.availableQty)}
+                      {formatQty(row.remainingAvailableQty)}
                     </td>
                     <td className="px-3 py-2">
                       <div className="space-y-1">
@@ -2900,7 +2988,7 @@ const Consumption = () => {
                             type="button"
                             className="h-8 w-8 rounded-md border border-slate-300 bg-white text-base font-semibold text-slate-700 hover:border-slate-400"
                             onClick={() => onConsumeQtyStep(row.rowId, -1)}
-                            disabled={row.availableQty <= 0}
+                            disabled={row.maxAvailableQty <= 0}
                             aria-label={`Decrease consume quantity for ${row.name || "item"}`}
                           >
                             -
@@ -2911,6 +2999,7 @@ const Consumption = () => {
                             inputMode="decimal"
                             min="0"
                             step="0.01"
+                            max={row.maxAvailableQty}
                             value={row.consumeQty}
                             placeholder="0"
                             onChange={(event) =>
@@ -2922,14 +3011,14 @@ const Consumption = () => {
                             type="button"
                             className="h-8 w-8 rounded-md border border-slate-300 bg-white text-base font-semibold text-slate-700 hover:border-slate-400"
                             onClick={() => onConsumeQtyStep(row.rowId, 1)}
-                            disabled={row.availableQty <= 0}
+                            disabled={row.maxAvailableQty <= 0}
                             aria-label={`Increase consume quantity for ${row.name || "item"}`}
                           >
                             +
                           </button>
                         </div>
                         <p className="text-xs font-semibold text-emerald-700">
-                          Available: {formatQty(row.availableQty)}
+                          Available: {formatQty(row.remainingAvailableQty)}
                         </p>
                         {rowQtyError && (
                           <p className="text-xs text-red-600">{rowQtyError}</p>
