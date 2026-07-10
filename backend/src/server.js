@@ -1040,22 +1040,69 @@ const loadLinkedPurchaseOrdersByBoqIds = async (db, boqIds = []) => {
   }, new Map());
 };
 
+const loadLinkedPurchaseOrderItemsByBoqIds = async (db, boqIds = []) => {
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(boqIds) ? boqIds : [])
+        .map((value) => toNullableInt(value))
+        .filter((value) => value !== null)
+    )
+  );
+  if (!ids.length) {
+    return new Map();
+  }
+
+  await ensurePurchaseTables();
+
+  const request = new sql.Request(db);
+  const inClause = buildPurchaseOrderItemInClause(request, ids, "BoqLinkedItemId");
+  const result = await request.query(`
+    SELECT
+      po.BOQId,
+      po.Id AS PurchaseOrderId,
+      po.UpdatedAt AS PurchaseOrderUpdatedAt,
+      poi.*
+    FROM dbo.PurchaseOrders po
+    INNER JOIN dbo.PurchaseOrderItems poi
+      ON poi.PurchaseOrderId = po.Id
+    WHERE po.BOQId IN (${inClause})
+    ORDER BY po.BOQId ASC, COALESCE(po.UpdatedAt, po.CreatedAt, po.OrderDate) DESC, poi.POItemId ASC
+  `);
+
+  return (result.recordset ?? []).reduce((acc, row) => {
+    const boqId = toNullableInt(row.BOQId);
+    if (boqId === null) {
+      return acc;
+    }
+    if (!acc.has(boqId)) {
+      acc.set(boqId, []);
+    }
+    acc.get(boqId).push(normalizePoItem(row));
+    return acc;
+  }, new Map());
+};
+
 const attachLinkedPurchaseOrdersToBoqs = async (db, boqs = []) => {
   const normalizedBoqs = Array.isArray(boqs) ? boqs : [];
   if (!normalizedBoqs.length) {
     return [];
   }
 
-  const linkedPurchaseOrdersByBoqId = await loadLinkedPurchaseOrdersByBoqIds(
-    db,
-    normalizedBoqs.map((boq) => boq?.id)
-  );
+  const boqIds = normalizedBoqs.map((boq) => boq?.id);
+  const [linkedPurchaseOrdersByBoqId, linkedPurchaseOrderItemsByBoqId] =
+    await Promise.all([
+      loadLinkedPurchaseOrdersByBoqIds(db, boqIds),
+      loadLinkedPurchaseOrderItemsByBoqIds(db, boqIds),
+    ]);
 
   return normalizedBoqs.map((boq) => {
     const linkedPurchaseOrders = linkedPurchaseOrdersByBoqId.get(boq.id) ?? [];
+    const linkedPurchaseOrderItems =
+      linkedPurchaseOrderItemsByBoqId.get(boq.id) ?? [];
     return {
       ...boq,
       linkedPurchaseOrders,
+      linkedPurchaseOrderItems,
       linkedPurchaseOrderCount: linkedPurchaseOrders.length,
       latestPurchaseOrder: linkedPurchaseOrders[0] ?? null,
     };
@@ -2058,6 +2105,12 @@ const normalizePurchaseOrderTerms = (value, fallback = DEFAULT_PURCHASE_ORDER_TE
 };
 
 const toNullableInt = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string" && !value.trim()) {
+    return null;
+  }
   const n = Number(value);
   return Number.isFinite(n) ? Math.trunc(n) : null;
 };
@@ -4262,6 +4315,7 @@ const validatePurchaseOrderBoqItemsAvailable = async (
   { boqId = null, items = [], excludePurchaseOrderId = null } = {}
 ) => {
   const safeBoqId = toNullableInt(boqId);
+  const safeExcludePurchaseOrderId = toNullableInt(excludePurchaseOrderId);
   if (safeBoqId === null) {
     return;
   }
@@ -4334,7 +4388,7 @@ const validatePurchaseOrderBoqItemsAvailable = async (
   }
 
   const orderedTotals = await loadBoqOrderedTotals(tx, boqItemIds, {
-    excludePurchaseOrderId,
+    excludePurchaseOrderId: safeExcludePurchaseOrderId,
   });
   for (const row of boqRows) {
     const boqItemId = toNullableInt(row.LineItemId);
@@ -4394,6 +4448,7 @@ const resolvePurchaseOrderItemColumns = (cols = new Set()) => {
   const hasPoId = cols.has("PurchaseOrderId");
   return {
     hasPoId,
+    poIdCol: hasPoId ? "PurchaseOrderId" : null,
     itemIdCol: cols.has("ItemId") ? "ItemId" : null,
     boqItemIdCol: cols.has("BoqItemId")
       ? "BoqItemId"
@@ -4711,7 +4766,7 @@ const applyBoqQuantitiesFromPurchaseOrderItems = async (
   const request = new sql.Request(tx);
   const inClause = buildPurchaseOrderItemInClause(request, boqItemIds, "BoqItemId");
   const result = await request.query(`
-    SELECT LineItemId, BOQId, ItemName
+    SELECT LineItemId, BOQId, ItemName, Quantity
     FROM dbo.BOQLineItems
     WHERE LineItemId IN (${inClause})
   `);
@@ -4774,6 +4829,194 @@ const applyBoqQuantitiesFromPurchaseOrderItems = async (
 
   await refreshBoqAvailability(tx, boqItemIds);
   return boqItemIds;
+};
+
+const syncBoqFromPurchaseOrderItems = async (
+  tx,
+  { boqId = null, items = [], purchaseOrderId = null } = {}
+) => {
+  const normalizedBoqId = toNullableInt(boqId);
+  if (normalizedBoqId === null) {
+    return {
+      items: Array.isArray(items) ? items : [],
+      affectedBoqItemIds: [],
+    };
+  }
+
+  const nextItems = Array.isArray(items)
+    ? items.map((item) => ({ ...item }))
+    : [];
+  const boqResult = await new sql.Request(tx)
+    .input("BOQId", sql.Int, normalizedBoqId)
+    .query(`
+      SELECT *
+      FROM dbo.BOQLineItems
+      WHERE BOQId = @BOQId
+    `);
+  const existingRows = boqResult.recordset ?? [];
+  const existingRowsById = new Map(
+    existingRows
+      .map((row) => [toNullableInt(row.LineItemId), row])
+      .filter(([lineItemId]) => lineItemId !== null)
+  );
+
+  const existingPoId = toNullableInt(purchaseOrderId);
+  const previousLinkedBoqItemIds = existingPoId
+    ? (
+        await new sql.Request(tx)
+          .input("PurchaseOrderId", sql.Int, existingPoId)
+          .query(`
+            SELECT DISTINCT BoqItemId
+            FROM dbo.PurchaseOrderItems
+            WHERE PurchaseOrderId = @PurchaseOrderId
+              AND BoqItemId IS NOT NULL
+          `)
+      ).recordset
+        ?.map((row) => toNullableInt(row.BoqItemId))
+        .filter((value) => value !== null) ?? []
+    : [];
+
+  const affectedBoqItemIds = new Set();
+  const nextLinkedBoqItemIds = new Set();
+
+  for (const item of nextItems) {
+    const quantity = normalizeCurrencyValue(item.quantity);
+    const rate = normalizeCurrencyValue(item.unitPrice ?? item.rate);
+    const lineItemId = toNullableInt(item.boqItemId);
+    const consumedQty =
+      lineItemId !== null
+        ? Number(existingRowsById.get(lineItemId)?.ConsumedQty ?? 0) || 0
+        : 0;
+
+    if (lineItemId !== null && existingRowsById.has(lineItemId)) {
+      await new sql.Request(tx)
+        .input("LineItemId", sql.Int, lineItemId)
+        .input("ItemId", sql.Int, item.itemId ?? null)
+        .input("ItemName", sql.NVarChar(200), item.name)
+        .input("Description", sql.NVarChar(sql.MAX), item.description ?? null)
+        .input("SerialNumber", sql.NVarChar(255), item.serialNumber || null)
+        .input("Unit", sql.NVarChar(50), item.unit ?? "PCS")
+        .input("HSN", sql.NVarChar(50), item.hsn || null)
+        .input("GST", sql.NVarChar(100), item.gst || null)
+        .input("Quantity", sql.Decimal(18, 2), quantity)
+        .input("Rate", sql.Decimal(18, 2), rate)
+        .input("ConsumedQty", sql.Decimal(18, 2), consumedQty)
+        .input("Notes", sql.NVarChar(sql.MAX), item.notes || null)
+        .query(`
+          UPDATE dbo.BOQLineItems
+          SET ItemId = @ItemId,
+              ItemName = @ItemName,
+              Description = @Description,
+              SerialNumber = @SerialNumber,
+              Unit = @Unit,
+              HSN = @HSN,
+              GST = @GST,
+              Quantity = @Quantity,
+              Rate = @Rate,
+              ConsumedQty = @ConsumedQty,
+              AvailableQty = CASE
+                WHEN @Quantity - @ConsumedQty < 0 THEN 0
+                ELSE @Quantity - @ConsumedQty
+              END,
+              Notes = @Notes
+          WHERE LineItemId = @LineItemId
+        `);
+      nextLinkedBoqItemIds.add(lineItemId);
+      affectedBoqItemIds.add(lineItemId);
+      continue;
+    }
+
+    const insertResult = await new sql.Request(tx)
+      .input("BOQId", sql.Int, normalizedBoqId)
+      .input("ItemId", sql.Int, item.itemId ?? null)
+      .input("ItemName", sql.NVarChar(200), item.name)
+      .input("Description", sql.NVarChar(sql.MAX), item.description ?? null)
+      .input("SerialNumber", sql.NVarChar(255), item.serialNumber || null)
+      .input("Unit", sql.NVarChar(50), item.unit ?? "PCS")
+      .input("HSN", sql.NVarChar(50), item.hsn || null)
+      .input("GST", sql.NVarChar(100), item.gst || null)
+      .input("Quantity", sql.Decimal(18, 2), quantity)
+      .input("Rate", sql.Decimal(18, 2), rate)
+      .input("ConsumedQty", sql.Decimal(18, 2), 0)
+      .input("AvailableQty", sql.Decimal(18, 2), quantity)
+      .input("Notes", sql.NVarChar(sql.MAX), item.notes || null)
+      .query(`
+        INSERT INTO dbo.BOQLineItems
+          (BOQId, ItemId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
+        OUTPUT INSERTED.LineItemId
+        VALUES
+          (@BOQId, @ItemId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
+      `);
+    const insertedBoqItemId = toNullableInt(insertResult.recordset?.[0]?.LineItemId);
+    if (insertedBoqItemId !== null) {
+      item.boqItemId = insertedBoqItemId;
+      nextLinkedBoqItemIds.add(insertedBoqItemId);
+      affectedBoqItemIds.add(insertedBoqItemId);
+    }
+  }
+
+  const removedBoqItemIds = previousLinkedBoqItemIds.filter(
+    (boqItemId) => !nextLinkedBoqItemIds.has(boqItemId)
+  );
+  if (removedBoqItemIds.length) {
+    const otherPoRequest = new sql.Request(tx);
+    const otherPoInClause = buildPurchaseOrderItemInClause(
+      otherPoRequest,
+      removedBoqItemIds,
+      "RemovedBoqItemId"
+    );
+    if (existingPoId !== null) {
+      otherPoRequest.input("CurrentPurchaseOrderId", sql.Int, existingPoId);
+    }
+    const otherPoLinksResult = await otherPoRequest.query(`
+      SELECT DISTINCT BoqItemId
+      FROM dbo.PurchaseOrderItems
+      WHERE BoqItemId IN (${otherPoInClause})
+        ${
+          existingPoId !== null
+            ? "AND PurchaseOrderId <> @CurrentPurchaseOrderId"
+            : ""
+        }
+    `);
+    const linkedElsewhere = new Set(
+      (otherPoLinksResult.recordset ?? [])
+        .map((row) => toNullableInt(row.BoqItemId))
+        .filter((value) => value !== null)
+    );
+    const consumedTotals = await loadBoqConsumedTotals(tx, removedBoqItemIds);
+    const removableBoqItemIds = removedBoqItemIds.filter((boqItemId) => {
+      if (linkedElsewhere.has(boqItemId)) {
+        return false;
+      }
+      return (consumedTotals.get(boqItemId) ?? 0) <= 0;
+    });
+
+    if (removableBoqItemIds.length) {
+      const deleteReq = new sql.Request(tx);
+      const deleteInClause = buildPurchaseOrderItemInClause(
+        deleteReq,
+        removableBoqItemIds,
+        "DeleteBoqItemId"
+      );
+      await deleteReq.query(`
+        DELETE FROM dbo.BOQLineItems
+        WHERE LineItemId IN (${deleteInClause})
+      `);
+    }
+  }
+
+  await new sql.Request(tx)
+    .input("BOQId", sql.Int, normalizedBoqId)
+    .query(`
+      UPDATE dbo.BOQProjects
+      SET UpdatedAt = SYSUTCDATETIME()
+      WHERE BOQId = @BOQId
+    `);
+
+  return {
+    items: nextItems,
+    affectedBoqItemIds: Array.from(affectedBoqItemIds),
+  };
 };
 
 const detachPurchaseOrderItemsFromBoq = async (tx, boqItemIds = []) => {

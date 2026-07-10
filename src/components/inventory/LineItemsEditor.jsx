@@ -320,6 +320,7 @@ const LineItemsEditor = ({
         stock: matchedCatalogItem.stock ?? item.stock ?? null,
         quantity:
           useInventoryQuantityForQuantity &&
+          (item.quantity === "" || item.quantity === null || item.quantity === undefined) &&
           Number.isFinite(Number(matchedCatalogItem.availableQty))
             ? Number(matchedCatalogItem.availableQty)
             : item.quantity,

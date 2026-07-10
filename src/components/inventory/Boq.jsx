@@ -9,6 +9,7 @@ import {
   fetchBoqs,
   updateBoq,
 } from "../../services/boqApi";
+import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import DateInput from "../common/DateInput";
 import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
@@ -185,6 +186,44 @@ const formatLinkedPurchaseOrderSummary = (record = {}) => {
     : `${reference} | ${status}`;
 };
 
+const getBoqRegisterItems = (record = {}) => {
+  if (
+    Array.isArray(record?.linkedPurchaseOrderItems) &&
+    record.linkedPurchaseOrderItems.length
+  ) {
+    return record.linkedPurchaseOrderItems;
+  }
+  return Array.isArray(record?.items) ? record.items : [];
+};
+
+const attachLinkedPurchaseOrderItems = (boqs = [], purchaseOrders = []) => {
+  const purchaseOrdersByBoqId = (Array.isArray(purchaseOrders) ? purchaseOrders : []).reduce(
+    (acc, order) => {
+      const boqId = String(order?.boqId ?? "").trim();
+      if (!boqId) {
+        return acc;
+      }
+      if (!acc[boqId]) {
+        acc[boqId] = [];
+      }
+      acc[boqId].push(order);
+      return acc;
+    },
+    {}
+  );
+
+  return (Array.isArray(boqs) ? boqs : []).map((boq) => {
+    const linkedOrders = purchaseOrdersByBoqId[String(boq?.id)] ?? [];
+    const linkedPurchaseOrderItems = linkedOrders.flatMap((order) =>
+      Array.isArray(order?.items) ? order.items : []
+    );
+    return {
+      ...boq,
+      linkedPurchaseOrderItems,
+    };
+  });
+};
+
 const Boq = () => {
   const settings = useSettings();
   const skipAutoProjectRef = useRef(false);
@@ -208,12 +247,13 @@ const Boq = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [projectList, boqList] = await Promise.all([
+      const [projectList, boqList, purchaseOrderList] = await Promise.all([
         fetchProjects(),
         fetchBoqs(),
+        fetchPurchaseOrders(),
       ]);
       setProjects(projectList);
-      setRecords(boqList);
+      setRecords(attachLinkedPurchaseOrderItems(boqList, purchaseOrderList));
     } catch (error) {
       console.error("Failed to load BOQ data", error);
       setErrorMessage("Unable to load BOQ data. Please refresh.");
@@ -431,7 +471,11 @@ const Boq = () => {
       } else {
         await createBoq(payload);
       }
-      const fresh = await fetchBoqs();
+      const [freshBoqs, freshPurchaseOrders] = await Promise.all([
+        fetchBoqs(),
+        fetchPurchaseOrders(),
+      ]);
+      const fresh = attachLinkedPurchaseOrderItems(freshBoqs, freshPurchaseOrders);
       setRecords(fresh);
       resetForm(fresh);
     } catch (error) {
@@ -794,7 +838,8 @@ const Boq = () => {
               </tr>
             )}
             {records.map((record) => {
-              const summary = buildGstSummary(record.items || []);
+              const registerItems = getBoqRegisterItems(record);
+              const summary = buildGstSummary(registerItems);
               return (
                 <tr key={record.id} className="border-t hover:bg-slate-50">
                   <td className="p-3 font-medium text-slate-800">
@@ -808,12 +853,12 @@ const Boq = () => {
                   <td className="p-3 text-xs text-slate-600">
                     {formatLinkedPurchaseOrderSummary(record)}
                   </td>
-                  <td className="p-3">{record.items?.length || 0}</td>
+                  <td className="p-3">{registerItems.length || 0}</td>
                   <td className="p-3 text-xs text-slate-600">
-                    {buildBoqLinePreview(record.items)}
+                    {buildBoqLinePreview(registerItems)}
                   </td>
                   <td className="p-3 text-xs text-slate-600">
-                    {buildBoqSerialPreview(record.items)}
+                    {buildBoqSerialPreview(registerItems)}
                   </td>
                   <td className="p-3">
                     <GstSummaryBlock summary={summary} formatCurrency={formatCurrency} />
@@ -861,7 +906,8 @@ const Boq = () => {
       </div>
       {viewRecord && (
         (() => {
-          const summary = buildGstSummary(viewRecord.items || []);
+          const registerItems = getBoqRegisterItems(viewRecord);
+          const summary = buildGstSummary(registerItems);
           return (
         <DocumentViewPanel
           id="boq-view-panel"
@@ -901,7 +947,7 @@ const Boq = () => {
             },
             { key: "amount", label: "Amount", align: "right", widthClass: "w-28" },
           ]}
-          tableRows={(viewRecord.items || []).map((item, index) => {
+          tableRows={registerItems.map((item, index) => {
             const qty = Number(item.quantity || 0);
             const rate = roundUnitPrice(item.rate);
             return {
