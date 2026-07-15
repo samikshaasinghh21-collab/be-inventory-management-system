@@ -66,6 +66,41 @@ const getBoqLineQuantity = (item = {}) =>
       0
   ) || 0;
 
+const getBoqRemainingQuantity = (item = {}) => {
+  const explicitRemaining = Number(
+    item.boqBalanceQty ??
+      item.BoqBalanceQty ??
+      item.remainingPoBalanceQty ??
+      item.RemainingPoBalanceQty ??
+      item.availableQty ??
+      item.AvailableQty ??
+      item.remainingQty ??
+      item.RemainingQty
+  );
+  if (Number.isFinite(explicitRemaining)) {
+    return Math.max(explicitRemaining, 0);
+  }
+
+  const totalQty = getBoqLineQuantity(item);
+  const orderedQty = Number(
+    item.orderedQty ??
+      item.OrderedQty ??
+      item.poOrderedQty ??
+      item.POOrderedQty ??
+      item.totalOrdered ??
+      item.TotalOrdered ??
+      0
+  );
+  if (Number.isFinite(orderedQty)) {
+    return Math.max(totalQty - orderedQty, 0);
+  }
+
+  const consumedQty = Number(
+    item.consumedQty ?? item.ConsumedQty ?? item.totalConsumed ?? item.TotalConsumed ?? 0
+  );
+  return Math.max(totalQty - (Number.isFinite(consumedQty) ? consumedQty : 0), 0);
+};
+
 const createRecommendationLineItem = (recommendation = {}) => ({
   id: Date.now() + Math.random(),
   itemId: recommendation.productId ?? null,
@@ -404,7 +439,10 @@ const PurchaseOrder = () => {
     return boqs.filter(
       (boq) =>
         String(boq.projectId) === String(form.projectId) &&
-        !isClosedBoq(boq.status)
+        !isClosedBoq(boq.status) &&
+        (Array.isArray(boq.items)
+          ? boq.items.some((item) => getBoqRemainingQuantity(item) > 0)
+          : true)
     );
   }, [boqs, form.projectId]);
 
@@ -555,6 +593,7 @@ const PurchaseOrder = () => {
       }
       const fresh = await fetchPurchaseOrders();
       setRecords(fresh);
+      await loadBoqs();
       resetForm();
     } catch (error) {
       setApiError(
@@ -575,38 +614,43 @@ const PurchaseOrder = () => {
     }
     const boqItems = Array.isArray(boq.items) ? boq.items : [];
 
-    const mapped = boqItems.map((item) => {
-      const qty = getBoqLineQuantity(item);
-      const directRate = Number(item.rate ?? item.Rate);
-      const rate =
-        Number.isFinite(directRate) && directRate >= 0
-          ? roundUnitPrice(directRate)
-          : qty > 0
-          ? roundUnitPrice((Number(item.amount ?? 0) || 0) / qty)
-          : 0;
+    const mapped = boqItems
+      .map((item) => {
+        const qty = getBoqRemainingQuantity(item);
+        if (qty <= 0) {
+          return null;
+        }
+        const directRate = Number(item.rate ?? item.Rate);
+        const rate =
+          Number.isFinite(directRate) && directRate >= 0
+            ? roundUnitPrice(directRate)
+            : qty > 0
+            ? roundUnitPrice((Number(item.amount ?? 0) || 0) / qty)
+            : 0;
 
-      return {
-        id: item.id ?? Date.now() + Math.random(),
-        itemId: item.itemId ?? null,
-        boqItemId: item.id ?? item.boqItemId ?? null,
-        name: item.name || "",
-        description: item.description || "",
-        unit: item.unit || "PCS",
-        hsn: item.hsn || "",
-        gst: item.gst || "",
-        serialNumber: item.serialNumber ?? "",
-        serialRequired: item.serialRequired ?? false,
-        taxPercentage:
-          item.taxPercentage ?? parseTaxPercentage(item.gst ?? item.GST ?? 0),
-        quantity: qty,
-        rate,
-        location: item.location || item.notes || "",
-        notes: item.notes || item.location || "",
-      };
-    });
+        return {
+          id: item.id ?? Date.now() + Math.random(),
+          itemId: item.itemId ?? null,
+          boqItemId: item.id ?? item.boqItemId ?? null,
+          name: item.name || "",
+          description: item.description || "",
+          unit: item.unit || "PCS",
+          hsn: item.hsn || "",
+          gst: item.gst || "",
+          serialNumber: item.serialNumber ?? "",
+          serialRequired: item.serialRequired ?? false,
+          taxPercentage:
+            item.taxPercentage ?? parseTaxPercentage(item.gst ?? item.GST ?? 0),
+          quantity: qty,
+          rate,
+          location: item.location || item.notes || "",
+          notes: item.notes || item.location || "",
+        };
+      })
+      .filter(Boolean);
 
     if (!mapped.length) {
-      setBoqError("The selected BOQ has no line items to import.");
+      setBoqError("The selected BOQ has no remaining line items to import.");
       return;
     }
 
@@ -959,7 +1003,9 @@ const PurchaseOrder = () => {
                         : "Select a project first"}
                     </option>
                     {boqsForProject.map((boq) => {
-                      const totalLines = Array.isArray(boq.items) ? boq.items.length : 0;
+                      const totalLines = Array.isArray(boq.items)
+                        ? boq.items.filter((item) => getBoqRemainingQuantity(item) > 0).length
+                        : 0;
                       return (
                         <option key={boq.id} value={boq.id}>
                           {boq.boqNumber} | v{boq.version} | {boq.status || "Draft"}

@@ -1048,6 +1048,73 @@ const DeliveryChallan = () => {
     );
   }, [getRemainingReceiptItemQty, selectedReceipts]);
 
+  const receiptItemDetailsMap = useMemo(() => {
+    return receipts.reduce((acc, receipt) => {
+      (receipt.items || []).forEach((item) => {
+        const itemId = String(
+          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? ""
+        ).trim();
+        if (!itemId) {
+          return;
+        }
+        acc[itemId] = {
+          receipt,
+          item,
+        };
+      });
+      return acc;
+    }, {});
+  }, [receipts]);
+
+  const hydrateEditableChallanItems = useCallback(
+    (challanItems = []) =>
+      (Array.isArray(challanItems) ? challanItems : []).map((challanItem) => {
+        const normalizedSourceType = normalizeLookupText(challanItem.sourceType);
+        const receiptItemId = String(
+          challanItem.receiveGoodsItemId ?? challanItem.ReceiveGoodsItemId ?? ""
+        ).trim();
+        if (normalizedSourceType !== "receive" || !receiptItemId) {
+          return challanItem;
+        }
+
+        const receiptDetail = receiptItemDetailsMap[receiptItemId];
+        if (!receiptDetail?.item) {
+          return challanItem;
+        }
+
+        const { receipt, item } = receiptDetail;
+        const receivedQty = getReceiptItemReceivedQty(item);
+        const availableQty = getRemainingReceiptItemQty(item);
+
+        return {
+          ...challanItem,
+          sourceType: challanItem.sourceType || "receive",
+          sourceKey: challanItem.sourceKey || `receive:${receiptItemId}`,
+          sourceRef: challanItem.sourceRef || getReceiptReference(receipt),
+          receiveGoodsItemId:
+            challanItem.receiveGoodsItemId ?? challanItem.ReceiveGoodsItemId ?? item.id ?? null,
+          poItemId:
+            challanItem.poItemId ??
+            challanItem.POItemId ??
+            item.poItemId ??
+            item.POItemId ??
+            item.purchaseOrderItemId ??
+            item.PurchaseOrderItemId ??
+            null,
+          itemId: challanItem.itemId ?? challanItem.ItemId ?? item.itemId ?? item.ItemId ?? null,
+          name: challanItem.name || item.name || item.ItemName || "",
+          description: challanItem.description || item.description || item.Description || "",
+          unit: challanItem.unit || item.unit || item.Unit || "PCS",
+          hsn: challanItem.hsn || item.hsn || item.HSN || "",
+          gst: challanItem.gst || item.gst || item.GST || "",
+          receivedQty,
+          previouslyUsedQty: Math.max(receivedQty - availableQty, 0),
+          availableQty,
+        };
+      }),
+    [getRemainingReceiptItemQty, receiptItemDetailsMap]
+  );
+
   const selectedReceiptsSummary = useMemo(
     () => ({
       receipts: selectedReceipts.length,
@@ -1401,7 +1468,9 @@ const DeliveryChallan = () => {
       podDate: record.podDate || "",
       notes: record.notes || "",
     });
-    setItems(record.items?.length ? record.items : [createLineItem()]);
+    setItems(
+      record.items?.length ? hydrateEditableChallanItems(record.items) : [createLineItem()]
+    );
     const recordReceiptIds = Array.from(
       new Set([
         ...(Array.isArray(record.receiveGoodsIds) ? record.receiveGoodsIds : []),
@@ -1424,6 +1493,13 @@ const DeliveryChallan = () => {
       search: "",
     }));
   };
+
+  useEffect(() => {
+    if (!editingId || !receipts.length) {
+      return;
+    }
+    setItems((prev) => hydrateEditableChallanItems(prev));
+  }, [editingId, hydrateEditableChallanItems, receipts.length]);
 
   const handleDelete = async (id) => {
     try {

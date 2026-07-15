@@ -6190,9 +6190,16 @@ const ensureReceiveTables = async () => {
   }
 };
 
+let ensureBoqTablesPromise = null;
+
 const ensureBoqTables = async () => {
-  const pool = await getPool();
-  await pool.request().query(`
+  if (ensureBoqTablesPromise) {
+    return ensureBoqTablesPromise;
+  }
+
+  ensureBoqTablesPromise = (async () => {
+    const pool = await getPool();
+    await pool.request().query(`
     IF OBJECT_ID('dbo.BOQProjects', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.BOQProjects (
@@ -6208,9 +6215,9 @@ const ensureBoqTables = async () => {
         UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
       )
     END
-  `);
+    `);
 
-  await pool.request().query(`
+    await pool.request().query(`
     IF COL_LENGTH('dbo.BOQProjects', 'BOQDate') IS NULL
     BEGIN
       ALTER TABLE dbo.BOQProjects ADD BOQDate DATE NULL;
@@ -6225,9 +6232,9 @@ const ensureBoqTables = async () => {
       ALTER TABLE dbo.BOQProjects ADD UpdatedAt DATETIME2 NOT NULL
         CONSTRAINT DF_BOQProjects_UpdatedAt DEFAULT SYSUTCDATETIME();
     END;
-  `);
+    `);
 
-  await pool.request().query(`
+    await pool.request().query(`
     IF OBJECT_ID('dbo.BOQLineItems', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.BOQLineItems (
@@ -6249,9 +6256,9 @@ const ensureBoqTables = async () => {
           REFERENCES dbo.BOQProjects(BOQId) ON DELETE CASCADE
       )
     END
-  `);
+    `);
 
-  await pool.request().query(`
+    await pool.request().query(`
     IF COL_LENGTH('dbo.BOQLineItems', 'Notes') IS NULL
     BEGIN
       ALTER TABLE dbo.BOQLineItems ADD Notes NVARCHAR(MAX) NULL;
@@ -6307,13 +6314,21 @@ const ensureBoqTables = async () => {
       SET ConsumedQty = 0
       WHERE ConsumedQty IS NULL;
     END;
-  `);
+    `);
 
-  await pool.request().query(`
+    await pool.request().query(`
     UPDATE dbo.BOQLineItems
     SET AvailableQty = Quantity
     WHERE AvailableQty IS NULL
-  `);
+    `);
+  })();
+
+  try {
+    await ensureBoqTablesPromise;
+  } catch (error) {
+    ensureBoqTablesPromise = null;
+    throw error;
+  }
 };
 
 const uniqueBoqItemIds = (values = []) => {
