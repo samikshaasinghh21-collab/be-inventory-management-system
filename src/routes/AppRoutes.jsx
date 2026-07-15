@@ -20,6 +20,7 @@ import ProjectDashboard from "../pages/projectManagement/ProjectDashboard";
 import ProjectManagementProjects from "../pages/projectManagement/ProjectManagementProjects";
 import ProjectManagementTasks from "../pages/projectManagement/ProjectManagementTasks";
 import ProjectManagementTeamAllocation from "../pages/projectManagement/ProjectManagementTeamAllocation";
+import ProjectManagementSiteReports from "../pages/projectManagement/ProjectManagementSiteReports";
 import ProjectManagementPlaceholder from "../pages/projectManagement/ProjectManagementPlaceholder";
 import { projectManagementPlaceholderPages } from "../pages/projectManagement/projectManagementData";
 import Settings from "../pages/Settings";
@@ -205,8 +206,12 @@ const AppRoutes = () => {
           path="/project-management/team-allocation"
           element={<ProjectManagementTeamAllocation />}
         />
+        <Route
+          path="/project-management/site-reports"
+          element={<ProjectManagementSiteReports />}
+        />
         {projectManagementPlaceholderPages
-          .filter((screen) => !["projects", "tasks", "team-allocation"].includes(screen.key))
+          .filter((screen) => !["projects", "tasks", "team-allocation", "site-reports"].includes(screen.key))
           .map((screen) => (
           <Route
             key={screen.path}

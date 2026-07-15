@@ -130,6 +130,7 @@ export const normalizeProjectRecord = (project = {}) => ({
   financials: Array.isArray(project.financials) ? project.financials : [],
   documents: Array.isArray(project.documents) ? project.documents : [],
   activities: Array.isArray(project.activities) ? project.activities : [],
+  siteReports: Array.isArray(project.siteReports) ? project.siteReports : [],
   openIssues: Number(project.openIssues ?? project.OpenIssues ?? 0) || 0,
   pendingInvoices:
     Number(project.pendingInvoices ?? project.PendingInvoices ?? 0) || 0,

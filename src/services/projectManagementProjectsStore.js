@@ -44,6 +44,7 @@ const PROJECT_COLLECTION_FIELDS = [
   "financials",
   "documents",
   "activities",
+  "siteReports",
 ];
 
 const canUseLocalStorage = () =>

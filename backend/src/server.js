@@ -3067,7 +3067,25 @@ const replaceReceiveSerialNumbers = async (
     .query(`
       DELETE FROM dbo.SerialNumbers WHERE ReceiveGoodsId = @ReceiptId
     `);
-  return;
+
+  for (const item of items) {
+    for (const serialNumber of normalizeSerialNumbers(item.serialNumbers)) {
+      await new sql.Request(tx)
+        .input("PurchaseOrderId", sql.Int, toNullableInt(purchaseOrderId))
+        .input("PurchaseOrderItemId", sql.Int, toNullableInt(item.poItemId))
+        .input("ReceiveGoodsId", sql.Int, toNullableInt(receiptId))
+        .input("ItemId", sql.Int, toNullableInt(item.itemId))
+        .input("ProductName", sql.NVarChar(255), normalizeOptionalString(item.name))
+        .input("SerialNumber", sql.NVarChar(255), serialNumber)
+        .input("LocationId", sql.Int, toNullableInt(locationId))
+        .query(`
+          INSERT INTO dbo.SerialNumbers
+            (PurchaseOrderId, PurchaseOrderItemId, ReceiveGoodsId, ItemId, ProductName, SerialNumber, LocationId)
+          VALUES
+            (@PurchaseOrderId, @PurchaseOrderItemId, @ReceiveGoodsId, @ItemId, @ProductName, @SerialNumber, @LocationId)
+        `);
+    }
+  }
 };
 
 const recalculateReceiveGoodsChain = async (
@@ -5587,21 +5605,21 @@ const applyConsumptionStockDelta = async (tx, beforeItems = [], afterItems = [])
   }
 };
 
-const buildRequestedReceiveTotalsBeforeReceipt = (
+const buildRequestedReceiveTotalsExcludingReceipt = (
   purchaseOrderItems = [],
   headers = [],
   groupedItems = {},
   targetReceiptId = null
 ) => {
   const totals = new Map();
-  const stopAtId = targetReceiptId === null ? null : String(targetReceiptId);
+  const excludedId = targetReceiptId === null ? null : String(targetReceiptId);
 
   for (const header of headers) {
     const receiptId = String(
       header?.ReceiveGoodsId ?? header?.receiveGoodsId ?? header?.Id ?? header?.id ?? ""
     );
-    if (stopAtId && receiptId === stopAtId) {
-      break;
+    if (excludedId && receiptId === excludedId) {
+      continue;
     }
 
     const items = groupedItems[receiptId] ?? groupedItems[Number(receiptId)] ?? [];
@@ -5616,10 +5634,6 @@ const buildRequestedReceiveTotalsBeforeReceipt = (
         toReceiveQuantity(totals.get(key)) + toReceiveQuantity(item.receivedQty)
       );
     });
-  }
-
-  if (!stopAtId) {
-    return totals;
   }
 
   return purchaseOrderItems.reduce((acc, item, index) => {
@@ -5659,7 +5673,7 @@ const validateReceiveQuantitiesAgainstAvailability = async (
     headersResult.recordset ?? [],
     receivePk
   );
-  const priorTotals = buildRequestedReceiveTotalsBeforeReceipt(
+  const receivedByOtherReceipts = buildRequestedReceiveTotalsExcludingReceipt(
     purchaseOrderItems,
     sortedHeaders,
     groupedItems,
@@ -5672,7 +5686,7 @@ const validateReceiveQuantitiesAgainstAvailability = async (
       normalizedItems.byKey.get(itemKey) ?? normalizedItems.ordered[index] ?? null;
     const orderedQty = toReceiveQuantity(poItem.quantity ?? poItem.orderedQty);
     const remainingQty = Math.max(
-      orderedQty - toReceiveQuantity(priorTotals.get(itemKey)),
+      orderedQty - toReceiveQuantity(receivedByOtherReceipts.get(itemKey)),
       0
     );
     const requestedQty = Math.max(
@@ -5697,7 +5711,55 @@ const validateReceiveSerialNumbers = async (
     normalizedItems,
   }
 ) => {
-  return;
+  const serials = [];
+  for (const item of normalizedItems.ordered) {
+    const itemSerials = normalizeSerialNumbers(item.serialNumbers);
+    const normalizedKeys = itemSerials.map((value) => value.toLocaleLowerCase());
+    if (new Set(normalizedKeys).size !== normalizedKeys.length) {
+      const error = new Error(`Duplicate serial numbers entered for ${item.name || "item"}.`);
+      error.statusCode = 400;
+      throw error;
+    }
+    if (item.serialRequired && itemSerials.length !== toReceiveQuantity(item.receivedQty)) {
+      const error = new Error(
+        `${item.name || "Item"} requires one unique serial number for each received unit.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+    serials.push(...itemSerials);
+  }
+
+  const normalizedSerials = serials.map((value) => value.toLocaleLowerCase());
+  if (new Set(normalizedSerials).size !== normalizedSerials.length) {
+    const error = new Error("A serial number cannot be used more than once in a receipt.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!serials.length) {
+    return;
+  }
+
+  const request = new sql.Request(tx);
+  const placeholders = serials.map((serialNumber, index) => {
+    const parameter = `ReceiveSerial${index}`;
+    request.input(parameter, sql.NVarChar(255), serialNumber);
+    return `@${parameter}`;
+  });
+  request.input("TargetReceiptId", sql.Int, toNullableInt(targetReceiptId));
+  const result = await request.query(`
+    SELECT TOP 1 SerialNumber
+    FROM dbo.SerialNumbers
+    WHERE SerialNumber IN (${placeholders.join(", ")})
+      AND (@TargetReceiptId IS NULL OR ReceiveGoodsId <> @TargetReceiptId)
+  `);
+  if (result.recordset?.length) {
+    const error = new Error(
+      `Serial number ${result.recordset[0].SerialNumber} is already in inventory.`
+    );
+    error.statusCode = 400;
+    throw error;
+  }
 };
 
 const writeReceiveAuditLog = async (
