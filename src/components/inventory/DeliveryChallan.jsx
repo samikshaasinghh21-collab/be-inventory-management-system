@@ -362,12 +362,7 @@ const mapAvailableInventoryRowToChallanItem = (row = {}, index = 0) => {
 
 const isConsumptionLeftoverInventoryRow = (row = {}) => {
   const normalizedSourceType = normalizeLookupText(row.sourceType);
-  if (normalizedSourceType === "consumption") {
-    return toQuantity(row.availableQty) > 0;
-  }
-  return normalizedSourceType === "dc" &&
-    toQuantity(row.availableQty) > 0 &&
-    toQuantity(row.consumedQty) > 0;
+  return normalizedSourceType === "consumption" && toQuantity(row.availableQty) > 0;
 };
 
 const parseNumberValue = (value) => {
@@ -2167,6 +2162,7 @@ const DeliveryChallan = () => {
       const availableRows = await fetchAvailableInventory({
         projectId: parseNumberValue(form.projectId),
         locationId: parseNumberValue(form.fromLocationId),
+        includeConsumptionLeftover: true,
       });
       const leftoverItems = (Array.isArray(availableRows) ? availableRows : [])
         .filter(isConsumptionLeftoverInventoryRow)

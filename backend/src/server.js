@@ -1438,6 +1438,14 @@ const normalizeDeliveryChallanItem = (row = {}) => ({
     row.deliveryChallanId ??
     row.ChallanId ??
     null,
+  deliveryChallanItemId:
+    row.DeliveryChallanItemId ??
+    row.deliveryChallanItemId ??
+    row.DeliveryChallanLineItemId ??
+    row.deliveryChallanLineItemId ??
+    row.Id ??
+    row.id ??
+    null,
   receiveGoodsItemId:
     row.ReceiveGoodsItemId ?? row.receiveGoodsItemId ?? null,
   sourceType: row.SourceType ?? row.sourceType ?? "",
@@ -1501,6 +1509,8 @@ const buildInventoryMaterialKey = (item = {}) => {
 
 const buildDeliveryChallanMaterialGroups = (items = []) => {
   const groups = new Map();
+  const sourceKeyToGroupKey = new Map();
+  const deliveryChallanItemIdToGroupKey = new Map();
   const receiveGoodsItemIdToMaterialKey = new Map();
 
   (Array.isArray(items) ? items : []).forEach((item) => {
@@ -1509,9 +1519,26 @@ const buildDeliveryChallanMaterialGroups = (items = []) => {
       return;
     }
 
+    const explicitSourceKey = normalizeOptionalString(
+      item.sourceKey ?? item.SourceKey
+    );
+    const deliveryChallanItemId = toNullableInt(
+      item.deliveryChallanItemId ??
+        item.DeliveryChallanItemId ??
+        item.deliveryChallanLineItemId ??
+        item.DeliveryChallanLineItemId ??
+        item.id ??
+        item.Id
+    );
     const deliveredQty = Number(item.quantity ?? item.Quantity ?? 0) || 0;
-    if (!groups.has(materialKey)) {
-      groups.set(materialKey, {
+    const groupKey =
+      explicitSourceKey ??
+      (deliveryChallanItemId !== null
+        ? `delivery-challan-item:${deliveryChallanItemId}`
+        : materialKey);
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        groupKey,
         materialKey,
         name: item.name ?? item.ItemName ?? "Item",
         unit: item.unit ?? item.Unit ?? "PCS",
@@ -1520,19 +1547,29 @@ const buildDeliveryChallanMaterialGroups = (items = []) => {
       });
     }
 
-    const group = groups.get(materialKey);
+    const group = groups.get(groupKey);
     group.deliveredQty += deliveredQty;
+
+    if (explicitSourceKey) {
+      sourceKeyToGroupKey.set(explicitSourceKey, groupKey);
+    }
+
+    if (deliveryChallanItemId !== null) {
+      deliveryChallanItemIdToGroupKey.set(deliveryChallanItemId, groupKey);
+    }
 
     const receiveGoodsItemId = toNullableInt(
       item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
     );
     if (receiveGoodsItemId !== null) {
-      receiveGoodsItemIdToMaterialKey.set(receiveGoodsItemId, materialKey);
+      receiveGoodsItemIdToMaterialKey.set(receiveGoodsItemId, groupKey);
     }
   });
 
   return {
     groups,
+    sourceKeyToGroupKey,
+    deliveryChallanItemIdToGroupKey,
     receiveGoodsItemIdToMaterialKey,
   };
 };
@@ -1540,8 +1577,30 @@ const buildDeliveryChallanMaterialGroups = (items = []) => {
 const resolveDeliveryChallanMaterialKey = (
   item = {},
   groups = new Map(),
+  sourceKeyToGroupKey = new Map(),
+  deliveryChallanItemIdToGroupKey = new Map(),
   receiveGoodsItemIdToMaterialKey = new Map()
 ) => {
+  const explicitSourceKey = normalizeOptionalString(
+    item.sourceKey ?? item.SourceKey
+  );
+  if (explicitSourceKey && sourceKeyToGroupKey.has(explicitSourceKey)) {
+    return sourceKeyToGroupKey.get(explicitSourceKey);
+  }
+
+  const deliveryChallanItemId = toNullableInt(
+    item.deliveryChallanItemId ??
+      item.DeliveryChallanItemId ??
+      item.deliveryChallanLineItemId ??
+      item.DeliveryChallanLineItemId
+  );
+  if (
+    deliveryChallanItemId !== null &&
+    deliveryChallanItemIdToGroupKey.has(deliveryChallanItemId)
+  ) {
+    return deliveryChallanItemIdToGroupKey.get(deliveryChallanItemId);
+  }
+
   const receiveGoodsItemId = toNullableInt(
     item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
   );
@@ -1578,7 +1637,12 @@ const buildDeliveryChallanMetrics = (
   challanItems = [],
   consumptions = []
 ) => {
-  const { groups, receiveGoodsItemIdToMaterialKey } =
+  const {
+    groups,
+    sourceKeyToGroupKey,
+    deliveryChallanItemIdToGroupKey,
+    receiveGoodsItemIdToMaterialKey,
+  } =
     buildDeliveryChallanMaterialGroups(challanItems);
 
   (Array.isArray(consumptions) ? consumptions : []).forEach((consumption) => {
@@ -1590,6 +1654,8 @@ const buildDeliveryChallanMetrics = (
       const materialKey = resolveDeliveryChallanMaterialKey(
         item,
         groups,
+        sourceKeyToGroupKey,
+        deliveryChallanItemIdToGroupKey,
         receiveGoodsItemIdToMaterialKey
       );
       if (!materialKey) {
@@ -8010,8 +8076,12 @@ const validateConsumptionAgainstDeliveryChallan = async (
   const challanItems = (challanItemsResult.recordset ?? []).map(
     normalizeDeliveryChallanItem
   );
-  const { groups, receiveGoodsItemIdToMaterialKey } =
-    buildDeliveryChallanMaterialGroups(challanItems);
+  const {
+    groups,
+    sourceKeyToGroupKey,
+    deliveryChallanItemIdToGroupKey,
+    receiveGoodsItemIdToMaterialKey,
+  } = buildDeliveryChallanMaterialGroups(challanItems);
 
   if (!groups.size) {
     const error = new Error("The selected delivery challan has no line items.");
@@ -8054,6 +8124,8 @@ const validateConsumptionAgainstDeliveryChallan = async (
     const materialKey = resolveDeliveryChallanMaterialKey(
       item,
       groups,
+      sourceKeyToGroupKey,
+      deliveryChallanItemIdToGroupKey,
       receiveGoodsItemIdToMaterialKey
     );
     if (!materialKey) {
@@ -8746,6 +8818,7 @@ const loadAvailableInventoryRows = async (
     excludeDeliveryChallanId = null,
     excludeConsumptionId = null,
     excludeReallocateInventoryId = null,
+    includeConsumptionLeftover = false,
     includeZero = false,
   } = {}
 ) => {
@@ -8789,18 +8862,54 @@ const loadAvailableInventoryRows = async (
   const reallocatePk = await refreshReallocateInventoryPk();
   const reallocateFk = await refreshReallocateInventoryItemsFk();
 
+  const buildConsumptionLeftoverSourceKey = (item = {}) => {
+    const baseSourceKey = normalizeOptionalString(item.sourceKey ?? item.SourceKey);
+    if (baseSourceKey) {
+      return `consumption:${baseSourceKey}`;
+    }
+
+    const deliveryChallanId = toNullableInt(
+      item.deliveryChallanId ?? item.DeliveryChallanId ?? item.ChallanId
+    );
+    const deliveryChallanItemId = toNullableInt(
+      item.deliveryChallanItemId ??
+        item.DeliveryChallanItemId ??
+        item.deliveryChallanLineItemId ??
+        item.DeliveryChallanLineItemId
+    );
+    const receiveGoodsItemId = toNullableInt(
+      item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+    );
+    const itemId = toNullableInt(item.itemId ?? item.ItemId);
+    const materialKey = buildInventoryMaterialKey(item);
+    const identity =
+      deliveryChallanItemId ??
+      receiveGoodsItemId ??
+      itemId ??
+      materialKey;
+
+    if (deliveryChallanId !== null && identity) {
+      return `consumption:dc:${deliveryChallanId}:${identity}`;
+    }
+    if (receiveGoodsItemId !== null) {
+      return `consumption:receive:${receiveGoodsItemId}`;
+    }
+    return identity ? `consumption:material:${identity}` : "";
+  };
+
   const sourceEntries = new Map();
   const materialIndex = new Map();
-  const makeEntryMapKey = (entry) => `${entry.locationId}|${entry.sourceKey}`;
+  const makeEntryMapKey = (entry) =>
+    `${entry.projectId ?? ""}|${entry.locationId}|${entry.sourceKey}`;
   const makeMaterialIndexKey = (entry) =>
-    `${entry.locationId}|${entry.materialKey}`;
+    `${entry.projectId ?? ""}|${entry.locationId}|${entry.materialKey}`;
 
   const indexEntry = (entry) => {
     const indexKey = makeMaterialIndexKey(entry);
     if (!materialIndex.has(indexKey)) {
       materialIndex.set(indexKey, []);
     }
-    materialIndex.get(indexKey).push(entry);
+      materialIndex.get(indexKey).push(entry);
   };
 
   const addSourceEntry = (rawEntry, quantity) => {
@@ -8879,7 +8988,9 @@ const loadAvailableInventoryRows = async (
         fallbackDeliveryChallanId,
     });
     if (explicitSourceKey) {
-      const exact = sourceEntries.get(`${safeLocationId}|${explicitSourceKey}`);
+      const exact = sourceEntries.get(
+        `${toNullableInt(movementProjectId) ?? safeProjectId ?? ""}|${safeLocationId}|${explicitSourceKey}`
+      );
       if (exact) {
         exact[field] += movementQty;
         return;
@@ -8898,7 +9009,10 @@ const loadAvailableInventoryRows = async (
     let candidates = [];
 
     if (materialKey) {
-      candidates = materialIndex.get(`${safeLocationId}|${materialKey}`) ?? [];
+      candidates =
+        materialIndex.get(
+          `${toNullableInt(movementProjectId) ?? safeProjectId ?? ""}|${safeLocationId}|${materialKey}`
+        ) ?? [];
     }
 
     if (deliveryChallanId !== null) {
@@ -9179,7 +9293,8 @@ const loadAvailableInventoryRows = async (
       c.ProjectId AS HeaderProjectId,
       c.FromLocationId AS HeaderFromLocationId,
       c.LocationId AS HeaderLocationId,
-      c.DeliveryChallanId AS HeaderDeliveryChallanId
+      c.DeliveryChallanId AS HeaderDeliveryChallanId,
+      c.DeliveryChallanRef AS HeaderDeliveryChallanRef
     FROM dbo.Consumption c
     INNER JOIN dbo.ConsumptionItems ci
       ON ci.${toIdentifier(consumptionFk)} = c.${toIdentifier(consumptionPk)}
@@ -9207,34 +9322,35 @@ const loadAvailableInventoryRows = async (
     });
   });
 
-  (consumptionItemsResult.recordset ?? []).forEach((row) => {
-    const item = normalizeConsumptionItem(row);
-    const itemQty = toAvailabilityQuantity(item.quantity);
-    if (!itemQty) {
-      return;
-    }
+  if (includeConsumptionLeftover) {
+    (consumptionItemsResult.recordset ?? []).forEach((row) => {
+      const item = normalizeConsumptionItem(row);
+      const itemQty = toAvailabilityQuantity(item.quantity);
+      if (!itemQty) {
+        return;
+      }
 
-    addSourceEntry(
-      {
-        ...item,
-        consumptionId: row.HeaderConsumptionId ?? item.consumptionId,
-        sourceType: "consumption",
-        sourceKey:
-          item.sourceKey ||
-          `consumption:${row.HeaderConsumptionId ?? item.consumptionId ?? "record"}:${
-            item.id ??
-            item.receiveGoodsItemId ??
-            item.deliveryChallanItemId ??
-            item.itemId ??
-            buildInventoryMaterialKey(item)
-          }`,
-        projectId: row.HeaderProjectId,
-        locationId: row.HeaderLocationId,
-        sourceRef: `Consumption ${row.HeaderConsumptionId ?? item.consumptionId ?? ""}`.trim(),
-      },
-      itemQty
-    );
-  });
+      addSourceEntry(
+        {
+          ...item,
+          consumptionId: row.HeaderConsumptionId ?? item.consumptionId,
+          sourceType: "consumption",
+          sourceKey: buildConsumptionLeftoverSourceKey(item),
+          projectId: row.HeaderProjectId,
+          locationId: row.HeaderLocationId,
+          sourceRef:
+            normalizeOptionalString(
+              row.HeaderDeliveryChallanRef ??
+                row.SourceRef ??
+                item.sourceRef ??
+                item.deliveryChallanRef
+            ) ??
+            `Consumption ${row.HeaderConsumptionId ?? item.consumptionId ?? ""}`.trim(),
+        },
+        itemQty
+      );
+    });
+  }
 
   (reallocateItemsResult.recordset ?? []).forEach((row) => {
     const transfer = normalizeReallocateInventory({
@@ -13071,6 +13187,8 @@ app.get("/api/available-inventory", async (req, res) => {
   const excludeReallocateInventoryId = toNullableInt(
     req.query.excludeReallocateInventoryId
   );
+  const includeConsumptionLeftover =
+    String(req.query.includeConsumptionLeftover ?? "").trim().toLowerCase() === "true";
 
   if (!locationId) {
     return res.status(400).json({
@@ -13086,6 +13204,7 @@ app.get("/api/available-inventory", async (req, res) => {
       locationId,
       excludeConsumptionId,
       excludeReallocateInventoryId,
+      includeConsumptionLeftover,
     });
     return res.json({ ok: true, items });
   } catch (error) {
@@ -19141,10 +19260,27 @@ const mapConsumptionItemsFromDeliveryChallan = (
   requestedItems = [],
   challanItems = []
 ) => {
+  const bySourceKey = new Map();
+  const byDeliveryChallanItemId = new Map();
   const byReceiveGoodsItemId = new Map();
   const byMaterialKey = new Map();
 
   (Array.isArray(challanItems) ? challanItems : []).forEach((item) => {
+    const sourceKey = normalizeOptionalString(item.sourceKey ?? item.SourceKey);
+    if (sourceKey) {
+      bySourceKey.set(sourceKey, item);
+    }
+    const deliveryChallanItemId = toNullableInt(
+      item.deliveryChallanItemId ??
+        item.DeliveryChallanItemId ??
+        item.deliveryChallanLineItemId ??
+        item.DeliveryChallanLineItemId ??
+        item.id ??
+        item.Id
+    );
+    if (deliveryChallanItemId !== null) {
+      byDeliveryChallanItemId.set(deliveryChallanItemId, item);
+    }
     const receiveGoodsItemId = toNullableInt(
       item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
     );
@@ -19164,11 +19300,22 @@ const mapConsumptionItemsFromDeliveryChallan = (
   const materialKeyCursor = new Map();
 
   return (Array.isArray(requestedItems) ? requestedItems : []).map((item) => {
+    const sourceKey = normalizeOptionalString(item.sourceKey ?? item.SourceKey);
+    const deliveryChallanItemId = toNullableInt(
+      item.deliveryChallanItemId ??
+        item.DeliveryChallanItemId ??
+        item.deliveryChallanLineItemId ??
+        item.DeliveryChallanLineItemId
+    );
     const receiveGoodsItemId = toNullableInt(
       item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
     );
     let matchedSourceItem =
-      receiveGoodsItemId !== null
+      sourceKey && bySourceKey.has(sourceKey)
+        ? bySourceKey.get(sourceKey) ?? null
+        : deliveryChallanItemId !== null
+        ? byDeliveryChallanItemId.get(deliveryChallanItemId) ?? null
+        : receiveGoodsItemId !== null
         ? byReceiveGoodsItemId.get(receiveGoodsItemId) ?? null
         : null;
 

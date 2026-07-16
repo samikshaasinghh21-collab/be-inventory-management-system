@@ -120,6 +120,79 @@ const buildRecordItemSourceKey = (item = {}, fallbackDeliveryChallanId = null) =
   return key ? `material:${key}` : "";
 };
 
+const buildExactInventoryRowIdentity = (row = {}) =>
+  [
+    normalizeText(row.sourceType),
+    String(row.sourceKey ?? "").trim(),
+    String(toNullableInt(row.deliveryChallanId) ?? ""),
+    String(toNullableInt(row.deliveryChallanItemId) ?? ""),
+    String(toNullableInt(row.receiveGoodsItemId) ?? ""),
+    String(toNullableInt(row.itemId) ?? ""),
+    String(toNullableInt(row.projectId) ?? ""),
+    String(toNullableInt(row.locationId) ?? ""),
+  ].join("|");
+
+const dedupeExactInventoryRows = (rows = []) => {
+  const uniqueRows = new Map();
+
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = buildExactInventoryRowIdentity(row);
+    if (!key.replace(/\|/g, "").trim()) {
+      uniqueRows.set(`fallback:${uniqueRows.size}`, row);
+      return;
+    }
+
+    const existing = uniqueRows.get(key);
+    if (!existing) {
+      uniqueRows.set(key, row);
+      return;
+    }
+
+    uniqueRows.set(key, {
+      ...existing,
+      sourceQty: Math.max(toNumber(existing.sourceQty), toNumber(row.sourceQty)),
+      consumedQty: Math.max(toNumber(existing.consumedQty), toNumber(row.consumedQty)),
+      adjustedQty: Math.max(
+        toNumber(existing.adjustedQty ?? existing.reallocatedQty),
+        toNumber(row.adjustedQty ?? row.reallocatedQty)
+      ),
+      reallocatedQty: Math.max(
+        toNumber(existing.reallocatedQty ?? existing.adjustedQty),
+        toNumber(row.reallocatedQty ?? row.adjustedQty)
+      ),
+      availableQty: Math.max(toNumber(existing.availableQty), toNumber(row.availableQty)),
+      remainingAvailableQty: Math.max(
+        toNumber(existing.remainingAvailableQty),
+        toNumber(row.remainingAvailableQty)
+      ),
+    });
+  });
+
+  return Array.from(uniqueRows.values());
+};
+
+const buildReallocationSourceKey = (record = {}, item = {}) => {
+  const transferId = toNullableInt(record.id ?? record.transferId);
+  const itemId = toNullableInt(item.id ?? item.Id);
+  const deliveryChallanItemId = toNullableInt(
+    item.deliveryChallanItemId ??
+      item.DeliveryChallanItemId ??
+      item.deliveryChallanLineItemId ??
+      item.DeliveryChallanLineItemId
+  );
+  const receiveGoodsItemId = toNullableInt(
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
+  );
+  const sourceKey = String(item.sourceKey ?? item.SourceKey ?? "").trim();
+  const key = materialKey(item);
+  const identity =
+    itemId ?? deliveryChallanItemId ?? receiveGoodsItemId ?? sourceKey ?? key;
+
+  return transferId !== null && identity
+    ? `reallocation:${transferId}:${identity}`
+    : "";
+};
+
 const getRecordItemSourceKeyCandidates = (item = {}, fallbackDeliveryChallanId = null) => {
   const keys = new Set();
   const explicit = String(item.sourceKey ?? item.SourceKey ?? "").trim();
@@ -752,6 +825,64 @@ const Consumption = () => {
     return nextMap;
   }, [receiveGoods]);
 
+  const reallocationSourceQtyByKey = useMemo(() => {
+    const nextMap = new Map();
+    reallocations.forEach((record) => {
+      (record.items || []).forEach((item) => {
+        const key = buildReallocationSourceKey(record, item);
+        if (!key) {
+          return;
+        }
+        nextMap.set(key, Math.max(toNumber(item.quantity), 0));
+      });
+    });
+    return nextMap;
+  }, [reallocations]);
+
+  const reallocatedQtyBySourceKey = useMemo(() => {
+    const nextMap = new Map();
+    reallocations.forEach((record) => {
+      (record.items || []).forEach((item) => {
+        const key = buildRecordItemSourceKey(item, item.deliveryChallanId ?? record.deliveryChallanId);
+        if (!key) {
+          return;
+        }
+        nextMap.set(key, (nextMap.get(key) ?? 0) + Math.max(toNumber(item.quantity), 0));
+      });
+    });
+    return nextMap;
+  }, [reallocations]);
+
+  const sourceQtyByKey = useMemo(() => {
+    const nextMap = new Map();
+    [deliveryChallanSourceQtyByKey, receiveSourceQtyByKey, reallocationSourceQtyByKey].forEach(
+      (sourceMap) => {
+        sourceMap.forEach((qty, key) => {
+          nextMap.set(key, Math.max(toNumber(nextMap.get(key)), Math.max(toNumber(qty), 0)));
+        });
+      }
+    );
+    return nextMap;
+  }, [
+    deliveryChallanSourceQtyByKey,
+    receiveSourceQtyByKey,
+    reallocationSourceQtyByKey,
+  ]);
+
+  const consumedQtyBySourceKey = useMemo(() => {
+    const nextMap = new Map();
+    consumptions.forEach((record) => {
+      (record.items || []).forEach((item) => {
+        const key = buildRecordItemSourceKey(item, record.deliveryChallanId);
+        if (!key) {
+          return;
+        }
+        nextMap.set(key, (nextMap.get(key) ?? 0) + Math.max(toNumber(item.quantity), 0));
+      });
+    });
+    return nextMap;
+  }, [consumptions]);
+
   const loadAvailableInventoryForLocation = useCallback(
     async ({ projectId, locationId, preserveRows = false } = {}) => {
       const safeProjectId = String(projectId ?? "").trim();
@@ -775,7 +906,7 @@ const Consumption = () => {
           locationId: safeLocationId,
           excludeConsumptionId: editingId || undefined,
         });
-        const safeList = Array.isArray(list) ? list : [];
+        const safeList = dedupeExactInventoryRows(Array.isArray(list) ? list : []);
         setAvailableInventory(safeList);
         if (!preserveRows) {
           setItemRows(
@@ -1442,54 +1573,36 @@ const Consumption = () => {
   ]);
 
   const consumptionRegisterMetrics = useMemo(() => {
-    const runningConsumedBySource = new Map();
     const metricsByRecordId = new Map();
 
-    const orderedRecords = [...sortedRecords].sort((left, right) => {
-      const leftDate =
-        parseDateOnly(left.consumptionDate ?? left.createdAt)?.getTime() ?? 0;
-      const rightDate =
-        parseDateOnly(right.consumptionDate ?? right.createdAt)?.getTime() ?? 0;
-      if (leftDate !== rightDate) {
-        return leftDate - rightDate;
-      }
-      return toNumber(left.id ?? left.consumptionId) - toNumber(right.id ?? right.consumptionId);
-    });
-
-    orderedRecords.forEach((record) => {
+    sortedRecords.forEach((record) => {
       const itemMetrics = (record.items || []).map((item, index) => {
         const sourceKey = buildRecordItemSourceKey(item, record.deliveryChallanId);
         const consumedQty = Math.max(toNumber(item.quantity), 0);
-        const previouslyConsumed = Math.max(
-          toNumber(runningConsumedBySource.get(sourceKey)),
-          0
-        );
-        const sourceQty = Math.max(
-          toNumber(
-            deliveryChallanSourceQtyByKey.get(sourceKey) ??
-              receiveSourceQtyByKey.get(sourceKey)
-          ),
+        const sourceQty = Math.max(toNumber(sourceQtyByKey.get(sourceKey)), consumedQty);
+        const totalConsumedQty = Math.max(
+          toNumber(consumedQtyBySourceKey.get(sourceKey)),
           consumedQty
         );
-        const availableBalance = Math.max(
-          sourceQty - previouslyConsumed - consumedQty,
+        const totalReallocatedQty = Math.max(
+          toNumber(reallocatedQtyBySourceKey.get(sourceKey)),
           0
         );
-
-        if (sourceKey) {
-          runningConsumedBySource.set(sourceKey, previouslyConsumed + consumedQty);
-        }
+        const availableBalance = Math.max(
+          sourceQty - totalConsumedQty - totalReallocatedQty,
+          0
+        );
 
         return {
           key: item.id ?? `${record.id ?? "record"}:${index}`,
-          previouslyConsumed,
+          consumedQty,
           availableBalance,
         };
       });
 
       metricsByRecordId.set(String(record.id ?? record.consumptionId ?? ""), {
-        totalPreviouslyConsumed: itemMetrics.reduce(
-          (sum, item) => sum + item.previouslyConsumed,
+        totalConsumedQty: itemMetrics.reduce(
+          (sum, item) => sum + item.consumedQty,
           0
         ),
         totalAvailableBalance: itemMetrics.reduce(
@@ -1501,7 +1614,12 @@ const Consumption = () => {
     });
 
     return metricsByRecordId;
-  }, [deliveryChallanSourceQtyByKey, receiveSourceQtyByKey, sortedRecords]);
+  }, [
+    consumedQtyBySourceKey,
+    reallocatedQtyBySourceKey,
+    sortedRecords,
+    sourceQtyByKey,
+  ]);
 
   const clearError = (name) => {
     setErrors((prev) => {
@@ -2247,6 +2365,12 @@ const Consumption = () => {
     try {
       await deleteConsumption(record.id);
       const latest = await loadAll();
+      if (form.projectId && (form.fromLocationId || form.locationId)) {
+        await loadAvailableInventoryForLocation({
+          projectId: form.projectId,
+          locationId: form.fromLocationId || form.locationId,
+        });
+      }
 
       if (editingId && String(editingId) === String(record.id)) {
         resetForm({ nextRecords: latest?.consumptions ?? [] });
@@ -2921,9 +3045,6 @@ const Consumption = () => {
                     Consumed Qty
                   </th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[150px]">
-                    Adjusted
-                  </th>
-                  <th className="px-3 py-3 text-right font-semibold min-w-[120px]">
                     Remaining Available Qty
                   </th>
                   <th className="px-3 py-3 text-right font-semibold min-w-[140px]">
@@ -2934,7 +3055,7 @@ const Consumption = () => {
               <tbody>
                 {!itemRows.length && (
                   <tr>
-                    <td colSpan="11" className="px-4 py-10 text-center text-slate-500">
+                    <td colSpan="10" className="px-4 py-10 text-center text-slate-500">
                       {form.projectId && (form.fromLocationId || form.locationId)
                         ? "No available inventory found for this project and source location."
                         : "Select a project and source location to load available inventory."}
@@ -2974,9 +3095,6 @@ const Consumption = () => {
                     </td>
                     <td className="px-3 py-2 text-right text-slate-700">
                       {formatQty(row.previouslyConsumed)}
-                    </td>
-                    <td className="px-3 py-2 text-right text-slate-700">
-                      {formatQty(row.reallocatedQty)}
                     </td>
                     <td className="px-3 py-2 text-right font-semibold text-emerald-600">
                       {formatQty(row.remainingAvailableQty)}
@@ -3032,7 +3150,7 @@ const Consumption = () => {
               {!!itemRows.length && (
                 <tfoot>
                   <tr className="bg-violet-50">
-                    <td colSpan="9" className="px-3 py-3 text-right font-semibold text-violet-800">
+                    <td colSpan="8" className="px-3 py-3 text-right font-semibold text-violet-800">
                       Total Quantity to Consume:
                     </td>
                     <td colSpan="2" className="px-3 py-3 text-right text-lg font-bold text-violet-900">
@@ -3177,7 +3295,7 @@ const Consumption = () => {
                       {formatDate(record.consumptionDate || record.createdAt)}
                     </td>
                     <td className="px-4 py-3 text-right text-slate-700">
-                      {formatQty(metrics.totalPreviouslyConsumed)}
+                      {formatQty(metrics.totalConsumedQty)}
                     </td>
                     <td className="px-4 py-3 text-right text-emerald-700">
                       {formatQty(metrics.totalAvailableBalance)}
@@ -3294,7 +3412,7 @@ const Consumption = () => {
                 name: item.name || "-",
                 unit: item.unit || "PCS",
                 hsn: item.hsn || "-",
-                previouslyConsumed: formatQty(registerMetrics.previouslyConsumed),
+                previouslyConsumed: formatQty(registerMetrics.consumedQty),
                 availableBalance: formatQty(registerMetrics.availableBalance),
                 qty: formatQty(quantity),
                 rate: formatQty(rate),

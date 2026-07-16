@@ -58,6 +58,7 @@ export const fetchAvailableInventory = async ({
   locationId,
   excludeConsumptionId,
   excludeReallocateInventoryId,
+  includeConsumptionLeftover,
 } = {}) => {
   const response = await api.get("/available-inventory", {
     params: {
@@ -65,6 +66,7 @@ export const fetchAvailableInventory = async ({
       locationId,
       excludeConsumptionId,
       excludeReallocateInventoryId,
+      includeConsumptionLeftover,
     },
   });
   const list = Array.isArray(response.data?.items)
