@@ -29,6 +29,8 @@ const CreateAccount = () => {
     if (form.password !== form.confirmPassword) nextErrors.confirmPassword = "Passwords must match";
     if (!form.terms) nextErrors.terms = "Please agree to the terms";
     setErrors(nextErrors);
+    setSubmitting(false);
+    
     if (Object.keys(nextErrors).length) return;
 
     setSubmitting(true);
@@ -171,7 +173,7 @@ const CreateAccount = () => {
             submitting ? "bg-emerald-500/70 cursor-not-allowed" : "bg-gradient-to-r from-emerald-600 to-teal-500"
           }`}
         >
-          {submitting ? "Creating account…" : "Create account"}
+          {submitting ? "Creating accountï¿½" : "Create account"}
         </button>
       </form>
     </AuthShell>

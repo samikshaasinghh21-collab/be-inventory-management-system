@@ -21,6 +21,8 @@ import ProjectManagementProjects from "../pages/projectManagement/ProjectManagem
 import ProjectManagementTasks from "../pages/projectManagement/ProjectManagementTasks";
 import ProjectManagementTeamAllocation from "../pages/projectManagement/ProjectManagementTeamAllocation";
 import ProjectManagementSiteReports from "../pages/projectManagement/ProjectManagementSiteReports";
+import ProjectManagementInventoryAllocation from "../pages/projectManagement/ProjectManagementInventoryAllocation";
+import ProjectManagementPurchaseTracking from "../pages/projectManagement/ProjectManagementPurchaseTracking";
 import ProjectManagementPlaceholder from "../pages/projectManagement/ProjectManagementPlaceholder";
 import { projectManagementPlaceholderPages } from "../pages/projectManagement/projectManagementData";
 import Settings from "../pages/Settings";
@@ -210,8 +212,16 @@ const AppRoutes = () => {
           path="/project-management/site-reports"
           element={<ProjectManagementSiteReports />}
         />
+        <Route
+          path="/project-management/inventory-allocation"
+          element={<ProjectManagementInventoryAllocation />}
+        />
+        <Route
+          path="/project-management/purchase-tracking"
+          element={<ProjectManagementPurchaseTracking />}
+        />
         {projectManagementPlaceholderPages
-          .filter((screen) => !["projects", "tasks", "team-allocation", "site-reports"].includes(screen.key))
+          .filter((screen) => !["projects", "tasks", "team-allocation", "site-reports", "inventory-allocation", "purchase-tracking"].includes(screen.key))
           .map((screen) => (
           <Route
             key={screen.path}
