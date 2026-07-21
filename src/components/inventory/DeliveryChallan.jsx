@@ -234,6 +234,8 @@ const getReceiptItemReceivedQty = (item = {}) =>
 
 const getReceiptItemAvailableQty = (item = {}) =>
   Number(
+    item.liveAvailableQty ??
+      item.LiveAvailableQty ??
     item.receiptAvailableQty ??
       item.ReceiptAvailableQty ??
       item.availableQty ??
@@ -243,22 +245,86 @@ const getReceiptItemAvailableQty = (item = {}) =>
       getReceiptItemReceivedQty(item)
   ) || 0;
 
+const mergeReceiptsWithAvailableInventory = (receipts = [], availableRows = []) => {
+  const availableByReceiptItemId = new Map();
+  (Array.isArray(availableRows) ? availableRows : []).forEach((row) => {
+    if (normalizeLookupText(row.sourceType) !== "receive") {
+      return;
+    }
+    const receiptItemId = String(
+      row.receiptItemId ?? row.receiveGoodsItemId ?? ""
+    ).trim();
+    if (!receiptItemId) {
+      return;
+    }
+    availableByReceiptItemId.set(receiptItemId, row);
+  });
+
+  return (Array.isArray(receipts) ? receipts : []).map((receipt) => ({
+    ...receipt,
+    items: (receipt.items || [])
+      .map((item) => {
+        const receiptItemId = String(
+          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? ""
+        ).trim();
+        const latestRow = receiptItemId
+          ? availableByReceiptItemId.get(receiptItemId) ?? null
+          : null;
+        if (!latestRow) {
+          return {
+            ...item,
+            liveAvailableQty: 0,
+            receiptAvailableQty: 0,
+            availableQty: 0,
+            totalAvailableQty: 0,
+          };
+        }
+
+        const latestAvailableQty = Math.max(Number(latestRow.availableQty ?? 0) || 0, 0);
+        return {
+          ...item,
+          sourceKey: latestRow.sourceKey ?? item.sourceKey ?? `receive:${receiptItemId}`,
+          sourceRowId: latestRow.sourceRowId ?? latestRow.sourceKey ?? `receive:${receiptItemId}`,
+          sourceRef: latestRow.sourceRef ?? getReceiptReference(receipt),
+          liveAvailableQty: latestAvailableQty,
+          receiptAvailableQty: latestAvailableQty,
+          availableQty: latestAvailableQty,
+          totalAvailableQty: latestAvailableQty,
+          consumedQty: Number(latestRow.consumedQty ?? item.consumedQty ?? 0) || 0,
+          adjustedQty:
+            Number(latestRow.reallocatedQty ?? latestRow.adjustedQty ?? item.adjustedQty ?? 0) ||
+            0,
+          reallocatedQty:
+            Number(latestRow.reallocatedQty ?? latestRow.adjustedQty ?? item.reallocatedQty ?? 0) ||
+            0,
+        };
+      })
+      .filter((item) => getReceiptItemAvailableQty(item) > 0),
+  }));
+};
+
 const mapReceiptItemsToChallanItems = (
   receipt = {},
   resolveAvailableQty = getReceiptItemAvailableQty
 ) =>
-  (receipt.items || [])
-    .map((item, index) => {
+  Array.from(
+    (receipt.items || []).reduce((map, item, index) => {
       const availableQty = Math.max(Number(resolveAvailableQty(item)) || 0, 0);
+      if (availableQty <= 0) {
+        return map;
+      }
       const quantity = availableQty;
       const receivedQty = getReceiptItemReceivedQty(item);
       const receiveGoodsItemId =
         item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? null;
-      return {
+      const sourceRowId = receiveGoodsItemId ? `receive:${receiveGoodsItemId}` : "";
+      const nextItem = {
         id: item.id ?? `${Date.now()}-${index}`,
         sourceType: "receive",
-        sourceKey: receiveGoodsItemId ? `receive:${receiveGoodsItemId}` : "",
+        sourceKey: sourceRowId,
+        sourceRowId,
         sourceRef: getReceiptReference(receipt),
+        receiptItemId: receiveGoodsItemId,
         receiveGoodsItemId,
         poItemId:
           item.poItemId ??
@@ -279,8 +345,10 @@ const mapReceiptItemsToChallanItems = (
         rate: Number(item.unitPrice ?? item.rate ?? 0) || 0,
         notes: item.notes || "",
       };
-    })
-    .filter(Boolean)
+      map.set(String(sourceRowId || nextItem.id), nextItem);
+      return map;
+    }, new Map()).values()
+  )
     .filter((item) => item.name && Number(item.quantity) > 0);
 
 const fmtQty = (value) =>
@@ -338,7 +406,9 @@ const mapAvailableInventoryRowToChallanItem = (row = {}, index = 0) => {
     id: sourceKey || `${Date.now()}-${index}`,
     sourceType,
     sourceKey,
+    sourceRowId: row.sourceRowId ?? sourceKey,
     sourceRef: row.sourceRef || "",
+    receiptItemId: row.receiptItemId ?? row.receiveGoodsItemId ?? null,
     receiveGoodsItemId: row.receiveGoodsItemId ?? null,
     deliveryChallanId: row.deliveryChallanId ?? null,
     deliveryChallanItemId: row.deliveryChallanItemId ?? null,
@@ -368,6 +438,155 @@ const isConsumptionLeftoverInventoryRow = (row = {}) => {
 const parseNumberValue = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toPositiveNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const buildSubmitSourceIdentity = (item = {}) =>
+  String(
+    item.sourceRowId ??
+      item.SourceRowId ??
+    item.sourceKey ??
+      item.SourceKey ??
+      item.receiptItemId ??
+      item.ReceiptItemId ??
+      item.receiveGoodsItemId ??
+      item.ReceiveGoodsItemId ??
+      item.deliveryChallanItemId ??
+      item.DeliveryChallanItemId ??
+      item.itemId ??
+      item.ItemId ??
+      ""
+  ).trim();
+
+const buildAvailabilityLookupKeys = (item = {}) =>
+  Array.from(
+    new Set(
+      [
+        String(item.sourceRowId ?? item.SourceRowId ?? "").trim(),
+        String(item.sourceKey ?? item.SourceKey ?? "").trim(),
+        toPositiveNumber(item.receiptItemId ?? item.ReceiptItemId) > 0
+          ? `receive:${toPositiveNumber(item.receiptItemId ?? item.ReceiptItemId)}`
+          : "",
+        toPositiveNumber(item.receiveGoodsItemId ?? item.ReceiveGoodsItemId) > 0
+          ? `receive:${toPositiveNumber(
+              item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+            )}`
+          : "",
+        toPositiveNumber(item.deliveryChallanId ?? item.DeliveryChallanId) > 0 &&
+        toPositiveNumber(
+          item.deliveryChallanItemId ??
+            item.DeliveryChallanItemId ??
+            item.deliveryChallanLineItemId ??
+            item.DeliveryChallanLineItemId
+        ) > 0
+          ? `dc:${toPositiveNumber(
+              item.deliveryChallanId ?? item.DeliveryChallanId
+            )}:${toPositiveNumber(
+              item.deliveryChallanItemId ??
+                item.DeliveryChallanItemId ??
+                item.deliveryChallanLineItemId ??
+                item.DeliveryChallanLineItemId
+            )}`
+          : "",
+        buildSubmitSourceIdentity(item),
+      ].filter(Boolean)
+    )
+  );
+
+const findUniqueAvailabilityRow = (rows = [], predicate) => {
+  const matches = (Array.isArray(rows) ? rows : []).filter(predicate);
+  return matches.length === 1 ? matches[0] : null;
+};
+
+const findLatestAvailabilityRow = (item = {}, rows = [], availabilityMap = new Map()) => {
+  const lookupKeys = buildAvailabilityLookupKeys(item);
+  const keyedMatch = lookupKeys.find((key) => availabilityMap.has(key));
+  if (keyedMatch) {
+    return availabilityMap.get(keyedMatch) ?? null;
+  }
+
+  const normalizedSourceType = normalizeLookupText(item.sourceType ?? item.SourceType);
+  const deliveryChallanId = toPositiveNumber(
+    item.deliveryChallanId ?? item.DeliveryChallanId
+  );
+  const deliveryChallanItemId = toPositiveNumber(
+    item.deliveryChallanItemId ??
+      item.DeliveryChallanItemId ??
+      item.deliveryChallanLineItemId ??
+      item.DeliveryChallanLineItemId
+  );
+  const receiveGoodsItemId = toPositiveNumber(
+    item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+  );
+  const itemId = toPositiveNumber(item.itemId ?? item.ItemId);
+  const sourceRef = String(item.sourceRef ?? item.SourceRef ?? "").trim().toLowerCase();
+  const itemName = String(item.name ?? item.Name ?? item.Item ?? "").trim().toLowerCase();
+
+  if (deliveryChallanId > 0 && deliveryChallanItemId > 0) {
+    const exactDcRow = findUniqueAvailabilityRow(
+      rows,
+      (row) =>
+        toPositiveNumber(row.deliveryChallanId) === deliveryChallanId &&
+        toPositiveNumber(row.deliveryChallanItemId) === deliveryChallanItemId
+    );
+    if (exactDcRow) {
+      return exactDcRow;
+    }
+  }
+
+  if (receiveGoodsItemId > 0) {
+    const exactReceiptRow = findUniqueAvailabilityRow(
+      rows,
+      (row) => toPositiveNumber(row.receiveGoodsItemId) === receiveGoodsItemId
+    );
+    if (exactReceiptRow) {
+      return exactReceiptRow;
+    }
+  }
+
+  if (normalizedSourceType && deliveryChallanId > 0 && itemId > 0 && sourceRef) {
+    const dcItemRow = findUniqueAvailabilityRow(
+      rows,
+      (row) =>
+        normalizeLookupText(row.sourceType) === normalizedSourceType &&
+        toPositiveNumber(row.deliveryChallanId) === deliveryChallanId &&
+        toPositiveNumber(row.itemId) === itemId &&
+        String(row.sourceRef ?? "").trim().toLowerCase() === sourceRef
+    );
+    if (dcItemRow) {
+      return dcItemRow;
+    }
+  }
+
+  if (normalizedSourceType && itemId > 0 && sourceRef && itemName) {
+    const typedItemRow = findUniqueAvailabilityRow(
+      rows,
+      (row) =>
+        normalizeLookupText(row.sourceType) === normalizedSourceType &&
+        toPositiveNumber(row.itemId) === itemId &&
+        String(row.sourceRef ?? "").trim().toLowerCase() === sourceRef &&
+        String(row.name ?? "").trim().toLowerCase() === itemName
+    );
+    if (typedItemRow) {
+      return typedItemRow;
+    }
+  }
+
+  if (normalizedSourceType && sourceRef && itemName) {
+    return findUniqueAvailabilityRow(
+      rows,
+      (row) =>
+        normalizeLookupText(row.sourceType) === normalizedSourceType &&
+        String(row.sourceRef ?? "").trim().toLowerCase() === sourceRef &&
+        String(row.name ?? "").trim().toLowerCase() === itemName
+    );
+  }
+
+  return null;
 };
 
 const normalizeLookupText = (value = "") => String(value ?? "").trim().toLowerCase();
@@ -619,6 +838,7 @@ const DeliveryChallan = () => {
   const [errors, setErrors] = useState({});
   const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [leftoverLoading, setLeftoverLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [receiptError, setReceiptError] = useState("");
   const [updateProof, setUpdateProof] = useState("");
   const [dcStatusFilter, setDcStatusFilter] = useState("all");
@@ -683,18 +903,66 @@ const DeliveryChallan = () => {
       setReallocations([]);
     }
   };
-  const loadReceipts = async (projectId = null) => {
+  const loadReceipts = async (
+    projectId = null,
+    { excludeDeliveryChallanId = null } = {}
+  ) => {
     if (!projectId) {
       setReceipts([]);
       setReceiptError("");
       setReceiptsLoading(false);
-      return;
+      return [];
     }
     try {
       setReceiptsLoading(true);
       const list = await fetchReceiveGoods({ projectId: Number(projectId) });
-      setReceipts(Array.isArray(list) ? list : []);
+      const normalizedList = Array.isArray(list) ? list : [];
+      const distinctLocationIds = Array.from(
+        new Set(
+          normalizedList
+            .map((receipt) => parseNumberValue(receipt.locationId))
+            .filter((locationId) => locationId !== null && locationId > 0)
+        )
+      );
+      const availableInventoryGroups = await Promise.all(
+        distinctLocationIds.map((locationId) =>
+          fetchAvailableInventory({
+            projectId: Number(projectId),
+            locationId,
+            excludeDeliveryChallanId: excludeDeliveryChallanId || undefined,
+          }).catch((error) => {
+            console.error(
+              `Failed to load available inventory for location ${locationId}:`,
+              error
+            );
+            return [];
+          })
+        )
+      );
+      const latestAvailableRows = availableInventoryGroups.flat();
+      const receiptsWithLiveAvailability = mergeReceiptsWithAvailableInventory(
+        normalizedList,
+        latestAvailableRows
+      );
+      console.debug("Delivery Challan receipt stock refresh", {
+        projectId: Number(projectId),
+        receiptCount: receiptsWithLiveAvailability.length,
+        availableRowCount: latestAvailableRows.length,
+        sampleReceiptItems: receiptsWithLiveAvailability
+          .flatMap((receipt) =>
+            (receipt.items || []).slice(0, 3).map((item) => ({
+              receiptRef: getReceiptReference(receipt),
+              item: item.name,
+              receiptItemId:
+                item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? null,
+              displayedAvailableQty: getReceiptItemAvailableQty(item),
+            }))
+          )
+          .slice(0, 10),
+      });
+      setReceipts(receiptsWithLiveAvailability);
       setReceiptError("");
+      return receiptsWithLiveAvailability;
     } catch (error) {
       setReceipts([]);
       setReceiptError(
@@ -702,6 +970,7 @@ const DeliveryChallan = () => {
           error?.message ||
           "Could not load receive receipts."
       );
+      return [];
     } finally {
       setReceiptsLoading(false);
     }
@@ -764,6 +1033,9 @@ const DeliveryChallan = () => {
     window.addEventListener("projects:changed", refreshProjects);
     window.addEventListener("purchase-orders:changed", refreshPurchaseOrders);
     window.addEventListener("receive-goods:changed", refreshReceipts);
+    window.addEventListener("delivery-challans:changed", refreshReceipts);
+    window.addEventListener("consumptions:changed", refreshReceipts);
+    window.addEventListener("reallocate-inventory:changed", refreshReceipts);
     window.addEventListener("delivery-challans:changed", refreshNumber);
     window.addEventListener("reallocate-inventory:changed", refreshReallocations);
     return () => {
@@ -774,6 +1046,9 @@ const DeliveryChallan = () => {
       window.removeEventListener("projects:changed", refreshProjects);
       window.removeEventListener("purchase-orders:changed", refreshPurchaseOrders);
       window.removeEventListener("receive-goods:changed", refreshReceipts);
+      window.removeEventListener("delivery-challans:changed", refreshReceipts);
+      window.removeEventListener("consumptions:changed", refreshReceipts);
+      window.removeEventListener("reallocate-inventory:changed", refreshReceipts);
       window.removeEventListener("delivery-challans:changed", refreshNumber);
       window.removeEventListener(
         "reallocate-inventory:changed",
@@ -941,12 +1216,12 @@ const DeliveryChallan = () => {
   }, [locations, form.projectId]);
 
   const receiptsForSelection = useMemo(() => {
-    if (!form.projectId) {
-      return receipts;
-    }
-    return receipts.filter(
-      (receipt) => String(receipt.projectId) === String(form.projectId)
-    );
+    const scopedReceipts = !form.projectId
+      ? receipts
+      : receipts.filter(
+          (receipt) => String(receipt.projectId) === String(form.projectId)
+        );
+    return scopedReceipts.filter((receipt) => (receipt.items || []).length > 0);
   }, [receipts, form.projectId]);
 
   const filteredReceiptsForSelection = useMemo(() => {
@@ -1023,6 +1298,12 @@ const DeliveryChallan = () => {
   }, [editingId, records]);
 
   const getRemainingReceiptItemQty = useCallback((item = {}) => {
+    const liveAvailableQty = Number(
+      item.liveAvailableQty ?? item.LiveAvailableQty
+    );
+    if (Number.isFinite(liveAvailableQty)) {
+      return Math.max(liveAvailableQty, 0);
+    }
     const receiptQty = getReceiptItemReceivedQty(item);
     const hintedAvailableQty = getReceiptItemAvailableQty(item);
     const receiptItemId = Number.parseInt(
@@ -1036,6 +1317,25 @@ const DeliveryChallan = () => {
     const remainingFromHistory = Math.max(receiptQty - alreadyDelivered, 0);
     return Math.max(0, Math.min(hintedAvailableQty, remainingFromHistory));
   }, [deliveredQtyByReceiptItem]);
+
+  const receiptItemAvailabilityMap = useMemo(() => {
+    return receipts.reduce((acc, receipt) => {
+      (receipt.items || []).forEach((item) => {
+        const receiptItemId = String(
+          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? ""
+        ).trim();
+        if (!receiptItemId) {
+          return;
+        }
+        acc[receiptItemId] = {
+          receipt,
+          item,
+          availableQty: getRemainingReceiptItemQty(item),
+        };
+      });
+      return acc;
+    }, {});
+  }, [getRemainingReceiptItemQty, receipts]);
 
   const selectedReceiptItems = useMemo(() => {
     return selectedReceipts.flatMap((receipt) =>
@@ -1085,7 +1385,15 @@ const DeliveryChallan = () => {
           ...challanItem,
           sourceType: challanItem.sourceType || "receive",
           sourceKey: challanItem.sourceKey || `receive:${receiptItemId}`,
+          sourceRowId: challanItem.sourceRowId || `receive:${receiptItemId}`,
           sourceRef: challanItem.sourceRef || getReceiptReference(receipt),
+          receiptItemId:
+            challanItem.receiptItemId ??
+            challanItem.ReceiptItemId ??
+            challanItem.receiveGoodsItemId ??
+            challanItem.ReceiveGoodsItemId ??
+            item.id ??
+            null,
           receiveGoodsItemId:
             challanItem.receiveGoodsItemId ?? challanItem.ReceiveGoodsItemId ?? item.id ?? null,
           poItemId:
@@ -1109,6 +1417,49 @@ const DeliveryChallan = () => {
       }),
     [getRemainingReceiptItemQty, receiptItemDetailsMap]
   );
+
+  const buildLatestReceiptStockMap = useCallback(
+    (receiptList = []) => {
+      const nextMap = new Map();
+      (Array.isArray(receiptList) ? receiptList : []).forEach((receipt) => {
+        (receipt.items || []).forEach((item) => {
+          const receiptItemId = parseNumberValue(
+            item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id
+          );
+          if (!receiptItemId) {
+            return;
+          }
+          nextMap.set(String(receiptItemId), {
+            receipt,
+            item,
+            availableQty: getRemainingReceiptItemQty(item),
+          });
+        });
+      });
+      return nextMap;
+    },
+    [getRemainingReceiptItemQty]
+  );
+
+  const buildReceiptItemToReceiptIdMap = useCallback((receiptList = []) => {
+    const nextMap = new Map();
+    (Array.isArray(receiptList) ? receiptList : []).forEach((receipt) => {
+      const receiptId = parseNumberValue(receipt.id ?? receipt.receiveGoodsId);
+      if (!receiptId) {
+        return;
+      }
+      (receipt.items || []).forEach((item) => {
+        const receiptItemId = parseNumberValue(
+          item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id
+        );
+        if (!receiptItemId) {
+          return;
+        }
+        nextMap.set(String(receiptItemId), receiptId);
+      });
+    });
+    return nextMap;
+  }, []);
 
   const selectedReceiptsSummary = useMemo(
     () => ({
@@ -1183,6 +1534,95 @@ const DeliveryChallan = () => {
       prev.filter((receiptId) => selectedReceiptIds.includes(String(receiptId)))
     );
   }, [editingId, selectedReceiptIds]);
+
+  useEffect(() => {
+    if (!items.length) {
+      return;
+    }
+
+    const seenReceiptRowIds = new Set();
+    const unavailableLabels = [];
+    let hasChanges = false;
+
+    const nextItems = items.reduce((acc, item) => {
+      const normalizedSourceType = normalizeLookupText(item.sourceType);
+      if (normalizedSourceType !== "receive") {
+        acc.push(item);
+        return acc;
+      }
+
+      const receiptItemId = String(
+        item.receiptItemId ??
+          item.ReceiptItemId ??
+          item.receiveGoodsItemId ??
+          item.ReceiveGoodsItemId ??
+          ""
+      ).trim();
+      const latestReceiptItem = receiptItemId
+        ? receiptItemAvailabilityMap[receiptItemId]
+        : null;
+
+      if (!receiptItemId || seenReceiptRowIds.has(receiptItemId)) {
+        hasChanges = true;
+        return acc;
+      }
+      seenReceiptRowIds.add(receiptItemId);
+
+      if (!latestReceiptItem || latestReceiptItem.availableQty <= 0) {
+        hasChanges = true;
+        unavailableLabels.push(
+          `${item.sourceRef || "Receipt"} | ${item.name || "Item"}`
+        );
+        return acc;
+      }
+
+      const latestAvailableQty = Math.max(Number(latestReceiptItem.availableQty) || 0, 0);
+      const sourceRef = getReceiptReference(latestReceiptItem.receipt);
+      const nextQuantity = Math.min(
+        Math.max(Number(item.quantity) || 0, 0),
+        latestAvailableQty
+      );
+      const nextItem = {
+        ...item,
+        id: item.id ?? `receive:${receiptItemId}`,
+        sourceType: "receive",
+        sourceKey: `receive:${receiptItemId}`,
+        sourceRowId: `receive:${receiptItemId}`,
+        sourceRef,
+        receiptItemId: Number(receiptItemId),
+        receiveGoodsItemId: Number(receiptItemId),
+        availableQty: latestAvailableQty,
+        receivedQty: getReceiptItemReceivedQty(latestReceiptItem.item),
+        previouslyUsedQty: Math.max(
+          getReceiptItemReceivedQty(latestReceiptItem.item) - latestAvailableQty,
+          0
+        ),
+        quantity: nextQuantity,
+      };
+
+      if (
+        nextItem.sourceKey !== item.sourceKey ||
+        nextItem.sourceRef !== item.sourceRef ||
+        nextItem.availableQty !== item.availableQty ||
+        nextItem.quantity !== item.quantity ||
+        nextItem.receiveGoodsItemId !== item.receiveGoodsItemId
+      ) {
+        hasChanges = true;
+      }
+
+      acc.push(nextItem);
+      return acc;
+    }, []);
+
+    if (hasChanges) {
+      setItems(nextItems);
+      if (unavailableLabels.length) {
+        setReceiptError(
+          `Unavailable receipt rows removed: ${unavailableLabels.join(", ")}.`
+        );
+      }
+    }
+  }, [items, receiptItemAvailabilityMap]);
 
   const resetForm = () => {
     setForm(createFormState());
@@ -1263,7 +1703,7 @@ const DeliveryChallan = () => {
     setChallanDetailTab(nextTab);
   }, [location.key, location.state, records]);
 
-  const validate = () => {
+  const validate = (candidateItems = items) => {
     const nextErrors = {};
     if (!form.dcNumber.trim()) {
       nextErrors.dcNumber = "DC number is required.";
@@ -1278,11 +1718,31 @@ const DeliveryChallan = () => {
       nextErrors.toLocationId = "Select destination.";
     }
 
-    const validItems = items.filter(
+    const validItems = candidateItems.filter(
       (item) => item.name.trim() && Number(item.quantity) > 0
     );
     if (!validItems.length) {
       nextErrors.items = "Add at least one line item.";
+    }
+
+    const invalidIdentityItem = validItems.find((item) => {
+      const normalizedSourceType = normalizeLookupText(item.sourceType);
+      const hasSourceIdentity = Boolean(buildSubmitSourceIdentity(item));
+      const hasItemId = toPositiveNumber(item.itemId ?? item.ItemId) > 0;
+      if (normalizedSourceType === "receive") {
+        return !hasSourceIdentity || !hasItemId || toPositiveNumber(item.receiveGoodsItemId) <= 0;
+      }
+      return !hasSourceIdentity || !hasItemId;
+    });
+    if (invalidIdentityItem) {
+      nextErrors.items = `Source mapping is missing for ${invalidIdentityItem.name || "an item"}. Reload the source rows and try again.`;
+    }
+
+    const zeroOrNegativeItem = validItems.find(
+      (item) => !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0
+    );
+    if (zeroOrNegativeItem) {
+      nextErrors.items = `Quantity for ${zeroOrNegativeItem.name || "an item"} must be greater than zero.`;
     }
 
     const invalidQuantityItem = validItems.find((item) => {
@@ -1294,6 +1754,7 @@ const DeliveryChallan = () => {
       nextErrors.items = `DC quantity for ${invalidQuantityItem.name || "an item"} cannot exceed available quantity (${getReceiptItemAvailableQty(invalidQuantityItem)}).`;
     }
 
+    const duplicateSourceRows = new Set();
     const aggregatedItems = validItems.reduce((map, item) => {
       const normalizedName = String(item.name ?? item.ItemName ?? item.item ?? item.Item ?? "")
         .trim()
@@ -1302,13 +1763,12 @@ const DeliveryChallan = () => {
         .trim()
         .toLowerCase() || "pcs";
       const materialKey = `${normalizedName}::${normalizedUnit}`;
-      const key =
-        item.receiveGoodsItemId ??
-        item.poItemId ??
-        item.itemId ??
-        materialKey;
+      const key = buildSubmitSourceIdentity(item) || materialKey;
       const quantity = Number(item.quantity) || 0;
       const availableQty = getReceiptItemAvailableQty(item);
+      if (map.has(key)) {
+        duplicateSourceRows.add(item.name || "an item");
+      }
       const existing = map.get(key) || {
         name: item.name || "an item",
         quantity: 0,
@@ -1319,6 +1779,10 @@ const DeliveryChallan = () => {
       map.set(key, existing);
       return map;
     }, new Map());
+
+    if (!nextErrors.items && duplicateSourceRows.size) {
+      nextErrors.items = `Duplicate source rows selected for ${Array.from(duplicateSourceRows).join(", ")}. Remove duplicate rows before saving.`;
+    }
 
     const duplicateExceeded = Array.from(aggregatedItems.values()).find(
       (group) => group.quantity > group.availableQty
@@ -1342,70 +1806,341 @@ const DeliveryChallan = () => {
     return Object.keys(nextErrors).length === 0;
   };
 
+  const buildNormalizedItemsForSubmit = useCallback(
+    (sourceItems = []) =>
+      (Array.isArray(sourceItems) ? sourceItems : [])
+        .map((item) => {
+          const quantity = Number(item.quantity) || 0;
+          const rate = Number(item.rate) || 0;
+          return {
+            ...item,
+            id: item.id ?? buildSubmitSourceIdentity(item),
+            sourceType: String(item.sourceType ?? item.SourceType ?? "").trim(),
+            sourceKey: String(item.sourceKey ?? item.SourceKey ?? "").trim(),
+            sourceRowId: String(
+              item.sourceRowId ?? item.SourceRowId ?? item.sourceKey ?? item.SourceKey ?? ""
+            ).trim(),
+            sourceRef: String(item.sourceRef ?? item.SourceRef ?? "").trim(),
+            name: String(item.name ?? item.Name ?? item.Item ?? "").trim(),
+            description: String(item.description ?? item.Description ?? "").trim(),
+            unit: String(item.unit ?? item.Unit ?? "PCS").trim() || "PCS",
+            hsn: String(item.hsn ?? item.HSN ?? "").trim(),
+            gst: String(item.gst ?? item.GST ?? "").trim(),
+            quantity,
+            rate,
+            availableQty: Math.max(Number(item.availableQty ?? 0) || 0, 0),
+            receiptItemId: parseNumberValue(
+              item.receiptItemId ??
+                item.ReceiptItemId ??
+                item.receiveGoodsItemId ??
+                item.ReceiveGoodsItemId
+            ),
+            receiveGoodsItemId: parseNumberValue(
+              item.receiveGoodsItemId ?? item.ReceiveGoodsItemId
+            ),
+            poItemId: parseNumberValue(item.poItemId ?? item.POItemId),
+            itemId: parseNumberValue(item.itemId ?? item.ItemId),
+            deliveryChallanId: parseNumberValue(
+              item.deliveryChallanId ?? item.DeliveryChallanId
+            ),
+            deliveryChallanItemId: parseNumberValue(
+              item.deliveryChallanItemId ??
+                item.DeliveryChallanItemId ??
+                item.deliveryChallanLineItemId ??
+                item.DeliveryChallanLineItemId
+            ),
+          };
+        })
+        .filter((item) => item.name && item.quantity > 0),
+    []
+  );
+
+  const buildFreshAvailabilityMap = useCallback((rows = []) => {
+    const nextMap = new Map();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      buildAvailabilityLookupKeys(row).forEach((key) => {
+        if (!nextMap.has(key)) {
+          nextMap.set(key, row);
+        }
+      });
+    });
+    return nextMap;
+  }, []);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setReceiptError("");
-    if (!validate()) {
+    if (isSubmitting) {
+      return;
+    }
+
+    const normalizedItems = buildNormalizedItemsForSubmit(items);
+    if (!validate(normalizedItems)) {
       console.debug("Delivery challan validation failed", {
-        items,
+        items: normalizedItems,
         selectedReceiptIds,
         loadedReceiptIds,
       });
       return;
     }
 
-    const cleanedItems = items
-      .map((item) => ({
-        ...item,
-        name: String(item.name ?? "").trim(),
-        hsn: String(item.hsn ?? "").trim(),
-        gst: String(item.gst ?? "").trim(),
-        quantity: Number(item.quantity) || 0,
-        rate: Number(item.rate) || 0,
-      }))
-      .filter((item) => item.name && Number(item.quantity) > 0);
-
     const receiptIdsForPayload = loadedReceiptIds.length
       ? loadedReceiptIds
       : selectedReceiptIds;
 
-    const payload = {
-      dcNumber: String(form.dcNumber ?? "").trim(),
-      projectId: parseNumberValue(form.projectId),
-      receiveGoodsId: parseNumberValue(form.receiveGoodsId),
-      receiveGoodsIds: receiptIdsForPayload
-        .map((receiptId) => parseNumberValue(receiptId))
-        .filter((receiptId) => receiptId !== null && receiptId > 0),
-      fromLocationId: parseNumberValue(form.fromLocationId),
-      toLocationId: parseNumberValue(form.toLocationId),
-      toLocation: String(form.toLocation ?? "").trim(),
-      vehicleNumber: String(form.vehicleNumber ?? "").trim() || null,
-      eWayBillNumber: String(form.eWayBillNumber ?? "").trim() || null,
-      issueDate: String(form.issueDate ?? "").trim() || null,
-      status: String(form.status ?? "Draft").trim(),
-      podStatus: POD_STATUS.PENDING,
-      podReference: null,
-      podDate: null,
-      notes: String(form.notes ?? "").trim() || null,
-      auditBy: profileName,
-      auditRole: profileRole,
-      items: cleanedItems,
-    };
+    const projectId = parseNumberValue(form.projectId);
+    const fromLocationId = parseNumberValue(form.fromLocationId);
+    const toLocationId = parseNumberValue(form.toLocationId);
 
-    console.debug("Delivery challan submit payload", payload);
-    cleanedItems.forEach((item, index) => {
-      console.debug(`Item ${index + 1}:`, {
-        name: item.name,
-        receiveGoodsItemId: item.receiveGoodsItemId,
-        poItemId: item.poItemId,
-        itemId: item.itemId,
-        availableQty: item.availableQty,
-        enteredQuantity: item.quantity,
-        rate: item.rate,
-      });
-    });
+    if (!projectId || !fromLocationId || !toLocationId) {
+      setReceiptError(
+        "Project, source location, and destination location are required before saving."
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
 
     try {
+      const latestReceipts = await loadReceipts(projectId, {
+        excludeDeliveryChallanId: editingId || null,
+      });
+      const latestReceiptStockMap = buildLatestReceiptStockMap(latestReceipts);
+      const latestReceiptItemToReceiptIdMap = buildReceiptItemToReceiptIdMap(latestReceipts);
+      const latestAvailableRows = await fetchAvailableInventory({
+        projectId,
+        locationId: fromLocationId,
+        excludeDeliveryChallanId: editingId || undefined,
+        includeConsumptionLeftover: true,
+      });
+      const freshAvailabilityMap = buildFreshAvailabilityMap(latestAvailableRows);
+      const requestedBySource = new Map();
+      const remappedItems = normalizedItems.map((item) => {
+        const normalizedSourceType = normalizeLookupText(item.sourceType);
+        let latestRow = null;
+        let latestAvailableQty = 0;
+        let sourceKey = "";
+        let sourceRowId = "";
+        let sourceRef = String(item.sourceRef ?? "").trim();
+        let resolvedReceiptItemId = parseNumberValue(
+          item.receiptItemId ?? item.receiveGoodsItemId
+        );
+        let resolvedReceiveGoodsItemId = parseNumberValue(item.receiveGoodsItemId);
+
+        if (normalizedSourceType === "receive") {
+          const receiptItemId = parseNumberValue(
+            item.receiptItemId ?? item.receiveGoodsItemId
+          );
+          const latestReceiptRow = receiptItemId
+            ? latestReceiptStockMap.get(String(receiptItemId))
+            : null;
+          const rowLabel = `${item.sourceRef || "Receipt"} | ${item.name || "Item"}`;
+
+          if (!latestReceiptRow) {
+            throw new Error(
+              `Receipt row ${rowLabel} is no longer available. Reload the latest receipt stock and try again.`
+            );
+          }
+
+          latestAvailableQty = Math.max(Number(latestReceiptRow.availableQty ?? 0) || 0, 0);
+          sourceRef = getReceiptReference(latestReceiptRow.receipt);
+          resolvedReceiptItemId = receiptItemId;
+          resolvedReceiveGoodsItemId = receiptItemId;
+          sourceKey = `receive:${receiptItemId}`;
+          sourceRowId = sourceKey;
+
+          if (latestAvailableQty <= 0) {
+            throw new Error(
+              `Receipt row ${sourceRef} | ${item.name || "Item"} is fully used and cannot be dispatched again.`
+            );
+          }
+
+          console.debug("Delivery Challan receipt balance check", {
+            receiptRef: sourceRef,
+            item: item.name,
+            receiptItemId,
+            displayedAvailableQty: item.availableQty,
+            latestFrontendAvailableQty: latestAvailableQty,
+          });
+        } else {
+          latestRow = findLatestAvailabilityRow(
+            item,
+            latestAvailableRows,
+            freshAvailabilityMap
+          );
+          if (!latestRow) {
+            throw new Error(
+              `Source row ${item.sourceRef || "-"} | ${item.name || "an item"} is no longer available. Reload the latest stock and try again.`
+            );
+          }
+
+          latestAvailableQty = Math.max(Number(latestRow.availableQty ?? 0) || 0, 0);
+          sourceKey = String(
+            latestRow.sourceKey ?? item.sourceKey ?? buildAvailabilityLookupKeys(item)[0] ?? ""
+          ).trim();
+          sourceRowId = String(
+            latestRow.sourceRowId ?? latestRow.sourceKey ?? item.sourceRowId ?? sourceKey
+          ).trim();
+          sourceRef = String(latestRow.sourceRef ?? item.sourceRef ?? "").trim();
+          resolvedReceiptItemId =
+            parseNumberValue(
+              latestRow.receiptItemId ??
+                latestRow.receiveGoodsItemId ??
+                item.receiptItemId ??
+                item.receiveGoodsItemId
+            ) ?? null;
+          resolvedReceiveGoodsItemId =
+            parseNumberValue(latestRow.receiveGoodsItemId ?? item.receiveGoodsItemId) ?? null;
+
+          if (latestAvailableQty <= 0) {
+            throw new Error(
+              `${item.sourceRef || "This source row"} | ${item.name || "This item"} is already fully used and cannot be dispatched again.`
+            );
+          }
+
+          console.debug("Delivery Challan inventory balance check", {
+            sourceRef,
+            item: item.name,
+            sourceRowId,
+            displayedAvailableQty: item.availableQty,
+            latestFrontendAvailableQty: latestAvailableQty,
+          });
+        }
+
+        requestedBySource.set(
+          sourceRowId || sourceKey,
+          (requestedBySource.get(sourceRowId || sourceKey) ?? 0) +
+            Math.max(Number(item.quantity) || 0, 0)
+        );
+
+        return {
+          ...item,
+          sourceType:
+            normalizedSourceType === "receive"
+              ? "receive"
+              : String(latestRow?.sourceType ?? item.sourceType ?? "").trim(),
+          sourceKey,
+          sourceRowId: sourceRowId || sourceKey,
+          sourceRef,
+          receiptItemId: resolvedReceiptItemId ?? null,
+          receiveGoodsItemId: resolvedReceiveGoodsItemId ?? null,
+          poItemId: parseNumberValue(item.poItemId) ?? null,
+          itemId: parseNumberValue(latestRow?.itemId ?? item.itemId) ?? null,
+          deliveryChallanId:
+            parseNumberValue(latestRow?.deliveryChallanId ?? item.deliveryChallanId) ?? null,
+          deliveryChallanItemId:
+            parseNumberValue(
+              latestRow?.deliveryChallanItemId ?? item.deliveryChallanItemId
+            ) ?? null,
+          availableQty: latestAvailableQty,
+        };
+      });
+
+      const duplicateRequested = remappedItems.find((item) => {
+        const sourceIdentity = String(item.sourceRowId ?? item.sourceKey ?? "").trim();
+        return !sourceIdentity || (requestedBySource.get(sourceIdentity) ?? 0) > item.availableQty;
+      });
+      if (duplicateRequested) {
+        throw new Error(
+          `DC quantity for ${duplicateRequested.name || "an item"} cannot exceed the latest available quantity (${duplicateRequested.availableQty}).`
+        );
+      }
+
+      const invalidMappedItem = remappedItems.find(
+        (item) =>
+          !item.itemId ||
+          (!item.receiveGoodsItemId && normalizeLookupText(item.sourceType) === "receive") ||
+          (!item.sourceRowId && !item.sourceKey) ||
+          item.quantity <= 0
+      );
+      if (invalidMappedItem) {
+        throw new Error(
+          `Required source identifiers are missing for ${invalidMappedItem.name || "an item"}. Reload the source rows and try again.`
+        );
+      }
+
+      const exactReceiptIdsForPayload = Array.from(
+        new Set(
+          remappedItems
+            .map((item) => {
+              if (normalizeLookupText(item.sourceType) !== "receive") {
+                return null;
+              }
+              const receiptItemId = parseNumberValue(
+                item.receiptItemId ?? item.receiveGoodsItemId
+              );
+              return receiptItemId
+                ? latestReceiptItemToReceiptIdMap.get(String(receiptItemId)) ?? null
+                : null;
+            })
+            .filter((receiptId) => receiptId !== null && receiptId > 0)
+        )
+      );
+
+      const payload = {
+        dcNumber: String(form.dcNumber ?? "").trim(),
+        projectId,
+        receiveGoodsId:
+          exactReceiptIdsForPayload[0] ??
+          parseNumberValue(form.receiveGoodsId),
+        receiveGoodsIds: exactReceiptIdsForPayload.length
+          ? exactReceiptIdsForPayload
+          : receiptIdsForPayload
+              .map((receiptId) => parseNumberValue(receiptId))
+              .filter((receiptId) => receiptId !== null && receiptId > 0),
+        fromLocationId,
+        toLocationId,
+        toLocation: String(form.toLocation ?? "").trim(),
+        vehicleNumber: String(form.vehicleNumber ?? "").trim() || null,
+        eWayBillNumber: String(form.eWayBillNumber ?? "").trim() || null,
+        issueDate: String(form.issueDate ?? "").trim() || null,
+        status: String(form.status ?? "Draft").trim(),
+        podStatus: POD_STATUS.PENDING,
+        podReference: null,
+        podDate: null,
+        notes: String(form.notes ?? "").trim() || null,
+        auditBy: profileName,
+        auditRole: profileRole,
+        items: remappedItems.map((item) => ({
+          receiptItemId: item.receiptItemId,
+          receiveGoodsItemId: item.receiveGoodsItemId,
+          poItemId: item.poItemId,
+          itemId: item.itemId,
+          deliveryChallanId: item.deliveryChallanId,
+          deliveryChallanItemId: item.deliveryChallanItemId,
+          sourceType: item.sourceType || null,
+          sourceKey: item.sourceKey || null,
+          sourceRowId: item.sourceRowId || item.sourceKey || null,
+          sourceRef: item.sourceRef || null,
+          name: item.name,
+          description: item.description || null,
+          unit: item.unit || "PCS",
+          hsn: item.hsn || null,
+          gst: item.gst || null,
+          quantity: Number(item.quantity) || 0,
+          rate: Number(item.rate) || 0,
+          notes: item.notes || null,
+        })),
+      };
+
+      console.debug("Delivery challan submit payload", payload);
+      console.debug("Delivery challan receipt linkage", {
+        selectedReceiptIds: receiptIdsForPayload,
+        exactReceiptIdsForPayload,
+        remappedReceiveItems: remappedItems
+          .filter((item) => normalizeLookupText(item.sourceType) === "receive")
+          .map((item) => ({
+            item: item.name,
+            receiptItemId: item.receiptItemId ?? item.receiveGoodsItemId ?? null,
+            receiveGoodsItemId: item.receiveGoodsItemId ?? null,
+            sourceRowId: item.sourceRowId ?? null,
+            sourceRef: item.sourceRef ?? null,
+          })),
+      });
+      payload.items.forEach((item, index) => {
+        console.debug(`Item ${index + 1}:`, item);
+      });
+
       let savedChallan;
       if (editingId) {
         savedChallan = await updateDeliveryChallan(editingId, payload);
@@ -1413,6 +2148,7 @@ const DeliveryChallan = () => {
         savedChallan = await createDeliveryChallan(payload);
       }
       await loadRecords();
+      await loadReceipts(projectId);
       resetForm();
       setUpdateProof(
         `${editingId ? "Delivery challan updated" : "Delivery challan saved"}: ${
@@ -1427,6 +2163,8 @@ const DeliveryChallan = () => {
         "Failed to save delivery challan.";
       setReceiptError(apiErrorMessage);
       console.error("Failed to save delivery challan:", error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1500,6 +2238,7 @@ const DeliveryChallan = () => {
     try {
       await deleteDeliveryChallan(id);
       await loadRecords();
+      await loadReceipts(form.projectId || null);
     } catch (error) {
       console.error("Failed to delete delivery challan:", error);
     }
@@ -2579,10 +3318,18 @@ const DeliveryChallan = () => {
               <select
                 value={form.fromLocationId}
                 onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    fromLocationId: event.target.value,
-                  }))
+                  {
+                    const nextFromLocationId = event.target.value;
+                    setForm((prev) => ({
+                      ...prev,
+                      fromLocationId: nextFromLocationId,
+                      receiveGoodsId: "",
+                    }));
+                    setSelectedReceiptIds([]);
+                    setLoadedReceiptIds([]);
+                    setItems([]);
+                    setReceiptError("");
+                  }
                 }
                 className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
               >
@@ -3057,9 +3804,16 @@ const DeliveryChallan = () => {
           </button>
           <button
             type="submit"
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            disabled={isSubmitting}
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {editingId ? "Update Challan" : "Save Challan"}
+            {isSubmitting
+              ? editingId
+                ? "Updating..."
+                : "Saving..."
+              : editingId
+              ? "Update Challan"
+              : "Save Challan"}
           </button>
         </div>
       </form>

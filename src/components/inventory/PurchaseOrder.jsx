@@ -515,10 +515,16 @@ const PurchaseOrder = () => {
         if (!name || qty <= 0) {
           continue;
         }
+        const boqItemId = Number.parseInt(
+          item.boqItemId ?? item.BoqItemId ?? item.BOQItemId ?? "",
+          10
+        );
         const itemId = Number.parseInt(item.itemId ?? item.ItemId ?? "", 10);
         const normalizedName = name.toLowerCase();
         const normalizedUnit = String(item.unit || "0").trim().toUpperCase() || "0";
-        const identityKey = Number.isFinite(itemId) && itemId > 0
+        const identityKey = Number.isFinite(boqItemId) && boqItemId > 0
+          ? `boq-item-id:${boqItemId}`
+          : Number.isFinite(itemId) && itemId > 0
           ? `id:${itemId}`
           : `name:${normalizedName}::${normalizedUnit}`;
         if (seen.has(identityKey)) {

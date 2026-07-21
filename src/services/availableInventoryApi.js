@@ -10,7 +10,20 @@ const normalizeAvailableInventoryItem = (item = {}) => ({
   locationId: item.locationId ?? item.LocationId ?? null,
   sourceType: item.sourceType ?? item.SourceType ?? "",
   sourceKey: item.sourceKey ?? item.SourceKey ?? "",
+  sourceRowId:
+    item.sourceRowId ??
+    item.SourceRowId ??
+    item.sourceKey ??
+    item.SourceKey ??
+    "",
   receiveGoodsId: item.receiveGoodsId ?? item.ReceiveGoodsId ?? null,
+  receiptItemId:
+    item.receiptItemId ??
+    item.ReceiptItemId ??
+    item.receiveGoodsItemId ??
+    item.ReceiveGoodsItemId ??
+    item.ReceiveItemId ??
+    null,
   receiveGoodsItemId:
     item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId ?? null,
   deliveryChallanId: item.deliveryChallanId ?? item.DeliveryChallanId ?? null,
@@ -56,14 +69,25 @@ const normalizeAvailableInventoryItem = (item = {}) => ({
 export const fetchAvailableInventory = async ({
   projectId,
   locationId,
+  destinationLocationId,
+  excludeDeliveryChallanId,
   excludeConsumptionId,
   excludeReallocateInventoryId,
   includeConsumptionLeftover,
 } = {}) => {
+  if (import.meta.env.DEV) {
+    console.debug("[Consumption lookup] requesting available inventory", {
+      projectId,
+      sourceLocationId: locationId,
+      destinationLocationId,
+    });
+  }
   const response = await api.get("/available-inventory", {
     params: {
       projectId,
       locationId,
+      destinationLocationId,
+      excludeDeliveryChallanId,
       excludeConsumptionId,
       excludeReallocateInventoryId,
       includeConsumptionLeftover,
@@ -74,5 +98,16 @@ export const fetchAvailableInventory = async ({
     : Array.isArray(response.data)
     ? response.data
     : [];
-  return list.map(normalizeAvailableInventoryItem);
+  const normalized = list.map(normalizeAvailableInventoryItem);
+  if (import.meta.env.DEV) {
+    console.debug("[Consumption lookup] available inventory response", {
+      rowCount: normalized.length,
+      dcRowsWithBalance: normalized.filter(
+        (row) =>
+          String(row.sourceType || "").trim().toLowerCase() === "dc" &&
+          row.remainingAvailableQty > 0
+      ).length,
+    });
+  }
+  return normalized;
 };

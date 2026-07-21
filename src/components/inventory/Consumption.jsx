@@ -148,27 +148,34 @@ const dedupeExactInventoryRows = (rows = []) => {
       return;
     }
 
+    const sourceQty = Math.max(toNumber(existing.sourceQty), toNumber(row.sourceQty));
+    const consumedQty = Math.max(
+      toNumber(existing.consumedQty),
+      toNumber(row.consumedQty)
+    );
+    const reallocatedQty = Math.max(
+      toNumber(existing.reallocatedQty ?? existing.adjustedQty),
+      toNumber(row.reallocatedQty ?? row.adjustedQty)
+    );
+    const remainingAvailableQty = Math.max(
+      sourceQty - consumedQty - reallocatedQty,
+      0
+    );
+
     uniqueRows.set(key, {
       ...existing,
-      sourceQty: Math.max(toNumber(existing.sourceQty), toNumber(row.sourceQty)),
-      consumedQty: Math.max(toNumber(existing.consumedQty), toNumber(row.consumedQty)),
-      adjustedQty: Math.max(
-        toNumber(existing.adjustedQty ?? existing.reallocatedQty),
-        toNumber(row.adjustedQty ?? row.reallocatedQty)
-      ),
-      reallocatedQty: Math.max(
-        toNumber(existing.reallocatedQty ?? existing.adjustedQty),
-        toNumber(row.reallocatedQty ?? row.adjustedQty)
-      ),
-      availableQty: Math.max(toNumber(existing.availableQty), toNumber(row.availableQty)),
-      remainingAvailableQty: Math.max(
-        toNumber(existing.remainingAvailableQty),
-        toNumber(row.remainingAvailableQty)
-      ),
+      sourceQty,
+      consumedQty,
+      adjustedQty: reallocatedQty,
+      reallocatedQty,
+      availableQty: remainingAvailableQty,
+      remainingAvailableQty,
     });
   });
 
-  return Array.from(uniqueRows.values());
+  return Array.from(uniqueRows.values()).filter(
+    (row) => Math.max(toNumber(row.remainingAvailableQty ?? row.availableQty), 0) > 0
+  );
 };
 
 const buildReallocationSourceKey = (record = {}, item = {}) => {
@@ -278,7 +285,19 @@ const resolveBaseAvailableQty = ({
   adjustedQty = null,
   availableQty = null,
   remainingAvailableQty = null,
+  remainingQty = null,
+  balanceQty = null,
 } = {}) => {
+  const backendAvailableQty = [
+    availableQty,
+    remainingAvailableQty,
+    remainingQty,
+    balanceQty,
+  ].find(hasQuantityValue);
+  if (hasQuantityValue(backendAvailableQty)) {
+    return Math.max(toNumber(backendAvailableQty), 0);
+  }
+
   const normalizedSourceQty = Math.max(toNumber(sourceQty), 0);
   const normalizedConsumedQty = Math.max(toNumber(consumedQty), 0);
   const normalizedAdjustedQty = Math.max(toNumber(adjustedQty), 0);
@@ -294,8 +313,28 @@ const resolveBaseAvailableQty = ({
     );
   }
 
-  return Math.max(toNumber(remainingAvailableQty ?? availableQty), 0);
+  return 0;
 };
+
+const resolveRowBackendAvailableQty = (row = {}) =>
+  resolveBaseAvailableQty({
+    availableQty: row.availableQty ?? row.AvailableQty,
+    remainingAvailableQty:
+      row.remainingAvailableQty ?? row.RemainingAvailableQty,
+    remainingQty: row.remainingQty ?? row.RemainingQty,
+    balanceQty: row.balanceQty ?? row.BalanceQty,
+    sourceQty: row.sourceQty ?? row.SourceQty ?? row.dcQty,
+    consumedQty:
+      row.consumedQty ??
+      row.ConsumedQty ??
+      row.previouslyConsumed ??
+      row.PreviouslyConsumed,
+    adjustedQty:
+      row.adjustedQty ??
+      row.AdjustedQty ??
+      row.reallocatedQty ??
+      row.ReallocatedQty,
+  });
 
 const buildConsumptionRowState = (
   row = {},
@@ -303,7 +342,12 @@ const buildConsumptionRowState = (
 ) => {
   const sourceQty = Math.max(toNumber(row.sourceQty ?? row.dcQty), 0);
   const consumedQty = Math.max(
-    toNumber(row.consumedQty ?? row.previouslyConsumed),
+    toNumber(
+      row.consumedQty ??
+        row.ConsumedQty ??
+        row.previouslyConsumed ??
+        row.PreviouslyConsumed
+    ),
     0
   );
   const adjustedQty = Math.max(
@@ -318,6 +362,8 @@ const buildConsumptionRowState = (
       hasQuantityValue(row.adjustedQty ?? row.reallocatedQty) ? adjustedQty : null,
     availableQty: row.availableQty,
     remainingAvailableQty: row.remainingAvailableQty,
+    remainingQty: row.remainingQty ?? row.RemainingQty,
+    balanceQty: row.balanceQty ?? row.BalanceQty,
   });
   const consumeQty = clampRequestedQuantity(requestedQty, maxAvailableQty);
 
@@ -331,7 +377,9 @@ const buildConsumptionRowState = (
     reallocatedQty: adjustedQty,
     maxAvailableQty,
     availableQty: maxAvailableQty,
-    remainingAvailableQty: Math.max(maxAvailableQty - consumeQty, 0),
+    // The input is only a draft until Save. Display the persisted backend
+    // balance here; subtracting consumeQty makes fully-selected stock look used.
+    remainingAvailableQty: maxAvailableQty,
     consumeQty: consumeQty > 0 ? formatQuantityInputText(consumeQty) : "",
     selected: Boolean(selected) && maxAvailableQty > 0,
   };
@@ -587,7 +635,7 @@ const buildRowsFromAvailableInventory = ({
     const sourceKey = String(line.sourceKey ?? "").trim();
     const sourceId = toNullableInt(line.receiveGoodsItemId);
     const key = materialKey(line);
-    const availableQuantity = Math.max(toNumber(line.availableQty), 0);
+    const availableQuantity = resolveRowBackendAvailableQty(line);
     const existingItem = takeExistingItem({
       sourceKey,
       sourceId,
@@ -608,7 +656,10 @@ const buildRowsFromAvailableInventory = ({
       sourceType: line.sourceType || "receive",
       sourceKey,
       sourceRef: line.sourceRef || "",
-      sourceQty: Math.max(toNumber(line.sourceQty), 0),
+      sourceQty: Math.max(
+        toNumber(line.sourceQty ?? line.SourceQty ?? line.dcQty),
+        0
+      ),
       boqItemId: toNullableInt(existingItem?.boqItemId ?? line.itemId) ?? null,
       itemId: toNullableInt(line.itemId ?? existingItem?.itemId) ?? null,
       receiveGoodsId: toNullableInt(line.receiveGoodsId),
@@ -626,16 +677,32 @@ const buildRowsFromAvailableInventory = ({
       gst: line.gst || "",
       rate: toNumber(line.rate),
       notes: line.notes || "",
-      dcQty: Math.max(toNumber(line.sourceQty), 0),
-      consumedQty: Math.max(toNumber(line.consumedQty), 0),
-      previouslyConsumed: Math.max(toNumber(line.consumedQty), 0),
+      dcQty: Math.max(
+        toNumber(line.sourceQty ?? line.SourceQty ?? line.dcQty),
+        0
+      ),
+      consumedQty: Math.max(
+        toNumber(
+          line.consumedQty ??
+            line.ConsumedQty ??
+            line.previouslyConsumed ??
+            line.PreviouslyConsumed
+        ),
+        0
+      ),
+      previouslyConsumed: Math.max(
+        toNumber(
+          line.consumedQty ??
+            line.ConsumedQty ??
+            line.previouslyConsumed ??
+            line.PreviouslyConsumed
+        ),
+        0
+      ),
       adjustedQty: Math.max(toNumber(line.adjustedQty ?? line.reallocatedQty), 0),
       reallocatedQty: Math.max(toNumber(line.adjustedQty ?? line.reallocatedQty), 0),
       availableQty: availableQuantity,
-      remainingAvailableQty: Math.max(
-        toNumber(line.remainingAvailableQty ?? line.availableQty),
-        0
-      ),
+      remainingAvailableQty: availableQuantity,
       selected: selectedQuantity > 0,
       consumeQty: selectedQuantity > 0 ? formatQuantityInputText(selectedQuantity) : "",
     });
@@ -839,20 +906,6 @@ const Consumption = () => {
     return nextMap;
   }, [reallocations]);
 
-  const reallocatedQtyBySourceKey = useMemo(() => {
-    const nextMap = new Map();
-    reallocations.forEach((record) => {
-      (record.items || []).forEach((item) => {
-        const key = buildRecordItemSourceKey(item, item.deliveryChallanId ?? record.deliveryChallanId);
-        if (!key) {
-          return;
-        }
-        nextMap.set(key, (nextMap.get(key) ?? 0) + Math.max(toNumber(item.quantity), 0));
-      });
-    });
-    return nextMap;
-  }, [reallocations]);
-
   const sourceQtyByKey = useMemo(() => {
     const nextMap = new Map();
     [deliveryChallanSourceQtyByKey, receiveSourceQtyByKey, reallocationSourceQtyByKey].forEach(
@@ -869,22 +922,14 @@ const Consumption = () => {
     reallocationSourceQtyByKey,
   ]);
 
-  const consumedQtyBySourceKey = useMemo(() => {
-    const nextMap = new Map();
-    consumptions.forEach((record) => {
-      (record.items || []).forEach((item) => {
-        const key = buildRecordItemSourceKey(item, record.deliveryChallanId);
-        if (!key) {
-          return;
-        }
-        nextMap.set(key, (nextMap.get(key) ?? 0) + Math.max(toNumber(item.quantity), 0));
-      });
-    });
-    return nextMap;
-  }, [consumptions]);
-
   const loadAvailableInventoryForLocation = useCallback(
-    async ({ projectId, locationId, preserveRows = false } = {}) => {
+    async ({
+      projectId,
+      locationId,
+      destinationLocationId = null,
+      preserveRows = false,
+      excludeConsumptionId = undefined,
+    } = {}) => {
       const safeProjectId = String(projectId ?? "").trim();
       const safeLocationId = String(locationId ?? "").trim();
 
@@ -904,7 +949,11 @@ const Consumption = () => {
         const list = await fetchAvailableInventory({
           projectId: safeProjectId,
           locationId: safeLocationId,
-          excludeConsumptionId: editingId || undefined,
+          destinationLocationId,
+          excludeConsumptionId:
+            excludeConsumptionId === undefined
+              ? editingId || undefined
+              : excludeConsumptionId,
         });
         const safeList = dedupeExactInventoryRows(Array.isArray(list) ? list : []);
         setAvailableInventory(safeList);
@@ -1140,6 +1189,7 @@ const Consumption = () => {
     loadAvailableInventoryForLocation({
       projectId,
       locationId: sourceLocationId,
+      destinationLocationId: form.locationId || null,
     }).then((list) => {
         if (cancelled) {
           return;
@@ -1169,26 +1219,96 @@ const Consumption = () => {
     loadAvailableInventoryForLocation,
   ]);
 
-  const availableChallans = useMemo(() => {
+  const availableDcInventoryRows = useMemo(() => {
     const selectedProjectId = String(form.projectId || "").trim();
-    const selectedSourceLocationId = String(form.fromLocationId || "").trim();
+    const selectedSourceLocationId = String(
+      form.fromLocationId || form.locationId || ""
+    ).trim();
 
-    return deliveryChallans.filter((challan) => {
+    return availableInventory.filter((row) => {
+      if (normalizeText(row.sourceType) !== "dc") {
+        return false;
+      }
+      if (Math.max(toNumber(row.remainingAvailableQty ?? row.availableQty), 0) <= 0) {
+        return false;
+      }
       if (
         selectedProjectId &&
-        String(challan.projectId ?? "").trim() !== selectedProjectId
+        String(row.projectId ?? "").trim() !== selectedProjectId
       ) {
         return false;
       }
       if (
         selectedSourceLocationId &&
-        String(challan.toLocationId ?? "").trim() !== selectedSourceLocationId
+        String(row.locationId ?? "").trim() !== selectedSourceLocationId
       ) {
         return false;
       }
-      return true;
+      return Boolean(
+        toNullableInt(row.deliveryChallanId) !== null &&
+          toNullableInt(row.deliveryChallanItemId) !== null
+      );
     });
-  }, [deliveryChallans, form.fromLocationId, form.projectId]);
+  }, [availableInventory, form.fromLocationId, form.locationId, form.projectId]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+    const dcRows = availableInventory.filter(
+      (row) => normalizeText(row.sourceType) === "dc"
+    );
+    console.debug("[Consumption lookup] frontend filter/render", {
+      projectId: form.projectId || null,
+      sourceLocationId: form.fromLocationId || form.locationId || null,
+      destinationLocationId: form.locationId || null,
+      apiRows: availableInventory.length,
+      apiDcRows: dcRows.length,
+      positiveDcRows: dcRows.filter(
+        (row) => toNumber(row.remainingAvailableQty ?? row.availableQty) > 0
+      ).length,
+      renderedDcRows: availableDcInventoryRows.length,
+    });
+  }, [
+    availableDcInventoryRows.length,
+    availableInventory,
+    form.fromLocationId,
+    form.locationId,
+    form.projectId,
+  ]);
+
+  const availableChallans = useMemo(() => {
+    const rowsByChallanId = new Map();
+    availableDcInventoryRows.forEach((row) => {
+      const challanId = String(row.deliveryChallanId ?? "").trim();
+      if (!challanId) {
+        return;
+      }
+      if (!rowsByChallanId.has(challanId)) {
+        rowsByChallanId.set(challanId, []);
+      }
+      rowsByChallanId.get(challanId).push(row);
+    });
+
+    return Array.from(rowsByChallanId.entries()).map(([challanId, rows]) => {
+      const challan = deliveryChallans.find(
+        (candidate) => String(candidate.id ?? "") === challanId
+      );
+      if (challan) {
+        return challan;
+      }
+      const firstRow = rows[0] ?? {};
+      return {
+        id: firstRow.deliveryChallanId,
+        deliveryChallanId: firstRow.deliveryChallanId,
+        dcNumber: firstRow.sourceRef || `DC ${firstRow.deliveryChallanId}`,
+        projectId: firstRow.projectId,
+        toLocationId: firstRow.locationId,
+        status: "Available",
+        items: rows,
+      };
+    });
+  }, [availableDcInventoryRows, deliveryChallans]);
 
   const reallocationAvailableQtyByRef = useMemo(() => {
     const nextMap = new Map();
@@ -1247,12 +1367,13 @@ const Consumption = () => {
     reallocations,
   ]);
 
-  const filteredDeliveryChallansForSelection = useMemo(() => {
+  const filteredDeliveryChallanInventoryRows = useMemo(() => {
     const keyword = normalizeText(deliveryChallanFilter);
-    return availableChallans.filter((challan) => {
+    return availableDcInventoryRows.filter((row) => {
       if (!keyword) {
         return true;
       }
+      const challan = deliveryChallanMap[String(row.deliveryChallanId)] ?? {};
       const fromLocation =
         locationMap[String(challan.fromLocationId)]?.name ||
         challan.fromLocation ||
@@ -1262,6 +1383,9 @@ const Consumption = () => {
         challan.toLocation ||
         "";
       return [
+        row.sourceRef,
+        row.name,
+        row.itemCode,
         challan.dcNumber,
         fromLocation,
         toLocation,
@@ -1271,7 +1395,26 @@ const Consumption = () => {
         .toLowerCase()
         .includes(keyword);
     });
-  }, [availableChallans, deliveryChallanFilter, locationMap]);
+  }, [
+    availableDcInventoryRows,
+    deliveryChallanFilter,
+    deliveryChallanMap,
+    locationMap,
+  ]);
+
+  const filteredDeliveryChallansForSelection = useMemo(() => {
+    const visibleIds = new Set(
+      filteredDeliveryChallanInventoryRows.map((row) =>
+        String(row.deliveryChallanId ?? "")
+      )
+    );
+    return availableChallans.filter((challan) =>
+      visibleIds.has(String(challan.id ?? challan.deliveryChallanId ?? ""))
+    );
+  }, [
+    availableChallans,
+    filteredDeliveryChallanInventoryRows,
+  ]);
 
   const filteredReallocationsForSelection = useMemo(() => {
     const keyword = normalizeText(deliveryChallanFilter);
@@ -1579,19 +1722,31 @@ const Consumption = () => {
       const itemMetrics = (record.items || []).map((item, index) => {
         const sourceKey = buildRecordItemSourceKey(item, record.deliveryChallanId);
         const consumedQty = Math.max(toNumber(item.quantity), 0);
-        const sourceQty = Math.max(toNumber(sourceQtyByKey.get(sourceKey)), consumedQty);
-        const totalConsumedQty = Math.max(
-          toNumber(consumedQtyBySourceKey.get(sourceKey)),
+        const persistedBalance = [
+          item.remainingQty,
+          item.remainingAvailableQty,
+          item.availableQty,
+          item.balanceQty,
+        ].find(hasQuantityValue);
+        const sourceQty = Math.max(
+          toNumber(
+            hasQuantityValue(item.sourceQty)
+              ? item.sourceQty
+              : sourceQtyByKey.get(sourceKey)
+          ),
           consumedQty
         );
-        const totalReallocatedQty = Math.max(
-          toNumber(reallocatedQtyBySourceKey.get(sourceKey)),
-          0
+        const totalConsumedQty = Math.max(
+          toNumber(
+            hasQuantityValue(item.totalConsumedQty)
+              ? item.totalConsumedQty
+              : consumedQty
+          ),
+          consumedQty
         );
-        const availableBalance = Math.max(
-          sourceQty - totalConsumedQty - totalReallocatedQty,
-          0
-        );
+        const availableBalance = hasQuantityValue(persistedBalance)
+          ? Math.max(toNumber(persistedBalance), 0)
+          : Math.max(sourceQty - totalConsumedQty, 0);
 
         return {
           key: item.id ?? `${record.id ?? "record"}:${index}`,
@@ -1615,11 +1770,27 @@ const Consumption = () => {
 
     return metricsByRecordId;
   }, [
-    consumedQtyBySourceKey,
-    reallocatedQtyBySourceKey,
     sortedRecords,
     sourceQtyByKey,
   ]);
+
+  const getRecordSourceReference = useCallback(
+    (record = {}) => {
+      const itemReferences = (record.items || [])
+        .map((item) => String(item.sourceRef || item.deliveryChallanRef || "").trim())
+        .filter(Boolean);
+      const references = Array.from(new Set(itemReferences));
+      if (references.length) {
+        return references.join(", ");
+      }
+      return (
+        deliveryChallanMap[String(record.deliveryChallanId)]?.dcNumber ||
+        record.deliveryChallanRef ||
+        "-"
+      );
+    },
+    [deliveryChallanMap]
+  );
 
   const clearError = (name) => {
     setErrors((prev) => {
@@ -2174,6 +2345,11 @@ const Consumption = () => {
     }
 
     const payload = buildPayload();
+    const availabilityScope = {
+      projectId: payload.projectId,
+      locationId: payload.fromLocationId ?? payload.locationId,
+      destinationLocationId: payload.locationId,
+    };
 
     setSaving(true);
     try {
@@ -2183,7 +2359,15 @@ const Consumption = () => {
         await createConsumption(payload);
       }
 
-      const latest = await loadAll();
+      const [latest] = await Promise.all([
+        loadAll(),
+        loadAvailableInventoryForLocation({
+          ...availabilityScope,
+          preserveRows: true,
+          // After persistence the saved consumption must be included in the balance.
+          excludeConsumptionId: null,
+        }),
+      ]);
       const wasEditing = Boolean(editingId);
       resetForm({ nextRecords: latest?.consumptions ?? [] });
       setFeedback({
@@ -2317,6 +2501,20 @@ const Consumption = () => {
 
     const fallbackRows = (record.items || []).map((item, index) => {
       const consumed = Math.max(toNumber(item.quantity), 0);
+      const totalConsumed = Math.max(
+        toNumber(item.totalConsumedQty ?? item.consumedQty ?? consumed),
+        consumed
+      );
+      const sourceQty = Math.max(toNumber(item.sourceQty), totalConsumed);
+      const persistedRemaining = [
+        item.remainingQty,
+        item.remainingAvailableQty,
+        item.availableQty,
+        item.balanceQty,
+      ].find(hasQuantityValue);
+      const remainingQty = hasQuantityValue(persistedRemaining)
+        ? Math.max(toNumber(persistedRemaining), 0)
+        : Math.max(sourceQty - totalConsumed, 0);
       return buildConsumptionRowState({
         rowId: `edit-${index}-${item.id ?? item.name ?? "row"}`,
         index,
@@ -2336,13 +2534,14 @@ const Consumption = () => {
         gst: item.gst || "",
         rate: Math.max(toNumber(item.rate), 0),
         notes: item.notes || "",
-        sourceQty: consumed,
-        dcQty: consumed,
-        consumedQty: 0,
-        previouslyConsumed: 0,
-        adjustedQty: 0,
-        availableQty: consumed,
-        remainingAvailableQty: 0,
+        sourceQty,
+        dcQty: sourceQty,
+        consumedQty: totalConsumed,
+        previouslyConsumed: totalConsumed,
+        adjustedQty: Math.max(toNumber(item.adjustedQty), 0),
+        availableQty: remainingQty,
+        remainingAvailableQty: remainingQty,
+        remainingQty,
         selected: consumed > 0,
         consumeQty: consumed > 0 ? String(consumed) : "",
       });
@@ -2724,18 +2923,30 @@ const Consumption = () => {
                       <th className="px-3 py-3 text-left">
                         {lookupSource === LOOKUP_SOURCE.REALLOCATION
                           ? "Reallocation Ref"
-                          : "DC Number"}
+                          : "Source Reference"}
                       </th>
                       <th className="px-3 py-3 text-left">
                         {lookupSource === LOOKUP_SOURCE.REALLOCATION
                           ? "Transfer Date"
-                          : "DC Date"}
+                          : "Item"}
                       </th>
                       <th className="px-3 py-3 text-left">From</th>
                       <th className="px-3 py-3 text-left">To</th>
-                      <th className="px-3 py-3 text-right">Item Count</th>
-                      <th className="px-3 py-3 text-right">Total Quantity</th>
-                      <th className="px-3 py-3 text-right">Available Qty</th>
+                      <th className="px-3 py-3 text-right">
+                        {lookupSource === LOOKUP_SOURCE.REALLOCATION
+                          ? "Item Count"
+                          : "Source Qty"}
+                      </th>
+                      <th className="px-3 py-3 text-right">
+                        {lookupSource === LOOKUP_SOURCE.REALLOCATION
+                          ? "Total Quantity"
+                          : "Consumed Qty"}
+                      </th>
+                      <th className="px-3 py-3 text-right">
+                        {lookupSource === LOOKUP_SOURCE.REALLOCATION
+                          ? "Available Qty"
+                          : "Remaining Available Qty"}
+                      </th>
                       <th className="px-3 py-3 text-left">Status</th>
                     </tr>
                   </thead>
@@ -2811,33 +3022,44 @@ const Consumption = () => {
                           })
                         )
                       )
-                    ) : filteredDeliveryChallansForSelection.length === 0 ? (
+                    ) : !String(form.fromLocationId || form.locationId || "").trim() ? (
                       <tr>
                         <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
-                          No delivery challans found for this project.
+                          Select a source location to review delivery challan inventory with remaining balance.
+                        </td>
+                      </tr>
+                    ) : filteredDeliveryChallanInventoryRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                          No delivery challan inventory with remaining balance was found for this project and source location.
                         </td>
                       </tr>
                     ) : (
-                      filteredDeliveryChallansForSelection.map((challan) => {
-                        const id = String(challan.id);
-                        const isSelected = selectedDeliveryChallanIds.includes(id);
+                      filteredDeliveryChallanInventoryRows.map((row, index) => {
+                        const challanId = String(row.deliveryChallanId ?? "");
+                        const challan = deliveryChallanMap[challanId] ?? {};
+                        const isSelected = selectedDeliveryChallanIds.includes(challanId);
                         return (
                           <tr
-                            key={id}
+                            key={
+                              row.sourceRowId ||
+                              row.sourceKey ||
+                              `${challanId}:${row.deliveryChallanItemId ?? index}`
+                            }
                             className="border-t border-slate-200 bg-white hover:bg-violet-50/40"
                           >
                             <td className="px-3 py-3">
                               <input
                                 type="checkbox"
                                 checked={isSelected}
-                                onChange={() => toggleDeliveryChallanSelection(id)}
+                                onChange={() => toggleDeliveryChallanSelection(challanId)}
                               />
                             </td>
                             <td className="px-3 py-3 font-semibold text-slate-800">
-                              {challan.dcNumber || "-"}
+                              {row.sourceRef || challan.dcNumber || "-"}
                             </td>
                             <td className="px-3 py-3 text-slate-700">
-                              {formatDate(challan.issueDate)}
+                              {row.name || "-"}
                             </td>
                             <td className="px-3 py-3 text-slate-700">
                               {getChallanLocationLabel(challan, "from")}
@@ -2846,13 +3068,13 @@ const Consumption = () => {
                               {getChallanLocationLabel(challan, "to")}
                             </td>
                             <td className="px-3 py-3 text-right text-slate-700">
-                              {getChallanItemCount(challan)}
+                              {formatQty(row.sourceQty)}
                             </td>
                             <td className="px-3 py-3 text-right font-semibold text-slate-800">
-                              {formatQty(getChallanTotalQuantity(challan))}
+                              {formatQty(row.consumedQty)}
                             </td>
                             <td className="px-3 py-3 text-right font-semibold text-emerald-700">
-                              {formatQty(getChallanAvailableQuantity(challan))}
+                              {formatQty(row.remainingAvailableQty ?? row.availableQty)}
                             </td>
                             <td className="px-3 py-3 text-slate-700">
                               <span
@@ -2860,7 +3082,7 @@ const Consumption = () => {
                                   challan.status
                                 )}`}
                               >
-                                {challan.status || "Draft"}
+                                {challan.status || "Available"}
                               </span>
                             </td>
                           </tr>
@@ -2874,7 +3096,7 @@ const Consumption = () => {
                 <p className="text-slate-500">
                   {lookupSource === LOOKUP_SOURCE.REALLOCATION
                     ? `Showing ${filteredReallocationsForSelection.length} of ${availableReallocations.length} reallocation records`
-                    : `Showing ${filteredDeliveryChallansForSelection.length} of ${availableChallans.length} DCs`}
+                    : `Showing ${filteredDeliveryChallanInventoryRows.length} of ${availableDcInventoryRows.length} remaining DC inventory rows`}
                 </p>
                 <div className="flex items-center gap-4">
                   <span className="font-semibold text-violet-800">
@@ -3241,7 +3463,7 @@ const Consumption = () => {
                 <th className="px-4 py-3 text-left font-semibold min-w-[130px]">Ref</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[180px]">Project</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[170px]">Location</th>
-                <th className="px-4 py-3 text-left font-semibold min-w-[130px]">DC Ref</th>
+                <th className="px-4 py-3 text-left font-semibold min-w-[130px]">Source Ref</th>
                 <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Date</th>
                 <th className="px-4 py-3 text-right font-semibold min-w-[140px]">
                   Consumed Qty
@@ -3284,12 +3506,12 @@ const Consumption = () => {
                       ]?.name || "-"}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
-                      {locationMap[String(record.locationId)]?.name || "-"}
+                      {`${
+                        locationMap[String(record.fromLocationId ?? record.locationId)]?.name || "-"
+                      } → ${locationMap[String(record.locationId)]?.name || "-"}`}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
-                      {deliveryChallanMap[String(record.deliveryChallanId)]?.dcNumber ||
-                        record.deliveryChallanRef ||
-                        "-"}
+                      {getRecordSourceReference(record)}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                       {formatDate(record.consumptionDate || record.createdAt)}
@@ -3374,9 +3596,7 @@ const Consumption = () => {
             ]}
             rightBlockTitle="Source Reference"
             rightBlockLines={[
-              deliveryChallanMap[String(viewRecord.deliveryChallanId)]?.dcNumber ||
-                viewRecord.deliveryChallanRef ||
-                "-",
+              getRecordSourceReference(viewRecord),
             ]}
             tableColumns={[
               { key: "serial", label: "Sl No", widthClass: "w-16" },

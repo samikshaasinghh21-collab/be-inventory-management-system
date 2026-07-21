@@ -49,6 +49,8 @@ const normalizeConsumptionItem = (item = {}) => ({
   receiveGoodsId: item.receiveGoodsId ?? item.ReceiveGoodsId ?? null,
   sourceType: item.sourceType ?? item.SourceType ?? "",
   sourceKey: item.sourceKey ?? item.SourceKey ?? "",
+  sourceRef:
+    item.sourceRef ?? item.SourceRef ?? item.deliveryChallanRef ?? item.DeliveryChallanRef ?? "",
   name: item.name ?? item.Item ?? item.item ?? item.Name ?? "",
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",
@@ -56,6 +58,26 @@ const normalizeConsumptionItem = (item = {}) => ({
   gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
   quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
   consumeQty: Number(item.consumeQty ?? item.ConsumeQty ?? item.quantity ?? item.Quantity ?? 0) || 0,
+  sourceQty: Number(item.sourceQty ?? item.SourceQty ?? 0) || 0,
+  totalConsumedQty:
+    Number(item.totalConsumedQty ?? item.TotalConsumedQty ?? item.consumedQty ?? item.ConsumedQty ?? 0) || 0,
+  adjustedQty:
+    Number(item.adjustedQty ?? item.AdjustedQty ?? item.reallocatedQty ?? item.ReallocatedQty ?? 0) || 0,
+  remainingQty:
+    item.remainingQty ??
+    item.RemainingQty ??
+    item.remainingAvailableQty ??
+    item.RemainingAvailableQty ??
+    item.availableQty ??
+    item.AvailableQty ??
+    item.balanceQty ??
+    item.BalanceQty ??
+    null,
+  remainingAvailableQty:
+    item.remainingAvailableQty ?? item.RemainingAvailableQty ?? null,
+  availableQty:
+    item.availableQty ?? item.AvailableQty ?? item.remainingQty ?? item.RemainingQty ?? null,
+  balanceQty: item.balanceQty ?? item.BalanceQty ?? null,
   rate: Number(item.rate ?? item.Rate ?? 0) || 0,
   notes: item.notes ?? item.Notes ?? "",
 });
