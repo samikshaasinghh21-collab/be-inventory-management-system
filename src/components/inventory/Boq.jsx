@@ -24,6 +24,7 @@ import {
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
+  lineItemId: null,
   itemId: null,
   name: "",
   description: "",
@@ -227,6 +228,7 @@ const attachLinkedPurchaseOrderItems = (boqs = [], purchaseOrders = []) => {
 const Boq = () => {
   const settings = useSettings();
   const skipAutoProjectRef = useRef(false);
+  const savingRef = useRef(false);
   const [projects, setProjects] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
@@ -334,7 +336,8 @@ const Boq = () => {
               ? []
               : prev;
           const mapped = selected.map((item) => ({
-            id: item.id ?? Date.now() + Math.random(),
+            id: Date.now() + Math.random(),
+            lineItemId: null,
             itemId: item.itemId ?? item.ItemId ?? item.id ?? null,
             name: item.name ?? "",
             description: item.description ?? "",
@@ -423,7 +426,7 @@ const Boq = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!validate()) {
+    if (savingRef.current || !validate()) {
       return;
     }
 
@@ -445,7 +448,7 @@ const Boq = () => {
       date: form.date,
       notes: form.notes,
       items: cleanedItems.map((item) => ({
-        id: item.id ?? null,
+        id: item.lineItemId ?? null,
         itemId: item.itemId ?? null,
         name: item.name,
         description: item.description,
@@ -464,6 +467,7 @@ const Boq = () => {
     };
 
     try {
+      savingRef.current = true;
       setSaving(true);
       setErrorMessage("");
       if (editingId) {
@@ -482,6 +486,7 @@ const Boq = () => {
       console.error("Failed to save BOQ", error);
       setErrorMessage(error?.response?.data?.error ?? "Failed to save BOQ");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -501,6 +506,7 @@ const Boq = () => {
       record.items?.length
         ? record.items.map((item) => ({
             id: item.id ?? Date.now() + Math.random(),
+            lineItemId: item.id ?? null,
             itemId: item.itemId ?? null,
             name: item.name ?? "",
             description: item.description ?? "",

@@ -28,7 +28,6 @@ export const createProject = async (payload) => {
 export const updateProjectApi = async (id, payload) => {
   const response = await api.put(`/projects/${id}`, payload);
   const normalized = normalizeProjectRecord(response.data?.project ?? response.data);
-  emitProjectsChange();
   return normalized;
 };
 

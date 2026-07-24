@@ -75,6 +75,27 @@ const getSqlErrorNumber = (error) =>
   error?.info?.number ??
   null;
 
+const getSqlErrorDiagnostics = (error) => {
+  const info = error?.originalError?.info ?? error?.info ?? {};
+  return {
+    message: error?.message ?? String(error),
+    stack: error?.stack ?? null,
+    sqlNumber: getSqlErrorNumber(error),
+    sqlProcedure:
+      info?.procName ?? info?.procedure ?? error?.procName ?? error?.procedure ?? null,
+    sqlLineNumber:
+      info?.lineNumber ?? error?.lineNumber ?? error?.originalError?.lineNumber ?? null,
+  };
+};
+
+const logBoqSqlStatement = (boqId, label, statement) => {
+  console.log("[BOQ SQL]", {
+    boqId: toNullableInt(boqId),
+    label,
+    statement: String(statement).replace(/\s+/g, " ").trim(),
+  });
+};
+
 const isSqlMissingTableError = (error) => {
   const number = getSqlErrorNumber(error);
   return number === 208 || number === 207;
@@ -1632,6 +1653,41 @@ const isConsumptionLinkedToDeliveryChallan = (consumption = {}, challan = {}) =>
   return Boolean(challanRef && consumptionRef && challanRef === consumptionRef);
 };
 
+const isConsumptionItemLinkedToDeliveryChallan = (
+  item = {},
+  consumption = {},
+  challan = {},
+  challanItemIds = new Set()
+) => {
+  const challanId = toNullableInt(challan.id ?? challan.deliveryChallanId);
+  const itemChallanId = toNullableInt(
+    item.deliveryChallanId ?? item.DeliveryChallanId ?? item.ChallanId
+  );
+  if (itemChallanId !== null) {
+    return challanId !== null && itemChallanId === challanId;
+  }
+
+  const sourceKey = normalizeInventoryKeyValue(item.sourceKey ?? item.SourceKey);
+  const sourceDcMatch = /^dc:(\d+):/i.exec(sourceKey);
+  if (sourceDcMatch) {
+    return challanId !== null && Number(sourceDcMatch[1]) === challanId;
+  }
+
+  const deliveryChallanItemId = toNullableInt(
+    item.deliveryChallanItemId ??
+      item.DeliveryChallanItemId ??
+      item.deliveryChallanLineItemId ??
+      item.DeliveryChallanLineItemId
+  );
+  if (deliveryChallanItemId !== null) {
+    return challanItemIds.has(deliveryChallanItemId);
+  }
+
+  // Legacy consumption rows may predate item-level source identifiers. Only
+  // those rows are allowed to fall back to their header DC reference.
+  return isConsumptionLinkedToDeliveryChallan(consumption, challan);
+};
+
 const buildDeliveryChallanMetrics = (
   challan = {},
   challanItems = [],
@@ -1644,13 +1700,34 @@ const buildDeliveryChallanMetrics = (
     receiveGoodsItemIdToMaterialKey,
   } =
     buildDeliveryChallanMaterialGroups(challanItems);
+  const challanItemIds = new Set(
+    (Array.isArray(challanItems) ? challanItems : [])
+      .map((item) =>
+        toNullableInt(
+          item.deliveryChallanItemId ??
+            item.DeliveryChallanItemId ??
+            item.deliveryChallanLineItemId ??
+            item.DeliveryChallanLineItemId ??
+            item.id ??
+            item.Id
+        )
+      )
+      .filter((id) => id !== null)
+  );
 
   (Array.isArray(consumptions) ? consumptions : []).forEach((consumption) => {
-    if (!isConsumptionLinkedToDeliveryChallan(consumption, challan)) {
-      return;
-    }
-
     (consumption.items || []).forEach((item) => {
+      if (
+        !isConsumptionItemLinkedToDeliveryChallan(
+          item,
+          consumption,
+          challan,
+          challanItemIds
+        )
+      ) {
+        return;
+      }
+
       const materialKey = resolveDeliveryChallanMaterialKey(
         item,
         groups,
@@ -2627,6 +2704,38 @@ const getCustomerById = async (pool, customerId) => {
     normalizeCustomer(customerRow),
     contactsResult.recordset ?? []
   );
+};
+
+const getCustomerSnapshotById = async (pool, customerId) => {
+  const safeCustomerId = toNullableInt(customerId);
+  if (!safeCustomerId) {
+    return null;
+  }
+
+  const result = await pool
+    .request()
+    .input("CustomerId", sql.Int, safeCustomerId)
+    .query(`
+      SELECT
+        CustomerId,
+        CustomerName,
+        CompanyName,
+        Address,
+        GSTNumber,
+        GSTType,
+        City,
+        State,
+        Pincode,
+        ContactNumber,
+        Email,
+        ContactPerson,
+        Designation
+      FROM dbo.Customers
+      WHERE CustomerId = @CustomerId
+    `);
+
+  const customerRow = result.recordset?.[0];
+  return customerRow ? normalizeCustomer(customerRow) : null;
 };
 
 const buildNextPurchaseOrderNumber = (poNumbers = [], year = new Date().getFullYear()) => {
@@ -3729,6 +3838,11 @@ const ensureVendorsTable = async () => {
 };
 
 const ensureCustomersTable = async () => {
+  if (ensureCustomersTable.promise) {
+    return ensureCustomersTable.promise;
+  }
+
+  ensureCustomersTable.promise = (async () => {
   const pool = await getPool();
   await pool.request().query(`
     IF OBJECT_ID('dbo.Customers', 'U') IS NULL
@@ -3889,9 +4003,23 @@ const ensureCustomersTable = async () => {
     BEGIN CATCH
     END CATCH;
   `);
+  })();
+
+  try {
+    return await ensureCustomersTable.promise;
+  } catch (error) {
+    ensureCustomersTable.promise = null;
+    throw error;
+  }
 };
+ensureCustomersTable.promise = null;
 
 const ensureProjectsTable = async () => {
+  if (ensureProjectsTable.promise) {
+    return ensureProjectsTable.promise;
+  }
+
+  ensureProjectsTable.promise = (async () => {
   const pool = await getPool();
   await pool.request().query(`
     IF OBJECT_ID('dbo.Projects', 'U') IS NULL
@@ -4033,7 +4161,16 @@ const ensureProjectsTable = async () => {
       ADD CONSTRAINT DF_Projects_UpdatedAt DEFAULT SYSUTCDATETIME() FOR UpdatedAt;
     END;
   `);
+  })();
+
+  try {
+    return await ensureProjectsTable.promise;
+  } catch (error) {
+    ensureProjectsTable.promise = null;
+    throw error;
+  }
 };
+ensureProjectsTable.promise = null;
 
 const ensureLocationsTable = async () => {
   const pool = await getPool();
@@ -5073,11 +5210,15 @@ const syncBoqFromPurchaseOrderItems = async (
       .input("AvailableQty", sql.Decimal(18, 2), quantity)
       .input("Notes", sql.NVarChar(sql.MAX), item.notes || null)
       .query(`
+        DECLARE @InsertedBoqLineItems TABLE (LineItemId INT NOT NULL);
+
         INSERT INTO dbo.BOQLineItems
           (BOQId, ItemId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
-        OUTPUT INSERTED.LineItemId
+        OUTPUT INSERTED.LineItemId INTO @InsertedBoqLineItems (LineItemId)
         VALUES
-          (@BOQId, @ItemId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
+          (@BOQId, @ItemId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes);
+
+        SELECT LineItemId FROM @InsertedBoqLineItems;
       `);
     const insertedBoqItemId = toNullableInt(insertResult.recordset?.[0]?.LineItemId);
     if (insertedBoqItemId !== null) {
@@ -6473,6 +6614,17 @@ const refreshBoqAvailability = async (tx, boqItemIds = []) => {
     updateReq.input("BoqItemId", sql.Int, boqItemId);
     updateReq.input("ConsumedQty", sql.Decimal(18, 2), consumedQty);
     updateReq.input("OrderedQty", sql.Decimal(18, 2), orderedQty);
+    logBoqSqlStatement(
+      null,
+      `recalculate BOQ line-item balance ${boqItemId}`,
+      `UPDATE dbo.BOQLineItems
+       SET ConsumedQty = @ConsumedQty,
+           AvailableQty = CASE
+             WHEN Quantity - @OrderedQty < 0 THEN 0
+             ELSE Quantity - @OrderedQty
+           END
+       WHERE LineItemId = @BoqItemId`
+    );
     await updateReq.query(`
       UPDATE dbo.BOQLineItems
       SET ConsumedQty = @ConsumedQty,
@@ -15123,7 +15275,7 @@ app.put("/api/projects/:id", async (req, res) => {
         .json({ ok: false, error: "Customer is required for every project" });
     }
 
-    const selectedCustomer = await getCustomerById(pool, resolvedCustomerId);
+    const selectedCustomer = await getCustomerSnapshotById(pool, resolvedCustomerId);
     if (!selectedCustomer) {
       return res.status(400).json({ ok: false, error: "Selected customer was not found" });
     }
@@ -18031,10 +18183,13 @@ app.put("/api/boqs/:id", async (req, res) => {
   const normalizedBoqNumber = String(boqNumber).trim();
 
   let tx;
+  let updateStage = "initializing BOQ update";
   try {
+    updateStage = "ensuring BOQ schema";
     await ensureBoqTables();
     const pool = await getPool();
 
+    updateStage = "checking BOQ number";
     const duplicateBoq = await pool
       .request()
       .input("BOQNumber", sql.NVarChar(50), normalizedBoqNumber)
@@ -18054,6 +18209,21 @@ app.put("/api/boqs/:id", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
+    updateStage = "updating BOQ header";
+    logBoqSqlStatement(
+      id,
+      updateStage,
+      `UPDATE dbo.BOQProjects
+       SET ProjectId = @ProjectId,
+           BOQNumber = @BOQNumber,
+           Version = @Version,
+           PreparedBy = @PreparedBy,
+           Status = @Status,
+           BOQDate = @BOQDate,
+           Notes = @Notes,
+           UpdatedAt = SYSUTCDATETIME()
+       WHERE BOQId = @BOQId`
+    );
     const updateBoq = new sql.Request(tx);
     updateBoq.input("BOQId", sql.Int, id);
     updateBoq.input("ProjectId", sql.Int, Number(projectId));
@@ -18064,7 +18234,7 @@ app.put("/api/boqs/:id", async (req, res) => {
     updateBoq.input("BOQDate", sql.Date, parseDateInput(date) || null);
     updateBoq.input("Notes", sql.NVarChar(sql.MAX), notes || null);
 
-    const boqResult = await updateBoq.query(`
+    const updateResult = await updateBoq.query(`
       UPDATE dbo.BOQProjects
       SET ProjectId = @ProjectId,
           BOQNumber = @BOQNumber,
@@ -18074,16 +18244,21 @@ app.put("/api/boqs/:id", async (req, res) => {
           BOQDate = @BOQDate,
           Notes = @Notes,
           UpdatedAt = SYSUTCDATETIME()
-      OUTPUT INSERTED.*
       WHERE BOQId = @BOQId
     `);
 
-    const boqRow = boqResult.recordset?.[0];
-    if (!boqRow) {
+    if (updateResult.rowsAffected?.[0] === 0) {
       await tx.rollback();
+      tx = null;
       return res.status(404).json({ ok: false, error: "BOQ not found" });
     }
 
+    const boqResult = await new sql.Request(tx)
+      .input("BOQId", sql.Int, id)
+      .query(`SELECT * FROM dbo.BOQProjects WHERE BOQId = @BOQId`);
+    const boqRow = boqResult.recordset?.[0];
+
+    updateStage = "loading existing BOQ line items";
     const existingItemsResult = await new sql.Request(tx)
       .input("BOQId", sql.Int, id)
       .query(`
@@ -18097,6 +18272,14 @@ app.put("/api/boqs/:id", async (req, res) => {
         .map((row) => [toNullableInt(row.LineItemId), row])
         .filter(([lineItemId]) => lineItemId !== null)
     );
+    const submittedExistingItemIds = normalizedItems
+      .map((item) => item.id)
+      .filter((lineItemId) => lineItemId !== null && existingItemsById.has(lineItemId));
+    if (new Set(submittedExistingItemIds).size !== submittedExistingItemIds.length) {
+      const error = new Error("A BOQ line item was submitted more than once.");
+      error.statusCode = 400;
+      throw error;
+    }
     const retainedItemIds = Array.from(
       new Set(
         normalizedItems
@@ -18110,6 +18293,7 @@ app.put("/api/boqs/:id", async (req, res) => {
     const removedItemIds = removedItemRows
       .map((row) => toNullableInt(row.LineItemId))
       .filter((lineItemId) => lineItemId !== null);
+    updateStage = "validating BOQ line-item usage";
     const consumedTotals = await loadBoqConsumedTotals(tx, [
       ...retainedItemIds,
       ...removedItemIds,
@@ -18169,6 +18353,28 @@ app.put("/api/boqs/:id", async (req, res) => {
           throw error;
         }
 
+        updateStage = `updating BOQ line item ${item.id}`;
+        logBoqSqlStatement(
+          id,
+          updateStage,
+          `UPDATE dbo.BOQLineItems
+           SET ItemId = @ItemId,
+               ItemName = @ItemName,
+               Description = @Description,
+               SerialNumber = @SerialNumber,
+               Unit = @Unit,
+               HSN = @HSN,
+               GST = @GST,
+               Quantity = @Quantity,
+               Rate = @Rate,
+               ConsumedQty = @ConsumedQty,
+               AvailableQty = CASE
+                 WHEN @Quantity - @ConsumedQty < 0 THEN 0
+                 ELSE @Quantity - @ConsumedQty
+               END,
+               Notes = @Notes
+           WHERE LineItemId = @LineItemId`
+        );
         await new sql.Request(tx)
           .input("LineItemId", sql.Int, item.id)
           .input("ItemId", sql.Int, item.itemId ?? null)
@@ -18219,12 +18425,28 @@ app.put("/api/boqs/:id", async (req, res) => {
       insertItem.input("ConsumedQty", sql.Decimal(18, 2), 0);
       insertItem.input("AvailableQty", sql.Decimal(18, 2), qty);
       insertItem.input("Notes", sql.NVarChar(sql.MAX), item.notes);
+      updateStage = "inserting a new BOQ line item";
+      logBoqSqlStatement(
+        id,
+        updateStage,
+        `DECLARE @InsertedBoqLineItems TABLE (LineItemId INT NOT NULL);
+         INSERT INTO dbo.BOQLineItems
+           (BOQId, ItemId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
+         OUTPUT INSERTED.LineItemId INTO @InsertedBoqLineItems (LineItemId)
+         VALUES
+           (@BOQId, @ItemId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes);
+         SELECT LineItemId FROM @InsertedBoqLineItems;`
+      );
       const insertResult = await insertItem.query(`
+        DECLARE @InsertedBoqLineItems TABLE (LineItemId INT NOT NULL);
+
         INSERT INTO dbo.BOQLineItems
           (BOQId, ItemId, ItemName, Description, SerialNumber, Unit, HSN, GST, Quantity, Rate, ConsumedQty, AvailableQty, Notes)
-        OUTPUT INSERTED.LineItemId
+        OUTPUT INSERTED.LineItemId INTO @InsertedBoqLineItems (LineItemId)
         VALUES
-          (@BOQId, @ItemId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes)
+          (@BOQId, @ItemId, @ItemName, @Description, @SerialNumber, @Unit, @HSN, @GST, @Quantity, @Rate, @ConsumedQty, @AvailableQty, @Notes);
+
+        SELECT LineItemId FROM @InsertedBoqLineItems;
       `);
       const insertedItemId = toNullableInt(insertResult.recordset?.[0]?.LineItemId);
       if (insertedItemId !== null) {
@@ -18233,6 +18455,7 @@ app.put("/api/boqs/:id", async (req, res) => {
     }
 
     if (removedItemIds.length) {
+      updateStage = "deleting removed BOQ line items";
       await detachPurchaseOrderItemsFromBoq(tx, removedItemIds);
 
       const deleteItems = new sql.Request(tx);
@@ -18241,12 +18464,19 @@ app.put("/api/boqs/:id", async (req, res) => {
         removedItemIds,
         "RemovedLineItemId"
       );
+      logBoqSqlStatement(
+        id,
+        updateStage,
+        `DELETE FROM dbo.BOQLineItems
+         WHERE LineItemId IN (${removedInClause})`
+      );
       await deleteItems.query(`
         DELETE FROM dbo.BOQLineItems
         WHERE LineItemId IN (${removedInClause})
       `);
     }
 
+    updateStage = "recalculating BOQ and purchase-order balances";
     await refreshBoqAvailability(tx, affectedBoqItemIds);
     const syncedPurchaseOrderIds = await syncPurchaseOrderItemsFromBoq(
       tx,
@@ -18254,8 +18484,11 @@ app.put("/api/boqs/:id", async (req, res) => {
     );
     await refreshPurchaseOrdersDerivedData(tx, syncedPurchaseOrderIds);
 
+    updateStage = "committing BOQ update";
     await tx.commit();
+    tx = null;
 
+    updateStage = "loading updated BOQ";
     const itemsResult = await pool
       .request()
       .input("BOQId", sql.Int, id)
@@ -18273,9 +18506,21 @@ app.put("/api/boqs/:id", async (req, res) => {
     });
   } catch (error) {
     await rollbackTx(tx);
-    return res.status(500).json({
+    tx = null;
+    console.error("[PUT /api/boqs/:id] BOQ update failed", {
+      boqId: id,
+      stage: updateStage,
+      ...getSqlErrorDiagnostics(error),
+    });
+    const statusCode = error?.statusCode ?? 500;
+    return res.status(statusCode).json({
       ok: false,
-      error: error?.message ?? "Failed to update BOQ",
+      code: "BOQ_UPDATE_FAILED",
+      error:
+        statusCode < 500
+          ? error?.message ?? "The BOQ update is not valid."
+          : error?.message ??
+            "The BOQ update could not be saved. No changes were applied.",
     });
   }
 });
@@ -18580,14 +18825,22 @@ app.get("/api/delivery-challans/:id", async (req, res) => {
       .input("DeliveryChallanRef", sql.NVarChar(100), normalizedChallan.dcNumber || null)
       .query(`
         SELECT *
-        FROM dbo.Consumption
-        WHERE DeliveryChallanId = @DeliveryChallanId
+        FROM dbo.Consumption c
+        WHERE c.DeliveryChallanId = @DeliveryChallanId
+          OR EXISTS (
+            SELECT 1
+            FROM dbo.ConsumptionItems ci
+            WHERE ci.${toIdentifier(consumptionItemFk)} = c.${toIdentifier(
+              consumptionHeaderPk
+            )}
+              AND ci.DeliveryChallanId = @DeliveryChallanId
+          )
           OR (
             @DeliveryChallanRef IS NOT NULL
             AND LTRIM(RTRIM(@DeliveryChallanRef)) <> ''
-            AND LOWER(LTRIM(RTRIM(DeliveryChallanRef))) = LOWER(LTRIM(RTRIM(@DeliveryChallanRef)))
+            AND LOWER(LTRIM(RTRIM(c.DeliveryChallanRef))) = LOWER(LTRIM(RTRIM(@DeliveryChallanRef)))
           )
-        ORDER BY ${toIdentifier(consumptionHeaderPk)} DESC
+        ORDER BY c.${toIdentifier(consumptionHeaderPk)} DESC
       `);
     const linkedConsumptionIds = (linkedConsumptionsResult.recordset ?? [])
       .map((row) => toNullableInt(row[consumptionHeaderPk] ?? row.Id ?? row.ConsumptionId))
@@ -19174,7 +19427,7 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
         .filter((itemId) => itemId !== null)
     );
     const retainedItemIds = new Set();
-    for (const item of normalizedItems) {
+    for (const [itemIndex, item] of normalizedItems.entries()) {
       const deliveryChallanItemId = toNullableInt(item.deliveryChallanItemId);
       if (
         deliveryChallanItemId !== null &&
@@ -19185,6 +19438,16 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
           "One or more delivery challan line identifiers are invalid or duplicated."
         );
         error.statusCode = 400;
+        error.details = {
+          deliveryChallanId: id,
+          itemIndex,
+          deliveryChallanItemId,
+          existingLineIds: Array.from(existingItemIds),
+          retainedLineIds: Array.from(retainedItemIds),
+          reason: existingItemIds.has(deliveryChallanItemId)
+            ? "duplicate-line-id"
+            : "line-id-does-not-belong-to-challan",
+        };
         throw error;
       }
 
@@ -19285,6 +19548,7 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
       error: isDuplicateDcNumber
         ? "Delivery challan number already exists. Retry to get the next auto-generated number."
         : error?.message ?? "Failed to update delivery challan",
+      ...(error?.details ? { details: error.details } : {}),
     });
   }
 });
@@ -19880,8 +20144,10 @@ app.get("/api/consumptions", async (_req, res) => {
 
     return res.json({ ok: true, consumptions: dataWithBalances });
   } catch (error) {
+    console.error("[GET /api/consumptions] Failed to fetch consumptions", error);
     return res.status(500).json({
       ok: false,
+      code: "CONSUMPTIONS_FETCH_FAILED",
       error: error?.message ?? "Failed to fetch consumptions",
     });
   }
@@ -20301,20 +20567,6 @@ app.post("/api/consumptions", async (req, res) => {
       items: mappedItems,
     });
 
-    let linkedTransferId = null;
-    if (safeFromLocationId !== safeLocationId) {
-      linkedTransferId = await upsertConsumptionTransfer(tx, {
-        consumptionNumber: safeConsumptionNumber,
-        projectId: safeProjectId,
-        fromLocationId: safeFromLocationId,
-        toLocationId: safeLocationId,
-        requestDate: parsedConsumptionDate ?? consumptionDate ?? null,
-        requestedBy: safeIssuedBy,
-        notes: safeNotes,
-        items: mappedItems,
-      });
-    }
-
     const resolvedDeliveryChallanIds = Array.from(
       new Set(
         [
@@ -20410,21 +20662,6 @@ app.post("/api/consumptions", async (req, res) => {
       `);
     }
 
-    if (linkedTransferId !== null) {
-      await upsertConsumptionTransfer(tx, {
-        existingTransferId: linkedTransferId,
-        consumptionId,
-        consumptionNumber: safeConsumptionNumber,
-        projectId: safeProjectId,
-        fromLocationId: safeFromLocationId,
-        toLocationId: safeLocationId,
-        requestDate: parsedConsumptionDate ?? consumptionDate ?? null,
-        requestedBy: safeIssuedBy,
-        notes: safeNotes,
-        items: mappedItems,
-      });
-    }
-
     await applyConsumptionStockDelta(tx, [], mappedItems);
 
     await tx.commit();
@@ -20449,9 +20686,12 @@ app.post("/api/consumptions", async (req, res) => {
     });
   } catch (error) {
     await rollbackTx(tx);
+    console.error("[POST /api/consumptions] Failed to create consumption", error);
     return res.status(error?.statusCode ?? 500).json({
       ok: false,
+      code: "CONSUMPTION_CREATE_FAILED",
       error: error?.message ?? "Failed to create consumption",
+      ...(error?.details ? { details: error.details } : {}),
     });
   }
 });
@@ -20657,20 +20897,7 @@ app.put("/api/consumptions/:id", async (req, res) => {
       excludeConsumptionId: id,
     });
 
-    if (safeFromLocationId !== safeLocationId) {
-      await upsertConsumptionTransfer(tx, {
-        existingTransferId: linkedTransfer?.id ?? null,
-        consumptionId: id,
-        consumptionNumber: safeConsumptionNumber,
-        projectId: safeProjectId,
-        fromLocationId: safeFromLocationId,
-        toLocationId: safeLocationId,
-        requestDate: parsedConsumptionDate ?? consumptionDate ?? null,
-        requestedBy: safeIssuedBy,
-        notes: safeNotes,
-        items: mappedItems,
-      });
-    } else if (linkedTransfer?.id) {
+    if (linkedTransfer?.id) {
       await deleteReallocateInventoryRecord(tx, linkedTransfer.id);
     }
 

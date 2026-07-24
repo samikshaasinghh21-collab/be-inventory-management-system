@@ -1926,6 +1926,11 @@ const DeliveryChallan = () => {
           item.receiptItemId ?? item.receiveGoodsItemId
         );
         let resolvedReceiveGoodsItemId = parseNumberValue(item.receiveGoodsItemId);
+        const persistedLineId = parseNumberValue(item.deliveryChallanItemId);
+        const belongsToEditedChallan =
+          Boolean(editingId) &&
+          persistedLineId !== null &&
+          String(item.deliveryChallanId ?? "") === String(editingId);
 
         if (normalizedSourceType === "receive") {
           const receiptItemId = parseNumberValue(
@@ -2029,9 +2034,7 @@ const DeliveryChallan = () => {
           deliveryChallanId:
             parseNumberValue(latestRow?.deliveryChallanId ?? item.deliveryChallanId) ?? null,
           deliveryChallanItemId:
-            parseNumberValue(
-              latestRow?.deliveryChallanItemId ?? item.deliveryChallanItemId
-            ) ?? null,
+            belongsToEditedChallan ? persistedLineId : null,
           availableQty: latestAvailableQty,
         };
       });
@@ -2124,6 +2127,18 @@ const DeliveryChallan = () => {
       };
 
       console.debug("Delivery challan submit payload", payload);
+      console.debug(
+        "Delivery challan line identifiers",
+        payload.items.map((item, index) => ({
+          index,
+          deliveryChallanId: editingId ?? null,
+          deliveryChallanItemId: item.deliveryChallanItemId ?? null,
+          sourceDeliveryChallanId: item.deliveryChallanId ?? null,
+          sourceKey: item.sourceKey ?? null,
+          receiveGoodsItemId: item.receiveGoodsItemId ?? null,
+          itemId: item.itemId ?? null,
+        }))
+      );
       console.debug("Delivery challan receipt linkage", {
         selectedReceiptIds: receiptIdsForPayload,
         exactReceiptIdsForPayload,

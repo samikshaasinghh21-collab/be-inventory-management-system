@@ -6,7 +6,6 @@ import {
   deleteProject as deleteProjectLocal,
   getProjects,
   setProjects as setLocalProjects,
-  updateProject as updateProjectLocal,
 } from "../services/projectsStore";
 import {
   deleteProjectApi,
@@ -48,6 +47,16 @@ const getCustomerOptionLabel = (customer = {}) => {
     return `${primaryName} | ${secondaryCompany}`;
   }
   return primaryName || "Unnamed customer";
+};
+
+const emitProjectsChangedSoon = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.setTimeout(() => {
+    window.dispatchEvent(new Event("projects:changed"));
+  }, 0);
 };
 
 const ProjectsHome = () => {
@@ -267,12 +276,19 @@ const ProjectsHome = () => {
       };
 
       const updated = await updateProjectApi(editing.id, payload);
-      setProjects((prev) =>
-        prev.map((project) => (project.id === editing.id ? updated : project))
+      const replaceUpdatedProject = (list = []) =>
+        list.map((project) =>
+          String(project.id) === String(editing.id) ? updated : project
+        );
+      const cachedProjects = getProjects();
+      setLocalProjects(
+        replaceUpdatedProject(cachedProjects.length ? cachedProjects : projects),
+        { emit: false }
       );
-      updateProjectLocal(editing.id, updated);
+      setProjects((prev) => replaceUpdatedProject(prev));
       closeEdit();
       setApiError("");
+      emitProjectsChangedSoon();
     } catch (error) {
       console.error("Failed to update project", error);
       setApiError(
