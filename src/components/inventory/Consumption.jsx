@@ -41,6 +41,20 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const createTimingLogger = (label) => {
+  const startedAt = performance.now();
+  let lastAt = startedAt;
+  return (stage, details = {}) => {
+    const now = performance.now();
+    console.debug(`[timing] ${label} ${stage}`, {
+      stageMs: Math.round(now - lastAt),
+      totalMs: Math.round(now - startedAt),
+      ...details,
+    });
+    lastAt = now;
+  };
+};
+
 const toNullableInt = (value) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : null;
@@ -789,6 +803,8 @@ const Consumption = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const prefillSignatureRef = useRef("");
+  const refreshTimerRef = useRef(null);
+  const savingRef = useRef(false);
   const settings = useSettings();
   const company = useMemo(() => settings?.company ?? {}, [settings]);
 
@@ -820,6 +836,10 @@ const Consumption = () => {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [viewRecord, setViewRecord] = useState(null);
+
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
 
   const projectMap = useMemo(
     () =>
@@ -929,6 +949,7 @@ const Consumption = () => {
       destinationLocationId = null,
       preserveRows = false,
       excludeConsumptionId = undefined,
+      timing = null,
     } = {}) => {
       const safeProjectId = String(projectId ?? "").trim();
       const safeLocationId = String(locationId ?? "").trim();
@@ -946,6 +967,10 @@ const Consumption = () => {
       setInventoryError("");
 
       try {
+        timing?.("available-inventory-refresh-start", {
+          projectId: safeProjectId,
+          locationId: safeLocationId,
+        });
         const list = await fetchAvailableInventory({
           projectId: safeProjectId,
           locationId: safeLocationId,
@@ -966,6 +991,9 @@ const Consumption = () => {
           );
         }
         setLoadedDeliveryChallanIds([]);
+        timing?.("available-inventory-refresh-complete", {
+          rowCount: safeList.length,
+        });
         return safeList;
       } catch (error) {
         setAvailableInventory([]);
@@ -999,9 +1027,10 @@ const Consumption = () => {
     [reallocations]
   );
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async ({ timing = null } = {}) => {
     setLoading(true);
     try {
+      timing?.("load-all-start");
       const [
         projectsList,
         locationsList,
@@ -1034,6 +1063,7 @@ const Consumption = () => {
         consumptions: Array.isArray(consumptionsList) ? consumptionsList : [],
       };
     } finally {
+      timing?.("load-all-complete");
       setLoading(false);
     }
   }, []);
@@ -1062,7 +1092,17 @@ const Consumption = () => {
 
   useEffect(() => {
     const refresh = () => {
-      void loadAll();
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
+      refreshTimerRef.current = window.setTimeout(() => {
+        const timing = createTimingLogger("Consumption event refresh");
+        timing("scheduled-refresh-start", { saving: savingRef.current });
+        void loadAll({ timing }).finally(() => {
+          timing("scheduled-refresh-finished");
+          refreshTimerRef.current = null;
+        });
+      }, savingRef.current ? 600 : 150);
     };
 
     window.addEventListener("consumptions:changed", refresh);
@@ -1073,6 +1113,10 @@ const Consumption = () => {
     window.addEventListener("locations:changed", refresh);
 
     return () => {
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
       window.removeEventListener("consumptions:changed", refresh);
       window.removeEventListener("delivery-challans:changed", refresh);
       window.removeEventListener("receive-goods:changed", refresh);
@@ -2338,13 +2382,18 @@ const Consumption = () => {
 
   const onSubmit = async (event) => {
     event.preventDefault();
+    const timing = createTimingLogger("Consumption save");
+    timing("submit-start");
     setFeedback({ type: "", message: "" });
 
     if (!validate()) {
+      timing("frontend-validation-failed");
       return;
     }
+    timing("frontend-validation-complete");
 
     const payload = buildPayload();
+    timing("payload-built", { itemCount: payload.items.length });
     const availabilityScope = {
       projectId: payload.projectId,
       locationId: payload.fromLocationId ?? payload.locationId,
@@ -2353,30 +2402,71 @@ const Consumption = () => {
 
     setSaving(true);
     try {
+      let savedConsumption;
       if (editingId) {
-        await updateConsumption(editingId, payload);
+        savedConsumption = await updateConsumption(editingId, payload);
       } else {
-        await createConsumption(payload);
+        savedConsumption = await createConsumption(payload);
       }
+      timing("save-response-received", {
+        consumptionId: savedConsumption?.id ?? savedConsumption?.consumptionId ?? null,
+      });
 
-      const [latest] = await Promise.all([
-        loadAll(),
-        loadAvailableInventoryForLocation({
-          ...availabilityScope,
-          preserveRows: true,
-          // After persistence the saved consumption must be included in the balance.
-          excludeConsumptionId: null,
-        }),
-      ]);
       const wasEditing = Boolean(editingId);
-      resetForm({ nextRecords: latest?.consumptions ?? [] });
+      const optimisticConsumptions = savedConsumption
+        ? [
+            savedConsumption,
+            ...consumptions.filter(
+              (record) =>
+                String(record.id ?? record.consumptionId) !==
+                String(savedConsumption.id ?? savedConsumption.consumptionId)
+            ),
+          ]
+        : consumptions;
+      setConsumptions(optimisticConsumptions);
+      resetForm({ nextRecords: optimisticConsumptions });
       setFeedback({
         type: "success",
         message: wasEditing
           ? "Consumption entry updated successfully."
           : "Consumption entry saved successfully.",
       });
+      setSaving(false);
+      timing("success-shown");
+
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+      window.setTimeout(() => {
+        const backgroundTiming = createTimingLogger("Consumption post-save refresh");
+        backgroundTiming("background-refresh-start");
+        void Promise.all([
+          loadAll({ timing: backgroundTiming }),
+          loadAvailableInventoryForLocation({
+            ...availabilityScope,
+            preserveRows: true,
+            // After persistence the saved consumption must be included in the balance.
+            excludeConsumptionId: null,
+            timing: backgroundTiming,
+          }),
+        ])
+          .then(() => {
+            backgroundTiming("delivery-challan-sync-complete");
+          })
+          .catch((error) => {
+            backgroundTiming("background-refresh-failed", {
+              message: error?.message ?? "Refresh failed",
+            });
+          });
+      }, 0);
     } catch (error) {
+      timing("save-failed", {
+        message:
+          error?.response?.data?.error ||
+          error?.message ||
+          "Failed to save consumption entry.",
+      });
       setFeedback({
         type: "error",
         message:
@@ -2384,7 +2474,6 @@ const Consumption = () => {
           error?.message ||
           "Failed to save consumption entry.",
       });
-    } finally {
       setSaving(false);
     }
   };

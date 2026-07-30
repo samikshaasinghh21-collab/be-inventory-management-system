@@ -91,6 +91,11 @@ export const fetchAvailableInventory = async ({
       excludeConsumptionId,
       excludeReallocateInventoryId,
       includeConsumptionLeftover,
+      _: Date.now(),
+    },
+    headers: {
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
     },
   });
   const list = Array.isArray(response.data?.items)

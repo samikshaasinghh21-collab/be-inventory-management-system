@@ -61,6 +61,7 @@ const buildApiUnavailableError = (
   return error;
 };
 
+
 export const isApiUnavailableError = (error) =>
   Boolean(error?.isApiUnavailable) ||
   error?.code === "ERR_API_UNAVAILABLE" ||

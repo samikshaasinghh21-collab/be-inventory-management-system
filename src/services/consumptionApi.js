@@ -2,6 +2,16 @@ import api from "./api";
 
 const emitConsumptionChange = () => {
   if (typeof window !== "undefined") {
+    console.debug("[timing] Consumption API dispatch synchronization events", {
+      events: [
+        "consumptions:changed",
+        "delivery-challans:changed",
+        "receive-goods:changed",
+        "products:changed",
+        "boqs:changed",
+        "reallocate-inventory:changed",
+      ],
+    });
     window.dispatchEvent(new Event("consumptions:changed"));
     window.dispatchEvent(new Event("delivery-challans:changed"));
     window.dispatchEvent(new Event("receive-goods:changed"));
@@ -251,20 +261,43 @@ export const fetchConsumptions = async () => {
 };
 
 export const createConsumption = async (payload) => {
+  const startedAt = performance.now();
+  console.debug("[timing] createConsumption request start", {
+    itemCount: Array.isArray(payload?.items) ? payload.items.length : 0,
+  });
   const response = await api.post("/consumptions", payload, {
     timeout: 60000,
   });
+  console.debug("[timing] createConsumption response received", {
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
   const normalized = normalizeConsumption(response.data?.consumption ?? response.data);
   emitConsumptionChange();
+  console.debug("[timing] createConsumption complete", {
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
   return normalized;
 };
 
 export const updateConsumption = async (id, payload) => {
+  const startedAt = performance.now();
+  console.debug("[timing] updateConsumption request start", {
+    id,
+    itemCount: Array.isArray(payload?.items) ? payload.items.length : 0,
+  });
   const response = await api.put(`/consumptions/${id}`, payload, {
     timeout: 60000,
   });
+  console.debug("[timing] updateConsumption response received", {
+    id,
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
   const normalized = normalizeConsumption(response.data?.consumption ?? response.data);
   emitConsumptionChange();
+  console.debug("[timing] updateConsumption complete", {
+    id,
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
   return normalized;
 };
 
