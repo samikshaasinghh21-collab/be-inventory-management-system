@@ -1,25 +1,16 @@
-const normalizeRole = (value) => String(value ?? "").trim().toLowerCase();
+import { getCurrentUser } from "../services/authService";
+import { reauthenticate } from "../services/settingsApi";
 
-export const isAdminRole = (settings) =>
-  normalizeRole(settings?.profile?.role) === "admin";
+export const isAdminRole = () =>
+  getCurrentUser()?.permissions?.includes("*") ||
+  getCurrentUser()?.permissions?.includes("purchase_orders.override_closed");
 
-export const hasClosedPoAdminPassword = (settings) =>
-  Boolean(String(settings?.security?.closedPoAdminPassword ?? "").trim());
-
-export const verifyClosedPoAdminPassword = (settings, password) =>
-  isAdminRole(settings) &&
-  String(settings?.security?.closedPoAdminPassword ?? "") ===
-    String(password ?? "");
-
-export const getClosedPoAuthError = (settings, password) => {
-  if (!isAdminRole(settings)) {
-    return "Only Admin users can unlock a locked purchase order.";
-  }
-  if (!hasClosedPoAdminPassword(settings)) {
-    return "Set the closed PO admin password in Settings before unlocking locked orders.";
-  }
-  if (!verifyClosedPoAdminPassword(settings, password)) {
-    return "Incorrect admin password.";
-  }
-  return "";
+export const hasClosedPoAdminPassword = () => false;
+export const verifyClosedPoAdminPassword = async (_settings, password, totpCode = "") => {
+  try { await reauthenticate(password, totpCode); return true; } catch { return false; }
+};
+export const getClosedPoAuthError = async (_settings, password, totpCode = "") => {
+  if (!isAdminRole()) return "You do not have permission to unlock a locked purchase order.";
+  try { await reauthenticate(password, totpCode); return ""; }
+  catch (error) { return error.response?.data?.error || "Re-authentication failed."; }
 };

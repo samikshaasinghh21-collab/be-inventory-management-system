@@ -405,7 +405,7 @@ export const NAVIGATION_SECTIONS = [
           }),
           createNavItem({
             id: "project-management-site-reports",
-            label: "Site Reports",
+            label: "Daily Site Reports",
             to: "/project-management/site-reports",
             icon: "file",
             matchPrefixes: ["/project-management/site-reports"],
@@ -449,12 +449,12 @@ export const NAVIGATION_SECTIONS = [
             searchKeywords: ["project documents", "files", "drawings"],
           }),
           createNavItem({
-            id: "project-management-timeline",
-            label: "Timeline",
-            to: "/project-management/timeline",
+            id: "project-management-milestones",
+            label: "Milestones",
+            to: "/project-management/milestones",
             icon: "clock",
-            matchPrefixes: ["/project-management/timeline"],
-            subtitle: "Milestones, schedules, and delivery dates.",
+            matchPrefixes: ["/project-management/milestones"],
+            subtitle: "Milestones, linked tasks, schedules, and delivery dates.",
             searchKeywords: ["project timeline", "milestones", "schedule"],
           }),
           createNavItem({

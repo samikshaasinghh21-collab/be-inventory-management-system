@@ -608,17 +608,25 @@ export const printSection = async ({
   if (typeof document === "undefined") {
     return;
   }
+  // Open the popup while the click event is still active. Waiting before
+  // window.open causes browsers to treat the print window as an unsolicited
+  // popup and block it.
+  const printWindow = safeOpen();
+  if (!printWindow) {
+    return;
+  }
   const node = await waitForNode(selector);
   if (!node) {
+    try {
+      printWindow.close();
+    } catch {
+      // no-op
+    }
     return;
   }
   const isPanelPrint = selector.includes("view-panel");
   const clone = sanitizeCloneForPrint(node.cloneNode(true), { isPanelPrint });
   const bodyHtml = isPanelPrint ? clone.outerHTML : clone.innerHTML;
-  const printWindow = safeOpen();
-  if (!printWindow) {
-    return;
-  }
   printWindow.document.open();
   printWindow.document.write(
     buildDocument({

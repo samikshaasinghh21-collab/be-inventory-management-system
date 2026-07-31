@@ -23,12 +23,16 @@ import ProjectManagementTeamAllocation from "../pages/projectManagement/ProjectM
 import ProjectManagementSiteReports from "../pages/projectManagement/ProjectManagementSiteReports";
 import ProjectManagementInventoryAllocation from "../pages/projectManagement/ProjectManagementInventoryAllocation";
 import ProjectManagementPurchaseTracking from "../pages/projectManagement/ProjectManagementPurchaseTracking";
+import ProjectManagementFinancials from "../pages/projectManagement/ProjectManagementFinancials";
+import ProjectManagementMilestones from "../pages/projectManagement/ProjectManagementMilestones";
+import ProjectManagementDocuments from "../pages/projectManagement/ProjectManagementDocuments";
 import ProjectManagementPlaceholder from "../pages/projectManagement/ProjectManagementPlaceholder";
 import { projectManagementPlaceholderPages } from "../pages/projectManagement/projectManagementData";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
 import CreateAccount from "../pages/CreateAccount";
 import SsoCallback from "../pages/SsoCallback";
+import PasswordReset from "../pages/PasswordReset";
 
 import EditItems from "../components/inventory/EditItems";
 import CreateVendors from "../components/inventory/CreateVendors";
@@ -100,11 +104,10 @@ const HRMS_PAGE_ROUTES = [
 const AppRoutes = () => {
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={<HrmsPlaceholder page="login" />}
-      />
+      <Route path="/login" element={<Navigate replace to="/" />} />
       <Route path="/create-account" element={<CreateAccount />} />
+      <Route path="/forgot-password" element={<PasswordReset requestOnly />} />
+      <Route path="/reset-password" element={<PasswordReset />} />
       <Route path="/auth/sso/callback" element={<SsoCallback />} />
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
@@ -220,8 +223,20 @@ const AppRoutes = () => {
           path="/project-management/purchase-tracking"
           element={<ProjectManagementPurchaseTracking />}
         />
+        <Route
+          path="/project-management/financials"
+          element={<ProjectManagementFinancials />}
+        />
+        <Route
+          path="/project-management/milestones"
+          element={<ProjectManagementMilestones />}
+        />
+        <Route
+          path="/project-management/documents"
+          element={<ProjectManagementDocuments />}
+        />
         {projectManagementPlaceholderPages
-          .filter((screen) => !["projects", "tasks", "team-allocation", "site-reports", "inventory-allocation", "purchase-tracking"].includes(screen.key))
+          .filter((screen) => !["projects", "tasks", "team-allocation", "site-reports", "inventory-allocation", "purchase-tracking", "financials", "documents", "timeline"].includes(screen.key))
           .map((screen) => (
           <Route
             key={screen.path}

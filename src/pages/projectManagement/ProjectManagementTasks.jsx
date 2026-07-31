@@ -8,25 +8,29 @@ import {
   Eye,
   FolderKanban,
   ListChecks,
+  Pencil,
   Search,
   UserPlus,
   Users,
+  X,
 } from "lucide-react";
 import {
   PROJECT_MANAGEMENT_PROJECTS_EVENT,
   hydrateProjectManagementProjects,
   getProjectManagementProjects,
 } from "../../services/projectManagementProjectsStore";
+import {
+  fetchTaskHistory,
+  downloadAuthenticatedFile,
+  updateProjectTask,
+} from "../../services/projectManagementApi";
 import { formatDate } from "../../utils/dateFormat";
 
 const TASK_STATUS_OPTIONS = [
   "All",
-  "Not Started",
-  "Assigned",
-  "In Progress",
-  "Under Review",
+  "Pending",
+  "Partial",
   "Completed",
-  "Blocked",
   "Cancelled",
 ];
 
@@ -36,12 +40,9 @@ const inputClass =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100";
 
 const statusStyles = {
-  "Not Started": "border-slate-200 bg-slate-50 text-slate-700",
-  Assigned: "border-blue-200 bg-blue-50 text-blue-700",
-  "In Progress": "border-emerald-200 bg-emerald-50 text-emerald-700",
-  "Under Review": "border-amber-200 bg-amber-50 text-amber-700",
+  Pending: "border-slate-200 bg-slate-50 text-slate-700",
+  Partial: "border-amber-200 bg-amber-50 text-amber-700",
   Completed: "border-violet-200 bg-violet-50 text-violet-700",
-  Blocked: "border-rose-200 bg-rose-50 text-rose-700",
   Cancelled: "border-slate-300 bg-slate-200 text-slate-700",
 };
 
@@ -84,7 +85,7 @@ const getTaskName = (task = {}) =>
 const getTaskDescription = (task = {}) =>
   task.description || task.taskDescription || task.notes || "";
 
-const getTaskStatus = (task = {}) => task.status || "Assigned";
+const getTaskStatus = (task = {}) => task.status || "Pending";
 
 const getAssignedTo = (task = {}) => task.assignedTo || task.owner || "";
 
@@ -96,10 +97,147 @@ const getTaskProgress = (task = {}) => {
   if (Number.isFinite(direct) && direct > 0) return percentValue(direct);
   const status = getTaskStatus(task);
   if (status === "Completed") return 100;
-  if (status === "Under Review") return 85;
-  if (status === "In Progress") return 55;
-  if (status === "Assigned") return 15;
+  if (status === "Partial") return percentValue(task.completionPercentage);
   return 0;
+};
+
+const TaskUpdateModal = ({ task, onClose, onSaved }) => {
+  const [form, setForm] = useState({
+    status: getTaskStatus(task),
+    completionPercentage: getTaskProgress(task),
+    remainingWorkRemarks: task.remainingWorkRemarks || "",
+    progressRemarks: "",
+    remarks: task.remarks || "",
+    assignedEmployeeName: task.assignedTo || "",
+    dueDate: task.dueDate ? String(task.dueDate).slice(0, 10) : "",
+  });
+  const [attachments, setAttachments] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    void fetchTaskHistory(task.id).then((result) => setHistory(result.history || [])).catch(() => {});
+  }, [task.id]);
+
+  const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const changeStatus = (status) => {
+    setForm((current) => ({
+      ...current,
+      status,
+      completionPercentage:
+        status === "Completed" ? 100 : status === "Pending" ? 0 : current.completionPercentage,
+    }));
+  };
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await updateProjectTask(task.id, form, attachments);
+      await onSaved();
+      onClose();
+    } catch (saveError) {
+      setError(saveError?.response?.data?.error || saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm">
+      <div className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-500">Update Task</p>
+            <h2 className="mt-1 text-xl font-bold text-slate-950">{getTaskName(task)}</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="grid gap-4 p-6 md:grid-cols-2">
+          <label className="text-sm font-medium text-slate-700">
+            Status
+            <select className={`${inputClass} mt-1`} value={form.status} onChange={(event) => changeStatus(event.target.value)}>
+              {TASK_STATUS_OPTIONS.filter((item) => item !== "All").map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            Completion %
+            <input className={`${inputClass} mt-1`} type="number" min="0" max="100"
+              disabled={form.status === "Pending" || form.status === "Completed"}
+              value={form.completionPercentage}
+              onChange={(event) => setField("completionPercentage", event.target.value)} />
+          </label>
+          {form.status === "Partial" && (
+            <label className="text-sm font-medium text-slate-700 md:col-span-2">
+              Remaining-work remarks *
+              <textarea className={`${inputClass} mt-1`} rows="3" value={form.remainingWorkRemarks}
+                onChange={(event) => setField("remainingWorkRemarks", event.target.value)} />
+            </label>
+          )}
+          <label className="text-sm font-medium text-slate-700">
+            Assigned employee
+            <input className={`${inputClass} mt-1`} value={form.assignedEmployeeName}
+              onChange={(event) => setField("assignedEmployeeName", event.target.value)} />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            Due date
+            <input className={`${inputClass} mt-1`} type="date" value={form.dueDate}
+              onChange={(event) => setField("dueDate", event.target.value)} />
+          </label>
+          <label className="text-sm font-medium text-slate-700 md:col-span-2">
+            Progress remarks
+            <textarea className={`${inputClass} mt-1`} rows="2" value={form.progressRemarks}
+              onChange={(event) => setField("progressRemarks", event.target.value)} />
+          </label>
+          <label className="text-sm font-medium text-slate-700 md:col-span-2">
+            General remarks
+            <textarea className={`${inputClass} mt-1`} rows="2" value={form.remarks}
+              onChange={(event) => setField("remarks", event.target.value)} />
+          </label>
+          <label className="text-sm font-medium text-slate-700 md:col-span-2">
+            Attachments
+            <input className={`${inputClass} mt-1`} type="file" multiple
+              onChange={(event) => setAttachments(Array.from(event.target.files || []))} />
+          </label>
+          {error && <p className="md:col-span-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+          <section className="md:col-span-2">
+            <h3 className="font-semibold text-slate-900">Update history</h3>
+            <div className="mt-2 max-h-52 space-y-2 overflow-y-auto">
+              {!history.length ? <p className="text-sm text-slate-500">No updates recorded yet.</p> : history.map((item) => (
+                <div key={item.id} className="rounded-lg border border-slate-200 p-3 text-sm">
+                  <p className="font-medium text-slate-800">{item.updatedBy} · {formatDateValue(item.updatedAt)}</p>
+                  <p className="mt-1 text-slate-500">{item.changedFields.join(", ") || "Remarks/attachments updated"}</p>
+                  {item.progressRemarks && <p className="mt-1 text-slate-700">{item.progressRemarks}</p>}
+                  {item.attachments?.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {item.attachments.map((file) => (
+                        <button
+                          key={file.id}
+                          type="button"
+                          onClick={() => downloadAuthenticatedFile(file.downloadUrl, file.name)}
+                          className="rounded-md bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700"
+                        >
+                          {file.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
+          <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold">Cancel</button>
+          <button type="button" disabled={saving} onClick={save} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+            {saving ? "Saving..." : "Save Update"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const buildTaskRows = (projects = []) =>
@@ -312,6 +450,9 @@ const ProjectManagementTasks = () => {
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [ownerFilter, setOwnerFilter] = useState("All");
   const [selectedTask, setSelectedTask] = useState(null);
+  const [taskToUpdate, setTaskToUpdate] = useState(null);
+
+  const reload = async () => setProjects(await hydrateProjectManagementProjects());
 
   useEffect(() => {
     const handleProjectsChange = () => setProjects(getProjectManagementProjects());
@@ -380,10 +521,10 @@ const ProjectManagementTasks = () => {
       (task) => getTaskStatus(task) === "Completed"
     ).length;
     const inProgress = taskRows.filter((task) =>
-      ["Assigned", "In Progress", "Under Review"].includes(getTaskStatus(task))
+      ["Pending", "Partial"].includes(getTaskStatus(task))
     ).length;
     const blocked = taskRows.filter((task) =>
-      ["Blocked", "Cancelled"].includes(getTaskStatus(task))
+      ["Cancelled"].includes(getTaskStatus(task))
     ).length;
     const overdue = taskRows.filter(
       (task) => getTaskStatus(task) !== "Completed" && isPastDate(task.dueDate)
@@ -403,7 +544,7 @@ const ProjectManagementTasks = () => {
     {
       label: "Active Tasks",
       value: metrics.inProgress.toLocaleString("en-IN"),
-      helper: "Assigned or in motion",
+      helper: "Pending or partially complete",
       icon: Clock3,
       tone: "emerald",
     },
@@ -422,9 +563,9 @@ const ProjectManagementTasks = () => {
       tone: "violet",
     },
     {
-      label: "Blocked",
+      label: "Cancelled",
       value: metrics.blocked.toLocaleString("en-IN"),
-      helper: "Needs attention",
+      helper: "Excluded from progress averages",
       icon: CalendarDays,
       tone: "amber",
     },
@@ -625,6 +766,14 @@ const ProjectManagementTasks = () => {
                         </button>
                         <button
                           type="button"
+                          onClick={() => setTaskToUpdate(task)}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
+                        >
+                          <Pencil className="h-4 w-4" />
+                          Update
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => navigate("/project-management/projects")}
                           className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
                         >
@@ -652,7 +801,7 @@ const ProjectManagementTasks = () => {
                 Task assignments come from project records
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                Create or assign a task from any project and this register updates from localStorage.
+                Create or assign a task from any project and this register updates from SQL Server.
               </p>
             </div>
           </div>
@@ -675,6 +824,13 @@ const ProjectManagementTasks = () => {
             setSelectedTask(null);
             navigate("/project-management/projects");
           }}
+        />
+      )}
+      {taskToUpdate && (
+        <TaskUpdateModal
+          task={taskToUpdate}
+          onClose={() => setTaskToUpdate(null)}
+          onSaved={reload}
         />
       )}
     </div>

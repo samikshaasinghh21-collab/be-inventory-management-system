@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import logo from "../assets/images/bangalore-electronics-logo.png";
+import { completePasswordMfa, login, loginWithPasskey } from "../services/authService";
 
 const validateEmail = (value) => /.+@.+\..+/.test(value);
 
@@ -268,6 +269,9 @@ const Login = () => {
   const timersRef = useRef([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [totpRequired, setTotpRequired] = useState(false);
+  const [mfaTransaction, setMfaTransaction] = useState(null);
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({ email: "", password: "" });
@@ -298,8 +302,25 @@ const Login = () => {
     setFormError(`${provider} sign in is ready for UI review. Connect your identity provider to enable it.`);
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
+    if (totpRequired) {
+      if (!totpCode.trim()) {
+        setFormError("Enter your authenticator or recovery code.");
+        return;
+      }
+      setIsSubmitting(true);
+      setAuthStep("Verifying...");
+      try {
+        await completePasswordMfa({ ...mfaTransaction, code: totpCode });
+        navigate("/", { replace: true });
+      } catch (error) {
+        setFormError(error?.response?.data?.error || "Unable to verify sign-in");
+        setIsSubmitting(false);
+        setAuthStep("");
+      }
+      return;
+    }
     const nextErrors = {
       email: email.trim() ? (validateEmail(email) ? "" : "Enter a valid email") : "Email is required",
       password: password ? "" : "Password is required",
@@ -310,19 +331,45 @@ const Login = () => {
     if (Object.values(nextErrors).some(Boolean)) return;
 
     setIsSubmitting(true);
-    setAuthStep("Verifying...");
+    setAuthStep("Authenticating...");
+    try {
+      const result = await login(email, password);
+      if (result.code === "MFA_REQUIRED") {
+        setMfaTransaction({
+          transactionId: result.transactionId,
+          transactionToken: result.transactionToken,
+        });
+        setTotpRequired(true);
+        setFormError("Enter your authenticator or recovery code.");
+        setAuthStep("");
+        setIsSubmitting(false);
+        return;
+      }
+      setIsSuccess(true);
+      setAuthStep("Welcome back");
+      timersRef.current = [
+        setTimeout(() => setIsLeaving(true), 350),
+        setTimeout(() => navigate("/"), 700),
+      ];
+    } catch (error) {
+      setFormError(error?.response?.data?.error || error?.message || "Sign in failed");
+      setAuthStep("");
+      setIsSubmitting(false);
+    }
+  };
 
-    timersRef.current.forEach(clearTimeout);
-    timersRef.current = [
-      setTimeout(() => setAuthStep("Authenticating..."), 700),
-      setTimeout(() => setAuthStep("Loading your workspace..."), 1450),
-      setTimeout(() => {
-        setIsSuccess(true);
-        setAuthStep("Welcome back");
-      }, 2150),
-      setTimeout(() => setIsLeaving(true), 2800),
-      setTimeout(() => navigate("/"), 3300),
-    ];
+  const handlePasskeyLogin = async () => {
+    setFormError("");
+    setIsSubmitting(true);
+    setAuthStep("Waiting for passkey...");
+    try {
+      await loginWithPasskey();
+      navigate("/", { replace: true });
+    } catch (error) {
+      setFormError(error?.response?.data?.error || error?.message || "Passkey sign-in was not completed");
+      setIsSubmitting(false);
+      setAuthStep("");
+    }
   };
 
   return (
@@ -363,6 +410,17 @@ const Login = () => {
             )}
 
             <div className="mt-10 space-y-7">
+              {!totpRequired && (
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handlePasskeyLogin}
+                  className="flex h-14 w-full items-center justify-center gap-3 rounded-[18px] border border-emerald-700 bg-white font-bold text-emerald-800 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-4 focus:ring-emerald-700/20 disabled:opacity-60"
+                >
+                  <LockIcon />
+                  Sign in with a passkey
+                </button>
+              )}
               <div className="animate-login-stagger" style={stagger(1)}>
                 <FloatingInput
                   id="email"
@@ -405,6 +463,23 @@ const Login = () => {
                 />
               </div>
 
+              {totpRequired && (
+                <div className="animate-login-stagger" style={stagger(3)}>
+                  <FloatingInput
+                    id="totpCode"
+                    label="Authenticator code"
+                    icon={<LockIcon />}
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    required
+                    value={totpCode}
+                    onChange={(event) => setTotpCode(event.target.value)}
+                    placeholder="Enter six-digit code"
+                  />
+                </div>
+              )}
+
               <div className="flex animate-login-stagger items-center justify-between gap-4 text-sm sm:text-base" style={stagger(3)}>
                 <label className="login-muted flex cursor-pointer items-center gap-3 font-medium text-slate-500 transition-colors duration-300">
                   <input
@@ -415,7 +490,7 @@ const Login = () => {
                   />
                   Remember me
                 </label>
-                <button type="button" className="login-link font-bold text-emerald-700 transition hover:text-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-4">
+                <button type="button" onClick={() => navigate("/forgot-password")} className="login-link font-bold text-emerald-700 transition hover:text-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-4">
                   Forgot password?
                 </button>
               </div>
@@ -456,9 +531,7 @@ const Login = () => {
 
             <p className="login-muted mt-12 animate-login-stagger text-center text-base font-medium text-slate-500 transition-colors duration-300" style={stagger(7)}>
               Don&apos;t have an account?{" "}
-              <Link to="/create-account" className="login-link font-extrabold text-emerald-700 transition hover:text-emerald-600">
-                Sign Up
-              </Link>
+              <span className="font-semibold text-slate-500">Ask an administrator for an invitation</span>
             </p>
           </form>
         </div>

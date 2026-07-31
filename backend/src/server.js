@@ -1,10 +1,25 @@
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import express from "express";
+import helmet from "helmet";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { checkDbConnection, getPool, sql } from "./config/db.js";
+import {
+  authenticate,
+  createAuthRouter,
+  ensureAuthSchema,
+  hasPermission,
+  hasStepUpScope,
+  requireEnrollment,
+} from "./auth.js";
+import {
+  createProjectManagementRouter,
+  ensureProjectManagementSchema,
+} from "./projectManagement.js";
+import { createSettingsAdminRouter } from "./settingsAdmin.js";
 import version from "../../scripts/getVersion.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,7 +38,26 @@ const port = Number.parseInt(process.env.PORT ?? "5000", 10);
 process.env.APP_VERSION = process.env.APP_VERSION || version;
 console.log(`Backend starting with app version: ${process.env.APP_VERSION}`);
 
-app.use(cors());
+const configuredOrigins = String(process.env.TRUSTED_FRONTEND_ORIGIN || "")
+  .split(",").map((value) => value.trim().replace(/\/$/, "")).filter(Boolean);
+const developmentOrigins = ["http://localhost:5173", "http://localhost:5174"];
+const allowedOrigins = new Set(configuredOrigins.length ? configuredOrigins : developmentOrigins);
+app.set("trust proxy", Number.parseInt(process.env.TRUST_PROXY_HOPS || "0", 10));
+app.disable("x-powered-by");
+app.use(helmet({
+  contentSecurityPolicy: process.env.NODE_ENV === "production" ? undefined : false,
+  crossOriginResourcePolicy: { policy: "same-site" },
+}));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin.replace(/\/$/, ""))) return callback(null, true);
+    const error = new Error("Origin is not allowed");
+    error.statusCode = 403;
+    return callback(error);
+  },
+  credentials: true,
+}));
+app.use(cookieParser());
 app.use(express.json({ limit: "25mb" }));
 
 // Basic request logger to surface 2xx/4xx/5xx hits in the terminal
@@ -38,6 +72,15 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+app.use("/api/auth", createAuthRouter());
+app.use("/api/settings", createSettingsAdminRouter());
+app.use("/api/project-management", createProjectManagementRouter());
+app.use(["/api/purchase-orders", "/api/receive-goods", "/api/goods-receipts"], authenticate, requireEnrollment);
+
+const hasClosedMutationGrant = (req) =>
+  hasPermission(req.user, "purchase_orders.override_closed") &&
+  hasStepUpScope(req.session, "purchase_orders.override_closed");
 
 const getLanAddresses = () => {
   const interfaces = os.networkInterfaces();
@@ -15093,7 +15136,8 @@ app.put("/api/purchase-orders/:id", async (req, res) => {
   }
 
   const allowLockedEdit =
-    req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true;
+    (req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true) &&
+    hasClosedMutationGrant(req);
 
   const {
     projectId = null,
@@ -15320,7 +15364,8 @@ app.patch("/api/purchase-orders/:id/status", async (req, res) => {
   }
 
   const allowLockedEdit =
-    req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true;
+    (req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true) &&
+    hasClosedMutationGrant(req);
   const requestedStatus = normalizeOptionalString(req.body?.status);
   if (!requestedStatus) {
     return res.status(400).json({ ok: false, error: "Status is required" });
@@ -16648,7 +16693,8 @@ app.put("/api/receive-goods/:id", async (req, res) => {
   } = req.body ?? {};
 
   const allowLockedEdit =
-    req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true;
+    (req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true) &&
+    hasClosedMutationGrant(req);
   const negativeItem = findNegativeQuantityInput(items, [
     "receivedQty",
     "ReceivedQty",
@@ -16936,7 +16982,8 @@ app.delete("/api/receive-goods/:id", async (req, res) => {
   }
 
   const allowLockedEdit =
-    req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true;
+    (req.body?.allowLockedEdit === true || req.body?.allowClosedEdit === true) &&
+    hasClosedMutationGrant(req);
   const auditBy = req.body?.auditBy ?? null;
 
   let tx;
@@ -20692,16 +20739,30 @@ app.delete("/api/reallocate-inventory/:id", async (req, res) => {
   }
 });
 
-app.use((err, _req, res, _next) => {
-  void _next;
-  res.status(500).json({
+app.use((req, res) => {
+  res.status(404).json({
     ok: false,
-    error: err?.message ?? "Internal server error",
+    code: "NOT_FOUND",
+    error: "API route not found",
+    path: req.path,
   });
 });
 
-const warmupSchema = async () => {
+app.use((err, _req, res, _next) => {
+  void _next;
+  const status = Number(err?.statusCode || err?.status || 500);
+  res.status(status).json({
+    ok: false,
+    code: status === 500 ? "INTERNAL_ERROR" : "REQUEST_ERROR",
+    error: process.env.NODE_ENV === "production" && status >= 500
+      ? "Internal server error"
+      : (err?.message ?? "Internal server error"),
+  });
+});
+
+const warmupSchema = async ({ fatal = false } = {}) => {
   try {
+    await ensureAuthSchema();
     await Promise.all([
       ensureBrandsTable(),
       ensureItemsTable(),
@@ -20717,11 +20778,17 @@ const warmupSchema = async () => {
       ensureConsumptionTables(),
       ensureReallocateInventoryTables(),
     ]);
+    await ensureProjectManagementSchema();
     console.log("Schema warmup complete");
   } catch (error) {
     console.error("Schema warmup failed:", error?.message ?? error);
+    if (fatal) throw error;
   }
 };
+
+if (process.env.NODE_ENV === "production") {
+  await warmupSchema({ fatal: true });
+}
 
 app.listen(port, () => {
   const localUrl = `http://localhost:${port}/api`;
@@ -20735,5 +20802,7 @@ app.listen(port, () => {
     });
   }
 
-  void warmupSchema();
+  if (process.env.NODE_ENV !== "production") {
+    void warmupSchema();
+  }
 });

@@ -1349,8 +1349,8 @@ const ReceiveGoods = () => {
     }
   };
 
-  const handleClosedPoUnlock = () => {
-    const nextError = getClosedPoAuthError(settings, adminPassword);
+  const handleClosedPoUnlock = async () => {
+    const nextError = await getClosedPoAuthError(settings, adminPassword);
     if (nextError) {
       setAdminPasswordError(nextError);
       return;

@@ -1,121 +1,53 @@
-const STORAGE_KEY = "appSettings";
+import {
+  getMigrationState,
+  loadSettingsFromApis,
+  saveAppearance,
+  saveNotifications,
+  saveWorkspaceSetting,
+} from "./settingsApi";
 
 export const DEFAULT_SETTINGS = {
-  profile: {
-    fullName: "Demo Account",
-    email: "demo@mybillbook.in",
-    phone: "+91 98765 43210",
-    role: "Admin",
-    avatar: "",
-    dob: "1983-05-01",
-    country: "India",
-    languages: "English (United States), English (India)",
-    regionFormat: "English (United States); 8/31/2000; 01:01 - 23:59",
-  },
-  company: {
-    name: "",
-    email: "",
-    phone: "",
-    address: "",
-    city: "",
-    state: "",
-    pincode: "",
-    gstin: "",
-  },
-  preferences: {
-    currency: "INR",
-    dateFormat: "DD/MM/YYYY",
-    timeZone: "Asia/Kolkata",
-    language: "English",
-    theme: "Light",
-  },
-  inventory: {
-    defaultUnit: "PCS",
-    lowStockThreshold: 5,
-    reorderLevel: 10,
-    valuationMethod: "FIFO",
-    allowNegativeStock: false,
-    autoReorder: false,
-    trackBatch: false,
-  },
-  notifications: {
-    email: true,
-    sms: false,
-    lowStock: true,
-    weeklySummary: false,
-    projectUpdates: true,
-  },
-  security: {
-    twoFactor: false,
-    sessionTimeout: 30,
-    passwordExpiryDays: 90,
-    requireStrongPassword: true,
-    closedPoAdminPassword: "",
-  },
+  profile: { fullName: "", email: "", phone: "", role: "", avatar: "", jobTitle: "", department: "" },
+  company: { name: "BE Inventory", email: "", phone: "", address: "", city: "", state: "", pincode: "", gstin: "" },
+  preferences: { currency: "INR", dateFormat: "DD/MM/YYYY", timeZone: "Asia/Kolkata", language: "English", theme: "Light" },
+  inventory: { defaultUnit: "PCS", lowStockThreshold: 5, reorderLevel: 10, valuationMethod: "FIFO", allowNegativeStock: false, autoReorder: false, trackBatch: false },
+  notifications: { email: true, sms: false, lowStock: true, weeklySummary: false, projectUpdates: true },
+  security: { inactivityTimeoutMinutes: 30, passwordExpiryDays: 90, failedLoginLimit: 5, accountLockMinutes: 15, requireStrongPassword: true },
 };
 
-const cloneDefaults = () =>
-  JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-
-const isPlainObject = (value) =>
-  value && typeof value === "object" && !Array.isArray(value);
-
-const mergeDefaults = (defaults, stored) => {
-  if (!isPlainObject(defaults) || !isPlainObject(stored)) {
-    return stored ?? defaults;
-  }
-
-  const merged = { ...defaults };
-  Object.keys(stored).forEach((key) => {
-    if (key in defaults) {
-      merged[key] = mergeDefaults(defaults[key], stored[key]);
-    } else {
-      merged[key] = stored[key];
+let memorySettings = structuredClone(DEFAULT_SETTINGS);
+const emit = () => {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("settings:changed"));
+};
+export const getSettings = () => structuredClone(memorySettings);
+export const hydrateSettings = async () => {
+  const data = await loadSettingsFromApis();
+  if (typeof window !== "undefined" && data.capabilities?.manageWorkspace) {
+    const legacyRaw = window.localStorage.getItem("appSettings");
+    if (legacyRaw) {
+      try {
+        const legacy = JSON.parse(legacyRaw);
+        const persistence = await getMigrationState();
+        if (!persistence.organization && legacy.company) data.workspace.organization = await saveWorkspaceSetting("organization", legacy.company);
+        if (!persistence.inventory && legacy.inventory) data.workspace.inventory = await saveWorkspaceSetting("inventory", legacy.inventory);
+        if (!persistence.preferences && legacy.preferences) data.appearance = await saveAppearance(legacy.preferences);
+        if (!persistence.preferences && legacy.notifications) data.notifications = await saveNotifications(legacy.notifications);
+        window.localStorage.removeItem("appSettings");
+      } catch {
+        // Leave the legacy record intact so a later authenticated load can retry safely.
+      }
     }
-  });
-  return merged;
-};
-
-const emitChange = () => {
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event("settings:changed"));
   }
+  memorySettings = {
+    profile: { ...DEFAULT_SETTINGS.profile, ...data.profile, fullName: data.profile?.name || "" },
+    company: { ...DEFAULT_SETTINGS.company, ...(data.workspace?.organization || {}) },
+    preferences: { ...DEFAULT_SETTINGS.preferences, ...(data.appearance || {}) },
+    inventory: { ...DEFAULT_SETTINGS.inventory, ...(data.workspace?.inventory || {}) },
+    notifications: { ...DEFAULT_SETTINGS.notifications, ...(data.notifications || {}) },
+    security: { ...DEFAULT_SETTINGS.security, ...(data.workspace?.security || {}) },
+  };
+  emit();
+  return getSettings();
 };
-
-export const getSettings = () => {
-  if (typeof window === "undefined") {
-    return cloneDefaults();
-  }
-
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return cloneDefaults();
-    }
-    const stored = JSON.parse(raw);
-    if (!stored || typeof stored !== "object") {
-      return cloneDefaults();
-    }
-    return mergeDefaults(DEFAULT_SETTINGS, stored);
-  } catch {
-    return cloneDefaults();
-  }
-};
-
-export const saveSettings = (settings) => {
-  if (typeof window === "undefined") {
-    return settings;
-  }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  emitChange();
-  return settings;
-};
-
-export const resetSettings = () => {
-  const defaults = cloneDefaults();
-  if (typeof window !== "undefined") {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(defaults));
-    emitChange();
-  }
-  return defaults;
-};
+export const saveSettings = (settings) => { memorySettings = structuredClone(settings); emit(); return getSettings(); };
+export const resetSettings = () => { memorySettings = structuredClone(DEFAULT_SETTINGS); emit(); return getSettings(); };

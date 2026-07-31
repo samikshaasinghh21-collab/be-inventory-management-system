@@ -107,7 +107,7 @@ const ProjectManagementInventoryAllocation = () => {
     setLoading(true); setError("");
     try {
       const projectRows = getProjectManagementProjects();
-      const allocationRows = fetchInventoryAllocations();
+      const allocationRows = await fetchInventoryAllocations();
       const locationRows = localLocations(projectRows);
       const boqRows = localBoqs();
       setAllocations(allocationRows); setProjects(projectRows); setLocations(locationRows); setBoqs(boqRows);

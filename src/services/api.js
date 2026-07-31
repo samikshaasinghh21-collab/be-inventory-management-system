@@ -135,6 +135,7 @@ export const ensureApiAvailable = async ({ force = false } = {}) => {
       const { baseUrl: normalizedBaseUrl, healthUrl } = resolveApiUrls(baseUrl);
       const response = await axios.get(healthUrl, {
         timeout: 5000,
+        withCredentials: true,
         headers: {
           "Cache-Control": "no-cache",
         },
@@ -180,7 +181,19 @@ export const ensureApiAvailable = async ({ force = false } = {}) => {
 
 const api = axios.create({
   baseURL: activeApiBaseUrl,
+  withCredentials: true,
 });
+
+const readCookie = (name) => {
+  if (typeof document === "undefined") return "";
+  const prefix = `${encodeURIComponent(name)}=`;
+  return document.cookie.split("; ").find((part) => part.startsWith(prefix))?.slice(prefix.length) || "";
+};
+
+const isPublicAuthPage = () =>
+  typeof window !== "undefined" &&
+  ["/login", "/create-account", "/forgot-password", "/reset-password", "/auth/sso/callback", "/security-enrollment"]
+    .includes(window.location.pathname);
 
 api.interceptors.request.use(
   async (config) => {
@@ -189,10 +202,10 @@ api.interceptors.request.use(
     }
 
     config.baseURL = activeApiBaseUrl;
-    const token = localStorage.getItem("token");
-    if (token) {
+    if (["post", "put", "patch", "delete"].includes(String(config.method).toLowerCase())) {
       config.headers = config.headers ?? {};
-      config.headers.Authorization = `Bearer ${token}`;
+      const csrf = decodeURIComponent(readCookie("be_csrf"));
+      if (csrf) config.headers["X-CSRF-Token"] = csrf;
     }
     return config;
   },
@@ -201,9 +214,9 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem("token");
+  async (error) => {
+    if (error.response?.status === 401 && !isPublicAuthPage()) {
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:expired"));
     }
 
     if (

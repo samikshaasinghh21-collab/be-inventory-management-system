@@ -196,7 +196,7 @@ export const projectManagementPlaceholderPages = [
   {
     key: "site-reports",
     path: "/project-management/site-reports",
-    title: "Site Reports",
+    title: "Daily Site Reports",
     description: "Capture site updates, work progress, issues, photos, and daily observations.",
     actionLabel: "Create Report",
     emptyMessage: "No site reports have been submitted yet.",

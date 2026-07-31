@@ -543,8 +543,8 @@ const ReceiveGoodsRegister = () => {
     );
   };
 
-  const confirmClosedPoReceiptEdit = () => {
-    const nextError = getClosedPoAuthError(settings, adminPassword);
+  const confirmClosedPoReceiptEdit = async () => {
+    const nextError = await getClosedPoAuthError(settings, adminPassword);
     if (nextError) {
       setAdminPasswordError(nextError);
       return;
@@ -611,7 +611,7 @@ const ReceiveGoodsRegister = () => {
   };
 
   const confirmClosedPoReceiptDelete = async () => {
-    const nextError = getClosedPoAuthError(settings, adminPassword);
+    const nextError = await getClosedPoAuthError(settings, adminPassword);
     if (nextError) {
       setAdminPasswordError(nextError);
       return;

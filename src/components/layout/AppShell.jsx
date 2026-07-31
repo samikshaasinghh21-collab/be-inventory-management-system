@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
-import { getSettings } from "../../services/settingsStore";
+import { getSettings, hydrateSettings } from "../../services/settingsStore";
+import { loadCurrentUser } from "../../services/authService";
 import AppHeader from "./AppHeader";
 import Sidebar from "./Sidebar";
 import { getRouteMeta } from "./navigation";
@@ -91,9 +92,23 @@ const AppShell = ({ children }) => {
     const syncSettings = () => {
       setSettings(safeReadSettings());
     };
+    const handleExpiredSession = () => window.location.assign("/login");
 
     window.addEventListener("settings:changed", syncSettings);
-    return () => window.removeEventListener("settings:changed", syncSettings);
+    window.addEventListener("auth:expired", handleExpiredSession);
+    loadCurrentUser()
+      .then((user) => {
+        if (!user) {
+          window.location.assign("/login");
+          return null;
+        }
+        return hydrateSettings();
+      })
+      .catch(() => window.location.assign("/login"));
+    return () => {
+      window.removeEventListener("settings:changed", syncSettings);
+      window.removeEventListener("auth:expired", handleExpiredSession);
+    };
   }, []);
 
   useEffect(() => {

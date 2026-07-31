@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import AppIcon from "./AppIcon";
 import { FLAT_NAVIGATION_ITEMS, HEADER_QUICK_ACTIONS } from "./navigation";
 import NotificationBell from "../notifications/NotificationBell";
+import { logout } from "../../services/authService";
 
 const buildInitials = (name = "Workspace") =>
   String(name)
@@ -125,11 +126,12 @@ const AppHeader = ({
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     const shouldLogout = window.confirm("Are you sure you want to logout?");
     if (!shouldLogout) {
       return;
     }
+    await logout();
     navigate("/login");
   };
 
@@ -231,8 +233,9 @@ const AppHeader = ({
               )}
             </form>
 
-            <div className="header-quick-actions">
-              {HEADER_QUICK_ACTIONS.slice(0, 2).map((action) => (
+            {location.pathname !== "/settings" && (
+              <div className="header-quick-actions">
+                {HEADER_QUICK_ACTIONS.slice(0, 2).map((action) => (
                 <button
                   key={action.id}
                   type="button"
@@ -242,8 +245,9 @@ const AppHeader = ({
                   <AppIcon name={action.icon} className="h-4 w-4" />
                   <span>{action.label}</span>
                 </button>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
 
             <NotificationBell />
 

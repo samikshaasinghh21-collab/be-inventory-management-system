@@ -22,6 +22,7 @@ import {
   PackageCheck,
   Pencil,
   Plus,
+  Printer,
   ReceiptText,
   Search,
   Upload,
@@ -39,10 +40,17 @@ import {
   ensureProjectManagementProjects,
   getProjectManagementProjects as getProjects,
   saveProjectManagementProject as saveProject,
-  setProjectManagementProjects as setLocalProjects,
 } from "../../services/projectManagementProjectsStore";
+import {
+  createMilestone,
+  createProjectTask,
+  deleteMilestone,
+  updateProjectManagementProject,
+  updateMilestone,
+} from "../../services/projectManagementApi";
 import { formatDate } from "../../utils/dateFormat";
 import { formatInrCurrency } from "../../utils/formatters";
+import { printSection } from "../../utils/printUtils";
 
 const STATUS_OPTIONS = [
   "Draft",
@@ -100,6 +108,8 @@ const statusStyles = {
   Active: "border-emerald-200 bg-emerald-50 text-emerald-700",
   "On Hold": "border-amber-200 bg-amber-50 text-amber-700",
   Delayed: "border-rose-200 bg-rose-50 text-rose-700",
+  Pending: "border-slate-200 bg-slate-50 text-slate-700",
+  Partial: "border-amber-200 bg-amber-50 text-amber-700",
   Completed: "border-violet-200 bg-violet-50 text-violet-700",
   Cancelled: "border-slate-300 bg-slate-200 text-slate-700",
 };
@@ -139,6 +149,7 @@ const emptyProjectForm = {
   endDate: "",
   actualEndDate: "",
   milestoneTemplate: "",
+  milestones: [],
   estimatedBudget: "",
   approvedBudget: "",
   materialBudget: "",
@@ -162,20 +173,28 @@ const emptyTaskForm = {
   priority: "Medium",
   startDate: "",
   dueDate: "",
-  status: "Assigned",
+  status: "Pending",
   estimatedHours: "",
   dependencies: "",
   attachments: [],
   comments: "",
 };
 
+const newMilestoneForm = () => ({
+  id: makeId("milestone-draft"),
+  name: "",
+  description: "",
+  startDate: "",
+  targetDate: "",
+  responsiblePerson: "",
+  responsiblePersonId: "",
+  taskIds: [],
+});
+
 const TASK_STATUS_OPTIONS = [
-  "Not Started",
-  "Assigned",
-  "In Progress",
-  "Under Review",
+  "Pending",
+  "Partial",
   "Completed",
-  "Blocked",
   "Cancelled",
 ];
 
@@ -910,7 +929,7 @@ const getTaskDueCount = (project) =>
     return task.dueDate && taskStatus !== "completed" && isPastDate(task.dueDate);
   }).length;
 
-const getTaskStatus = (task = {}) => task.status || "Assigned";
+const getTaskStatus = (task = {}) => task.status || "Pending";
 
 const getTaskName = (task = {}) => task.taskName || task.title || task.name || "";
 
@@ -927,9 +946,7 @@ const getTaskProgress = (task = {}) => {
   if (Number.isFinite(direct) && direct > 0) return percentValue(direct);
   const status = getTaskStatus(task);
   if (status === "Completed") return 100;
-  if (status === "Under Review") return 85;
-  if (status === "In Progress") return 55;
-  if (status === "Assigned") return 15;
+  if (status === "Partial") return percentValue(task.completionPercentage ?? task.progress);
   return 0;
 };
 
@@ -1331,6 +1348,7 @@ const mapProjectToForm = (project = {}) => ({
   endDate: project.endDate || "",
   actualEndDate: project.actualEndDate || "",
   milestoneTemplate: project.milestoneTemplate || "",
+  milestones: Array.isArray(project.milestones) ? project.milestones : [],
   estimatedBudget: project.estimatedBudget || "",
   approvedBudget: project.approvedBudget || "",
   materialBudget: project.materialBudget || "",
@@ -1357,9 +1375,11 @@ const buildProjectPayload = (form, existingProject = null) => {
   const inventoryAllocations = existingProject?.inventoryAllocations?.length
     ? existingProject.inventoryAllocations
     : buildDefaultInventory(form);
-  const milestones = existingProject?.milestones?.length
-    ? existingProject.milestones
-    : buildDefaultMilestones(form);
+  const milestones = form.milestones?.length
+    ? form.milestones
+    : existingProject?.milestones?.length
+      ? existingProject.milestones
+      : buildDefaultMilestones(form);
   const financials = existingProject?.financials?.length
     ? existingProject.financials
     : buildDefaultFinancials(form);
@@ -1613,7 +1633,7 @@ const ProjectFormModal = ({
     if (!String(form.customerId || "").trim() && !form.client.trim()) {
       nextErrors.client = "Client is required.";
     }
-    if (!String(form.projectManagerId || "").trim() && !form.projectManager.trim()) {
+    if (!form.projectManager.trim()) {
       nextErrors.projectManager = "Project manager is required.";
     }
     if (!form.startDate) nextErrors.startDate = "Start date is required.";
@@ -1660,6 +1680,40 @@ const ProjectFormModal = ({
     updateField(idField, selectedEmployee ? String(selectedEmployee.employeeId || selectedEmployee.id) : "");
   };
 
+  const updateMilestoneField = (index, key, value) => {
+    setForm((current) => ({
+      ...current,
+      milestones: (current.milestones || []).map((milestone, milestoneIndex) =>
+        milestoneIndex === index ? { ...milestone, [key]: value } : milestone
+      ),
+    }));
+  };
+
+  const addMilestone = () =>
+    setForm((current) => ({
+      ...current,
+      milestones: [...(current.milestones || []), newMilestoneForm()],
+    }));
+
+  const removeMilestone = (index) =>
+    setForm((current) => ({
+      ...current,
+      milestones: (current.milestones || []).filter(
+        (_milestone, milestoneIndex) => milestoneIndex !== index
+      ),
+    }));
+
+  const updateManualResponsibility = (field, idField, value) => {
+    setForm((prev) => ({
+      ...prev,
+      [field]: value,
+      [idField]: "",
+    }));
+    if (errors[field]) {
+      setErrors((prev) => ({ ...prev, [field]: undefined }));
+    }
+  };
+
   const updateLocation = (locationId) => {
     const selectedLocation =
       locations.find((location) => String(location.id) === String(locationId)) || null;
@@ -1680,14 +1734,6 @@ const ProjectFormModal = ({
 
   const title = mode === "edit" ? "Edit Project" : "Create Project";
   const legacyCustomerOption = makeLegacySelectOption(form.client, customerSelectOptions);
-  const legacyProjectManagerOption = makeLegacySelectOption(
-    form.projectManager,
-    employeeSelectOptions
-  );
-  const legacySiteEngineerOption = makeLegacySelectOption(
-    form.siteEngineer,
-    employeeSelectOptions
-  );
   const legacyTeamLeadOption = makeLegacySelectOption(form.teamLead, employeeSelectOptions);
   const legacyLocationOption = makeLegacySelectOption(form.siteName, locationSelectOptions);
 
@@ -1836,6 +1882,73 @@ const ProjectFormModal = ({
               </section>
 
               <section className={sectionClass}>
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <SectionTitle
+                    icon={CheckCircle2}
+                    title="Milestones"
+                    subtitle="Add one or more delivery checkpoints. Progress is calculated from linked tasks."
+                  />
+                  <button
+                    type="button"
+                    onClick={addMilestone}
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700"
+                  >
+                    <Plus className="h-4 w-4" /> Add Milestone
+                  </button>
+                </div>
+                {!form.milestones?.length ? (
+                  <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
+                    No milestones added. They can also be created later from the Milestones module.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {form.milestones.map((milestone, index) => (
+                      <div key={milestone.id || index} className="rounded-xl border border-slate-200 p-4">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <Field label="Milestone Name" required>
+                            <input className={inputClass} value={milestone.name || ""}
+                              onChange={(event) => updateMilestoneField(index, "name", event.target.value)} />
+                          </Field>
+                          <Field label="Responsible Person">
+                            <input className={inputClass} value={milestone.responsiblePerson || milestone.owner || ""}
+                              onChange={(event) => updateMilestoneField(index, "responsiblePerson", event.target.value)}
+                              placeholder="Employee name" />
+                          </Field>
+                          <Field label="Start Date">
+                            <DateInput className={inputClass} value={milestone.startDate || ""}
+                              onChange={(value) => updateMilestoneField(index, "startDate", value || "")} />
+                          </Field>
+                          <Field label="Target Date">
+                            <DateInput className={inputClass} value={milestone.targetDate || ""}
+                              onChange={(value) => updateMilestoneField(index, "targetDate", value || "")} />
+                          </Field>
+                          <Field label="Description" className="md:col-span-2">
+                            <textarea className={inputClass} rows="2" value={milestone.description || ""}
+                              onChange={(event) => updateMilestoneField(index, "description", event.target.value)} />
+                          </Field>
+                          {project?.tasks?.length ? (
+                            <Field label="Linked Tasks" className="md:col-span-2">
+                              <select multiple className={`${inputClass} min-h-24`}
+                                value={(milestone.taskIds || milestone.linkedTasks || []).map(String)}
+                                onChange={(event) => updateMilestoneField(index, "taskIds", Array.from(event.target.selectedOptions).map((option) => Number(option.value)))}>
+                                {project.tasks.map((task) => (
+                                  <option key={task.id} value={task.id}>{task.taskName || task.title}</option>
+                                ))}
+                              </select>
+                            </Field>
+                          ) : null}
+                        </div>
+                        <button type="button" onClick={() => removeMilestone(index)}
+                          className="mt-3 text-sm font-semibold text-rose-600 hover:text-rose-700">
+                          Remove milestone
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className={sectionClass}>
                 <SectionTitle
                   icon={Users}
                   title="Responsibility"
@@ -1847,54 +1960,34 @@ const ProjectFormModal = ({
                     required
                     error={errors.projectManager}
                   >
-                    <SelectField
-                      value={
-                        form.projectManagerId ||
-                        (legacyProjectManagerOption
-                          ? legacyProjectManagerOption.value
-                          : "")
+                    <input
+                      type="text"
+                      value={form.projectManager}
+                      onChange={(event) =>
+                        updateManualResponsibility(
+                          "projectManager",
+                          "projectManagerId",
+                          event.target.value
+                        )
                       }
-                      onChange={(value) =>
-                        updateEmployee("projectManager", "projectManagerId", value)
-                      }
-                    >
-                      <option value="">Select project manager</option>
-                      {legacyProjectManagerOption ? (
-                        <option value={legacyProjectManagerOption.value}>
-                          {legacyProjectManagerOption.label}
-                        </option>
-                      ) : null}
-                      {employeeSelectOptions.map((employee) => (
-                        <option key={employee.value} value={employee.value}>
-                          {employee.label}
-                        </option>
-                      ))}
-                    </SelectField>
+                      placeholder="Enter project manager name"
+                      className={inputClass}
+                    />
                   </Field>
                   <Field label="Site Engineer">
-                    <SelectField
-                      value={
-                        form.siteEngineerId ||
-                        (legacySiteEngineerOption
-                          ? legacySiteEngineerOption.value
-                          : "")
+                    <input
+                      type="text"
+                      value={form.siteEngineer}
+                      onChange={(event) =>
+                        updateManualResponsibility(
+                          "siteEngineer",
+                          "siteEngineerId",
+                          event.target.value
+                        )
                       }
-                      onChange={(value) =>
-                        updateEmployee("siteEngineer", "siteEngineerId", value)
-                      }
-                    >
-                      <option value="">Select site engineer</option>
-                      {legacySiteEngineerOption ? (
-                        <option value={legacySiteEngineerOption.value}>
-                          {legacySiteEngineerOption.label}
-                        </option>
-                      ) : null}
-                      {employeeSelectOptions.map((employee) => (
-                        <option key={employee.value} value={employee.value}>
-                          {employee.label}
-                        </option>
-                      ))}
-                    </SelectField>
+                      placeholder="Enter site engineer name"
+                      className={inputClass}
+                    />
                   </Field>
                   <Field label="Team Lead">
                     <SelectField
@@ -2303,7 +2396,7 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
               value={form.status}
               onChange={(value) => updateField("status", value)}
             >
-              {TASK_STATUS_OPTIONS.map((option) => (
+              {TASK_STATUS_OPTIONS.filter((option) => option !== "Partial").map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>
@@ -2419,6 +2512,210 @@ const DetailTabButton = ({ tab, active, onClick }) => {
       {createElement(tab.icon, { className: "h-4 w-4" })}
       {tab.label}
     </button>
+  );
+};
+
+const ProjectPrintTable = ({ title, columns, rows, emptyMessage }) => (
+  <section className="details-section">
+    <h3>{title}</h3>
+    {rows.length ? (
+      <table>
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column.label}>{column.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={row.id || `${title}-${rowIndex}`}>
+              {columns.map((column) => (
+                <td key={column.label}>
+                  {column.render ? column.render(row) : row[column.key] || "-"}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ) : (
+      <p>{emptyMessage || `No ${title.toLowerCase()} available.`}</p>
+    )}
+  </section>
+);
+
+const ProjectCompleteFilePrint = ({ project }) => {
+  const budget = getBudget(project);
+  const expenses = getExpenses(project);
+  const tasks = project.tasks || [];
+  const team = project.teamAllocations || [];
+  const milestones = project.milestones || [];
+  const inventory = project.inventoryAllocations || [];
+  const purchases = project.purchases || [];
+  const financials = getCostBreakdownRows(project);
+  const documents = project.documents || [];
+  const activities = project.activities || [];
+
+  return (
+    <div
+      id="project-complete-file-print"
+      className="fixed left-[-10000px] top-0 w-[1000px] bg-white p-6 text-slate-900"
+      aria-hidden="true"
+    >
+      <section className="details-section">
+        <h3>Project Overview</h3>
+        {[
+          ["Project Name", project.name],
+          ["Project Code", project.code],
+          ["Client", project.client || project.companyName],
+          ["Category", project.projectCategory],
+          ["Status", getProjectStatus(project)],
+          ["Priority", project.priority],
+          ["Project Manager", project.projectManager],
+          ["Site Engineer", project.siteEngineer],
+          ["Team Lead", project.teamLead],
+          ["Department", project.department],
+          ["Start Date", formatDateValue(project.startDate)],
+          ["Planned End Date", formatDateValue(project.endDate)],
+          ["Actual End Date", formatDateValue(project.actualEndDate)],
+          ["Progress", `${getProgress(project)}%`],
+          ["Approved Budget", formatInrCurrency(budget)],
+          ["Recorded Spend", formatInrCurrency(expenses)],
+          ["Remaining Budget", formatInrCurrency(Math.max(budget - expenses, 0))],
+        ].map(([label, value]) => (
+          <div className="details-row" key={label}>
+            <span className="details-label">{label}</span>
+            <span className="details-value">{value || "-"}</span>
+          </div>
+        ))}
+      </section>
+
+      <section className="details-section">
+        <h3>Scope and Site Details</h3>
+        {[
+          ["Description", project.description || project.notes],
+          ["Site Name", project.siteName],
+          ["Site Address", project.siteAddress || project.address],
+          ["City / State", [project.city, project.state].filter(Boolean).join(", ")],
+          ["Site Contact", project.siteContactPerson],
+          ["Site Contact Number", project.siteContactNumber],
+        ].map(([label, value]) => (
+          <div className="details-row" key={label}>
+            <span className="details-label">{label}</span>
+            <span className="details-value">{value || "-"}</span>
+          </div>
+        ))}
+      </section>
+
+      <ProjectPrintTable
+        title="Tasks"
+        rows={tasks}
+        columns={[
+          { label: "Task", render: (row) => getTaskName(row) },
+          { label: "Assigned To", render: (row) => getAssignedTo(row) },
+          { label: "Due Date", render: (row) => formatDateValue(row.dueDate) },
+          { label: "Priority", key: "priority" },
+          { label: "Status", render: (row) => getTaskStatus(row) },
+          { label: "Progress", render: (row) => `${getTaskProgress(row)}%` },
+        ]}
+      />
+      <ProjectPrintTable
+        title="Team Allocation"
+        rows={team}
+        columns={[
+          { label: "Team Member", render: (row) => row.employee || row.member },
+          { label: "Role", key: "role" },
+          { label: "Department", key: "department" },
+          {
+            label: "Allocation",
+            render: (row) => row.allocation || `${row.allocationPercent || 0}%`,
+          },
+          { label: "Availability", key: "availability" },
+          { label: "Status", key: "status" },
+        ]}
+      />
+      <ProjectPrintTable
+        title="Milestones"
+        rows={milestones}
+        columns={[
+          { label: "Milestone", key: "name" },
+          { label: "Owner", key: "owner" },
+          { label: "Target Date", render: (row) => formatDateValue(row.targetDate) },
+          {
+            label: "Completion Date",
+            render: (row) => formatDateValue(row.completionDate),
+          },
+          { label: "Status", key: "status" },
+        ]}
+      />
+      <ProjectPrintTable
+        title="Inventory Allocation"
+        rows={inventory}
+        columns={[
+          { label: "Item", render: (row) => row.itemName || row.item || row.name },
+          { label: "Code", render: (row) => row.itemCode || row.code },
+          { label: "Required", render: (row) => `${row.requiredQty || 0} ${row.unit || ""}` },
+          { label: "Issued", render: (row) => `${row.issuedQty || 0} ${row.unit || ""}` },
+          { label: "Store", key: "storeLocation" },
+          { label: "Status", key: "status" },
+        ]}
+      />
+      <ProjectPrintTable
+        title="Purchases"
+        rows={purchases}
+        columns={[
+          { label: "PO Number", render: (row) => row.poNumber || row.reference },
+          { label: "Vendor", render: (row) => row.vendor || row.vendorName },
+          { label: "Items", render: (row) => row.itemSummary || row.summary },
+          {
+            label: "Amount",
+            render: (row) => formatInrCurrency(row.amount || row.total),
+          },
+          {
+            label: "Expected",
+            render: (row) =>
+              formatDateValue(row.expectedDelivery || row.expectedDate),
+          },
+          { label: "Status", key: "status" },
+        ]}
+      />
+      <ProjectPrintTable
+        title="Financial Summary"
+        rows={financials}
+        columns={[
+          { label: "Category", key: "category" },
+          { label: "Budget", render: (row) => formatInrCurrency(row.budget) },
+          { label: "Actual", render: (row) => formatInrCurrency(row.actual) },
+          { label: "Variance", render: (row) => formatInrCurrency(row.variance) },
+          { label: "Status", key: "status" },
+        ]}
+      />
+      <ProjectPrintTable
+        title="Documents"
+        rows={documents}
+        columns={[
+          { label: "Document", render: (row) => row.name || row.fileName },
+          { label: "Category", key: "category" },
+          { label: "Uploaded By", key: "uploadedBy" },
+          {
+            label: "Uploaded Date",
+            render: (row) => formatDateValue(row.uploadedDate || row.createdAt),
+          },
+          { label: "Size", key: "size" },
+        ]}
+      />
+      <ProjectPrintTable
+        title="Activity History"
+        rows={activities}
+        columns={[
+          { label: "Activity", key: "title" },
+          { label: "Description", key: "description" },
+          { label: "Actor", key: "actor" },
+          { label: "Date", render: (row) => formatDateValue(row.date) },
+        ]}
+      />
+    </div>
   );
 };
 
@@ -2549,6 +2846,33 @@ const ProjectDetailDrawer = ({
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  void printSection({
+                    selector: "#project-complete-file-print",
+                    title: "Complete Project File",
+                    subtitle: [project.code, project.name]
+                      .filter(Boolean)
+                      .join(" - "),
+                    metaRows: [
+                      { label: "Status", value: status },
+                      { label: "Project Manager", value: project.projectManager || "-" },
+                      {
+                        label: "Timeline",
+                        value: `${formatDateValue(project.startDate)} to ${formatDateValue(
+                          project.endDate
+                        )}`,
+                      },
+                      { label: "Budget", value: formatInrCurrency(budget) },
+                    ],
+                  })
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+              >
+                <Printer className="h-4 w-4" />
+                Print Complete File
+              </button>
               <button
                 type="button"
                 onClick={() => onAssignTask(project)}
@@ -3408,6 +3732,7 @@ const ProjectDetailDrawer = ({
             </section>
           )}
         </div>
+        <ProjectCompleteFilePrint project={project} />
       </div>
     </div>
   );
@@ -3527,28 +3852,6 @@ const ProjectManagementProjects = () => {
     });
   }, [activeFilter, projects, search]);
 
-  const replaceProject = (updatedProject) => {
-    const currentProjects = getProjects();
-    const exists = currentProjects.some(
-      (project) => String(project.id) === String(updatedProject.id)
-    );
-    const next = exists
-      ? currentProjects.map((project) =>
-          String(project.id) === String(updatedProject.id)
-            ? updatedProject
-            : project
-        )
-      : [updatedProject, ...currentProjects];
-    setLocalProjects(next);
-    setProjects(next);
-    if (
-      selectedProject &&
-      String(selectedProject.id) === String(updatedProject.id)
-    ) {
-      setSelectedProject(updatedProject);
-    }
-  };
-
   const openCreateModal = () => {
     setEditingProject(null);
     setProjectModalOpen(true);
@@ -3559,15 +3862,37 @@ const ProjectManagementProjects = () => {
     setProjectModalOpen(true);
   };
 
-  const saveProjectRecord = (project) => {
-    if (editingProject) {
-      replaceProject(project);
-    } else {
-      saveProject(project);
-      setProjects(getProjects());
+  const saveProjectRecord = async (project) => {
+    try {
+      if (editingProject) {
+        await updateProjectManagementProject(editingProject.id, project);
+        const nextMilestoneIds = new Set(
+          (project.milestones || [])
+            .map((milestone) => Number(milestone.id))
+            .filter(Number.isFinite)
+        );
+        for (const milestone of editingProject.milestones || []) {
+          if (Number.isFinite(Number(milestone.id)) && !nextMilestoneIds.has(Number(milestone.id))) {
+            await deleteMilestone(milestone.id);
+          }
+        }
+        for (const milestone of project.milestones || []) {
+          if (Number.isFinite(Number(milestone.id))) {
+            await updateMilestone(milestone.id, milestone);
+          } else {
+            await createMilestone(editingProject.id, milestone);
+          }
+        }
+      } else {
+        await saveProject(project);
+      }
+      const latest = await hydrateProjectManagementProjects();
+      setProjects(latest);
+      setProjectModalOpen(false);
+      setEditingProject(null);
+    } catch (error) {
+      window.alert(error?.response?.data?.error || error?.message || "Project could not be saved.");
     }
-    setProjectModalOpen(false);
-    setEditingProject(null);
   };
 
   const openDetails = (project, tab = "overview") => {
@@ -3576,12 +3901,24 @@ const ProjectManagementProjects = () => {
     setOpenMenuId(null);
   };
 
-  const saveTaskAssignment = (updatedProject) => {
-    replaceProject(updatedProject);
-    setTaskProject(null);
-    setSelectedProject(updatedProject);
-    setSelectedDetailTab("tasks");
-    navigate("/project-management/tasks");
+  const saveTaskAssignment = async (updatedProject) => {
+    try {
+      const task = updatedProject.tasks?.[0];
+      await createProjectTask(updatedProject.id, {
+        ...task,
+        status: task.status === "Completed" ? "Completed" : "Pending",
+        completionPercentage: task.status === "Completed" ? 100 : 0,
+        assignedEmployeeName: task.assignedTo,
+      });
+      const latest = await hydrateProjectManagementProjects();
+      setProjects(latest);
+      setTaskProject(null);
+      setSelectedProject(latest.find((project) => project.id === updatedProject.id) || null);
+      setSelectedDetailTab("tasks");
+      navigate("/project-management/tasks");
+    } catch (error) {
+      window.alert(error?.response?.data?.error || error?.message || "Task could not be assigned.");
+    }
   };
 
   const kpis = [

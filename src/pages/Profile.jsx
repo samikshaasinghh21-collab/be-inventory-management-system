@@ -4,6 +4,7 @@ import {
   getSettings,
   saveSettings,
 } from "../services/settingsStore";
+import { getCurrentUser } from "../services/authService";
 import DateInput from "../components/common/DateInput";
 
 const inputClass =
@@ -27,7 +28,10 @@ const Profile = () => {
   const statusTimer = useRef(null);
   const fileInputRef = useRef(null);
 
-  const profile = settings.profile ?? DEFAULT_SETTINGS.profile;
+  const profile = {
+    ...(settings.profile ?? DEFAULT_SETTINGS.profile),
+    role: getCurrentUser()?.role || "User",
+  };
   const preferences = settings.preferences ?? DEFAULT_SETTINGS.preferences;
 
   useEffect(() => {
@@ -290,12 +294,11 @@ const Profile = () => {
                   Role
                 </label>
                 <select
-                  value={profile.role}
-                  onChange={(event) =>
-                    updateProfile("role", event.target.value)
-                  }
+                  value={getCurrentUser()?.role || "User"}
+                  disabled
                   className={inputClass}
                 >
+                  <option value="User">User</option>
                   <option value="Admin">Admin</option>
                   <option value="Manager">Manager</option>
                   <option value="Viewer">Viewer</option>

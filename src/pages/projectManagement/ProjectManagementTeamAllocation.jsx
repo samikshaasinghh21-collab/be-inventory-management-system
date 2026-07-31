@@ -18,8 +18,11 @@ import {
   PROJECT_MANAGEMENT_PROJECTS_EVENT,
   getProjectManagementProjects,
   hydrateProjectManagementProjects,
-  setProjectManagementProjects,
 } from "../../services/projectManagementProjectsStore";
+import {
+  createProjectModuleRecord,
+  updateProjectModuleRecord,
+} from "../../services/projectManagementApi";
 import {
   fetchHrmsEmployees,
   getHrmsEmployeeErrorMessage,
@@ -266,14 +269,6 @@ const recalculateProjectWorkload = (projects = []) => {
     };
   });
 };
-
-const buildActivityEntry = (projectName, employee, action, role) => ({
-  id: makeId("activity"),
-  title: `Team allocation ${action}`,
-  description: `${employee} ${action} for ${projectName}${role ? ` as ${role}` : ""}.`,
-  actor: "Project office",
-  date: todayIso(),
-});
 
 const Badge = ({ label, variant = "status" }) => {
   const styles = variant === "availability" ? availabilityStyles : statusStyles;
@@ -523,12 +518,23 @@ const ProjectManagementTeamAllocation = () => {
   const projectOptions = useMemo(
     () =>
       projects
+        .filter(Boolean)
         .map((project) => ({
           id: project.id,
-          label: project.name,
-          code: project.code,
+          label: String(
+            project.name ||
+              project.projectName ||
+              project.ProjectName ||
+              project.code ||
+              "Untitled project"
+          ).trim(),
+          code: String(project.code || project.projectCode || ""),
         }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
+        .sort((a, b) =>
+          String(a.label).localeCompare(String(b.label), undefined, {
+            sensitivity: "base",
+          })
+        ),
     [projects]
   );
 
@@ -595,7 +601,7 @@ const ProjectManagementTeamAllocation = () => {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setError("");
     setMessage("");
 
@@ -647,75 +653,77 @@ const ProjectManagementTeamAllocation = () => {
       updatedAt: todayIso(),
     };
 
-    const nextProjects = projects.map((project) => {
-      const currentAllocations = project.teamAllocations || [];
-      const withoutCurrent = currentAllocations.filter(
-        (item) => item.id !== allocationRecord.id
+    try {
+      const data = { ...allocationRecord, id: undefined };
+      if (form.id && Number.isFinite(Number(form.id))) {
+        await updateProjectModuleRecord("team-allocations", form.id, {
+          projectId: form.projectId,
+          data,
+        });
+      } else {
+        await createProjectModuleRecord("team-allocations", {
+          projectId: form.projectId,
+          data,
+        });
+      }
+      const latest = recalculateProjectWorkload(
+        await hydrateProjectManagementProjects()
       );
-      if (project.id === form.projectId) {
-        const mode = form.id ? "updated" : "added";
-        return {
-          ...project,
-          teamAllocations: [allocationRecord, ...withoutCurrent],
-          activities: [
-            buildActivityEntry(
-              project.name,
-              allocationRecord.employee,
-              mode,
-              allocationRecord.role
-            ),
-            ...(project.activities || []),
-          ],
-        };
-      }
-
-      if (currentAllocations.length !== withoutCurrent.length) {
-        return { ...project, teamAllocations: withoutCurrent };
-      }
-
-      return project;
-    });
-
-    const normalized = recalculateProjectWorkload(nextProjects);
-    setProjectManagementProjects(normalized);
-    setMessage(
-      form.id
-        ? "Allocation updated. Project workload has been refreshed."
-        : "Allocation saved. Resource capacity has been recalculated."
-    );
-    resetForm();
+      setProjects(latest);
+      setMessage(
+        form.id
+          ? "Allocation updated in the database."
+          : "Allocation saved in the database."
+      );
+      resetForm();
+    } catch (saveError) {
+      setError(
+        saveError?.response?.data?.error ||
+          saveError?.message ||
+          "Allocation could not be saved."
+      );
+    }
   };
 
-  const handleRelease = (row) => {
+  const handleRelease = async (row) => {
     const confirmed = window.confirm(
       `Release ${row.employee} from ${row.projectName}?`
     );
     if (!confirmed) return;
 
-    const nextProjects = projects.map((project) => {
-      if (project.id !== row.projectId) return project;
-      return {
-        ...project,
-        teamAllocations: (project.teamAllocations || []).map((allocation) =>
-          allocation.id === row.id
-            ? {
-                ...allocation,
-                status: "Released",
-                availability: "Available",
-                endDate: allocation.endDate || new Date().toISOString().slice(0, 10),
-                updatedAt: todayIso(),
-              }
-            : allocation
-        ),
-        activities: [
-          buildActivityEntry(project.name, row.employee, "released", row.role),
-          ...(project.activities || []),
-        ],
+    try {
+      const data = {
+        ...row,
+        id: undefined,
+        projectName: undefined,
+        projectCode: undefined,
+        status: "Released",
+        availability: "Available",
+        endDate: row.endDate || new Date().toISOString().slice(0, 10),
+        updatedAt: todayIso(),
       };
-    });
-
-    setProjectManagementProjects(recalculateProjectWorkload(nextProjects));
-    setMessage(`${row.employee} has been released from ${row.projectName}.`);
+      if (Number.isFinite(Number(row.id))) {
+        await updateProjectModuleRecord("team-allocations", row.id, {
+          projectId: row.projectId,
+          data,
+        });
+      } else {
+        await createProjectModuleRecord("team-allocations", {
+          projectId: row.projectId,
+          data,
+        });
+      }
+      setProjects(
+        recalculateProjectWorkload(await hydrateProjectManagementProjects())
+      );
+      setMessage(`${row.employee} has been released in the database.`);
+    } catch (releaseError) {
+      setError(
+        releaseError?.response?.data?.error ||
+          releaseError?.message ||
+          "Allocation could not be released."
+      );
+    }
   };
 
   const noProjects = projectOptions.length === 0;

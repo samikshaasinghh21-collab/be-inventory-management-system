@@ -30,6 +30,7 @@ import {
   getPurchaseFollowUps,
   listLocalPurchases,
   PURCHASE_TRACKING_EVENT,
+  refreshPurchaseTracking,
   savePurchaseFollowUp,
   updateLocalPurchase,
 } from "../../services/purchaseTrackingStore";
@@ -227,15 +228,21 @@ const ProjectManagementPurchaseTracking = () => {
   const [editingPurchaseId, setEditingPurchaseId] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(({ quiet = false } = {}) => {
+  const load = useCallback(async ({ quiet = false } = {}) => {
     if (quiet) setRefreshing(true);
     else setLoading(true);
     setError("");
-    setProjects(getProjectManagementProjects());
-    setOrders(listLocalPurchases());
-    setFollowUps(getPurchaseFollowUps());
-    setLoading(false);
-    setRefreshing(false);
+    try {
+      await refreshPurchaseTracking();
+      setProjects(getProjectManagementProjects());
+      setOrders(listLocalPurchases());
+      setFollowUps(getPurchaseFollowUps());
+    } catch (loadError) {
+      setError(loadError?.response?.data?.error || loadError?.message || "Purchase tracking could not be loaded.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -320,7 +327,7 @@ const ProjectManagementPurchaseTracking = () => {
     if (refreshed) setSelected(refreshed);
   }, [rows, selected]);
 
-  const saveFollowUp = () => {
+  const saveFollowUp = async () => {
     if (!selected || !followUpForm) return;
     if (followUpForm.nextFollowUpDate && followUpForm.followUpStatus === "Resolved") {
       setError("Resolved follow-ups should not have a next follow-up date.");
@@ -329,10 +336,10 @@ const ProjectManagementPurchaseTracking = () => {
     setSaving(true);
     setError("");
     try {
-      const saved = savePurchaseFollowUp(selected.id, followUpForm);
+      const saved = await savePurchaseFollowUp(selected.id, followUpForm);
       setFollowUps(getPurchaseFollowUps());
       setFollowUpForm((current) => ({ ...current, note: "" }));
-      setMessage(`Follow-up saved locally at ${formatDateTime(saved.updatedAt)}.`);
+      setMessage(`Follow-up saved in the database at ${formatDateTime(saved.updatedAt)}.`);
     } catch (saveError) {
       setError(saveError?.message || "Could not save the follow-up.");
     } finally {
@@ -371,7 +378,7 @@ const ProjectManagementPurchaseTracking = () => {
     setMessage("");
   };
 
-  const savePurchase = () => {
+  const savePurchase = async () => {
     if (!purchaseForm) return;
     if (!purchaseForm.projectId || !purchaseForm.vendor.trim() || !purchaseForm.itemSummary.trim() || !purchaseForm.orderDate) {
       setError("Project, vendor, item summary, and order date are required.");
@@ -404,9 +411,9 @@ const ProjectManagementPurchaseTracking = () => {
           ? purchaseForm.actualDelivery || today()
           : purchaseForm.actualDelivery,
       };
-      if (editingPurchaseId) updateLocalPurchase(editingPurchaseId, payload);
-      else createLocalPurchase(payload);
-      load({ quiet: true });
+      if (editingPurchaseId) await updateLocalPurchase(editingPurchaseId, payload);
+      else await createLocalPurchase(payload);
+      await load({ quiet: true });
       setPurchaseForm(null);
       setEditingPurchaseId(null);
     } catch (saveError) {
@@ -416,12 +423,12 @@ const ProjectManagementPurchaseTracking = () => {
     }
   };
 
-  const removePurchase = (row) => {
-    if (!window.confirm(`Delete ${row.poNumber || "this purchase record"} from local storage?`)) return;
+  const removePurchase = async (row) => {
+    if (!window.confirm(`Delete ${row.poNumber || "this purchase record"} from the database?`)) return;
     try {
-      deleteLocalPurchase(row.id);
+      await deleteLocalPurchase(row.id);
       setSelected(null);
-      load({ quiet: true });
+      await load({ quiet: true });
     } catch (deleteError) {
       setError(deleteError?.message || "Could not delete the local purchase record.");
     }
@@ -462,7 +469,7 @@ const ProjectManagementPurchaseTracking = () => {
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-indigo-500">Project Management</p>
           <h1 className="mt-2 text-2xl font-bold text-slate-950 md:text-3xl">Purchase Tracking</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Track project purchases, delivery progress, and follow-ups entirely in this browser—no backend connection required.
+            Track project purchases, delivery progress, and follow-ups with SQL-backed persistence.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -539,14 +546,14 @@ const ProjectManagementPurchaseTracking = () => {
             </table>
           </div>
         )}
-        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>Showing {visibleRows.length} of {rows.length} local purchase records</span><span>All purchase and follow-up data is saved in this browser</span></div>
+        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>Showing {visibleRows.length} of {rows.length} purchase records</span><span>Purchase and follow-up data is saved in SQL Server</span></div>
       </section>
 
       {purchaseForm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm">
           <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <header className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
-              <div><p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">Local purchase</p><h2 className="mt-1 text-xl font-bold text-slate-950">{editingPurchaseId ? "Edit Purchase" : "Add Purchase"}</h2><p className="mt-1 text-sm text-slate-500">This record will be saved only in project-management localStorage.</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">Project purchase</p><h2 className="mt-1 text-xl font-bold text-slate-950">{editingPurchaseId ? "Edit Purchase" : "Add Purchase"}</h2><p className="mt-1 text-sm text-slate-500">This record will be saved in SQL Server.</p></div>
               <button type="button" onClick={() => { setPurchaseForm(null); setError(""); }} className="rounded-lg border border-slate-200 p-2 text-slate-500"><X className="h-4 w-4"/></button>
             </header>
             <div className="space-y-4 p-5">
@@ -587,7 +594,7 @@ const ProjectManagementPurchaseTracking = () => {
               </section>
 
               <section className={`${cardClass} p-4`}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-semibold text-slate-900">Local purchase record</h3><p className="mt-1 text-xs text-slate-500">Purchase and delivery quantities are stored in project-management localStorage.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openEditPurchase(selected)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700"><Pencil className="h-3.5 w-3.5"/> Edit</button><button type="button" onClick={() => removePurchase(selected)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700"><Trash2 className="h-3.5 w-3.5"/> Delete</button></div></div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-semibold text-slate-900">Project purchase record</h3><p className="mt-1 text-xs text-slate-500">Purchase and delivery quantities are stored in SQL Server.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openEditPurchase(selected)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700"><Pencil className="h-3.5 w-3.5"/> Edit</button><button type="button" onClick={() => removePurchase(selected)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700"><Trash2 className="h-3.5 w-3.5"/> Delete</button></div></div>
                 <div className="mt-4 overflow-x-auto"><table className="min-w-[700px] w-full text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2 text-left">Item Summary</th><th className="px-3 py-2 text-left">Unit</th><th className="px-3 py-2 text-right">Ordered</th><th className="px-3 py-2 text-right">Received</th><th className="px-3 py-2 text-right">Balance</th><th className="px-3 py-2 text-right">Value</th></tr></thead><tbody><tr><td className="px-3 py-3 font-medium text-slate-800">{selected.itemSummary || selected.summary || "Purchase materials"}</td><td className="px-3 py-3 text-slate-500">{selected.unit || "PCS"}</td><td className="px-3 py-3 text-right">{selected.orderedQty}</td><td className="px-3 py-3 text-right text-emerald-700">{selected.receivedQty}</td><td className="px-3 py-3 text-right font-semibold">{selected.balanceQty}</td><td className="px-3 py-3 text-right">{formatInrCurrency(selected.amount)}</td></tr></tbody></table></div>
               </section>
 
@@ -597,7 +604,7 @@ const ProjectManagementPurchaseTracking = () => {
               </section>
 
               <section className={`${cardClass} p-4`}>
-                <div><h3 className="font-semibold text-slate-900">Local follow-up</h3><p className="mt-1 text-xs text-slate-500">Project-team tracking saved locally without changing the purchase order.</p></div>
+                <div><h3 className="font-semibold text-slate-900">Purchase follow-up</h3><p className="mt-1 text-xs text-slate-500">Project-team tracking is saved in SQL Server without changing the purchase order.</p></div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <label><span className="mb-1 block text-xs font-medium text-slate-500">Follow-up status</span><select value={followUpForm.followUpStatus} onChange={(event) => setFollowUpForm((current) => ({ ...current, followUpStatus: event.target.value, ...(event.target.value === "Resolved" ? { nextFollowUpDate: "" } : {}) }))} className={inputClass}>{followUpStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
                   <label><span className="mb-1 block text-xs font-medium text-slate-500">Priority</span><select value={followUpForm.priority} onChange={(event) => setFollowUpForm((current) => ({ ...current, priority: event.target.value }))} className={inputClass}>{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>

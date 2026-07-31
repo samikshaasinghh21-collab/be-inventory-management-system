@@ -2,38 +2,14 @@ import {
   normalizeProjectRecord,
   normalizeProjectsList,
 } from "./projectNormalization";
-import { fetchProjects } from "./projectsApi";
-import { getProjects as getInventoryProjects } from "./projectsStore";
+import {
+  createProjectManagementProject,
+  fetchProjectManagementProjects,
+} from "./projectManagementApi";
 
 const STORAGE_KEY = "project_management_projects";
 export const PROJECT_MANAGEMENT_PROJECTS_EVENT =
   "project-management:projects-changed";
-
-const SHARED_PROJECT_FIELDS = [
-  "id",
-  "name",
-  "code",
-  "customerId",
-  "clientId",
-  "locationId",
-  "client",
-  "companyName",
-  "address",
-  "gstNumber",
-  "phone",
-  "email",
-  "contactPerson",
-  "designation",
-  "status",
-  "projectManagerId",
-  "siteEngineerId",
-  "teamLeadId",
-  "startDate",
-  "endDate",
-  "notes",
-  "createdAt",
-  "updatedAt",
-];
 
 const PROJECT_COLLECTION_FIELDS = [
   "tasks",
@@ -50,144 +26,132 @@ const PROJECT_COLLECTION_FIELDS = [
 const canUseLocalStorage = () =>
   typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 
-const emitChange = () => {
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event(PROJECT_MANAGEMENT_PROJECTS_EVENT));
-  }
-};
-
-const getStoredProjectManagementProjects = () => {
+const readStoredProjects = () => {
   if (!canUseLocalStorage()) return [];
-
   try {
     return normalizeProjectsList(
-      JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]")
+      JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "[]")
     );
   } catch {
     return [];
   }
 };
 
-const getProjectKey = (project = {}, index = 0) =>
-  String(
-    project?.id ??
-      project?.code ??
-      `${project?.name ?? "project"}-${index}`
-  )
-    .trim()
-    .toLowerCase();
+let projectCache = readStoredProjects();
 
-const hasValue = (value) =>
-  ![undefined, null, ""].includes(value);
+const emitChange = () => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(PROJECT_MANAGEMENT_PROJECTS_EVENT));
+  }
+};
 
-const mergeProjectRecord = (
-  projectManagementProject = {},
-  inventoryProject = {}
-) => {
-  const localProject = normalizeProjectRecord(projectManagementProject);
-  const sharedProject = normalizeProjectRecord(inventoryProject);
-  const mergedProject = {
-    ...sharedProject,
-    ...localProject,
-  };
+const recordKey = (record, index) => {
+  if (record?.id !== undefined && record?.id !== null && record?.id !== "") {
+    return `id:${String(record.id)}`;
+  }
+  return `value:${JSON.stringify(record)}:${index}`;
+};
 
-  SHARED_PROJECT_FIELDS.forEach((field) => {
-    if (!hasValue(mergedProject[field]) && hasValue(sharedProject[field])) {
-      mergedProject[field] = sharedProject[field];
-    }
+const mergeCollection = (legacy = [], server = []) => {
+  const merged = new Map();
+  (Array.isArray(legacy) ? legacy : []).forEach((record, index) => {
+    merged.set(recordKey(record, index), record);
   });
+  (Array.isArray(server) ? server : []).forEach((record, index) => {
+    const key = recordKey(record, index);
+    merged.set(key, { ...(merged.get(key) || {}), ...record });
+  });
+  return Array.from(merged.values());
+};
+
+const sameProject = (left = {}, right = {}) => {
+  if (
+    left.id !== undefined &&
+    left.id !== null &&
+    right.id !== undefined &&
+    right.id !== null
+  ) {
+    return String(left.id) === String(right.id);
+  }
+  const leftCode = String(left.code || left.ProjectCode || "").trim().toLowerCase();
+  const rightCode = String(right.code || right.ProjectCode || "").trim().toLowerCase();
+  return Boolean(leftCode && rightCode && leftCode === rightCode);
+};
+
+const mergeProject = (legacyProject = {}, serverProject = {}) => {
+  const legacy = normalizeProjectRecord(legacyProject);
+  const server = normalizeProjectRecord(serverProject);
+  const merged = normalizeProjectRecord({ ...legacy, ...serverProject });
 
   PROJECT_COLLECTION_FIELDS.forEach((field) => {
-    mergedProject[field] = Array.isArray(localProject[field])
-      ? localProject[field]
-      : Array.isArray(sharedProject[field])
-        ? sharedProject[field]
-        : [];
+    merged[field] = mergeCollection(legacy[field], server[field]);
   });
 
-  return normalizeProjectRecord(mergedProject);
+  return merged;
 };
 
-export const mergeProjectCollections = (
-  inventoryProjects = [],
-  projectManagementProjects = []
-) => {
-  const inventoryMap = new Map(
-    normalizeProjectsList(inventoryProjects).map((project, index) => [
-      getProjectKey(project, index),
-      project,
-    ])
-  );
-  const projectManagementMap = new Map(
-    normalizeProjectsList(projectManagementProjects).map((project, index) => [
-      getProjectKey(project, index),
-      project,
-    ])
-  );
+const mergeProjects = (legacyProjects = [], serverProjects = []) => {
+  const remainingLegacy = [...normalizeProjectsList(legacyProjects)];
+  const merged = normalizeProjectsList(serverProjects).map((serverProject) => {
+    const legacyIndex = remainingLegacy.findIndex((legacyProject) =>
+      sameProject(legacyProject, serverProject)
+    );
+    const legacyProject =
+      legacyIndex >= 0 ? remainingLegacy.splice(legacyIndex, 1)[0] : {};
+    return mergeProject(legacyProject, serverProject);
+  });
 
-  const orderedKeys = [
-    ...inventoryMap.keys(),
-    ...Array.from(projectManagementMap.keys()).filter(
-      (key) => !inventoryMap.has(key)
-    ),
-  ];
-
-  return orderedKeys.map((key) =>
-    mergeProjectRecord(
-      projectManagementMap.get(key),
-      inventoryMap.get(key)
-    )
-  );
+  return [...merged, ...remainingLegacy];
 };
 
-export const getProjectManagementProjects = () =>
-  mergeProjectCollections(
-    getInventoryProjects(),
-    getStoredProjectManagementProjects()
-  );
+const persistCache = () => {
+  if (canUseLocalStorage()) {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(projectCache));
+  }
+};
+
+export const getProjectManagementProjects = () => projectCache;
 
 export const setProjectManagementProjects = (projects = []) => {
-  if (!canUseLocalStorage()) return [];
-
-  const normalized = mergeProjectCollections(getInventoryProjects(), projects);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  projectCache = normalizeProjectsList(Array.isArray(projects) ? projects : []);
+  persistCache();
   emitChange();
-  return normalized;
+  return projectCache;
 };
 
 export const ensureProjectManagementProjects = (defaults = []) => {
-  const existing = getStoredProjectManagementProjects();
-  if (existing.length) return existing;
+  if (projectCache.length) return projectCache;
   return setProjectManagementProjects(defaults);
 };
 
-export const saveProjectManagementProject = (project) => {
-  const projects = getProjectManagementProjects();
-  const next = [normalizeProjectRecord(project), ...projects];
-  return setProjectManagementProjects(next)[0];
-};
-
 export const hydrateProjectManagementProjects = async (defaults = []) => {
-  const fallbackProjects = getInventoryProjects();
-
+  const legacyProjects = projectCache.length ? projectCache : readStoredProjects();
   try {
-    const latestProjects = await fetchProjects();
-    return setProjectManagementProjects(
-      mergeProjectCollections(
-        latestProjects,
-        getStoredProjectManagementProjects().length
-          ? getStoredProjectManagementProjects()
-          : defaults
-      )
+    const serverProjects = await fetchProjectManagementProjects();
+    projectCache = mergeProjects(
+      legacyProjects.length ? legacyProjects : defaults,
+      serverProjects
     );
-  } catch {
-    return setProjectManagementProjects(
-      mergeProjectCollections(
-        fallbackProjects,
-        getStoredProjectManagementProjects().length
-          ? getStoredProjectManagementProjects()
-          : defaults
-      )
+  } catch (error) {
+    if (!legacyProjects.length && !defaults.length) throw error;
+    projectCache = normalizeProjectsList(
+      legacyProjects.length ? legacyProjects : defaults
     );
   }
+  persistCache();
+  emitChange();
+  return projectCache;
+};
+
+export const saveProjectManagementProject = async (project) => {
+  const saved = await createProjectManagementProject(project);
+  const existing = projectCache.find((item) => sameProject(item, saved));
+  const merged = mergeProject(existing, saved);
+  projectCache = [
+    merged,
+    ...projectCache.filter((item) => !sameProject(item, saved)),
+  ];
+  persistCache();
+  emitChange();
+  return merged;
 };

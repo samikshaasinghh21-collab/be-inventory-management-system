@@ -177,6 +177,18 @@ export const NotificationProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    const isPublicRoute = [
+      "/login",
+      "/create-account",
+      "/forgot-password",
+      "/reset-password",
+      "/auth/sso/callback",
+      "/security-enrollment",
+    ].includes(location.pathname);
+    if (isPublicRoute) {
+      return undefined;
+    }
+
     let active = true;
 
     const runRefresh = async () => {
@@ -235,7 +247,7 @@ export const NotificationProvider = ({ children }) => {
       window.removeEventListener("focus", handleChange);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [refreshNotifications]);
+  }, [location.pathname, refreshNotifications]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {

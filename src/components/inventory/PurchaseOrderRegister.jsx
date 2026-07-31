@@ -538,7 +538,7 @@ const PurchaseOrderRegister = () => {
   };
 
   const confirmLockedPoAction = async () => {
-    const nextError = getClosedPoAuthError(settings, adminPassword);
+    const nextError = await getClosedPoAuthError(settings, adminPassword);
     if (nextError) {
       setAdminPasswordError(nextError);
       return;
