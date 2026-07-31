@@ -710,7 +710,7 @@ export default function ProductCatalogDashboard() {
           </section>
 
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="border-b border-slate-200 px-5 py-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
                   Product Table
@@ -719,9 +719,6 @@ export default function ProductCatalogDashboard() {
                   Clean catalog overview
                 </h2>
               </div>
-              <p className="text-sm text-slate-500">
-                Sticky header, aligned pricing, and row-level actions.
-              </p>
             </div>
 
             {filteredItems.length === 0 ? (

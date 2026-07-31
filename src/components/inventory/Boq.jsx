@@ -24,6 +24,7 @@ import {
 
 const createLineItem = () => ({
   id: Date.now() + Math.random(),
+  lineItemId: null,
   itemId: null,
   name: "",
   description: "",
@@ -110,32 +111,6 @@ const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
       </div>
     </div>
   );
-};
-
-const buildBoqSerialPreview = (items = []) => {
-  const serials = [];
-  const seen = new Set();
-
-  (Array.isArray(items) ? items : []).forEach((item) => {
-    const serial = String(item?.serialNumber ?? "").trim();
-    if (!serial) {
-      return;
-    }
-    const key = serial.toLowerCase();
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    serials.push(serial);
-  });
-
-  if (!serials.length) {
-    return "-";
-  }
-  if (serials.length <= 2) {
-    return serials.join(", ");
-  }
-  return `${serials.slice(0, 2).join(", ")} +${serials.length - 2} more`;
 };
 
 const buildBoqLinePreview = (items = []) => {
@@ -227,6 +202,7 @@ const attachLinkedPurchaseOrderItems = (boqs = [], purchaseOrders = []) => {
 const Boq = () => {
   const settings = useSettings();
   const skipAutoProjectRef = useRef(false);
+  const savingRef = useRef(false);
   const [projects, setProjects] = useState([]);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(createFormState);
@@ -334,7 +310,8 @@ const Boq = () => {
               ? []
               : prev;
           const mapped = selected.map((item) => ({
-            id: item.id ?? Date.now() + Math.random(),
+            id: Date.now() + Math.random(),
+            lineItemId: null,
             itemId: item.itemId ?? item.ItemId ?? item.id ?? null,
             name: item.name ?? "",
             description: item.description ?? "",
@@ -423,7 +400,7 @@ const Boq = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!validate()) {
+    if (savingRef.current || !validate()) {
       return;
     }
 
@@ -445,7 +422,7 @@ const Boq = () => {
       date: form.date,
       notes: form.notes,
       items: cleanedItems.map((item) => ({
-        id: item.id ?? null,
+        id: item.lineItemId ?? null,
         itemId: item.itemId ?? null,
         name: item.name,
         description: item.description,
@@ -464,6 +441,7 @@ const Boq = () => {
     };
 
     try {
+      savingRef.current = true;
       setSaving(true);
       setErrorMessage("");
       if (editingId) {
@@ -482,6 +460,7 @@ const Boq = () => {
       console.error("Failed to save BOQ", error);
       setErrorMessage(error?.response?.data?.error ?? "Failed to save BOQ");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -501,6 +480,7 @@ const Boq = () => {
       record.items?.length
         ? record.items.map((item) => ({
             id: item.id ?? Date.now() + Math.random(),
+            lineItemId: item.id ?? null,
             itemId: item.itemId ?? null,
             name: item.name ?? "",
             description: item.description ?? "",
@@ -553,7 +533,8 @@ const Boq = () => {
         title: "BOQ Details",
         logoUrl,
         brandName,
-        brandDescription,
+                    brandDescription,
+                    pageOrientation: "landscape",
       });
     }, 80);
   };
@@ -751,7 +732,6 @@ const Boq = () => {
           onPickFromProducts={handlePickFromProducts}
           pickLabel="Pick from Products"
           showHsnGst
-          showSerialNumber
           useInventoryQuantityForQuantity
           priceLabel="Unit Price"
         />
@@ -815,7 +795,6 @@ const Boq = () => {
               <th className="p-3 text-left min-w-[200px]">PO Sync</th>
               <th className="p-3 text-left min-w-[110px]">Items</th>
               <th className="p-3 text-left min-w-[260px]">Line Item Preview</th>
-              <th className="p-3 text-left min-w-[180px]">Serial Numbers</th>
               <th className="p-3 text-left min-w-[220px]">Tax Details</th>
               <th className="p-3 text-left min-w-[140px]">Total Value</th>
               <th className="p-3 text-left min-w-[140px]">Date</th>
@@ -825,14 +804,14 @@ const Boq = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="12" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   Loading BOQs...
                 </td>
               </tr>
             )}
             {!loading && records.length === 0 && (
               <tr>
-                <td colSpan="12" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   No BOQs created yet.
                 </td>
               </tr>
@@ -856,9 +835,6 @@ const Boq = () => {
                   <td className="p-3">{registerItems.length || 0}</td>
                   <td className="p-3 text-xs text-slate-600">
                     {buildBoqLinePreview(registerItems)}
-                  </td>
-                  <td className="p-3 text-xs text-slate-600">
-                    {buildBoqSerialPreview(registerItems)}
                   </td>
                   <td className="p-3">
                     <GstSummaryBlock summary={summary} formatCurrency={formatCurrency} />
@@ -924,17 +900,14 @@ const Boq = () => {
             { label: "Date", value: formatDate(viewRecord.date) },
             { label: "Version", value: viewRecord.version },
             { label: "Status", value: viewRecord.status },
-            { label: "PO Sync", value: formatLinkedPurchaseOrderSummary(viewRecord) },
           ]}
           leftBlockTitle="Project"
           leftBlockLines={[projectMap[String(viewRecord.projectId)]?.name || "-"]}
-          rightBlockTitle="Prepared By / Notes"
-          rightBlockLines={[viewRecord.preparedBy || "-", viewRecord.notes || "-"]}
+          rightBlockTitle="Prepared By"
+          rightBlockLines={[viewRecord.preparedBy || "-"]}
           tableColumns={[
-            { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
             { key: "description", label: "Description" },
-            { key: "serialNumber", label: "Serial Number", widthClass: "w-28" },
             { key: "hsn", label: "HSN", widthClass: "w-20" },
             { key: "gst", label: "GST", widthClass: "w-20" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
@@ -952,10 +925,8 @@ const Boq = () => {
             const rate = roundUnitPrice(item.rate);
             return {
               id: item.id || index,
-              serial: index + 1,
               name: item.name || "-",
               description: item.description || item.notes || "-",
-              serialNumber: item.serialNumber || "-",
               hsn: item.hsn || "-",
               gst: item.gst || "-",
               unit: item.unit || "-",

@@ -83,10 +83,28 @@ const normalizeDeliveryChallanItem = (item = {}) => ({
     item.DeliveryChallanID ??
     item.ChallanId ??
     null,
+  deliveryChallanItemId:
+    item.deliveryChallanItemId ??
+    item.DeliveryChallanItemId ??
+    item.deliveryChallanLineItemId ??
+    item.DeliveryChallanLineItemId ??
+    null,
   receiveGoodsItemId:
     item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? null,
+  receiptItemId:
+    item.receiptItemId ??
+    item.ReceiptItemId ??
+    item.receiveGoodsItemId ??
+    item.ReceiveGoodsItemId ??
+    null,
   sourceType: item.sourceType ?? item.SourceType ?? "",
   sourceKey: item.sourceKey ?? item.SourceKey ?? "",
+  sourceRowId:
+    item.sourceRowId ??
+    item.SourceRowId ??
+    item.sourceKey ??
+    item.SourceKey ??
+    "",
   sourceRef: item.sourceRef ?? item.SourceRef ?? "",
   poItemId:
     item.poItemId ??
@@ -216,14 +234,23 @@ export const fetchNextDeliveryChallanNumber = async () => {
 };
 
 export const createDeliveryChallan = async (payload) => {
-  const response = await api.post("/delivery-challans", payload, {
-    timeout: 60000,
-  });
-  const normalized = normalizeDeliveryChallan(
-    response.data?.deliveryChallan ?? response.data
-  );
-  emitDeliveryChallanChange();
-  return normalized;
+  console.debug("createDeliveryChallan request payload", payload);
+  try {
+    const response = await api.post("/delivery-challans", payload, {
+      timeout: 60000,
+    });
+    const normalized = normalizeDeliveryChallan(
+      response.data?.deliveryChallan ?? response.data
+    );
+    emitDeliveryChallanChange();
+    return normalized;
+  } catch (error) {
+    console.error(
+      "createDeliveryChallan failed",
+      error?.response?.data ?? error?.message ?? error
+    );
+    throw error;
+  }
 };
 
 export const updateDeliveryChallan = async (id, payload) => {

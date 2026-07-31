@@ -2,6 +2,16 @@ import api from "./api";
 
 const emitConsumptionChange = () => {
   if (typeof window !== "undefined") {
+    console.debug("[timing] Consumption API dispatch synchronization events", {
+      events: [
+        "consumptions:changed",
+        "delivery-challans:changed",
+        "receive-goods:changed",
+        "products:changed",
+        "boqs:changed",
+        "reallocate-inventory:changed",
+      ],
+    });
     window.dispatchEvent(new Event("consumptions:changed"));
     window.dispatchEvent(new Event("delivery-challans:changed"));
     window.dispatchEvent(new Event("receive-goods:changed"));
@@ -49,6 +59,8 @@ const normalizeConsumptionItem = (item = {}) => ({
   receiveGoodsId: item.receiveGoodsId ?? item.ReceiveGoodsId ?? null,
   sourceType: item.sourceType ?? item.SourceType ?? "",
   sourceKey: item.sourceKey ?? item.SourceKey ?? "",
+  sourceRef:
+    item.sourceRef ?? item.SourceRef ?? item.deliveryChallanRef ?? item.DeliveryChallanRef ?? "",
   name: item.name ?? item.Item ?? item.item ?? item.Name ?? "",
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",
@@ -56,6 +68,26 @@ const normalizeConsumptionItem = (item = {}) => ({
   gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
   quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
   consumeQty: Number(item.consumeQty ?? item.ConsumeQty ?? item.quantity ?? item.Quantity ?? 0) || 0,
+  sourceQty: Number(item.sourceQty ?? item.SourceQty ?? 0) || 0,
+  totalConsumedQty:
+    Number(item.totalConsumedQty ?? item.TotalConsumedQty ?? item.consumedQty ?? item.ConsumedQty ?? 0) || 0,
+  adjustedQty:
+    Number(item.adjustedQty ?? item.AdjustedQty ?? item.reallocatedQty ?? item.ReallocatedQty ?? 0) || 0,
+  remainingQty:
+    item.remainingQty ??
+    item.RemainingQty ??
+    item.remainingAvailableQty ??
+    item.RemainingAvailableQty ??
+    item.availableQty ??
+    item.AvailableQty ??
+    item.balanceQty ??
+    item.BalanceQty ??
+    null,
+  remainingAvailableQty:
+    item.remainingAvailableQty ?? item.RemainingAvailableQty ?? null,
+  availableQty:
+    item.availableQty ?? item.AvailableQty ?? item.remainingQty ?? item.RemainingQty ?? null,
+  balanceQty: item.balanceQty ?? item.BalanceQty ?? null,
   rate: Number(item.rate ?? item.Rate ?? 0) || 0,
   notes: item.notes ?? item.Notes ?? "",
 });
@@ -229,20 +261,43 @@ export const fetchConsumptions = async () => {
 };
 
 export const createConsumption = async (payload) => {
+  const startedAt = performance.now();
+  console.debug("[timing] createConsumption request start", {
+    itemCount: Array.isArray(payload?.items) ? payload.items.length : 0,
+  });
   const response = await api.post("/consumptions", payload, {
     timeout: 60000,
   });
+  console.debug("[timing] createConsumption response received", {
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
   const normalized = normalizeConsumption(response.data?.consumption ?? response.data);
   emitConsumptionChange();
+  console.debug("[timing] createConsumption complete", {
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
   return normalized;
 };
 
 export const updateConsumption = async (id, payload) => {
+  const startedAt = performance.now();
+  console.debug("[timing] updateConsumption request start", {
+    id,
+    itemCount: Array.isArray(payload?.items) ? payload.items.length : 0,
+  });
   const response = await api.put(`/consumptions/${id}`, payload, {
     timeout: 60000,
   });
+  console.debug("[timing] updateConsumption response received", {
+    id,
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
   const normalized = normalizeConsumption(response.data?.consumption ?? response.data);
   emitConsumptionChange();
+  console.debug("[timing] updateConsumption complete", {
+    id,
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
   return normalized;
 };
 

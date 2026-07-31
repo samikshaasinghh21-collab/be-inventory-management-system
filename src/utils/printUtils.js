@@ -129,6 +129,11 @@ const commonStyles = `
   .print-panel-body .document-view-panel {
     border: 2px solid #1e293b;
     box-shadow: none !important;
+    break-inside: auto;
+    overflow: hidden;
+  }
+  .print-panel-body .document-view-panel > div {
+    break-inside: avoid;
   }
   .print-body *,
   .document-view-panel * {
@@ -332,6 +337,7 @@ const buildDocument = ({
   headStyles = "",
   showHeader = true,
   bodyClass = "",
+  pageOrientation = "portrait",
 }) => {
   const formattedMeta =
     Array.isArray(metaRows) && metaRows.length
@@ -372,7 +378,9 @@ const buildDocument = ({
       <head>
         <title>${title}</title>
         ${headStyles}
-        <style>${commonStyles}</style>
+        <style>${commonStyles}
+          @page { size: A4 ${pageOrientation === "landscape" ? "landscape" : "portrait"}; }
+        </style>
       </head>
       <body>
         <main class="print-page">
@@ -604,6 +612,7 @@ export const printSection = async ({
   logoUrl,
   brandName,
   brandDescription,
+  pageOrientation = "portrait",
 }) => {
   if (typeof document === "undefined") {
     return;
@@ -624,7 +633,8 @@ export const printSection = async ({
     }
     return;
   }
-  const isPanelPrint = selector.includes("view-panel");
+  const isPanelPrint =
+    selector.includes("view-panel") || selector.includes("print-panel");
   const clone = sanitizeCloneForPrint(node.cloneNode(true), { isPanelPrint });
   const bodyHtml = isPanelPrint ? clone.outerHTML : clone.innerHTML;
   printWindow.document.open();
@@ -639,6 +649,7 @@ export const printSection = async ({
       headStyles: collectHeadStyles(),
       showHeader: !isPanelPrint,
       bodyClass: isPanelPrint ? "print-panel-body" : "print-register-body",
+      pageOrientation,
       body: bodyHtml,
     })
   );

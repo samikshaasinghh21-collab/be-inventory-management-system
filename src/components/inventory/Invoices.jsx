@@ -29,6 +29,7 @@ const statusClassName = (status) => {
   return "border-blue-200 bg-blue-50 text-blue-700";
 };
 
+
 const Invoices = () => {
   const navigate = useNavigate();
   const [invoices, setInvoices] = useState([]);
@@ -104,7 +105,6 @@ const Invoices = () => {
       ),
     [invoices]
   );
-
   const handleDelete = async (invoiceId) => {
     try {
       await deleteInvoice(invoiceId);
@@ -239,7 +239,7 @@ const Invoices = () => {
                           }
                           className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
                         >
-                          <Eye className="h-4 w-4" />
+                         <Eye classname="h-0 w-0" /> 
                           Open
                         </button>
                         <button

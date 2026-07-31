@@ -35,7 +35,7 @@ const DocumentViewPanel = ({
   bottomFullContent = null,
   bottomLeftContent = null,
   bottomRightContent = null,
-  footerNote = "Any changes in GST & taxes are acceptable to you.",
+  footerNote = "",
   footerCompanyName = "Bangalore Electronics",
   hideFooterNote = false,
 }) => {
@@ -126,7 +126,10 @@ const DocumentViewPanel = ({
         <div className="p-3">
           <div className="grid grid-cols-2 gap-2 text-[11px]">
             {primaryPairs.map((row, index) => (
-              <div key={`${row.label}-${index}`} className="contents">
+              <div
+                key={`${row.label}-${index}`}
+                className={`contents ${row.printHidden ? "print-hidden" : ""}`}
+              >
                 <p className="text-slate-600">{row.label}:</p>
                 <p className="font-semibold">{toDisplay(row.value)}</p>
               </div>
@@ -136,23 +139,31 @@ const DocumentViewPanel = ({
       </div>
 
       {(leftBlockTitle || rightBlockTitle) && (
-        <div className="grid grid-cols-2 border-b border-slate-800 text-[11px]">
-          <div className="p-3 border-r border-slate-800">
-            <p className="font-semibold">{toDisplay(leftBlockTitle)}</p>
-            {leftBlockLines.map((line, index) => (
-              <p key={`${leftBlockTitle}-${index}`} className="mt-1">
-                {toDisplay(line)}
-              </p>
-            ))}
-          </div>
-          <div className="p-3">
-            <p className="font-semibold">{toDisplay(rightBlockTitle)}</p>
-            {rightBlockLines.map((line, index) => (
-              <p key={`${rightBlockTitle}-${index}`} className="mt-1">
-                {toDisplay(line)}
-              </p>
-            ))}
-          </div>
+        <div
+          className={`grid ${
+            leftBlockTitle && rightBlockTitle ? "grid-cols-2" : "grid-cols-1"
+          } border-b border-slate-800 text-[11px]`}
+        >
+          {leftBlockTitle ? (
+            <div className={`p-3 ${rightBlockTitle ? "border-r border-slate-800" : ""}`}>
+              <p className="font-semibold">{toDisplay(leftBlockTitle)}</p>
+              {leftBlockLines.map((line, index) => (
+                <p key={`${leftBlockTitle}-${index}`} className="mt-1">
+                  {toDisplay(line)}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {rightBlockTitle ? (
+            <div className="p-3">
+              <p className="font-semibold">{toDisplay(rightBlockTitle)}</p>
+              {rightBlockLines.map((line, index) => (
+                <p key={`${rightBlockTitle}-${index}`} className="mt-1">
+                  {toDisplay(line)}
+                </p>
+              ))}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -249,8 +260,8 @@ const DocumentViewPanel = ({
         </div>
       )}
 
-      <div className="flex items-center justify-between p-3 text-[11px]">
-        <p>{hideFooterNote ? "" : toDisplay(footerNote)}</p>
+      <div className="flex items-end justify-end p-3 text-[11px]">
+        {!hideFooterNote && footerNote ? <p className="mr-auto">{footerNote}</p> : null}
         <div className="text-right">
           <p className="font-semibold">For {toDisplay(footerCompanyName)}</p>
           <div className="mt-8 border-t border-slate-700 pt-2">

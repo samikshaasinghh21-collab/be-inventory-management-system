@@ -700,6 +700,18 @@ const Customers = () => {
                         <option value="inter">Inter-State (IGST)</option>
                       </select>
                     </div>
+                    <div className="lg:col-span-2">
+                      <label className="text-sm font-medium text-slate-700">
+                        Customer Address
+                      </label>
+                      <textarea
+                        value={form.address}
+                        onChange={(event) =>
+                          updateField("address", event.target.value)
+                        }
+                        className="mt-1 min-h-[120px] w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
+                      />
+                    </div>
                     <div>
                       <label className="text-sm font-medium text-slate-700">
                         City
@@ -734,18 +746,6 @@ const Customers = () => {
                           {errors.pincode}
                         </p>
                       )}
-                    </div>
-                    <div className="lg:col-span-2">
-                      <label className="text-sm font-medium text-slate-700">
-                        Address
-                      </label>
-                      <textarea
-                        value={form.address}
-                        onChange={(event) =>
-                          updateField("address", event.target.value)
-                        }
-                        className="mt-1 min-h-[120px] w-full rounded-lg border border-slate-200 px-4 py-3 text-sm"
-                      />
                     </div>
                     <div className="lg:col-span-2">
                       <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">

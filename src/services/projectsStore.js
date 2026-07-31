@@ -21,12 +21,14 @@ export const getProjects = () => {
   }
 };
 
-export const setProjects = (projects = []) => {
+export const setProjects = (projects = [], options = {}) => {
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify(normalizeProjectsList(projects))
   );
-  emitChange();
+  if (options.emit !== false) {
+    emitChange();
+  }
 };
 
 export const saveProject = (project) => {
