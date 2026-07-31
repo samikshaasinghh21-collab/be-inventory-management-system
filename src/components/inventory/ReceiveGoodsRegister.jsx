@@ -14,7 +14,6 @@ import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import { buildGstSummary } from "../../utils/taxUtils";
 import {
-  buildReceiveBillFromText,
   buildReceiveProjectDetailLines,
   buildReceiveShipToText,
   isReceiveProjectDetailsVisible,
@@ -867,7 +866,7 @@ const ReceiveGoodsRegister = () => {
             </p>
           </div>
         </div>
-        <table className="min-w-[1600px] text-sm">
+        <table className="min-w-[1760px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[80px]">Select</th>
@@ -879,6 +878,7 @@ const ReceiveGoodsRegister = () => {
               <th className="p-3 text-left min-w-[140px]">Received Date</th>
               <th className="p-3 text-left min-w-[180px]">Invoice No / Date</th>
               <th className="p-3 text-left min-w-[140px]">Received By</th>
+              <th className="p-3 text-left min-w-[220px]">Receiving Notes</th>
               <th className="p-3 text-left min-w-[120px]">Status</th>
               <th className="p-3 text-left min-w-[110px]">Items</th>
               <th className="p-3 text-left min-w-[120px]">Received Qty</th>
@@ -890,14 +890,14 @@ const ReceiveGoodsRegister = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="15" className="p-6 text-center text-slate-500">
+                <td colSpan="16" className="p-6 text-center text-slate-500">
                   Loading receipts...
                 </td>
               </tr>
             )}
             {!loading && filteredWithSelectors.length === 0 && (
               <tr>
-                <td colSpan="15" className="p-6 text-center text-slate-500">
+                <td colSpan="16" className="p-6 text-center text-slate-500">
                   No receipts found.
                 </td>
               </tr>
@@ -952,6 +952,9 @@ const ReceiveGoodsRegister = () => {
                         </div>
                       </td>
                       <td className="p-3">{receipt.receivedBy || "-"}</td>
+                      <td className="p-3 text-sm text-slate-600">
+                        {receipt.notes || "-"}
+                      </td>
                       <td className="p-3">
                         {statusBadge(receipt.status || po?.status)}
                       </td>
@@ -1010,7 +1013,7 @@ const ReceiveGoodsRegister = () => {
                     </tr>
                     {expandedId === receipt.id && (
                       <tr className="bg-slate-50">
-                        <td colSpan="15" className="p-4">
+                        <td colSpan="16" className="p-4">
                           <div className="space-y-4">
                             <div className="flex flex-wrap gap-4 text-sm text-slate-700">
                               <span>
@@ -1138,10 +1141,18 @@ const ReceiveGoodsRegister = () => {
           logoUrl={logoUrl}
           primaryPairs={[
             {
+              label: "RE No",
+              value: viewReceipt.id
+                ? `RE-${String(viewReceipt.id).padStart(5, "0")}`
+                : "-",
+              printHidden: true,
+            },
+            {
               label: "Receipt Ref",
               value:
                 poMap[String(viewReceipt.purchaseOrderId)]?.poNumber ||
                 viewReceipt.id,
+              printHidden: true,
             },
             { label: "Received Date", value: formatDate(viewReceipt.receivedDate) },
             { label: "Invoice No", value: viewReceipt.invoiceNumber || "-" },
@@ -1155,21 +1166,8 @@ const ReceiveGoodsRegister = () => {
             },
             { label: "Received By", value: viewReceipt.receivedBy },
           ]}
-          leftBlockTitle="Bill From"
+          leftBlockTitle="Receive Location"
           leftBlockLines={splitDocumentText(
-            viewReceipt.billFrom ||
-              viewReceipt.billTo ||
-              buildReceiveBillFromText(
-                projectMap[
-                  String(
-                    viewReceipt.projectId ||
-                      poMap[String(viewReceipt.purchaseOrderId)]?.projectId
-                  )
-                ]
-              )
-          )}
-          rightBlockTitle="Ship To"
-          rightBlockLines={splitDocumentText(
             viewReceipt.shipTo ||
               buildReceiveShipToText(
                 locationMap[
@@ -1180,6 +1178,8 @@ const ReceiveGoodsRegister = () => {
                 ]
               )
           )}
+          rightBlockTitle=""
+          rightBlockLines={[]}
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },

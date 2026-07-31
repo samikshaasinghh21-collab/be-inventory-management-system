@@ -1268,7 +1268,7 @@ const DeliveryChallan = () => {
               </div>
               <div className="p-3">
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <p className="text-slate-600">Our Ref:</p>
+                  <p className="text-slate-600">DC Number:</p>
                   <p className="font-semibold">{selectedChallan.dcNumber || "-"}</p>
                   <p className="text-slate-600">Date:</p>
                   <p className="font-semibold">
@@ -1349,7 +1349,6 @@ const DeliveryChallan = () => {
             </div>
 
             <div className="flex items-center justify-between p-3 text-[11px]">
-              <p>Any changes in GST & taxes are acceptable to you.</p>
               <div className="text-right">
                 <p className="font-semibold">For {companyName}</p>
                 <div className="mt-8 border-t border-slate-700 pt-2">

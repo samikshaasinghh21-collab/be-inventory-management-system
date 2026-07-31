@@ -1120,7 +1120,6 @@ const PurchaseOrder = () => {
             onPickFromProducts={goPickProducts}
             pickLabel="Pick from Products"
             showHsnGst
-            showSerialNumber
             priceLabel="Unit Price"
             extraFieldKey="location"
             extraFieldLabel="Ship To"

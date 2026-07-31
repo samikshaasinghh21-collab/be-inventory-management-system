@@ -75,20 +75,6 @@ const getPoItemQuantities = (item = {}) => {
   };
 };
 
-const getPoTotals = (record = {}) =>
-  (record.items || []).reduce(
-    (acc, item) => {
-      const { ordered, received, available, poBalance } = getPoItemQuantities(item);
-      return {
-        ordered: acc.ordered + ordered,
-        received: acc.received + received,
-        available: acc.available + available,
-        poBalance: acc.poBalance + poBalance,
-      };
-    },
-    { ordered: 0, received: 0, available: 0, poBalance: 0 }
-  );
-
 const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   const alignClass = align === "right" ? "text-right" : "text-left";
   return (
@@ -644,7 +630,7 @@ const PurchaseOrderRegister = () => {
             />
           </div>
         </div>
-        <table className="min-w-[1540px] text-sm">
+        <table className="min-w-[1280px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">PO No</th>
@@ -653,8 +639,6 @@ const PurchaseOrderRegister = () => {
               <th className="p-3 text-left min-w-[160px]">Ship To</th>
               <th className="p-3 text-left min-w-[140px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
-              <th className="p-3 text-left min-w-[130px]">Received Qty</th>
-              <th className="p-3 text-left min-w-[130px]">Available Qty</th>
               <th className="p-3 text-left min-w-[140px]">Subtotal</th>
               <th className="p-3 text-left min-w-[140px]">GST</th>
               <th className="p-3 text-left min-w-[140px]">Total Value</th>
@@ -665,14 +649,14 @@ const PurchaseOrderRegister = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="13" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   Loading purchase orders...
                 </td>
               </tr>
             )}
             {!loading && filteredRecords.length === 0 && (
               <tr>
-                <td colSpan="13" className="p-6 text-center text-slate-500">
+                <td colSpan="11" className="p-6 text-center text-slate-500">
                   {records.length === 0
                     ? "No purchase orders created yet."
                     : "No purchase orders match your search."}
@@ -689,7 +673,6 @@ const PurchaseOrderRegister = () => {
                 const summary = buildGstSummary(record.items || [], {
                   taxMode: getRecordTaxMode(record),
                 });
-                const quantities = getPoTotals(record);
                 const isLocked = isLockedPurchaseOrder(record.status);
                 const isCancelled = isCancelledPurchaseOrder(record.status);
                 const isUnlocked = isPoUnlocked(record.id);
@@ -708,12 +691,6 @@ const PurchaseOrderRegister = () => {
                       <td className="p-3">{location?.name || "-"}</td>
                       <td className="p-3">{statusBadge(record.status)}</td>
                       <td className="p-3">{record.items?.length || 0}</td>
-                      <td className="p-3 font-medium text-slate-800">
-                        {quantities.received}
-                      </td>
-                      <td className="p-3 font-medium text-slate-800">
-                        {quantities.available}
-                      </td>
                       <td className="p-3 font-medium">
                         {formatCurrency(summary.subtotal)}
                       </td>
@@ -830,7 +807,7 @@ const PurchaseOrderRegister = () => {
 
                     {expandedId === rowId && (
                       <tr className="bg-slate-50">
-                        <td colSpan="13" className="p-4">
+                        <td colSpan="11" className="p-4">
                           <div className="space-y-4">
                             {isLocked && (
                               <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -866,12 +843,6 @@ const PurchaseOrderRegister = () => {
                               </p>
                               <p>
                                 <strong>Total Value:</strong> {formatCurrency(summary.total)}
-                              </p>
-                              <p>
-                                <strong>Received Qty:</strong> {quantities.received}
-                              </p>
-                              <p>
-                                <strong>Available Qty:</strong> {quantities.available}
                               </p>
                             </div>
 
@@ -910,8 +881,6 @@ const PurchaseOrderRegister = () => {
                                       <th className="p-2 text-left">Description</th>
                                       <th className="p-2 text-left">Unit</th>
                                       <th className="p-2 text-left">Qty</th>
-                                      <th className="p-2 text-left">Received</th>
-                                      <th className="p-2 text-left">Available</th>
                                       <th className="p-2 text-left">Unit Price</th>
                                       <th className="p-2 text-left">Amount</th>
                                     </tr>
@@ -919,15 +888,14 @@ const PurchaseOrderRegister = () => {
                                   <tbody>
                                     {(record.items || []).length === 0 && (
                                       <tr>
-                                        <td colSpan="8" className="p-3 text-slate-500 text-center">
+                                        <td colSpan="6" className="p-3 text-slate-500 text-center">
                                           No line items.
                                         </td>
                                       </tr>
                                     )}
                                     {(record.items || []).map((item, itemIndex) => {
                                       const qty = Number(item.quantity ?? 0) || 0;
-                                      const { ordered, received, available } =
-                                        getPoItemQuantities(item);
+                                      const { ordered } = getPoItemQuantities(item);
                                       const rate = roundUnitPrice(item.unitPrice ?? item.rate ?? 0);
                                       const amount = qty * rate;
                                       return (
@@ -941,8 +909,6 @@ const PurchaseOrderRegister = () => {
                                           <td className="p-2">{item.description || "-"}</td>
                                           <td className="p-2">{item.unit || "-"}</td>
                                           <td className="p-2">{ordered}</td>
-                                          <td className="p-2">{received}</td>
-                                          <td className="p-2">{available}</td>
                                           <td className="p-2">{formatCurrency(rate)}</td>
                                           <td className="p-2">{formatCurrency(amount)}</td>
                                         </tr>
@@ -1000,30 +966,24 @@ const PurchaseOrderRegister = () => {
             projectMap[String(viewRecord.projectId)]?.client || "-",
           ]}
           tableColumns={[
-            { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
             { key: "description", label: "Description" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "ordered", label: "Qty", align: "right", widthClass: "w-20" },
-            { key: "received", label: "Received", align: "right", widthClass: "w-20" },
-            { key: "available", label: "Available", align: "right", widthClass: "w-20" },
             { key: "rate", label: "Unit Price", align: "right", widthClass: "w-24" },
             { key: "amount", label: "Amount", align: "right", widthClass: "w-28" },
           ]}
           tableRows={(viewRecord.items || []).map((item, index) => {
             const qty = Number(item.quantity || 0);
-            const { ordered, received, available } = getPoItemQuantities(item);
+            const { ordered } = getPoItemQuantities(item);
             const rate = roundUnitPrice(item.rate ?? item.unitPrice ?? 0);
             const amount = qty * rate;
             return {
               id: item.id || index,
-              serial: index + 1,
               name: item.name,
               description: item.description || "-",
               unit: item.unit,
               ordered,
-              received,
-              available,
               rate: formatCurrency(rate),
               amount: formatCurrency(amount),
             };

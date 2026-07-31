@@ -88,6 +88,10 @@ const normalizeReallocateInventory = (record = {}) => {
     ),
     transferDate: record.transferDate ?? record.TransferDate ?? null,
     requestedBy: record.requestedBy ?? record.RequestedBy ?? "",
+    movedQuantity:
+      record.movedQuantity ?? record.MovedQuantity ?? null,
+    remainingQuantity:
+      record.remainingQuantity ?? record.RemainingQuantity ?? null,
     eWayBillNumber:
       record.eWayBillNumber ??
       record.EWayBillNumber ??

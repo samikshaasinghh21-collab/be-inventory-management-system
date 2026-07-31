@@ -3,6 +3,7 @@ const createNavItem = (item, extra = {}) => ({
   children: [],
   exact: false,
   icon: "grid",
+  hidden: false,
   matchPrefixes: [],
   searchKeywords: [],
   subtitle: "",
@@ -139,6 +140,7 @@ export const NAVIGATION_SECTIONS = [
       createNavItem({
         id: "invoice",
         label: "Purchase Invoice",
+        hidden: true,
         to: "/inventory/invoices",
         icon: "file",
         matchPrefixes: ["/inventory/invoice", "/inventory/invoices"],

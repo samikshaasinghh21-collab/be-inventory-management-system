@@ -119,6 +119,10 @@ const Sidebar = ({
   };
 
   const renderSectionItem = (item, depth = 0) => {
+    if (item.hidden) {
+      return null;
+    }
+
     const isActive = isNavigationItemActive(location.pathname, item);
     const isExpanded = !!openGroups[item.id];
     const destination = getDefaultDestination(item);

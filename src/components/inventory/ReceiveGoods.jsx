@@ -1389,12 +1389,6 @@ const ReceiveGoods = () => {
     buildReceiptSummaryItems(viewReceipt, viewPurchaseOrder),
     { taxMode: viewReceipt?.taxMode || getPurchaseOrderTaxMode(viewPurchaseOrder) }
   );
-  const viewBillFrom = splitDocumentText(
-    viewReceipt?.billFrom ||
-      viewReceipt?.billTo ||
-      buildReceiveVendorAddressText(viewVendor) ||
-      buildReceiveBillFromText(viewProject)
-  );
   const viewShipTo = splitDocumentText(
     viewReceipt?.shipTo || buildReceiveShipToText(viewLocation)
   );
@@ -2017,7 +2011,9 @@ const ReceiveGoods = () => {
                       />
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-slate-700">Ship To</label>
+                      <label className="text-sm font-medium text-slate-700">
+                        Receive Location
+                      </label>
                       <textarea
                         value={receiveForm.shipTo}
                         onChange={(event) =>
@@ -2300,9 +2296,7 @@ const ReceiveGoods = () => {
             purchaseOrderPreviewProject?.client || "-",
           ]}
           tableColumns={[
-            { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
-            { key: "serialNumber", label: "Serial Number", widthClass: "w-28" },
             { key: "description", label: "Description" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "quantity", label: "Qty", align: "right", widthClass: "w-20" },
@@ -2315,9 +2309,7 @@ const ReceiveGoods = () => {
             const amount = qty * rate;
             return {
               id: item.id || index,
-              serial: index + 1,
               name: item.name,
-              serialNumber: item.serialNumber || "-",
               description: item.description || "-",
               unit: item.unit,
               quantity: qty,
@@ -2349,7 +2341,18 @@ const ReceiveGoods = () => {
           companyEmail={company.email}
           logoUrl={logoUrl}
           primaryPairs={[
-            { label: "Receipt Ref", value: viewPurchaseOrder?.poNumber || viewReceipt.id },
+            {
+              label: "RE No",
+              value: viewReceipt.id
+                ? `RE-${String(viewReceipt.id).padStart(5, "0")}`
+                : "-",
+              printHidden: true,
+            },
+            {
+              label: "Receipt Ref",
+              value: viewPurchaseOrder?.poNumber || viewReceipt.id,
+              printHidden: true,
+            },
             { label: "Received Date", value: formatDate(viewReceipt.receivedDate) || "-" },
             { label: "Invoice No", value: viewReceipt.invoiceNumber || "-" },
             { label: "Invoice Date", value: formatDate(viewReceipt.invoiceDate) || "-" },
@@ -2360,10 +2363,10 @@ const ReceiveGoods = () => {
             { label: "Status", value: viewReceipt.status || viewPurchaseOrder?.status || "Draft" },
             { label: "Received By", value: viewReceipt.receivedBy || "-" },
           ]}
-          leftBlockTitle="Bill From"
-          leftBlockLines={viewBillFrom}
-          rightBlockTitle="Ship To"
-          rightBlockLines={viewShipTo}
+          leftBlockTitle="Receive Location"
+          leftBlockLines={viewShipTo}
+          rightBlockTitle=""
+          rightBlockLines={[]}
           tableColumns={[
             { key: "serial", label: "Sl No", widthClass: "w-16" },
             { key: "name", label: "Item" },
