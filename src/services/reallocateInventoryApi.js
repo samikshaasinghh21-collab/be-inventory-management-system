@@ -42,6 +42,14 @@ const normalizeReallocateInventoryItem = (item = {}) => ({
   description: item.description ?? item.Description ?? "",
   unit: item.unit ?? item.Unit ?? "PCS",
   quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+  movedQuantity:
+    Number(item.movedQuantity ?? item.MovedQuantity ?? item.quantity ?? item.Quantity ?? 0) || 0,
+  currentQuantity:
+    item.currentQuantity ?? item.CurrentQuantity ?? null,
+  consumedQuantity:
+    Number(item.consumedQuantity ?? item.ConsumedQuantity ?? 0) || 0,
+  onwardMovedQuantity:
+    Number(item.onwardMovedQuantity ?? item.OnwardMovedQuantity ?? 0) || 0,
 });
 
 const normalizeReallocateInventory = (record = {}) => {
@@ -74,12 +82,21 @@ const normalizeReallocateInventory = (record = {}) => {
     referenceType,
     referenceId,
     referenceNo,
+    originalDcNumber:
+      record.originalDcNumber ?? record.OriginalDCNumber ?? referenceNo,
+    dc2Number: record.dc2Number ?? record.DC2Number ?? "",
     type: record.type ?? record.Type ?? "Reallocate",
     consumptionId: record.consumptionId ?? record.ConsumptionId ?? null,
     consumptionNumber:
       record.consumptionNumber ?? record.ConsumptionNumber ?? "",
     projectId: record.projectId ?? record.ProjectId ?? null,
     sourceProjectId: record.sourceProjectId ?? record.SourceProjectId ?? null,
+    sourceLocationName:
+      record.sourceLocationName ?? record.SourceLocationName ?? "",
+    destinationProjectName:
+      record.destinationProjectName ?? record.DestinationProjectName ?? "",
+    destinationLocationName:
+      record.destinationLocationName ?? record.DestinationLocationName ?? "",
     fromLocationId: record.fromLocationId ?? record.FromLocationId ?? null,
     toLocationId: record.toLocationId ?? record.ToLocationId ?? null,
     returnVendorId: record.returnVendorId ?? record.ReturnVendorId ?? null,
@@ -92,6 +109,13 @@ const normalizeReallocateInventory = (record = {}) => {
       record.movedQuantity ?? record.MovedQuantity ?? null,
     remainingQuantity:
       record.remainingQuantity ?? record.RemainingQuantity ?? null,
+    currentQuantity:
+      record.currentQuantity ?? record.CurrentQuantity ?? null,
+    consumedQuantity:
+      Number(record.consumedQuantity ?? record.ConsumedQuantity ?? 0) || 0,
+    onwardMovedQuantity:
+      Number(record.onwardMovedQuantity ?? record.OnwardMovedQuantity ?? 0) || 0,
+    vehicleNumber: record.vehicleNumber ?? record.VehicleNumber ?? "",
     eWayBillNumber:
       record.eWayBillNumber ??
       record.EWayBillNumber ??

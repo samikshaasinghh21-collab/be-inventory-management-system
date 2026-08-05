@@ -804,6 +804,7 @@ const CreateProduct = () => {
                 </label>
 
                 <label>
+                  
                   <span className="text-sm font-medium text-slate-700">Prep By</span>
                   <input
                     value={form.prepBy}
@@ -877,3 +878,4 @@ const CreateProduct = () => {
 };
 
 export default CreateProduct;
+''

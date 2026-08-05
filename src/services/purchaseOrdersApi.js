@@ -84,6 +84,21 @@ const normalizePoItem = (item = {}) => {
 };
 
 const normalizePurchaseOrder = (order = {}) => ({
+  ...(() => {
+    const legacyBoqId = order.boqId ?? order.BOQId ?? order.BoqId ?? null;
+    const parsedBoqIds = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(order.boqIds)
+            ? order.boqIds
+            : Array.isArray(order.BOQIds)
+            ? order.BOQIds
+            : []),
+          legacyBoqId,
+        ].filter((value) => value !== null && value !== undefined && value !== "")
+      )
+    );
+    return {
   id: order.id ?? order.Id ?? order.PurchaseOrderId ?? null,
   poNumber:
     order.poNumber ??
@@ -100,7 +115,8 @@ const normalizePurchaseOrder = (order = {}) => ({
     order.locationId ??
     order.LocationId ??
     null,
-  boqId: order.boqId ?? order.BOQId ?? order.BoqId ?? null,
+  boqId: legacyBoqId,
+  boqIds: parsedBoqIds,
   status: order.status ?? order.Status ?? "Draft",
   orderDate: order.orderDate ?? order.OrderDate ?? null,
   expectedDate:
@@ -115,11 +131,18 @@ const normalizePurchaseOrder = (order = {}) => ({
     order.TermsAndConditions ??
     DEFAULT_PURCHASE_ORDER_TERMS,
   total: Number(order.total ?? order.Total ?? 0),
+  linkedBoqs: Array.isArray(order.linkedBoqs)
+    ? order.linkedBoqs
+    : Array.isArray(order.LinkedBoqs)
+    ? order.LinkedBoqs
+    : [],
   items: Array.isArray(order.items)
     ? order.items.map(normalizePoItem)
     : Array.isArray(order.PurchaseOrderItems)
     ? order.PurchaseOrderItems.map(normalizePoItem)
     : [],
+    };
+  })(),
 });
 
 export const fetchPurchaseOrders = async () => {

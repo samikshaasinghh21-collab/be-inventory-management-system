@@ -396,6 +396,8 @@ const createReallocationModalState = (requestedBy = "") => ({
   reallocationType: "partial",
   requestDate: new Date().toISOString().slice(0, 10),
   requestedBy,
+  vehicleNumber: "",
+  eWayBillNumber: "",
   notes: "",
   items: [],
   loading: false,
@@ -444,16 +446,11 @@ const isReallocationLinkedToChallan = (transfer = {}, challan = {}) => {
   const challanRef = normalizeLookupText(challan.dcNumber);
   const transferRef = normalizeLookupText(transfer.referenceNo);
 
-  if (
-    challanId &&
-    transferReferenceType === "delivery_challan" &&
-    transferReferenceId &&
-    transferReferenceId === challanId
-  ) {
-    return true;
+  if (transferReferenceType === "delivery_challan" && transferReferenceId) {
+    return Boolean(challanId && transferReferenceId === challanId);
   }
-  if (challanRef && transferRef && challanRef === transferRef) {
-    return true;
+  if (transferReferenceType === "delivery_challan" && transferRef) {
+    return Boolean(challanRef && challanRef === transferRef);
   }
   return (transfer.items || []).some((item) =>
     isReallocationItemLinkedToChallan(item, challan)
@@ -464,10 +461,23 @@ const getChallanReallocationHistory = (challan = {}, reallocations = []) =>
   (Array.isArray(reallocations) ? reallocations : [])
     .filter((transfer) => !isInactiveReallocationStatus(transfer.status))
     .map((transfer) => {
+      const transferReferenceType = normalizeLookupText(
+        transfer.referenceType
+      ).replace(/[\s-]+/g, "_");
+      const hasExplicitDcReference =
+        transferReferenceType === "delivery_challan" &&
+        Boolean(
+          String(transfer.referenceId ?? "").trim() ||
+            normalizeLookupText(transfer.referenceNo)
+        );
+      const explicitlyLinked = isReallocationLinkedToChallan(transfer, challan);
+      if (hasExplicitDcReference && !explicitlyLinked) {
+        return null;
+      }
       const linkedItems = (transfer.items || []).filter((item) =>
         isReallocationItemLinkedToChallan(item, challan)
       );
-      return linkedItems.length || isReallocationLinkedToChallan(transfer, challan)
+      return linkedItems.length || explicitlyLinked
         ? { ...transfer, linkedItems }
         : null;
     })
@@ -594,6 +604,9 @@ const getChallanItemReallocatedQty = (challanItem = {}, history = []) =>
     (sum, transfer) =>
       sum +
       (transfer.linkedItems || []).reduce((itemSum, reallocationItem) => {
+        if (normalizeLookupText(reallocationItem.sourceType) === "reallocation") {
+          return itemSum;
+        }
         if (!isReallocationItemMatchChallanItem(reallocationItem, challanItem)) {
           return itemSum;
         }
@@ -601,6 +614,92 @@ const getChallanItemReallocatedQty = (challanItem = {}, history = []) =>
       }, 0),
     0
   );
+
+const getMovementQuantity = (transfer = {}) =>
+  (transfer.items || []).reduce(
+    (sum, item) => sum + (Number(item.quantity) || 0),
+    0
+  );
+
+const buildDeliveryChallanRegisterRows = (records = [], reallocations = []) =>
+  (Array.isArray(records) ? records : []).flatMap((record) => {
+    const metrics = getChallanReallocationMetrics(record, reallocations);
+    const originalRow = {
+      ...record,
+      registerRowId: `dc-${record.id}`,
+      registerKind: "original",
+      dcTypeKey: "original",
+      dcTypeLabel: "Allocated / Original DC",
+      movementStatusKey: metrics.reallocationStatusKey,
+      movementStatusLabel: metrics.reallocationStatusLabel,
+      movedQuantity: metrics.totalReallocatedQty,
+      currentQuantity: metrics.remainingBalanceQty,
+      originalRecord: record,
+      movement: null,
+    };
+    const movementRows = [...metrics.history]
+      .sort((left, right) => {
+        const leftDate = new Date(
+          left.transferDate ?? left.requestDate ?? left.createdAt ?? 0
+        ).getTime();
+        const rightDate = new Date(
+          right.transferDate ?? right.requestDate ?? right.createdAt ?? 0
+        ).getTime();
+        return leftDate - rightDate || Number(left.id || 0) - Number(right.id || 0);
+      })
+      .map((transfer) => {
+        const movedQuantity = getMovementQuantity(transfer);
+        const currentQuantity = Math.max(
+          Number(transfer.currentQuantity ?? movedQuantity) || 0,
+          0
+        );
+        return {
+          ...record,
+          id: `movement-${transfer.id}`,
+          registerRowId: `dc-${record.id}-movement-${transfer.id}`,
+          registerKind: "moved",
+          movementId: transfer.id,
+          dcNumber:
+            transfer.dc2Number ||
+            `DC2-${String(transfer.id ?? "").padStart(4, "0")}`,
+          originalDcNumber:
+            transfer.originalDcNumber || transfer.referenceNo || record.dcNumber,
+          projectId: transfer.projectId ?? record.projectId,
+          fromLocationId: transfer.fromLocationId,
+          toLocationId: transfer.toLocationId,
+          toLocation: transfer.destinationLocationName || "",
+          vehicleNumber: transfer.vehicleNumber || "",
+          eWayBillNumber: transfer.eWayBillNumber || "",
+          issueDate: transfer.transferDate || transfer.requestDate,
+          status: record.status,
+          items: (transfer.items || []).map((item) => ({
+            ...item,
+            movedQuantity: Number(item.movedQuantity ?? item.quantity) || 0,
+            quantity: Math.max(
+              Number(item.currentQuantity ?? item.quantity) || 0,
+              0
+            ),
+            balanceQty: Math.max(
+              Number(item.currentQuantity ?? item.quantity) || 0,
+              0
+            ),
+          })),
+          deliveredQty: movedQuantity,
+          consumedQty: Number(transfer.consumedQuantity) || 0,
+          balanceQty: currentQuantity,
+          registerStatus: getDeliveryChallanRegisterStatus(record),
+          dcTypeKey: "moved",
+          dcTypeLabel: "Moved DC",
+          movementStatusKey: currentQuantity > 0 ? "moved" : "fully_reallocated",
+          movementStatusLabel: currentQuantity > 0 ? "At Destination" : "Moved On / Consumed",
+          movedQuantity,
+          currentQuantity,
+          originalRecord: record,
+          movement: transfer,
+        };
+      });
+    return [originalRow, ...movementRows];
+  });
 
 const DeliveryChallan = () => {
   const location = useLocation();
@@ -630,7 +729,6 @@ const DeliveryChallan = () => {
   const [dcStatusFilter, setDcStatusFilter] = useState("all");
   const [dcTypeFilter, setDcTypeFilter] = useState("all");
   const [reallocationStatusFilter, setReallocationStatusFilter] = useState("all");
-  const [showMovementRegister, setShowMovementRegister] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [viewChallanRecord, setViewChallanRecord] = useState(null);
   const [selectedChallan, setSelectedChallan] = useState(null);
@@ -974,18 +1072,27 @@ const DeliveryChallan = () => {
     dcLookup.rows.forEach((row) => {
       const challanId = String(row.deliveryChallanId ?? "").trim();
       if (!challanId) return;
-      if (!rowsByChallan.has(challanId)) {
-        rowsByChallan.set(challanId, []);
+      const isMovedSource = normalizeLookupText(row.sourceType) === "reallocation";
+      const rowKey = isMovedSource
+        ? `moved:${String(row.sourceRef || row.sourceKey || challanId)}`
+        : `dc:${challanId}`;
+      if (!rowsByChallan.has(rowKey)) {
+        rowsByChallan.set(rowKey, { challanId, rows: [] });
       }
-      rowsByChallan.get(challanId).push(row);
+      rowsByChallan.get(rowKey).rows.push(row);
     });
-    return Array.from(rowsByChallan.entries())
-      .map(([challanId, availableRows]) => {
+    return Array.from(rowsByChallan.values())
+      .map(({ challanId, rows: availableRows }) => {
         const record = records.find((item) => String(item.id) === challanId);
         if (!record) return null;
+        const firstRow = availableRows[0] || {};
         return {
           record,
           availableRows,
+          displayDcNumber:
+            normalizeLookupText(firstRow.sourceType) === "reallocation"
+              ? firstRow.sourceRef || record.dcNumber
+              : record.dcNumber,
           availableQty: availableRows.reduce(
             (sum, row) => sum + toQuantity(row.availableQty),
             0
@@ -1095,6 +1202,47 @@ const DeliveryChallan = () => {
         .filter(Boolean),
     [receiptMap, selectedReceiptIds]
   );
+
+  const loadedReceiptSource = useMemo(() => {
+    const loadedReceipts = loadedReceiptIds
+      .map((receiptId) => receiptMap[String(receiptId)])
+      .filter(Boolean);
+    if (!loadedReceipts.length) {
+      return { projectId: "", locationId: "" };
+    }
+
+    const projectIds = Array.from(
+      new Set(
+        loadedReceipts
+          .map((receipt) => {
+            const purchaseOrder =
+              purchaseOrderMap[String(receipt.purchaseOrderId)] || null;
+            return String(
+              receipt.projectId ?? purchaseOrder?.projectId ?? ""
+            ).trim();
+          })
+          .filter(Boolean)
+      )
+    );
+    const locationIds = Array.from(
+      new Set(
+        loadedReceipts
+          .map((receipt) => {
+            const purchaseOrder =
+              purchaseOrderMap[String(receipt.purchaseOrderId)] || null;
+            return String(
+              receipt.locationId ?? purchaseOrder?.locationId ?? ""
+            ).trim();
+          })
+          .filter(Boolean)
+      )
+    );
+
+    return {
+      projectId: projectIds.length === 1 ? projectIds[0] : "",
+      locationId: locationIds.length === 1 ? locationIds[0] : "",
+    };
+  }, [loadedReceiptIds, purchaseOrderMap, receiptMap]);
 
   const selectableFilteredReceiptIds = useMemo(() => {
     return filteredReceiptsForSelection.map((receipt) => String(receipt.id));
@@ -1366,13 +1514,15 @@ const DeliveryChallan = () => {
 
   const validate = () => {
     const nextErrors = {};
+    const sourceProjectId = loadedReceiptSource.projectId || form.projectId;
+    const sourceLocationId = loadedReceiptSource.locationId || form.fromLocationId;
     if (!form.dcNumber.trim()) {
       nextErrors.dcNumber = "DC number is required.";
     }
-    if (!form.projectId) {
+    if (!sourceProjectId) {
       nextErrors.projectId = "Select a project.";
     }
-    if (!form.fromLocationId) {
+    if (!sourceLocationId) {
       nextErrors.fromLocationId = "Select source.";
     }
     if (!form.toLocationId && !form.toLocation.trim()) {
@@ -1469,15 +1619,17 @@ const DeliveryChallan = () => {
     const receiptIdsForPayload = loadedReceiptIds.length
       ? loadedReceiptIds
       : selectedReceiptIds;
+    const sourceProjectId = loadedReceiptSource.projectId || form.projectId;
+    const sourceLocationId = loadedReceiptSource.locationId || form.fromLocationId;
 
     const payload = {
       dcNumber: String(form.dcNumber ?? "").trim(),
-      projectId: parseNumberValue(form.projectId),
+      projectId: parseNumberValue(sourceProjectId),
       receiveGoodsId: parseNumberValue(form.receiveGoodsId),
       receiveGoodsIds: receiptIdsForPayload
         .map((receiptId) => parseNumberValue(receiptId))
         .filter((receiptId) => receiptId !== null && receiptId > 0),
-      fromLocationId: parseNumberValue(form.fromLocationId),
+      fromLocationId: parseNumberValue(sourceLocationId),
       toLocationId: parseNumberValue(form.toLocationId),
       toLocation: String(form.toLocation ?? "").trim(),
       vehicleNumber: String(form.vehicleNumber ?? "").trim() || null,
@@ -1559,28 +1711,31 @@ const DeliveryChallan = () => {
     ];
   }, [records]);
 
+  const deliveryRegisterRows = useMemo(
+    () => buildDeliveryChallanRegisterRows(records, reallocations),
+    [records, reallocations]
+  );
+
   const filteredRecords = useMemo(() => {
-    return records.filter((record) => {
-      const registerStatus = getDeliveryChallanRegisterStatus(record).toLowerCase();
-      const reallocationMetrics = getChallanReallocationMetrics(record, reallocations);
+    return deliveryRegisterRows.filter((record) => {
+      const registerStatus = String(
+        record.registerStatus || getDeliveryChallanRegisterStatus(record)
+      ).toLowerCase();
       if (dcStatusFilter !== "all" && registerStatus !== dcStatusFilter) {
         return false;
       }
-      if (
-        dcTypeFilter !== "all" &&
-        reallocationMetrics.dcTypeKey !== dcTypeFilter
-      ) {
+      if (dcTypeFilter !== "all" && record.dcTypeKey !== dcTypeFilter) {
         return false;
       }
       if (
         reallocationStatusFilter !== "all" &&
-        reallocationMetrics.reallocationStatusKey !== reallocationStatusFilter
+        record.movementStatusKey !== reallocationStatusFilter
       ) {
         return false;
       }
       return true;
     });
-  }, [dcStatusFilter, dcTypeFilter, reallocationStatusFilter, records, reallocations]);
+  }, [dcStatusFilter, dcTypeFilter, deliveryRegisterRows, reallocationStatusFilter]);
 
   const handlePrint = async (record) => {
     if (!record) return;
@@ -1798,6 +1953,10 @@ const DeliveryChallan = () => {
         requestDate: reallocationModal.requestDate || null,
         requestedBy:
           String(reallocationModal.requestedBy || "").trim() || profileName,
+        vehicleNumber:
+          String(reallocationModal.vehicleNumber || "").trim() || null,
+        eWayBillNumber:
+          String(reallocationModal.eWayBillNumber || "").trim() || null,
         status: "Completed",
         notes: String(reallocationModal.notes || "").trim() || null,
         movedQuantity: positiveItems.reduce(
@@ -2616,11 +2775,12 @@ const DeliveryChallan = () => {
                 Project *
               </label>
               <select
-                value={form.projectId}
+                value={loadedReceiptSource.projectId || form.projectId}
+                disabled={Boolean(loadedReceiptSource.projectId)}
                 onChange={(event) => {
                   handleProjectChange(event.target.value);
                 }}
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:bg-slate-100 disabled:text-slate-600"
               >
                 <option value="">Select project</option>
                 {projects.map((project) => (
@@ -2632,20 +2792,26 @@ const DeliveryChallan = () => {
               {errors.projectId && (
                 <p className="text-xs text-red-600 mt-1">{errors.projectId}</p>
               )}
+              {loadedReceiptSource.projectId && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Project is fixed by the loaded receipt.
+                </p>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">
                 From *
               </label>
               <select
-                value={form.fromLocationId}
+                value={loadedReceiptSource.locationId || form.fromLocationId}
+                disabled={Boolean(loadedReceiptSource.locationId)}
                 onChange={(event) =>
                   setForm((prev) => ({
                     ...prev,
                     fromLocationId: event.target.value,
                   }))
                 }
-                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2"
+                className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 disabled:bg-slate-100 disabled:text-slate-600"
               >
                 <option value="">Select source</option>
                 {locations.map((location) => (
@@ -2656,6 +2822,11 @@ const DeliveryChallan = () => {
               </select>
               {errors.fromLocationId && (
                 <p className="text-xs text-red-600 mt-1">{errors.fromLocationId}</p>
+              )}
+              {loadedReceiptSource.locationId && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Source is fixed by the loaded receipt.
+                </p>
               )}
             </div>
             <div>
@@ -3226,10 +3397,10 @@ const DeliveryChallan = () => {
                   </td>
                 </tr>
               ) : dcLookupEntries.length ? (
-                dcLookupEntries.map(({ record, availableRows, availableQty }) => (
-                  <tr key={record.id} className="border-t border-slate-200">
+                dcLookupEntries.map(({ record, availableRows, availableQty, displayDcNumber }) => (
+                  <tr key={`${record.id}:${displayDcNumber}`} className="border-t border-slate-200">
                     <td className="p-3 font-semibold text-slate-800">
-                      {record.dcNumber || "-"}
+                      {displayDcNumber || record.dcNumber || "-"}
                     </td>
                     <td className="p-3">
                       {projectMap[String(dcLookup.projectId)]?.name || "-"}
@@ -3296,9 +3467,8 @@ const DeliveryChallan = () => {
               className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700"
             >
               <option value="all">All DC Types</option>
-              <option value="original">Original DC</option>
-              <option value="reallocated">Fully Moved DC</option>
-              <option value="partially_reallocated">Partially Moved DC</option>
+              <option value="original">Allocated / Original DC</option>
+              <option value="moved">Moved DC</option>
             </select>
             <select
               value={reallocationStatusFilter}
@@ -3309,14 +3479,8 @@ const DeliveryChallan = () => {
               <option value="not_reallocated">Not Moved</option>
               <option value="partially_reallocated">Partially Moved</option>
               <option value="fully_reallocated">Fully Moved</option>
+              <option value="moved">At Destination</option>
             </select>
-            <button
-              type="button"
-              onClick={() => setShowMovementRegister((current) => !current)}
-              className="px-3 py-1.5 border border-slate-200 rounded-md text-xs text-slate-600 bg-white"
-            >
-              {showMovementRegister ? "Hide Movement Register" : "View Movement Register"}
-            </button>
             <button
               type="button"
               onClick={() =>
@@ -3336,7 +3500,7 @@ const DeliveryChallan = () => {
             </button>
           </div>
         </div>
-        <table className="min-w-[1920px] text-sm">
+        <table className="min-w-[2180px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">DC No</th>
@@ -3350,6 +3514,8 @@ const DeliveryChallan = () => {
               <th className="p-3 text-left min-w-[120px]">Items</th>
               <th className="p-3 text-right min-w-[140px]">Moved Qty</th>
               <th className="p-3 text-right min-w-[140px]">Remaining Balance</th>
+              <th className="p-3 text-left min-w-[150px]">Vehicle No</th>
+              <th className="p-3 text-left min-w-[170px]">E-Way Bill No</th>
               <th className="p-3 text-left min-w-[220px]">History</th>
               <th className="p-3 text-left min-w-[260px]">POD</th>
               <th className="p-3 text-left min-w-[260px]">Actions</th>
@@ -3358,7 +3524,7 @@ const DeliveryChallan = () => {
           <tbody>
             {filteredRecords.length === 0 && (
               <tr>
-                <td colSpan="14" className="p-6 text-center text-slate-500">
+                <td colSpan="16" className="p-6 text-center text-slate-500">
                   {records.length === 0
                     ? "No delivery challans created yet."
                     : "No delivery challans match the selected filters."}
@@ -3366,18 +3532,27 @@ const DeliveryChallan = () => {
               </tr>
             )}
             {filteredRecords.map((record) => {
-              const reallocationMetrics = getChallanReallocationMetrics(
-                record,
-                reallocations
-              );
-              const latestHistory = reallocationMetrics.history[0] || null;
-              const latestLocation = latestHistory
-                ? locationMap[String(latestHistory.toLocationId)] || {}
-                : {};
+              const isMovedDc = record.registerKind === "moved";
+              const metrics = isMovedDc
+                ? null
+                : getChallanReallocationMetrics(record, reallocations);
+              const latestHistory = isMovedDc
+                ? record.movement
+                : metrics?.history?.[0] || null;
               return (
-                <tr key={record.id} className="border-t hover:bg-slate-50">
+                <tr
+                  key={record.registerRowId || record.id}
+                  className={`border-t hover:bg-slate-50 ${
+                    isMovedDc ? "bg-blue-50/40" : ""
+                  }`}
+                >
                   <td className="p-3 font-medium text-slate-800">
-                    {record.dcNumber || "-"}
+                    <p>{record.dcNumber || "-"}</p>
+                    {isMovedDc ? (
+                      <p className="mt-1 text-xs font-normal text-slate-500">
+                        From {record.originalDcNumber || record.originalRecord?.dcNumber || "-"}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="p-3 text-slate-700">
                     {formatReceiptReference(
@@ -3398,68 +3573,82 @@ const DeliveryChallan = () => {
                       "-"}
                   </td>
                   <td className="p-3">
-                    <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                      {reallocationMetrics.dcTypeLabel}
+                    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                      isMovedDc
+                        ? "border-blue-200 bg-blue-100 text-blue-700"
+                        : "border-slate-200 bg-slate-100 text-slate-700"
+                    }`}>
+                      {record.dcTypeLabel || "Allocated / Original DC"}
                     </span>
                   </td>
-                  <td className="p-3">{getDeliveryChallanRegisterStatus(record)}</td>
                   <td className="p-3">
-                    <span
-                      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getReallocationStatusTone(
-                        reallocationMetrics.reallocationStatusKey
-                      )}`}
-                    >
-                      {reallocationMetrics.reallocationStatusLabel}
+                    {record.registerStatus || getDeliveryChallanRegisterStatus(record)}
+                  </td>
+                  <td className="p-3">
+                    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getReallocationStatusTone(
+                      record.movementStatusKey
+                    )}`}>
+                      {record.movementStatusLabel}
                     </span>
                   </td>
                   <td className="p-3">{record.items?.length || 0}</td>
                   <td className="p-3 text-right font-medium text-slate-800">
-                    {fmtQty(reallocationMetrics.totalReallocatedQty)}
+                    {fmtQty(record.movedQuantity)}
                   </td>
                   <td className="p-3 text-right font-medium text-slate-800">
-                    {fmtQty(reallocationMetrics.remainingBalanceQty)}
+                    {fmtQty(record.currentQuantity)}
                   </td>
+                  <td className="p-3 text-slate-700">{record.vehicleNumber || "-"}</td>
+                  <td className="p-3 text-slate-700">{record.eWayBillNumber || "-"}</td>
                   <td className="p-3 text-xs text-slate-600">
-                    {reallocationMetrics.historyCount > 0 ? (
+                    {isMovedDc ? (
                       <div className="space-y-1">
                         <p className="font-medium text-slate-700">
-                          {reallocationMetrics.historyCount} movement
-                          {reallocationMetrics.historyCount > 1 ? "s" : ""}
+                          {locationMap[String(record.fromLocationId)]?.name || "-"}
+                          {" → "}
+                          {locationMap[String(record.toLocationId)]?.name || record.toLocation || "-"}
+                        </p>
+                        <p>{formatDate(record.movement?.requestDate || record.movement?.transferDate)}</p>
+                        {record.movement?.requestedBy ? <p>By {record.movement.requestedBy}</p> : null}
+                      </div>
+                    ) : metrics?.historyCount > 0 ? (
+                      <div className="space-y-1">
+                        <p className="font-medium text-slate-700">
+                          {metrics.historyCount} movement{metrics.historyCount > 1 ? "s" : ""}
                         </p>
                         <p>
-                          Latest:{" "}
-                          {latestLocation.name || latestHistory?.referenceNumber || "-"}
+                          Latest: {locationMap[String(latestHistory?.toLocationId)]?.name || latestHistory?.referenceNumber || "-"}
                         </p>
                         <p>{formatDate(latestHistory?.requestDate || latestHistory?.transferDate)}</p>
                       </div>
-                    ) : (
-                      "-"
-                    )}
+                    ) : "-"}
                   </td>
-                  <td className="p-3">{renderPodWorkflowCell(record)}</td>
+                  <td className="p-3">{isMovedDc ? "-" : renderPodWorkflowCell(record)}</td>
                   <td className="p-3">
                     <div className="flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={() => handleViewChallan(record)}
-                        className="text-slate-700 text-sm underline"
-                      >
+                      <button type="button" onClick={() => handleViewChallan(record)} className="text-slate-700 text-sm underline">
                         View
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePrint(record)}
-                        className="text-slate-600 text-sm"
-                      >
+                      <button type="button" onClick={() => handlePrint(record)} className="text-slate-600 text-sm">
                         Print
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(record.id)}
-                        className="text-red-600 text-sm"
-                      >
-                        Delete
-                      </button>
+                      {Number(record.currentQuantity) > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReallocation(record.originalRecord || record, {
+                            currentProjectId: record.projectId,
+                            currentLocationId: record.toLocationId,
+                          })}
+                          className="text-blue-700 text-sm font-medium"
+                        >
+                          Move
+                        </button>
+                      ) : null}
+                      {!isMovedDc ? (
+                        <button type="button" onClick={() => handleDelete(record.id)} className="text-red-600 text-sm">
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -3467,103 +3656,6 @@ const DeliveryChallan = () => {
             })}
           </tbody>
         </table>
-        {showMovementRegister ? (
-          <>
-            <div className="border-t border-slate-200 px-4 py-3">
-              <h4 className="font-semibold text-slate-800">DC Movement History</h4>
-              <p className="mt-1 text-xs text-slate-500">
-                Every movement remains linked to the original DC number.
-              </p>
-            </div>
-            <table className="min-w-[1300px] text-sm">
-              <thead className="bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="p-3 text-left">Original DC Number</th>
-                  <th className="p-3 text-left">Previous Project / Location</th>
-                  <th className="p-3 text-left">New Project / Location</th>
-                  <th className="p-3 text-right">Moved Quantity</th>
-                  <th className="p-3 text-right">Remaining Quantity</th>
-                  <th className="p-3 text-left">Moved By</th>
-                  <th className="p-3 text-left">Date and Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reallocations.filter(
-                  (transfer) =>
-                    !isInactiveReallocationStatus(transfer.status) &&
-                    normalizeLookupText(transfer.referenceType).replace(
-                      /[\s-]+/g,
-                      "_"
-                    ) === "delivery_challan"
-                ).length ? (
-                  reallocations
-                    .filter(
-                      (transfer) =>
-                        !isInactiveReallocationStatus(transfer.status) &&
-                        normalizeLookupText(transfer.referenceType).replace(
-                          /[\s-]+/g,
-                          "_"
-                        ) === "delivery_challan"
-                    )
-                    .map((transfer) => {
-                      const originalRecord = records.find(
-                        (record) =>
-                          String(record.id) === String(transfer.referenceId) ||
-                          String(record.id) ===
-                            String(transfer.items?.[0]?.deliveryChallanId ?? "")
-                      );
-                      const movedQty =
-                        Number(transfer.movedQuantity) ||
-                        (transfer.items || []).reduce(
-                          (sum, item) => sum + (Number(item.quantity) || 0),
-                          0
-                        );
-                      return (
-                        <tr key={transfer.id} className="border-t border-slate-200">
-                          <td className="p-3 font-semibold text-slate-800">
-                            {originalRecord?.dcNumber || transfer.referenceNo || "-"}
-                          </td>
-                          <td className="p-3">
-                            {projectMap[String(transfer.sourceProjectId)]?.name ||
-                              "-"}{" "}
-                            /{" "}
-                            {locationMap[String(transfer.fromLocationId)]?.name || "-"}
-                          </td>
-                          <td className="p-3">
-                            {projectMap[String(transfer.projectId)]?.name || "-"} /{" "}
-                            {locationMap[String(transfer.toLocationId)]?.name || "-"}
-                          </td>
-                          <td className="p-3 text-right font-medium">
-                            {fmtQty(movedQty)}
-                          </td>
-                          <td className="p-3 text-right font-medium">
-                            {transfer.remainingQuantity === null ||
-                            transfer.remainingQuantity === undefined
-                              ? "-"
-                              : fmtQty(transfer.remainingQuantity)}
-                          </td>
-                          <td className="p-3">{transfer.requestedBy || "-"}</td>
-                          <td className="p-3">
-                            {formatDateTime(
-                              transfer.createdAt ||
-                                transfer.transferDate ||
-                                transfer.requestDate
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
-                ) : (
-                  <tr>
-                    <td colSpan="7" className="p-6 text-center text-slate-500">
-                      No DC movements recorded yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </>
-        ) : null}
       </div>
 
       {viewChallanRecord ? (
@@ -3582,7 +3674,9 @@ const DeliveryChallan = () => {
               primaryPairs={[
                 {
                   label: "RE No",
-                  value: viewChallanRecord.id
+                  value: viewChallanRecord.registerKind === "moved"
+                    ? viewChallanRecord.originalDcNumber || "-"
+                    : viewChallanRecord.id
                     ? `RE-${String(viewChallanRecord.id).padStart(5, "0")}`
                     : "-",
                 },
@@ -3604,7 +3698,9 @@ const DeliveryChallan = () => {
                 {
                   label: "POD",
                   value:
-                    [
+                    viewChallanRecord.registerKind === "moved"
+                      ? "-"
+                      : [
                       getPodStatusLabel(viewChallanRecord.podStatus),
                       viewChallanRecord.podReference,
                       formatDateTime(getPodTimestamp(viewChallanRecord)),
@@ -4040,7 +4136,7 @@ const DeliveryChallan = () => {
                   {reallocationModal.record?.dcNumber || "DC Movement"}
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">
-                  Move full or partial DC balance to another site without creating a new DC.
+                  Move full or partial balance to a new DC2 row at the selected destination.
                 </p>
               </div>
               <button
@@ -4194,7 +4290,7 @@ const DeliveryChallan = () => {
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-4">
                 <div>
                   <label className="text-sm font-medium text-slate-700">
                     Requested By
@@ -4208,6 +4304,42 @@ const DeliveryChallan = () => {
                         requestedBy: event.target.value,
                       }))
                     }
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Vehicle Number
+                  </label>
+                  <input
+                    type="text"
+                    value={reallocationModal.vehicleNumber}
+                    onChange={(event) =>
+                      setReallocationModal((prev) => ({
+                        ...prev,
+                        vehicleNumber: event.target.value,
+                      }))
+                    }
+                    maxLength={50}
+                    placeholder="Vehicle number"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    E-Way Bill Number
+                  </label>
+                  <input
+                    type="text"
+                    value={reallocationModal.eWayBillNumber}
+                    onChange={(event) =>
+                      setReallocationModal((prev) => ({
+                        ...prev,
+                        eWayBillNumber: event.target.value,
+                      }))
+                    }
+                    maxLength={100}
+                    placeholder="E-Way bill number"
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
                   />
                 </div>
@@ -4706,7 +4838,9 @@ const DeliveryChallan = () => {
               {
                 label: "POD",
                 value:
-                  [
+                  printChallan.registerKind === "moved"
+                    ? "-"
+                    : [
                     getPodStatusLabel(printChallan.podStatus),
                     printChallan.podReference,
                     formatDateTime(getPodTimestamp(printChallan)),

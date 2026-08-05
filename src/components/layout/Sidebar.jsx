@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import AppIcon from "./AppIcon";
 import {
@@ -40,33 +40,18 @@ const Sidebar = ({
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const [openGroups, setOpenGroups] = useState(() =>
-    createOpenState(location.pathname)
-  );
+  const [navigationState, setNavigationState] = useState(() => ({
+    pathname: location.pathname,
+    openGroups: createOpenState(location.pathname),
+  }));
+  const openGroups =
+    navigationState.pathname === location.pathname
+      ? navigationState.openGroups
+      : createOpenState(location.pathname);
 
   const profile = settings?.profile || {};
   const profileName = profile.fullName || "Demo Account";
   const profileInitials = buildInitials(profileName);
-
-  useEffect(() => {
-    if (isCollapsed && isDesktop) {
-      return;
-    }
-
-    setOpenGroups((current) => {
-      const nextState = { ...current };
-      let changed = false;
-
-      EXPANDABLE_ITEMS.forEach((item) => {
-        if (isNavigationItemActive(location.pathname, item) && !nextState[item.id]) {
-          nextState[item.id] = true;
-          changed = true;
-        }
-      });
-
-      return changed ? nextState : current;
-    });
-  }, [isCollapsed, isDesktop, location.pathname]);
 
   const shouldShowOverlay = !isDesktop && isMobileOpen;
 
@@ -151,10 +136,19 @@ const Sidebar = ({
               closeSidebarOnMobile();
               return;
             }
-            setOpenGroups((current) => ({
-              ...current,
-              [item.id]: !current[item.id],
-            }));
+            setNavigationState((current) => {
+              const currentOpenGroups =
+                current.pathname === location.pathname
+                  ? current.openGroups
+                  : createOpenState(location.pathname);
+              return {
+                pathname: location.pathname,
+                openGroups: {
+                  ...currentOpenGroups,
+                  [item.id]: !currentOpenGroups[item.id],
+                },
+              };
+            });
           }}
           title={item.label}
           aria-expanded={isExpanded}

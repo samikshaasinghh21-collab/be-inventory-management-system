@@ -75,6 +75,35 @@ const getPoItemQuantities = (item = {}) => {
   };
 };
 
+const getPurchaseOrderLinkedBoqs = (record = {}) =>
+  Array.isArray(record?.linkedBoqs) && record.linkedBoqs.length
+    ? record.linkedBoqs
+    : [];
+
+const getPurchaseOrderBoqSummary = (record = {}) => {
+  const linkedBoqs = getPurchaseOrderLinkedBoqs(record);
+  if (!linkedBoqs.length) {
+    return "-";
+  }
+  return linkedBoqs
+    .map((boq) => boq?.boqNumber || `BOQ-${boq?.id ?? ""}`.trim())
+    .filter(Boolean)
+    .join(", ");
+};
+
+const buildLinkedBoqItemLookup = (record = {}) => {
+  const lookup = new Map();
+  getPurchaseOrderLinkedBoqs(record).forEach((boq) => {
+    (boq.items || []).forEach((item) => {
+      const boqItemId = item?.id ?? item?.boqItemId ?? null;
+      if (boqItemId !== null && boqItemId !== undefined) {
+        lookup.set(String(boqItemId), boq);
+      }
+    });
+  });
+  return lookup;
+};
+
 const GstSummaryBlock = ({ summary, formatCurrency, align = "left" }) => {
   const alignClass = align === "right" ? "text-right" : "text-left";
   return (
@@ -341,6 +370,7 @@ const PurchaseOrderRegister = () => {
       vendorMap[String(record.vendorId)]?.name?.toLowerCase() || "";
     const locationName =
       locationMap[String(record.locationId)]?.name?.toLowerCase() || "";
+    const boqSummary = getPurchaseOrderBoqSummary(record).toLowerCase();
     return [
       poNumber,
       record.status,
@@ -348,6 +378,7 @@ const PurchaseOrderRegister = () => {
       projectName,
       vendorName,
       locationName,
+      boqSummary,
     ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query));
@@ -677,6 +708,7 @@ const PurchaseOrderRegister = () => {
                 const isCancelled = isCancelledPurchaseOrder(record.status);
                 const isUnlocked = isPoUnlocked(record.id);
                 const isRowBusy = statusActionBusyId === record.id;
+                const boqByItemId = buildLinkedBoqItemLookup(record);
                 return (
                   <Fragment key={key}>
                     <tr
@@ -844,6 +876,9 @@ const PurchaseOrderRegister = () => {
                               <p>
                                 <strong>Total Value:</strong> {formatCurrency(summary.total)}
                               </p>
+                              <p>
+                                <strong>BOQs:</strong> {getPurchaseOrderBoqSummary(record)}
+                              </p>
                             </div>
 
                             {record.notes && (
@@ -877,6 +912,7 @@ const PurchaseOrderRegister = () => {
                                 <table className="min-w-[1200px] text-sm">
                                   <thead className="bg-slate-100 text-slate-600">
                                     <tr>
+                                      <th className="p-2 text-left">BOQ</th>
                                       <th className="p-2 text-left">Item</th>
                                       <th className="p-2 text-left">Description</th>
                                       <th className="p-2 text-left">Unit</th>
@@ -888,7 +924,7 @@ const PurchaseOrderRegister = () => {
                                   <tbody>
                                     {(record.items || []).length === 0 && (
                                       <tr>
-                                        <td colSpan="6" className="p-3 text-slate-500 text-center">
+                                        <td colSpan="7" className="p-3 text-slate-500 text-center">
                                           No line items.
                                         </td>
                                       </tr>
@@ -898,11 +934,16 @@ const PurchaseOrderRegister = () => {
                                       const { ordered } = getPoItemQuantities(item);
                                       const rate = roundUnitPrice(item.unitPrice ?? item.rate ?? 0);
                                       const amount = qty * rate;
+                                      const linkedBoq =
+                                        boqByItemId.get(String(item.boqItemId ?? "")) ?? null;
                                       return (
                                         <tr
                                           key={item.id ?? item.itemId ?? `${key}-item-${itemIndex}`}
                                           className="border-t"
                                         >
+                                          <td className="p-2">
+                                            {linkedBoq?.boqNumber || "-"}
+                                          </td>
                                           <td className="p-2 font-medium text-slate-800">
                                             {item.name || (item.itemId ? `Item ${item.itemId}` : "-")}
                                           </td>
@@ -935,6 +976,8 @@ const PurchaseOrderRegister = () => {
           });
           const vendor = vendorMap[String(viewRecord.vendorId)];
           const primaryContact = vendor?.contacts?.[0];
+          const linkedBoqs = getPurchaseOrderLinkedBoqs(viewRecord);
+          const boqByItemId = buildLinkedBoqItemLookup(viewRecord);
           return (
         <DocumentViewPanel
           id="purchase-order-view-panel"
@@ -951,6 +994,7 @@ const PurchaseOrderRegister = () => {
             { label: "Date", value: formatDate(viewRecord.orderDate) },
             { label: "Date of Delivery", value: formatDate(viewRecord.expectedDate) },
             { label: "Status", value: viewRecord.status },
+            { label: "BOQs", value: getPurchaseOrderBoqSummary(viewRecord) },
           ]}
           leftBlockTitle="Vendor"
           leftBlockLines={[
@@ -966,6 +1010,7 @@ const PurchaseOrderRegister = () => {
             projectMap[String(viewRecord.projectId)]?.client || "-",
           ]}
           tableColumns={[
+            { key: "boqNumber", label: "BOQ", widthClass: "w-28" },
             { key: "name", label: "Item" },
             { key: "description", label: "Description" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
@@ -980,6 +1025,8 @@ const PurchaseOrderRegister = () => {
             const amount = qty * rate;
             return {
               id: item.id || index,
+              boqNumber:
+                boqByItemId.get(String(item.boqItemId ?? ""))?.boqNumber || "-",
               name: item.name,
               description: item.description || "-",
               unit: item.unit,
@@ -989,14 +1036,70 @@ const PurchaseOrderRegister = () => {
             };
           })}
           bottomFullContent={
-            <div className="text-left">
-              <p className="mb-2 font-semibold uppercase tracking-wide">
-                Terms &amp; Conditions
-              </p>
-              <TermsAndConditionsColumns
-                terms={viewRecord.termsAndConditions}
-                compact
-              />
+            <div className="space-y-4 text-left">
+              {linkedBoqs.length > 0 && (
+                <div>
+                  <p className="mb-2 font-semibold uppercase tracking-wide">
+                    Linked BOQs
+                  </p>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {linkedBoqs.map((boq) => (
+                      <div
+                        key={boq.id}
+                        className="rounded-md border border-slate-200 bg-white p-3"
+                      >
+                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                          <p className="text-slate-500">BOQ No:</p>
+                          <p className="font-semibold">{boq.boqNumber || "-"}</p>
+                          <p className="text-slate-500">Version:</p>
+                          <p className="font-semibold">{boq.version || "-"}</p>
+                          <p className="text-slate-500">Status:</p>
+                          <p className="font-semibold">{boq.status || "-"}</p>
+                          <p className="text-slate-500">Prepared By:</p>
+                          <p className="font-semibold">{boq.preparedBy || "-"}</p>
+                          <p className="text-slate-500">Date:</p>
+                          <p className="font-semibold">{formatDate(boq.date) || "-"}</p>
+                        </div>
+                        <div className="mt-3 overflow-x-auto rounded border border-slate-200">
+                          <table className="min-w-full text-[11px]">
+                            <thead className="bg-slate-50 text-slate-600">
+                              <tr>
+                                <th className="p-2 text-left">Item</th>
+                                <th className="p-2 text-right">Qty</th>
+                                <th className="p-2 text-left">Unit</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(boq.items || []).map((boqItem, boqItemIndex) => (
+                                <tr
+                                  key={boqItem.id || `${boq.id}-item-${boqItemIndex}`}
+                                  className="border-t border-slate-200"
+                                >
+                                  <td className="p-2">{boqItem.name || "-"}</td>
+                                  <td className="p-2 text-right">
+                                    {Number(boqItem.quantity ?? 0) || 0}
+                                  </td>
+                                  <td className="p-2">{boqItem.unit || "-"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <p className="mb-2 font-semibold uppercase tracking-wide">
+                  Terms &amp; Conditions
+                </p>
+                <TermsAndConditionsColumns
+                  terms={viewRecord.termsAndConditions}
+                  compact
+                />
+              </div>
             </div>
           }
           bottomLeftContent={

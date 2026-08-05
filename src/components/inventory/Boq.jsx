@@ -162,13 +162,16 @@ const formatLinkedPurchaseOrderSummary = (record = {}) => {
 };
 
 const getBoqRegisterItems = (record = {}) => {
+  if (Array.isArray(record?.items) && record.items.length) {
+    return record.items;
+  }
   if (
     Array.isArray(record?.linkedPurchaseOrderItems) &&
     record.linkedPurchaseOrderItems.length
   ) {
     return record.linkedPurchaseOrderItems;
   }
-  return Array.isArray(record?.items) ? record.items : [];
+  return [];
 };
 
 const attachLinkedPurchaseOrderItems = (boqs = [], purchaseOrders = []) => {

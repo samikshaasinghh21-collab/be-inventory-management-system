@@ -777,7 +777,9 @@ const normalizeLookupSource = (value = "") =>
 
 const getReallocationReference = (record = {}) =>
   String(
-    record.referenceNumber ??
+    record.dc2Number ??
+      record.DC2Number ??
+      record.referenceNumber ??
       record.ReferenceNumber ??
       record.referenceNo ??
       record.ReferenceNo ??
@@ -790,6 +792,7 @@ const getReallocationReferenceCandidates = (record = {}) =>
     new Set(
       [
         getReallocationReference(record),
+        record.dc2Number,
         record.referenceNo,
         record.consumptionNumber,
         record.sourceRef,
@@ -1339,7 +1342,12 @@ const Consumption = () => {
         (candidate) => String(candidate.id ?? "") === challanId
       );
       if (challan) {
-        return challan;
+        const firstRow = rows[0] ?? {};
+        return {
+          ...challan,
+          projectId: firstRow.projectId ?? challan.projectId,
+          toLocationId: firstRow.locationId ?? challan.toLocationId,
+        };
       }
       const firstRow = rows[0] ?? {};
       return {

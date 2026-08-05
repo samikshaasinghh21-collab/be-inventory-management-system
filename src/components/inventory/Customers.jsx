@@ -77,10 +77,7 @@ const getCustomerPrimaryName = (customer = {}) =>
   customer.name || customer.companyName || "-";
 
 const getCustomerCompanyName = (customer = {}) => {
-  const primaryName = getCustomerPrimaryName(customer);
-  return customer.companyName && customer.companyName !== primaryName
-    ? customer.companyName
-    : "-";
+  return customer.companyName || customer.name || "-";
 };
 
 const mapDocumentForForm = (document = {}, index = 0, customerId = "customer") => ({

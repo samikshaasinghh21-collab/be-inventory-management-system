@@ -130,10 +130,11 @@ const commonStyles = `
     border: 2px solid #1e293b;
     box-shadow: none !important;
     break-inside: auto;
-    overflow: hidden;
+    overflow: visible;
   }
   .print-panel-body .document-view-panel > div {
-    break-inside: avoid;
+    break-inside: auto;
+    page-break-inside: auto;
   }
   .print-body *,
   .document-view-panel * {
@@ -206,6 +207,7 @@ const commonStyles = `
   .print-panel-body table,
   .print-panel-body .document-view-panel table {
     table-layout: auto;
+    margin-top: 0 !important;
   }
   .print-panel-body th,
   .print-panel-body td,
