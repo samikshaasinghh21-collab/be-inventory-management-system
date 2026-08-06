@@ -3,10 +3,15 @@ import {
   normalizeProjectRecord,
   normalizeProjectsList,
 } from "./projectNormalization";
+import { getProjects, setProjects } from "./projectsStore";
 
-const emitProjectsChange = () => {
+const emitProjectsChange = (detail = null) => {
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event("projects:changed"));
+    window.dispatchEvent(
+      detail
+        ? new CustomEvent("projects:changed", { detail })
+        : new Event("projects:changed")
+    );
   }
 };
 
@@ -27,7 +32,32 @@ export const createProject = async (payload) => {
 
 export const updateProjectApi = async (id, payload) => {
   const response = await api.put(`/projects/${id}`, payload);
-  const normalized = normalizeProjectRecord(response.data?.project ?? response.data);
+  const cachedProjects = getProjects();
+  const existingProject = cachedProjects.find(
+    (project) => String(project.id) === String(id)
+  );
+  const responseProject = response.data?.project ?? response.data ?? {};
+  const normalized = normalizeProjectRecord({
+    ...(existingProject || {}),
+    ...(payload || {}),
+    ...responseProject,
+    id: responseProject.id ?? responseProject.ProjectId ?? existingProject?.id ?? id,
+    name:
+      responseProject.name ??
+      responseProject.ProjectName ??
+      payload?.name ??
+      existingProject?.name ??
+      "",
+  });
+  if (cachedProjects.length) {
+    setProjects(
+      cachedProjects.map((project) =>
+        String(project.id) === String(normalized.id) ? normalized : project
+      ),
+      { emit: false }
+    );
+  }
+  emitProjectsChange({ action: "updated", project: normalized });
   return normalized;
 };
 

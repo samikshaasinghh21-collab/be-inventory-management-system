@@ -49,16 +49,6 @@ const getCustomerOptionLabel = (customer = {}) => {
   return primaryName || "Unnamed customer";
 };
 
-const emitProjectsChangedSoon = () => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.setTimeout(() => {
-    window.dispatchEvent(new Event("projects:changed"));
-  }, 0);
-};
-
 const ProjectsHome = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState(() => getProjects());
@@ -280,15 +270,24 @@ const ProjectsHome = () => {
         list.map((project) =>
           String(project.id) === String(editing.id) ? updated : project
         );
-      const cachedProjects = getProjects();
-      setLocalProjects(
-        replaceUpdatedProject(cachedProjects.length ? cachedProjects : projects),
-        { emit: false }
-      );
-      setProjects((prev) => replaceUpdatedProject(prev));
+      let refreshedProjects = [];
+      try {
+        refreshedProjects = await fetchProjects();
+      } catch (refreshError) {
+        console.warn(
+          "Project updated, but the immediate project-list refresh failed.",
+          refreshError
+        );
+      }
+      const nextProjects = refreshedProjects.length
+        ? refreshedProjects
+        : replaceUpdatedProject(
+            getProjects().length ? getProjects() : projects
+          );
+      setLocalProjects(nextProjects, { emit: false });
+      setProjects(nextProjects);
       closeEdit();
       setApiError("");
-      emitProjectsChangedSoon();
     } catch (error) {
       console.error("Failed to update project", error);
       setApiError(

@@ -302,12 +302,17 @@ const PurchaseOrderRegister = () => {
     const refreshOrders = () => {
       void loadRecords();
     };
+    const refreshProjects = () => {
+      setProjects(getProjects());
+    };
 
     window.addEventListener("purchase-orders:changed", refreshOrders);
     window.addEventListener("receive-goods:changed", refreshOrders);
+    window.addEventListener("projects:changed", refreshProjects);
     return () => {
       window.removeEventListener("purchase-orders:changed", refreshOrders);
       window.removeEventListener("receive-goods:changed", refreshOrders);
+      window.removeEventListener("projects:changed", refreshProjects);
     };
   }, []);
 
@@ -661,7 +666,7 @@ const PurchaseOrderRegister = () => {
             />
           </div>
         </div>
-        <table className="min-w-[1280px] text-sm">
+        <table className="min-w-[1420px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">PO No</th>
@@ -670,6 +675,7 @@ const PurchaseOrderRegister = () => {
               <th className="p-3 text-left min-w-[160px]">Ship To</th>
               <th className="p-3 text-left min-w-[140px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
+              <th className="p-3 text-right min-w-[140px]">Remaining Qty</th>
               <th className="p-3 text-left min-w-[140px]">Subtotal</th>
               <th className="p-3 text-left min-w-[140px]">GST</th>
               <th className="p-3 text-left min-w-[140px]">Total Value</th>
@@ -680,14 +686,14 @@ const PurchaseOrderRegister = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   Loading purchase orders...
                 </td>
               </tr>
             )}
             {!loading && filteredRecords.length === 0 && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   {records.length === 0
                     ? "No purchase orders created yet."
                     : "No purchase orders match your search."}
@@ -709,6 +715,10 @@ const PurchaseOrderRegister = () => {
                 const isUnlocked = isPoUnlocked(record.id);
                 const isRowBusy = statusActionBusyId === record.id;
                 const boqByItemId = buildLinkedBoqItemLookup(record);
+                const remainingQuantity = (record.items || []).reduce(
+                  (total, item) => total + getPoItemQuantities(item).poBalance,
+                  0
+                );
                 return (
                   <Fragment key={key}>
                     <tr
@@ -723,6 +733,9 @@ const PurchaseOrderRegister = () => {
                       <td className="p-3">{location?.name || "-"}</td>
                       <td className="p-3">{statusBadge(record.status)}</td>
                       <td className="p-3">{record.items?.length || 0}</td>
+                      <td className="p-3 text-right font-semibold text-amber-700">
+                        {remainingQuantity}
+                      </td>
                       <td className="p-3 font-medium">
                         {formatCurrency(summary.subtotal)}
                       </td>
@@ -839,7 +852,7 @@ const PurchaseOrderRegister = () => {
 
                     {expandedId === rowId && (
                       <tr className="bg-slate-50">
-                        <td colSpan="11" className="p-4">
+                        <td colSpan="12" className="p-4">
                           <div className="space-y-4">
                             {isLocked && (
                               <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -909,14 +922,16 @@ const PurchaseOrderRegister = () => {
                                 Line Items
                               </h4>
                               <div className="overflow-x-auto border rounded-md">
-                                <table className="min-w-[1200px] text-sm">
+                                <table className="min-w-[1380px] text-sm">
                                   <thead className="bg-slate-100 text-slate-600">
                                     <tr>
                                       <th className="p-2 text-left">BOQ</th>
                                       <th className="p-2 text-left">Item</th>
                                       <th className="p-2 text-left">Description</th>
                                       <th className="p-2 text-left">Unit</th>
-                                      <th className="p-2 text-left">Qty</th>
+                                      <th className="p-2 text-right">Ordered Qty</th>
+                                      <th className="p-2 text-right">Received Qty</th>
+                                      <th className="p-2 text-right">Remaining Qty</th>
                                       <th className="p-2 text-left">Unit Price</th>
                                       <th className="p-2 text-left">Amount</th>
                                     </tr>
@@ -924,14 +939,15 @@ const PurchaseOrderRegister = () => {
                                   <tbody>
                                     {(record.items || []).length === 0 && (
                                       <tr>
-                                        <td colSpan="7" className="p-3 text-slate-500 text-center">
+                                        <td colSpan="9" className="p-3 text-slate-500 text-center">
                                           No line items.
                                         </td>
                                       </tr>
                                     )}
                                     {(record.items || []).map((item, itemIndex) => {
                                       const qty = Number(item.quantity ?? 0) || 0;
-                                      const { ordered } = getPoItemQuantities(item);
+                                      const { ordered, received, poBalance } =
+                                        getPoItemQuantities(item);
                                       const rate = roundUnitPrice(item.unitPrice ?? item.rate ?? 0);
                                       const amount = qty * rate;
                                       const linkedBoq =
@@ -949,7 +965,11 @@ const PurchaseOrderRegister = () => {
                                           </td>
                                           <td className="p-2">{item.description || "-"}</td>
                                           <td className="p-2">{item.unit || "-"}</td>
-                                          <td className="p-2">{ordered}</td>
+                                          <td className="p-2 text-right">{ordered}</td>
+                                          <td className="p-2 text-right">{received}</td>
+                                          <td className="p-2 text-right font-semibold text-amber-700">
+                                            {poBalance}
+                                          </td>
                                           <td className="p-2">{formatCurrency(rate)}</td>
                                           <td className="p-2">{formatCurrency(amount)}</td>
                                         </tr>

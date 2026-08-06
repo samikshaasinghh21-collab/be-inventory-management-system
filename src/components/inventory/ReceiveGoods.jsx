@@ -768,10 +768,15 @@ const ReceiveGoods = () => {
     const refreshPurchaseOrders = () => {
       void loadData();
     };
+    const refreshProjects = () => {
+      setProjects(getProjects());
+    };
 
     window.addEventListener("purchase-orders:changed", refreshPurchaseOrders);
+    window.addEventListener("projects:changed", refreshProjects);
     return () => {
       window.removeEventListener("purchase-orders:changed", refreshPurchaseOrders);
+      window.removeEventListener("projects:changed", refreshProjects);
     };
   }, []);
 

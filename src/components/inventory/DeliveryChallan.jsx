@@ -1272,7 +1272,6 @@ const DeliveryChallan = () => {
   }, [editingId, records]);
 
   const getRemainingReceiptItemQty = useCallback((item = {}) => {
-    const receiptQty = getReceiptItemReceivedQty(item);
     const hintedAvailableQty = getReceiptItemAvailableQty(item);
     const receiptItemId = Number.parseInt(
       item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? "",
@@ -1282,8 +1281,10 @@ const DeliveryChallan = () => {
       Number.isFinite(receiptItemId) && receiptItemId > 0
         ? deliveredQtyByReceiptItem.get(receiptItemId) ?? 0
         : 0;
-    const remainingFromHistory = Math.max(receiptQty - alreadyDelivered, 0);
-    return Math.max(0, Math.min(hintedAvailableQty, remainingFromHistory));
+    // The receive-goods balance already excludes consumed quantity, but it does
+    // not exclude quantity assigned to delivery challans. Subtract the other
+    // challans here so the form offers the same balance the backend validates.
+    return Math.max(hintedAvailableQty - alreadyDelivered, 0);
   }, [deliveredQtyByReceiptItem]);
 
   const selectedReceiptItems = useMemo(() => {
@@ -1528,6 +1529,13 @@ const DeliveryChallan = () => {
     if (!form.toLocationId && !form.toLocation.trim()) {
       nextErrors.toLocationId = "Select destination.";
     }
+    if (
+      sourceLocationId &&
+      form.toLocationId &&
+      String(sourceLocationId) === String(form.toLocationId)
+    ) {
+      nextErrors.toLocationId = "Source and destination locations must be different.";
+    }
 
     const validItems = items.filter(
       (item) => item.name.trim() && Number(item.quantity) > 0
@@ -1659,6 +1667,73 @@ const DeliveryChallan = () => {
     });
 
     try {
+      const liveRows = await fetchAvailableInventory({
+        projectId: payload.projectId,
+        locationId: payload.fromLocationId,
+        destinationLocationId: payload.toLocationId,
+        excludeDeliveryChallanId: editingId || undefined,
+        includeConsumptionLeftover: true,
+      });
+      const findLiveRow = (item) => {
+        const sourceRowId = String(
+          item.sourceRowId ?? item.sourceKey ?? ""
+        ).trim();
+        const receiptItemId = String(item.receiveGoodsItemId ?? "").trim();
+        return (liveRows || []).find((row) => {
+          const rowSourceRowId = String(
+            row.sourceRowId ?? row.sourceKey ?? ""
+          ).trim();
+          const rowReceiptItemId = String(row.receiveGoodsItemId ?? "").trim();
+          return (
+            (sourceRowId && rowSourceRowId === sourceRowId) ||
+            (receiptItemId && rowReceiptItemId === receiptItemId)
+          );
+        });
+      };
+      const requestedBySource = new Map();
+      let unavailableItem = null;
+      cleanedItems.forEach((item) => {
+        const liveRow = findLiveRow(item);
+        if (!liveRow) {
+          unavailableItem ||= item;
+          return;
+        }
+        const key = String(
+          liveRow.sourceRowId ??
+            liveRow.sourceKey ??
+            liveRow.receiveGoodsItemId ??
+            item.name
+        );
+        const current = requestedBySource.get(key) || {
+          item,
+          quantity: 0,
+          availableQty: Number(liveRow.availableQty) || 0,
+        };
+        current.quantity += Number(item.quantity) || 0;
+        requestedBySource.set(key, current);
+      });
+      const exceeded = Array.from(requestedBySource.values()).find(
+        (entry) => entry.quantity > entry.availableQty + 0.0001
+      );
+      if (unavailableItem || exceeded) {
+        const rejectedItem = unavailableItem || exceeded.item;
+        const message = unavailableItem
+          ? `${rejectedItem.name || "Selected item"} has no available balance at the source location. It may already be consumed or assigned to another delivery challan.`
+          : `DC quantity for ${rejectedItem.name || "the selected item"} cannot exceed the current available balance (${exceeded.availableQty}).`;
+        setItems((previousItems) =>
+          previousItems.map((item) => {
+            const liveRow = findLiveRow(item);
+            return liveRow
+              ? { ...item, availableQty: Number(liveRow.availableQty) || 0 }
+              : item;
+          })
+        );
+        setErrors((previousErrors) => ({ ...previousErrors, items: message }));
+        setReceiptError(message);
+        console.warn("Delivery challan inventory validation failed:", message);
+        return;
+      }
+
       let savedChallan;
       if (editingId) {
         savedChallan = await updateDeliveryChallan(editingId, payload);
@@ -2284,7 +2359,7 @@ const DeliveryChallan = () => {
     });
   };
 
-  const handleLoadSelectedReceipts = () => {
+  const handleLoadSelectedReceipts = async () => {
     if (!selectedReceipts.length) {
       setItems([]);
       setLoadedReceiptIds([]);
@@ -2312,11 +2387,6 @@ const DeliveryChallan = () => {
       setReceiptError("Selected receipts must come from the same source location.");
       return;
     }
-    const nextItems = selectedReceiptItems.length ? selectedReceiptItems : [];
-    if (!nextItems.length) {
-      setReceiptError("Selected receipts do not have items with available quantity.");
-      return;
-    }
     const primaryReceipt = selectedReceipts[0];
     const primaryPurchaseOrder =
       purchaseOrderMap[String(primaryReceipt?.purchaseOrderId)] || null;
@@ -2332,6 +2402,56 @@ const DeliveryChallan = () => {
         : primaryPurchaseOrder?.locationId
         ? String(primaryPurchaseOrder.locationId)
         : "";
+    let liveRows;
+    try {
+      liveRows = await fetchAvailableInventory({
+        projectId: parseNumberValue(nextProjectId),
+        locationId: parseNumberValue(nextFromLocationId),
+      });
+    } catch (error) {
+      setReceiptError(
+        error?.response?.data?.error ||
+          error?.message ||
+          "Could not verify the current receipt stock balance."
+      );
+      return;
+    }
+    const liveReceiptRows = new Map();
+    (Array.isArray(liveRows) ? liveRows : []).forEach((row) => {
+      const sourceKey = String(row.sourceKey ?? "").trim();
+      const receiptItemId = String(row.receiveGoodsItemId ?? "").trim();
+      if (sourceKey) liveReceiptRows.set(sourceKey, row);
+      if (receiptItemId) liveReceiptRows.set(`receive:${receiptItemId}`, row);
+    });
+    const nextItems = selectedReceiptItems
+      .map((item) => {
+        const sourceKey =
+          String(item.sourceKey ?? "").trim() ||
+          `receive:${String(item.receiveGoodsItemId ?? "").trim()}`;
+        const liveRow = liveReceiptRows.get(sourceKey);
+        const availableQty = Number(liveRow?.availableQty) || 0;
+        return liveRow
+          ? {
+              ...item,
+              sourceKey: liveRow.sourceKey || sourceKey,
+              sourceRowId: liveRow.sourceRowId || liveRow.sourceKey || sourceKey,
+              receiveGoodsItemId:
+                liveRow.receiveGoodsItemId ?? item.receiveGoodsItemId,
+              availableQty,
+              quantity: availableQty,
+            }
+          : null;
+      })
+      .filter(Boolean)
+      .filter((item) => item.availableQty > 0);
+    if (!nextItems.length) {
+      setItems([]);
+      setLoadedReceiptIds([]);
+      setReceiptError(
+        "The selected receipt has no remaining stock. Its quantities are already consumed or assigned to delivery challans."
+      );
+      return;
+    }
     setItems(
       nextItems.map((item) => ({
         ...item,

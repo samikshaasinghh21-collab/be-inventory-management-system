@@ -3337,14 +3337,33 @@ const replaceReceiveGoodsItems = async (
     items = [],
   }
 ) => {
-  await new sql.Request(tx)
+  const existingResult = await new sql.Request(tx)
     .input("ReceiptId", sql.Int, receiptId)
     .query(`
-      DELETE FROM dbo.ReceiveGoodsItems WHERE ${fkCol} = @ReceiptId
+      SELECT * FROM dbo.ReceiveGoodsItems WHERE ${fkCol} = @ReceiptId
     `);
+  const existingItems = existingResult.recordset ?? [];
+  const retainedIds = new Set();
 
   for (const item of items) {
+    const existingItem = existingItems.find((row) => {
+      const rowId = toNullableInt(row.Id);
+      if (rowId === null || retainedIds.has(rowId)) {
+        return false;
+      }
+      const rowPoItemId = toNullableInt(row.PurchaseOrderItemId);
+      const nextPoItemId = toNullableInt(item.poItemId);
+      if (rowPoItemId !== null && nextPoItemId !== null) {
+        return rowPoItemId === nextPoItemId;
+      }
+      return toNullableInt(row.ItemId) === toNullableInt(item.itemId);
+    });
+    const existingId = toNullableInt(existingItem?.Id);
+    if (existingId !== null) {
+      retainedIds.add(existingId);
+    }
     const insertItemReq = new sql.Request(tx);
+    insertItemReq.input("ExistingId", sql.Int, existingId);
     insertItemReq.input("ReceiptId", sql.Int, receiptId);
     insertItemReq.input("PurchaseOrderId", sql.Int, purchaseOrderId);
     insertItemReq.input("PurchaseOrderItemId", sql.Int, item.poItemId ?? null);
@@ -3375,12 +3394,60 @@ const replaceReceiveGoodsItems = async (
     insertItemReq.input("ReceivedQty", sql.Int, item.receivedQty);
     insertItemReq.input("BalanceQty", sql.Int, item.balanceQty);
 
-    await insertItemReq.query(`
-      INSERT INTO dbo.ReceiveGoodsItems
-        (${fkCol}, PurchaseOrderId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, HSN, GST, TaxPercentage, SerialRequired, UnitPrice, TaxableAmount, CGSTPercent, SGSTPercent, IGSTPercent, CGSTAmount, SGSTAmount, IGSTAmount, GSTAmount, SerialNumbersJson, ItemNotes, OrderedQty, ReceivedQty, BalanceQty)
-      VALUES
-        (@ReceiptId, @PurchaseOrderId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @HSN, @GST, @TaxPercentage, @SerialRequired, @UnitPrice, @TaxableAmount, @CGSTPercent, @SGSTPercent, @IGSTPercent, @CGSTAmount, @SGSTAmount, @IGSTAmount, @GSTAmount, @SerialNumbersJson, @ItemNotes, @OrderedQty, @ReceivedQty, @BalanceQty)
+    const savedItemResult = await insertItemReq.query(`
+      IF @ExistingId IS NULL
+      BEGIN
+        INSERT INTO dbo.ReceiveGoodsItems
+          (${fkCol}, PurchaseOrderId, PurchaseOrderItemId, ItemId, ItemName, Description, Unit, HSN, GST, TaxPercentage, SerialRequired, UnitPrice, TaxableAmount, CGSTPercent, SGSTPercent, IGSTPercent, CGSTAmount, SGSTAmount, IGSTAmount, GSTAmount, SerialNumbersJson, ItemNotes, OrderedQty, ReceivedQty, BalanceQty)
+        OUTPUT INSERTED.Id
+        VALUES
+          (@ReceiptId, @PurchaseOrderId, @PurchaseOrderItemId, @ItemId, @ItemName, @Description, @Unit, @HSN, @GST, @TaxPercentage, @SerialRequired, @UnitPrice, @TaxableAmount, @CGSTPercent, @SGSTPercent, @IGSTPercent, @CGSTAmount, @SGSTAmount, @IGSTAmount, @GSTAmount, @SerialNumbersJson, @ItemNotes, @OrderedQty, @ReceivedQty, @BalanceQty)
+      END
+      ELSE
+      BEGIN
+        UPDATE dbo.ReceiveGoodsItems
+        SET PurchaseOrderId = @PurchaseOrderId,
+            PurchaseOrderItemId = @PurchaseOrderItemId,
+            ItemId = @ItemId,
+            ItemName = @ItemName,
+            Description = @Description,
+            Unit = @Unit,
+            HSN = @HSN,
+            GST = @GST,
+            TaxPercentage = @TaxPercentage,
+            SerialRequired = @SerialRequired,
+            UnitPrice = @UnitPrice,
+            TaxableAmount = @TaxableAmount,
+            CGSTPercent = @CGSTPercent,
+            SGSTPercent = @SGSTPercent,
+            IGSTPercent = @IGSTPercent,
+            CGSTAmount = @CGSTAmount,
+            SGSTAmount = @SGSTAmount,
+            IGSTAmount = @IGSTAmount,
+            GSTAmount = @GSTAmount,
+            SerialNumbersJson = @SerialNumbersJson,
+            ItemNotes = @ItemNotes,
+            OrderedQty = @OrderedQty,
+            ReceivedQty = @ReceivedQty,
+            BalanceQty = @BalanceQty
+        OUTPUT INSERTED.Id
+        WHERE Id = @ExistingId
+      END
     `);
+    const savedId = toNullableInt(savedItemResult.recordset?.[0]?.Id);
+    if (savedId !== null) {
+      retainedIds.add(savedId);
+    }
+  }
+
+  for (const row of existingItems) {
+    const staleId = toNullableInt(row.Id);
+    if (staleId === null || retainedIds.has(staleId)) {
+      continue;
+    }
+    await new sql.Request(tx)
+      .input("Id", sql.Int, staleId)
+      .query(`DELETE FROM dbo.ReceiveGoodsItems WHERE Id = @Id`);
   }
 };
 
@@ -9878,25 +9945,6 @@ const loadAvailableInventoryRows = async (
       }
         return String(left.name || "").localeCompare(String(right.name || ""));
       });
-  finalRows
-    .filter((entry) => normalizeAvailabilitySourceType(entry.sourceType) === "dc")
-    .forEach((entry) => {
-      console.debug("[available-inventory] DC row balance", {
-        requestedProjectId: safeProjectId,
-        destinationLocationId: entry.locationId,
-        deliveryChallanId: entry.deliveryChallanId,
-        deliveryChallanItemId: entry.deliveryChallanItemId,
-        dcNumber: entry.sourceRef,
-        itemId: entry.itemId,
-        itemName: entry.name,
-        dcQuantity: entry.sourceQty,
-        consumedQuantity: entry.consumedQty,
-        transferredQuantity: entry.reallocatedQty,
-        adjustedQuantity: entry.adjustedQty,
-        availableQuantity: entry.availableQty,
-        sourceKey: entry.sourceKey,
-      });
-    });
   return finalRows;
 };
 
@@ -21867,7 +21915,11 @@ app.get("/api/reallocate-inventory", async (_req, res) => {
     const availabilityByDestination = new Map();
     const loadDestinationAvailability = (transfer) => {
       const destinationLocationId = toNullableInt(transfer.toLocationId);
-      const destinationProjectId = toNullableInt(transfer.projectId);
+      const rawDestinationProjectId = toNullableInt(transfer.projectId);
+      const destinationProjectId =
+        rawDestinationProjectId !== null && rawDestinationProjectId > 0
+          ? rawDestinationProjectId
+          : null;
       if (!destinationLocationId) {
         return Promise.resolve([]);
       }

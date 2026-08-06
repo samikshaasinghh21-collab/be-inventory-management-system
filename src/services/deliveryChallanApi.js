@@ -245,9 +245,13 @@ export const createDeliveryChallan = async (payload) => {
     emitDeliveryChallanChange();
     return normalized;
   } catch (error) {
+    const responseData = error?.response?.data;
+    const status = error?.response?.status;
+    const message =
+      responseData?.error || responseData?.message || error?.message || "Unknown error";
     console.error(
-      "createDeliveryChallan failed",
-      error?.response?.data ?? error?.message ?? error
+      `createDeliveryChallan failed${status ? ` (${status})` : ""}: ${message}`,
+      { response: responseData, payload }
     );
     throw error;
   }

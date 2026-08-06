@@ -124,8 +124,7 @@ const buildBoqLinePreview = (items = []) => {
     const unit = String(item?.unit ?? "").trim() || "PCS";
     const hsn = String(item?.hsn ?? "").trim();
     const gst = String(item?.gst ?? "").trim();
-    const note = String(item?.notes ?? "").trim();
-    const meta = [hsn ? `HSN ${hsn}` : "", gst ? `GST ${gst}` : "", note ? note : ""]
+    const meta = [hsn ? `HSN ${hsn}` : "", gst ? `GST ${gst}` : ""]
       .filter(Boolean)
       .join(" | ");
     return `${item?.name || "Item"} - ${qty} ${unit}${meta ? ` (${meta})` : ""}`;
@@ -172,6 +171,17 @@ const getBoqRegisterItems = (record = {}) => {
     return record.linkedPurchaseOrderItems;
   }
   return [];
+};
+
+const buildBoqLineNotes = (items = []) => {
+  const notes = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const note = String(item?.notes ?? "").trim();
+      return note ? `${item?.name || "Item"}: ${note}` : "";
+    })
+    .filter(Boolean);
+
+  return notes.length ? notes.join("; ") : "-";
 };
 
 const attachLinkedPurchaseOrderItems = (boqs = [], purchaseOrders = []) => {
@@ -798,6 +808,7 @@ const Boq = () => {
               <th className="p-3 text-left min-w-[200px]">PO Sync</th>
               <th className="p-3 text-left min-w-[110px]">Items</th>
               <th className="p-3 text-left min-w-[260px]">Line Item Preview</th>
+              <th className="p-3 text-left min-w-[240px]">Line Item Notes</th>
               <th className="p-3 text-left min-w-[220px]">Tax Details</th>
               <th className="p-3 text-left min-w-[140px]">Total Value</th>
               <th className="p-3 text-left min-w-[140px]">Date</th>
@@ -807,14 +818,14 @@ const Boq = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   Loading BOQs...
                 </td>
               </tr>
             )}
             {!loading && records.length === 0 && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   No BOQs created yet.
                 </td>
               </tr>
@@ -838,6 +849,9 @@ const Boq = () => {
                   <td className="p-3">{registerItems.length || 0}</td>
                   <td className="p-3 text-xs text-slate-600">
                     {buildBoqLinePreview(registerItems)}
+                  </td>
+                  <td className="p-3 text-xs text-slate-600 whitespace-pre-wrap">
+                    {buildBoqLineNotes(registerItems)}
                   </td>
                   <td className="p-3">
                     <GstSummaryBlock summary={summary} formatCurrency={formatCurrency} />
@@ -911,6 +925,7 @@ const Boq = () => {
           tableColumns={[
             { key: "name", label: "Item" },
             { key: "description", label: "Description" },
+            { key: "notes", label: "Notes" },
             { key: "hsn", label: "HSN", widthClass: "w-20" },
             { key: "gst", label: "GST", widthClass: "w-20" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
@@ -929,7 +944,8 @@ const Boq = () => {
             return {
               id: item.id || index,
               name: item.name || "-",
-              description: item.description || item.notes || "-",
+              description: item.description || "-",
+              notes: item.notes || "-",
               hsn: item.hsn || "-",
               gst: item.gst || "-",
               unit: item.unit || "-",

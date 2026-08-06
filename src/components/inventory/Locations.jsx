@@ -63,6 +63,14 @@ const Locations = () => {
     void loadRecords();
   }, []);
 
+  useEffect(() => {
+    const refreshProjects = () => setProjects(getProjects());
+    window.addEventListener("projects:changed", refreshProjects);
+    return () => {
+      window.removeEventListener("projects:changed", refreshProjects);
+    };
+  }, []);
+
   const projectMap = useMemo(() => {
     return projects.reduce((acc, project) => {
       acc[String(project.id)] = project;
