@@ -1940,7 +1940,14 @@ const normalizeReallocateInventory = (row = {}) => {
       metadata.remainingQuantity === null || metadata.remainingQuantity === undefined
         ? null
         : Number(metadata.remainingQuantity) || 0,
-    eWayBillNumber: metadata.eWayBillNumber ?? "",
+    vehicleNumber:
+      row.VehicleNumber ?? row.vehicleNumber ?? metadata.vehicleNumber ?? "",
+    eWayBillNumber:
+      row.EWayBillNumber ??
+      row.EwayBillNumber ??
+      row.eWayBillNumber ??
+      metadata.eWayBillNumber ??
+      "",
     status: metadata.status ?? "Pending",
     notes: metadata.notes ?? rawNotes ?? "",
     createdAt: row.CreatedAt ?? row.createdAt ?? metadata.createdAt ?? null,
@@ -1991,6 +1998,7 @@ const buildReallocateNotesPayload = ({
   requestedBy = "",
   movedQuantity = null,
   remainingQuantity = null,
+  vehicleNumber = "",
   eWayBillNumber = "",
   status = "Pending",
   notes = "",
@@ -2012,6 +2020,7 @@ const buildReallocateNotesPayload = ({
     requestedBy,
     movedQuantity,
     remainingQuantity,
+    vehicleNumber,
     eWayBillNumber,
     status,
     notes,
@@ -8851,6 +8860,8 @@ const ensureReallocateInventoryTables = async () => {
           FromLocationId INT NULL,
           ToLocationId INT NULL,
           TransferDate DATETIME NULL,
+          VehicleNumber NVARCHAR(50) NULL,
+          EWayBillNumber NVARCHAR(100) NULL,
           Notes NVARCHAR(1000) NULL
         )
       END
@@ -8868,6 +8879,14 @@ const ensureReallocateInventoryTables = async () => {
       IF COL_LENGTH('dbo.ReallocateInventory', 'TransferDate') IS NULL
       BEGIN
         ALTER TABLE dbo.ReallocateInventory ADD TransferDate DATETIME NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventory', 'VehicleNumber') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventory ADD VehicleNumber NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.ReallocateInventory', 'EWayBillNumber') IS NULL
+      BEGIN
+        ALTER TABLE dbo.ReallocateInventory ADD EWayBillNumber NVARCHAR(100) NULL;
       END;
       IF COL_LENGTH('dbo.ReallocateInventory', 'Notes') IS NULL
       BEGIN
@@ -9278,8 +9297,22 @@ const loadAvailableInventoryRows = async (
     fallbackDeliveryChallanId = null,
   }) => {
     const safeMovementLocationId = toNullableInt(movementLocationId);
+    const safeMovementProjectId = toNullableInt(movementProjectId);
     const movementQty = toAvailabilityQuantity(quantity);
     if (safeMovementLocationId !== safeLocationId || !movementQty) {
+      return;
+    }
+
+    // A location can hold stock for more than one project. When this lookup is
+    // project-scoped, never let a movement from another project fall back to a
+    // same-name material row in the requested project. Without this guard, a
+    // missing exact source row (because it was correctly filtered out above)
+    // could drain an unrelated project's inventory.
+    if (
+      safeProjectId !== null &&
+      safeMovementProjectId !== null &&
+      safeMovementProjectId !== safeProjectId
+    ) {
       return;
     }
 
@@ -9293,7 +9326,7 @@ const loadAvailableInventoryRows = async (
     if (explicitSourceKey) {
       const exact =
         sourceEntries.get(
-          `${toNullableInt(movementProjectId) ?? safeProjectId ?? ""}|${safeLocationId}|${explicitSourceKey}`
+          `${safeMovementProjectId ?? safeProjectId ?? ""}|${safeLocationId}|${explicitSourceKey}`
         ) ?? findSourceEntryByLocationAndSourceKey(explicitSourceKey);
       if (exact) {
         exact[field] += movementQty;
@@ -9315,7 +9348,7 @@ const loadAvailableInventoryRows = async (
     if (materialKey) {
       candidates =
         materialIndex.get(
-          `${toNullableInt(movementProjectId) ?? safeProjectId ?? ""}|${safeLocationId}|${materialKey}`
+          `${safeMovementProjectId ?? safeProjectId ?? ""}|${safeLocationId}|${materialKey}`
         ) ?? [];
       if (!candidates.length) {
         candidates = getMaterialCandidatesAtLocation(materialKey);
@@ -9518,7 +9551,11 @@ const loadAvailableInventoryRows = async (
       TransferDate: row.HeaderTransferDate,
       Notes: row.HeaderNotes,
     });
-    const targetProjectId = toNullableInt(transfer.projectId);
+    const parsedTargetProjectId = toNullableInt(transfer.projectId);
+    const targetProjectId =
+      parsedTargetProjectId !== null && parsedTargetProjectId > 0
+        ? parsedTargetProjectId
+        : toNullableInt(transfer.sourceProjectId) ?? safeProjectId;
     const transferId = toNullableInt(transfer.id);
     if (
       toNullableInt(excludeReallocateInventoryId) !== null &&
@@ -21780,6 +21817,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     requestedBy = null,
     movedQuantity = null,
     remainingQuantity = null,
+    vehicleNumber = null,
     eWayBillNumber = null,
     status = "Pending",
     notes = null,
@@ -21817,6 +21855,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     remainingQuantity === null || remainingQuantity === undefined
       ? null
       : toAvailabilityQuantity(remainingQuantity);
+  const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? "";
   const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? "";
   const safeStatus = normalizeOptionalString(status) ?? "Pending";
   const safeNotes = normalizeOptionalString(notes) ?? "";
@@ -21943,6 +21982,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       requestedBy: safeRequestedBy,
       movedQuantity: safeMovedQuantity,
       remainingQuantity: safeRemainingQuantity,
+      vehicleNumber: safeVehicleNumber,
       eWayBillNumber: safeEWayBillNumber,
       status: safeStatus,
       notes: safeNotes,
@@ -21954,13 +21994,15 @@ app.post("/api/reallocate-inventory", async (req, res) => {
     insertHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
     insertHeaderReq.input("ToLocationId", sql.Int, safeToLocationId);
     insertHeaderReq.input("TransferDate", sql.DateTime, parsedRequestDate ?? null);
+    insertHeaderReq.input("VehicleNumber", sql.NVarChar(50), safeVehicleNumber || null);
+    insertHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber || null);
     insertHeaderReq.input("Notes", sql.NVarChar(sql.MAX), initialNotesPayload);
     const headerResult = await insertHeaderReq.query(`
       INSERT INTO dbo.ReallocateInventory
-        (FromLocationId, ToLocationId, TransferDate, Notes)
+        (FromLocationId, ToLocationId, TransferDate, VehicleNumber, EWayBillNumber, Notes)
       OUTPUT INSERTED.*
       VALUES
-        (@FromLocationId, @ToLocationId, @TransferDate, @Notes)
+        (@FromLocationId, @ToLocationId, @TransferDate, @VehicleNumber, @EWayBillNumber, @Notes)
     `);
 
     const createdHeaderRow = headerResult.recordset?.[0];
@@ -21989,6 +22031,7 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       requestedBy: safeRequestedBy,
       movedQuantity: safeMovedQuantity,
       remainingQuantity: safeRemainingQuantity,
+      vehicleNumber: safeVehicleNumber,
       eWayBillNumber: safeEWayBillNumber,
       status: safeStatus,
       notes: safeNotes,
@@ -22081,6 +22124,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     returnVendorId = null,
     requestDate = null,
     requestedBy = null,
+    vehicleNumber = null,
     eWayBillNumber = null,
     status = "Pending",
     notes = null,
@@ -22110,6 +22154,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
   const safeToLocationId = toNullableInt(toLocationId);
   const safeReturnVendorId = toNullableInt(returnVendorId);
   const safeRequestedBy = normalizeOptionalString(requestedBy) ?? "";
+  const safeVehicleNumber = normalizeOptionalString(vehicleNumber) ?? "";
   const safeEWayBillNumber = normalizeOptionalString(eWayBillNumber) ?? "";
   const safeStatus = normalizeOptionalString(status) ?? "Pending";
   const safeNotes = normalizeOptionalString(notes) ?? "";
@@ -22251,6 +22296,7 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
       returnVendorId: safeReturnVendorId,
       requestDate: parsedRequestDate?.toISOString?.() ?? requestDate ?? null,
       requestedBy: safeRequestedBy,
+      vehicleNumber: safeVehicleNumber,
       eWayBillNumber: safeEWayBillNumber,
       status: safeStatus,
       notes: safeNotes,
@@ -22263,12 +22309,16 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
     updateHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
     updateHeaderReq.input("ToLocationId", sql.Int, safeToLocationId);
     updateHeaderReq.input("TransferDate", sql.DateTime, parsedRequestDate ?? null);
+    updateHeaderReq.input("VehicleNumber", sql.NVarChar(50), safeVehicleNumber || null);
+    updateHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber || null);
     updateHeaderReq.input("Notes", sql.NVarChar(sql.MAX), notesPayload);
     const headerResult = await updateHeaderReq.query(`
       UPDATE dbo.ReallocateInventory
       SET FromLocationId = @FromLocationId,
           ToLocationId = @ToLocationId,
           TransferDate = @TransferDate,
+          VehicleNumber = @VehicleNumber,
+          EWayBillNumber = @EWayBillNumber,
           Notes = @Notes
       OUTPUT INSERTED.*
       WHERE ${toIdentifier(pkCol)} = @TransferId

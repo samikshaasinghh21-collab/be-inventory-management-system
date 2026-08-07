@@ -356,6 +356,9 @@ const isConsumptionLeftoverInventoryRow = (row = {}) => {
 };
 
 const parseNumberValue = (value) => {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return null;
+  }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
@@ -396,6 +399,8 @@ const createReallocationModalState = (requestedBy = "") => ({
   reallocationType: "partial",
   requestDate: new Date().toISOString().slice(0, 10),
   requestedBy,
+  vehicleNumber: "",
+  eWayBillNumber: "",
   notes: "",
   items: [],
   loading: false,
@@ -1635,6 +1640,8 @@ const DeliveryChallan = () => {
       record,
       currentProjectId: String(currentProjectId ?? ""),
       currentLocationId: String(currentLocationId ?? ""),
+      vehicleNumber: String(record.vehicleNumber ?? ""),
+      eWayBillNumber: String(record.eWayBillNumber ?? ""),
       loading: true,
     });
 
@@ -1723,6 +1730,9 @@ const DeliveryChallan = () => {
 
   const handleReallocationSubmit = async (event) => {
     event.preventDefault();
+    if (reallocationModal.submitting) {
+      return;
+    }
     const challan = reallocationModal.record;
     if (!challan?.id) {
       return;
@@ -1747,7 +1757,7 @@ const DeliveryChallan = () => {
       return;
     }
 
-    const positiveItems = reallocationModal.items
+    let positiveItems = reallocationModal.items
       .map((item) => ({
         ...item,
         quantity: Number(item.quantity) || 0,
@@ -1782,6 +1792,162 @@ const DeliveryChallan = () => {
     }));
 
     try {
+      const freshRows = await fetchAvailableInventory({
+        projectId: parseNumberValue(reallocationModal.currentProjectId),
+        locationId: parseNumberValue(reallocationModal.currentLocationId),
+      });
+      let currentRows = (Array.isArray(freshRows) ? freshRows : []).filter(
+        (row) =>
+          ["dc", "reallocation"].includes(normalizeLookupText(row.sourceType)) &&
+          String(row.deliveryChallanId ?? "").trim() === String(challan.id)
+      );
+
+      if (!currentRows.length) {
+        const latestMovement = reallocations.find(
+          (transfer) =>
+            !isInactiveReallocationStatus(transfer.status) &&
+            isReallocationLinkedToChallan(transfer, challan)
+        );
+        const latestLocationId = parseNumberValue(latestMovement?.toLocationId);
+        const movementProjectId = parseNumberValue(latestMovement?.projectId);
+        const latestProjectId =
+          movementProjectId && movementProjectId > 0
+            ? movementProjectId
+            : parseNumberValue(latestMovement?.sourceProjectId) ??
+              parseNumberValue(challan.projectId);
+
+        if (
+          latestLocationId &&
+          String(latestLocationId) !==
+            String(reallocationModal.currentLocationId ?? "")
+        ) {
+          const latestRows = await fetchAvailableInventory({
+            projectId: latestProjectId,
+            locationId: latestLocationId,
+          });
+          currentRows = (Array.isArray(latestRows) ? latestRows : []).filter(
+            (row) =>
+              ["dc", "reallocation"].includes(normalizeLookupText(row.sourceType)) &&
+              String(row.deliveryChallanId ?? "").trim() === String(challan.id) &&
+              toQuantity(row.availableQty) > 0
+          );
+
+          if (currentRows.length) {
+            const enteredQtyByChallanItem = new Map(
+              positiveItems.map((item) => [
+                String(item.deliveryChallanItemId ?? "").trim(),
+                item.quantity,
+              ])
+            );
+            const enteredQtyByReceiptItem = new Map(
+              positiveItems.map((item) => [
+                String(item.receiveGoodsItemId ?? "").trim(),
+                item.quantity,
+              ])
+            );
+            const refreshedItems = currentRows.map((row, index) => ({
+              id:
+                row.sourceKey ||
+                row.deliveryChallanItemId ||
+                row.receiveGoodsItemId ||
+                `${challan.id}-${index}`,
+              name: row.name || `Item ${index + 1}`,
+              description: row.description || "",
+              unit: row.unit || "PCS",
+              quantity: String(
+                enteredQtyByChallanItem.get(
+                  String(row.deliveryChallanItemId ?? "").trim()
+                ) ??
+                  enteredQtyByReceiptItem.get(
+                    String(row.receiveGoodsItemId ?? "").trim()
+                  ) ??
+                  ""
+              ),
+              availableQty: Math.max(Number(row.availableQty) || 0, 0),
+              sourceQty: Math.max(Number(row.sourceQty) || 0, 0),
+              sourceKey: row.sourceKey || "",
+              sourceRef: row.sourceRef || challan.dcNumber || "",
+              receiveGoodsItemId: row.receiveGoodsItemId ?? null,
+              deliveryChallanId: row.deliveryChallanId ?? challan.id,
+              deliveryChallanItemId: row.deliveryChallanItemId ?? null,
+              itemId: row.itemId ?? null,
+              sourceType: normalizeLookupText(row.sourceType) || "dc",
+            }));
+            const latestLocationName =
+              locationMap[String(latestLocationId)]?.name ||
+              `location ${latestLocationId}`;
+            setReallocationModal((prev) => ({
+              ...prev,
+              currentProjectId: String(latestProjectId ?? ""),
+              currentLocationId: String(latestLocationId),
+              targetLocationId:
+                String(prev.targetLocationId) === String(latestLocationId)
+                  ? ""
+                  : prev.targetLocationId,
+              items: refreshedItems,
+              submitting: false,
+              error: `The latest DC balance was found at ${latestLocationName}. The source and quantities have been refreshed; review them and confirm the movement again.`,
+            }));
+            return;
+          }
+        }
+      }
+
+      const rowsByChallanItemId = new Map(
+        currentRows
+          .map((row) => [String(row.deliveryChallanItemId ?? "").trim(), row])
+          .filter(([itemId]) => itemId)
+      );
+      const rowsByReceiptItemId = new Map(
+        currentRows
+          .map((row) => [String(row.receiveGoodsItemId ?? "").trim(), row])
+          .filter(([itemId]) => itemId)
+      );
+
+      positiveItems = positiveItems.map((item) => {
+        const freshRow =
+          rowsByChallanItemId.get(
+            String(item.deliveryChallanItemId ?? "").trim()
+          ) ||
+          rowsByReceiptItemId.get(
+            String(item.receiveGoodsItemId ?? "").trim()
+          );
+        const freshAvailableQty = Number(freshRow?.availableQty) || 0;
+        if (!freshRow || item.quantity > freshAvailableQty) {
+          throw new Error(
+            `${item.name} now has ${fmtQty(
+              freshAvailableQty
+            )} available at the selected current location. Close this window and select the location holding the latest DC balance.`
+          );
+        }
+        return {
+          ...item,
+          availableQty: freshAvailableQty,
+          sourceQty: Number(freshRow.sourceQty) || freshAvailableQty,
+          sourceType: normalizeLookupText(freshRow.sourceType) || item.sourceType,
+          sourceKey: freshRow.sourceKey || item.sourceKey,
+          sourceRef: freshRow.sourceRef || item.sourceRef,
+          receiveGoodsItemId:
+            freshRow.receiveGoodsItemId ?? item.receiveGoodsItemId,
+          deliveryChallanId:
+            freshRow.deliveryChallanId ?? item.deliveryChallanId,
+          deliveryChallanItemId:
+            freshRow.deliveryChallanItemId ?? item.deliveryChallanItemId,
+        };
+      });
+    } catch (error) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        submitting: false,
+        error:
+          error?.response?.data?.error ||
+          error?.message ||
+          "Could not refresh the current DC balance.",
+      }));
+      return;
+    }
+
+    try {
       const savedReallocation = await createReallocateInventory({
         type: "Reallocate",
         referenceType: "delivery_challan",
@@ -1798,6 +1964,10 @@ const DeliveryChallan = () => {
         requestDate: reallocationModal.requestDate || null,
         requestedBy:
           String(reallocationModal.requestedBy || "").trim() || profileName,
+        vehicleNumber:
+          String(reallocationModal.vehicleNumber || "").trim() || null,
+        eWayBillNumber:
+          String(reallocationModal.eWayBillNumber || "").trim() || null,
         status: "Completed",
         notes: String(reallocationModal.notes || "").trim() || null,
         movedQuantity: positiveItems.reduce(
@@ -3086,7 +3256,7 @@ const DeliveryChallan = () => {
                                 min="0"
                                 max={availableQty}
                                 step="0.01"
-                                value={item.quantity}
+                                value={item.quantity ?? ""}
                                 onChange={(event) =>
                                   handleLineItemQuantityChange(item.id, event.target.value)
                                 }
@@ -3483,6 +3653,8 @@ const DeliveryChallan = () => {
                   <th className="p-3 text-left">New Project / Location</th>
                   <th className="p-3 text-right">Moved Quantity</th>
                   <th className="p-3 text-right">Remaining Quantity</th>
+                  <th className="p-3 text-left">Vehicle Number</th>
+                  <th className="p-3 text-left">E-Way Bill Number (EBN)</th>
                   <th className="p-3 text-left">Moved By</th>
                   <th className="p-3 text-left">Date and Time</th>
                 </tr>
@@ -3542,6 +3714,8 @@ const DeliveryChallan = () => {
                               ? "-"
                               : fmtQty(transfer.remainingQuantity)}
                           </td>
+                          <td className="p-3">{transfer.vehicleNumber || "-"}</td>
+                          <td className="p-3">{transfer.eWayBillNumber || "-"}</td>
                           <td className="p-3">{transfer.requestedBy || "-"}</td>
                           <td className="p-3">
                             {formatDateTime(
@@ -3555,7 +3729,7 @@ const DeliveryChallan = () => {
                     })
                 ) : (
                   <tr>
-                    <td colSpan="7" className="p-6 text-center text-slate-500">
+                    <td colSpan="9" className="p-6 text-center text-slate-500">
                       No DC movements recorded yet.
                     </td>
                   </tr>
@@ -4135,7 +4309,7 @@ const DeliveryChallan = () => {
                     Destination Location *
                   </label>
                   <select
-                    value={reallocationModal.targetLocationId}
+                    value={reallocationModal.targetLocationId ?? ""}
                     onChange={(event) =>
                       setReallocationModal((prev) => ({
                         ...prev,
@@ -4168,7 +4342,7 @@ const DeliveryChallan = () => {
                     Movement Type
                   </label>
                   <select
-                    value={reallocationModal.reallocationType}
+                    value={reallocationModal.reallocationType ?? "partial"}
                     onChange={(event) => handleReallocationTypeChange(event.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
                   >
@@ -4182,7 +4356,7 @@ const DeliveryChallan = () => {
                   </label>
                   <input
                     type="date"
-                    value={reallocationModal.requestDate}
+                    value={reallocationModal.requestDate ?? ""}
                     onChange={(event) =>
                       setReallocationModal((prev) => ({
                         ...prev,
@@ -4197,11 +4371,45 @@ const DeliveryChallan = () => {
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="text-sm font-medium text-slate-700">
+                    Vehicle Number
+                  </label>
+                  <input
+                    type="text"
+                    value={reallocationModal.vehicleNumber ?? ""}
+                    onChange={(event) =>
+                      setReallocationModal((prev) => ({
+                        ...prev,
+                        vehicleNumber: event.target.value,
+                      }))
+                    }
+                    placeholder="Enter vehicle number"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    E-Way Bill Number (EBN)
+                  </label>
+                  <input
+                    type="text"
+                    value={reallocationModal.eWayBillNumber ?? ""}
+                    onChange={(event) =>
+                      setReallocationModal((prev) => ({
+                        ...prev,
+                        eWayBillNumber: event.target.value,
+                      }))
+                    }
+                    placeholder="Enter E-Way Bill number"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
                     Requested By
                   </label>
                   <input
                     type="text"
-                    value={reallocationModal.requestedBy}
+                    value={reallocationModal.requestedBy ?? ""}
                     onChange={(event) =>
                       setReallocationModal((prev) => ({
                         ...prev,
@@ -4217,7 +4425,7 @@ const DeliveryChallan = () => {
                   </label>
                   <input
                     type="text"
-                    value={reallocationModal.notes}
+                    value={reallocationModal.notes ?? ""}
                     onChange={(event) =>
                       setReallocationModal((prev) => ({
                         ...prev,
@@ -4243,7 +4451,7 @@ const DeliveryChallan = () => {
                       <th className="p-3 text-left">Item</th>
                       <th className="p-3 text-left">Unit</th>
                       <th className="p-3 text-right">Source Qty</th>
-                      <th className="p-3 text-right">Available Qty</th>
+                      <th className="p-3 text-right">Available Qty Left</th>
                       <th className="p-3 text-right">Move Qty</th>
                     </tr>
                   </thead>
@@ -4270,14 +4478,20 @@ const DeliveryChallan = () => {
                             {fmtQty(item.sourceQty)}
                           </td>
                           <td className="p-3 text-right font-medium text-slate-800">
-                            {fmtQty(item.availableQty)}
+                            {fmtQty(
+                              Math.max(
+                                (Number(item.availableQty) || 0) -
+                                  (Number(item.quantity) || 0),
+                                0
+                              )
+                            )}
                           </td>
                           <td className="p-3">
                             <input
                               type="number"
                               min="0"
                               step="0.01"
-                              value={item.quantity}
+                              value={item.quantity ?? ""}
                               onChange={(event) =>
                                 handleReallocationItemChange(item.id, event.target.value)
                               }

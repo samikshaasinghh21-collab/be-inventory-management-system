@@ -92,6 +92,8 @@ const normalizeReallocateInventory = (record = {}) => {
       record.movedQuantity ?? record.MovedQuantity ?? null,
     remainingQuantity:
       record.remainingQuantity ?? record.RemainingQuantity ?? null,
+    vehicleNumber:
+      record.vehicleNumber ?? record.VehicleNumber ?? "",
     eWayBillNumber:
       record.eWayBillNumber ??
       record.EWayBillNumber ??
@@ -120,14 +122,33 @@ export const fetchReallocateInventory = async () => {
 };
 
 export const createReallocateInventory = async (payload) => {
-  const response = await api.post("/reallocate-inventory", payload, {
-    timeout: 60000,
-  });
-  const normalized = normalizeReallocateInventory(
-    response.data?.reallocation ?? response.data
-  );
-  emitReallocateInventoryChange();
-  return normalized;
+  try {
+    const response = await api.post("/reallocate-inventory", payload, {
+      timeout: 60000,
+    });
+    const normalized = normalizeReallocateInventory(
+      response.data?.reallocation ?? response.data
+    );
+    emitReallocateInventoryChange();
+    return normalized;
+  } catch (error) {
+    console.error("createReallocateInventory failed", {
+      status: error?.response?.status,
+      error: error?.response?.data?.error || error?.message,
+      fromLocationId: payload?.fromLocationId,
+      toLocationId: payload?.toLocationId,
+      sourceProjectId: payload?.sourceProjectId,
+      items: (payload?.items || []).map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        sourceType: item.sourceType,
+        sourceKey: item.sourceKey,
+        sourceRef: item.sourceRef,
+        deliveryChallanItemId: item.deliveryChallanItemId,
+      })),
+    });
+    throw error;
+  }
 };
 
 export const updateReallocateInventory = async (id, payload) => {
