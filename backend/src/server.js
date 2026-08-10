@@ -20,6 +20,7 @@ import {
   ensureProjectManagementSchema,
 } from "./projectManagement.js";
 import { createSettingsAdminRouter } from "./settingsAdmin.js";
+import { isAllowedOrigin } from "./corsConfig.js";
 import version from "../../scripts/getVersion.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,10 +39,6 @@ const port = Number.parseInt(process.env.PORT ?? "5000", 10);
 process.env.APP_VERSION = process.env.APP_VERSION || version;
 console.log(`Backend starting with app version: ${process.env.APP_VERSION}`);
 
-const configuredOrigins = String(process.env.TRUSTED_FRONTEND_ORIGIN || "")
-  .split(",").map((value) => value.trim().replace(/\/$/, "")).filter(Boolean);
-const developmentOrigins = ["http://localhost:5173", "http://localhost:5174"];
-const allowedOrigins = new Set(configuredOrigins.length ? configuredOrigins : developmentOrigins);
 app.set("trust proxy", Number.parseInt(process.env.TRUST_PROXY_HOPS || "0", 10));
 app.disable("x-powered-by");
 app.use(helmet({
@@ -50,7 +47,9 @@ app.use(helmet({
 }));
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin.replace(/\/$/, ""))) return callback(null, true);
+    if (isAllowedOrigin(origin, process.env.TRUSTED_FRONTEND_ORIGIN)) {
+      return callback(null, true);
+    }
     const error = new Error("Origin is not allowed");
     error.statusCode = 403;
     return callback(error);
@@ -1438,6 +1437,17 @@ const normalizeDeliveryChallan = (row = {}) => {
     id,
     deliveryChallanId: id,
     dcNumber: row.DCNumber ?? row.DcNumber ?? row.dcNumber ?? "",
+    dcType: row.DCType ?? row.dcType ?? "Original DC",
+    sourceDeliveryChallanId:
+      row.SourceDeliveryChallanId ?? row.sourceDeliveryChallanId ?? null,
+    sourceDcNumber: row.SourceDCNumber ?? row.sourceDcNumber ?? "",
+    originalDcNumber: row.OriginalDCNumber ?? row.originalDcNumber ?? "",
+    movedBy: row.MovedBy ?? row.movedBy ?? "",
+    movedAt: row.MovedAt ?? row.movedAt ?? null,
+    sourceRemainingQty:
+      Number(row.SourceRemainingQty ?? row.sourceRemainingQty ?? 0) || 0,
+    legacyReallocationId:
+      row.LegacyReallocationId ?? row.legacyReallocationId ?? null,
     projectId: row.ProjectId ?? row.projectId ?? null,
     receiveGoodsId: row.ReceiveGoodsId ?? row.receiveGoodsId ?? null,
     receiveGoodsIds: Array.isArray(row.receiveGoodsIds)
@@ -1447,6 +1457,12 @@ const normalizeDeliveryChallan = (row = {}) => {
       : [],
     fromLocationId: row.FromLocationId ?? row.fromLocationId ?? null,
     toLocationId: row.ToLocationId ?? row.toLocationId ?? null,
+    currentLocationId:
+      row.CurrentLocationId ??
+      row.currentLocationId ??
+      row.ToLocationId ??
+      row.toLocationId ??
+      null,
     toLocation: row.ToLocation ?? row.toLocation ?? "",
     vehicleNumber: row.VehicleNumber ?? row.vehicleNumber ?? "",
     eWayBillNumber:
@@ -7537,6 +7553,31 @@ const generateNextDeliveryChallanNumber = async (db) => {
   )}`;
 };
 
+const generateNextMovedDeliveryChallanNumber = async (db, originalDcNumber) => {
+  const baseNumber = normalizeOptionalString(originalDcNumber);
+  if (!baseNumber) {
+    throw new Error("The source DC number is required to create a moved DC.");
+  }
+
+  const result = await new sql.Request(db)
+    .input("OriginalDCNumber", sql.NVarChar(100), baseNumber)
+    .query(`
+      SELECT DCNumber
+      FROM dbo.DeliveryChallan WITH (UPDLOCK, HOLDLOCK)
+      WHERE DCNumber LIKE @OriginalDCNumber + N'-DC%'
+    `);
+  const pattern = new RegExp(
+    `^${baseNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-DC(\\d+)$`,
+    "i"
+  );
+  const maxMovement = (result.recordset ?? []).reduce((max, row) => {
+    const match = pattern.exec(String(row.DCNumber ?? "").trim());
+    const number = match ? Number.parseInt(match[1], 10) : 0;
+    return Number.isFinite(number) ? Math.max(max, number) : max;
+  }, 1);
+  return `${baseNumber}-DC${maxMovement + 1}`;
+};
+
 const refreshDeliveryChallanPk = async () => {
   const pool = await getPool();
   const colsResult = await pool.request().query(`
@@ -7799,6 +7840,52 @@ const ensureDeliveryChallanTables = async () => {
         ALTER TABLE dbo.DeliveryChallan ADD UpdatedAt DATETIME2 NOT NULL
           CONSTRAINT DF_DeliveryChallan_UpdatedAt DEFAULT SYSUTCDATETIME();
       END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'DCType') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD DCType NVARCHAR(50) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'SourceDeliveryChallanId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD SourceDeliveryChallanId BIGINT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'SourceDCNumber') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD SourceDCNumber NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'OriginalDCNumber') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD OriginalDCNumber NVARCHAR(100) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'MovedBy') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD MovedBy NVARCHAR(255) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'MovedAt') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD MovedAt DATETIME2 NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'SourceRemainingQty') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD SourceRemainingQty DECIMAL(18,2) NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'CurrentLocationId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD CurrentLocationId INT NULL;
+      END;
+      IF COL_LENGTH('dbo.DeliveryChallan', 'LegacyReallocationId') IS NULL
+      BEGIN
+        ALTER TABLE dbo.DeliveryChallan ADD LegacyReallocationId INT NULL;
+      END;
+    `);
+
+    await pool.request().query(`
+      UPDATE dbo.DeliveryChallan
+      SET CurrentLocationId = ToLocationId
+      WHERE ToLocationId IS NOT NULL
+        AND (
+          CurrentLocationId IS NULL
+          OR CurrentLocationId <> ToLocationId
+        );
     `);
 
     await pool.request().query(`
@@ -7812,6 +7899,20 @@ const ensureDeliveryChallanTables = async () => {
         CREATE UNIQUE INDEX UX_DeliveryChallan_DCNumber
           ON dbo.DeliveryChallan(DCNumber)
           WHERE DCNumber IS NOT NULL;
+      END
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE name = 'UX_DeliveryChallan_LegacyReallocationId'
+          AND object_id = OBJECT_ID('dbo.DeliveryChallan')
+      )
+      BEGIN
+        CREATE UNIQUE INDEX UX_DeliveryChallan_LegacyReallocationId
+          ON dbo.DeliveryChallan(LegacyReallocationId)
+          WHERE LegacyReallocationId IS NOT NULL;
       END
     `);
 
@@ -9075,7 +9176,7 @@ const buildReallocationAvailabilitySourceKey = ({
 };
 
 const isInactiveAvailabilityMovementStatus = (status = "") =>
-  ["cancelled", "canceled", "rejected", "void"].includes(
+  ["cancelled", "canceled", "rejected", "void", "migrated", "migrated to dc"].includes(
     normalizeInventoryKeyValue(status)
   );
 
@@ -9257,6 +9358,7 @@ const loadAvailableInventoryRows = async (
       receiveGoodsItemId: toNullableInt(rawEntry.receiveGoodsItemId),
       deliveryChallanId: toNullableInt(rawEntry.deliveryChallanId),
       deliveryChallanItemId: toNullableInt(rawEntry.deliveryChallanItemId),
+      poItemId: toNullableInt(rawEntry.poItemId ?? rawEntry.purchaseOrderItemId),
       itemId: toNullableInt(rawEntry.itemId),
       name: normalizeOptionalString(rawEntry.name ?? rawEntry.item) ?? "Item",
       description: normalizeOptionalString(rawEntry.description) ?? "",
@@ -9316,6 +9418,11 @@ const loadAvailableInventoryRows = async (
       return;
     }
 
+    const deliveryChallanId = toNullableInt(
+      item.deliveryChallanId ??
+        item.DeliveryChallanId ??
+        fallbackDeliveryChallanId
+    );
     const explicitSourceKey = buildAvailabilitySourceKey({
       ...item,
       deliveryChallanId:
@@ -9332,15 +9439,16 @@ const loadAvailableInventoryRows = async (
         exact[field] += movementQty;
         return;
       }
+      // A DC movement/consumption is line-specific. If its referenced DC row
+      // is not present at this location, never drain another DC with the same
+      // material name as a fallback.
+      if (deliveryChallanId !== null) {
+        return;
+      }
     }
 
     const receiveGoodsItemId = toNullableInt(
       item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.ReceiveItemId
-    );
-    const deliveryChallanId = toNullableInt(
-      item.deliveryChallanId ??
-        item.DeliveryChallanId ??
-        fallbackDeliveryChallanId
     );
     const materialKey = buildInventoryMaterialKey(item);
     let candidates = [];
@@ -9449,13 +9557,15 @@ const loadAvailableInventoryRows = async (
       dci.Id AS DeliveryChallanItemId,
       dc.${toIdentifier(deliveryPk)} AS HeaderDeliveryChallanId,
       dc.ProjectId AS HeaderProjectId,
-      dc.ToLocationId AS HeaderLocationId,
+      COALESCE(dc.CurrentLocationId, dc.ToLocationId) AS HeaderLocationId,
       dc.DCNumber AS HeaderDcNumber,
       dc.IssueDate AS HeaderDate
     FROM dbo.DeliveryChallan dc
     INNER JOIN dbo.DeliveryChallanItems dci
       ON dci.${toIdentifier(deliveryFk)} = dc.${toIdentifier(deliveryPk)}
-    WHERE dc.ToLocationId = @LocationId
+    WHERE COALESCE(dc.CurrentLocationId, dc.ToLocationId) = @LocationId
+      AND LOWER(LTRIM(RTRIM(ISNULL(dc.Status, '')))) NOT IN
+        ('fully moved', 'cancelled', 'canceled', 'rejected', 'void')
   `);
 
   (dcItemsAtLocationResult.recordset ?? []).forEach((row) => {
@@ -9467,6 +9577,7 @@ const loadAvailableInventoryRows = async (
         locationId: row.HeaderLocationId,
         deliveryChallanId: row.HeaderDeliveryChallanId,
         deliveryChallanItemId: row.DeliveryChallanItemId ?? item.id,
+        poItemId: item.poItemId,
         receiveGoodsItemId: item.receiveGoodsItemId,
         itemId: item.itemId,
         name: item.name,
@@ -9493,7 +9604,9 @@ const loadAvailableInventoryRows = async (
     SELECT
       dci.*,
       dc.ProjectId AS HeaderProjectId,
-      dc.FromLocationId AS HeaderLocationId
+      dc.FromLocationId AS HeaderLocationId,
+      dc.SourceDeliveryChallanId AS HeaderSourceDeliveryChallanId,
+      dc.LegacyReallocationId AS HeaderLegacyReallocationId
     FROM dbo.DeliveryChallan dc
     INNER JOIN dbo.DeliveryChallanItems dci
       ON dci.${toIdentifier(deliveryFk)} = dc.${toIdentifier(deliveryPk)}
@@ -9505,6 +9618,12 @@ const loadAvailableInventoryRows = async (
   `);
 
   (outgoingDcItemsResult.recordset ?? []).forEach((row) => {
+    if (
+      toNullableInt(row.HeaderLegacyReallocationId) !== null &&
+      toNullableInt(row.HeaderSourceDeliveryChallanId) === null
+    ) {
+      return;
+    }
     const item = normalizeDeliveryChallanItem(row);
     const sourceType =
       normalizeAvailabilitySourceType(item.sourceType) ||
@@ -9801,6 +9920,314 @@ const loadAvailableInventoryRows = async (
       });
     });
   return finalRows;
+};
+
+let migrateLegacyDeliveryChallanMovementsPromise = null;
+
+const migrateLegacyDeliveryChallanMovements = async () => {
+  if (migrateLegacyDeliveryChallanMovementsPromise) {
+    return migrateLegacyDeliveryChallanMovementsPromise;
+  }
+
+  migrateLegacyDeliveryChallanMovementsPromise = (async () => {
+    await ensureDeliveryChallanTables();
+    await ensureReallocateInventoryTables();
+    await ensureLocationsTable();
+    const deliveryPk = await refreshDeliveryChallanPk();
+    const deliveryFk = await refreshDeliveryChallanItemsFk();
+    const reallocatePk = await refreshReallocateInventoryPk();
+    const reallocateFk = await refreshReallocateInventoryItemsFk();
+    const pool = await getPool();
+    const transfersResult = await pool.request().query(`
+      SELECT *
+      FROM dbo.ReallocateInventory
+      ORDER BY TransferDate, ${toIdentifier(reallocatePk)}
+    `);
+
+    let createdCount = 0;
+    for (const rawTransfer of transfersResult.recordset ?? []) {
+      const transfer = normalizeReallocateInventory(rawTransfer);
+      if (
+        transfer.type !== "Reallocate" ||
+        isConsumptionLinkedReallocation(transfer) ||
+        isInactiveAvailabilityMovementStatus(transfer.status)
+      ) {
+        continue;
+      }
+
+      const transferId = toNullableInt(transfer.id);
+      const fromLocationId = toNullableInt(transfer.fromLocationId);
+      const toLocationId = toNullableInt(transfer.toLocationId);
+      if (!transferId || !fromLocationId || !toLocationId) {
+        continue;
+      }
+
+      let tx = pool.transaction();
+      try {
+        await tx.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+        const existingResult = await new sql.Request(tx)
+          .input("LegacyReallocationId", sql.Int, transferId)
+          .query(`
+            SELECT TOP 1 *
+            FROM dbo.DeliveryChallan WITH (UPDLOCK, HOLDLOCK)
+            WHERE LegacyReallocationId = @LegacyReallocationId
+          `);
+        const existing = existingResult.recordset?.[0] ?? null;
+
+        const transferItemsResult = await new sql.Request(tx)
+          .input("TransferId", sql.Int, transferId)
+          .query(`
+            SELECT *
+            FROM dbo.ReallocateInventoryItems
+            WHERE ${toIdentifier(reallocateFk)} = @TransferId
+            ORDER BY Id
+          `);
+        const transferItems = (transferItemsResult.recordset ?? [])
+          .map(normalizeReallocateInventoryItem)
+          .filter((item) => toAvailabilityQuantity(item.quantity) > 0);
+        if (!transferItems.length) {
+          await tx.rollback();
+          tx = null;
+          continue;
+        }
+
+        const migratedNotes = buildReallocateNotesPayload({
+          ...transfer,
+          status: "Migrated to DC",
+          updatedAt: new Date().toISOString(),
+        });
+        if (existing) {
+          await new sql.Request(tx)
+            .input("TransferId", sql.Int, transferId)
+            .input("Notes", sql.NVarChar(1000), migratedNotes)
+            .query(`
+              UPDATE dbo.ReallocateInventory
+              SET Notes = @Notes
+              WHERE ${toIdentifier(reallocatePk)} = @TransferId
+            `);
+          await tx.commit();
+          tx = null;
+          continue;
+        }
+
+        const referenceId = toNullableInt(transfer.referenceId);
+        const itemSourceId = transferItems
+          .map((item) => toNullableInt(item.deliveryChallanId))
+          .find((value) => value !== null);
+        const sourceId = referenceId ?? itemSourceId ?? null;
+        let sourceHeader = null;
+        if (sourceId !== null) {
+          const sourceResult = await new sql.Request(tx)
+            .input("SourceDeliveryChallanId", sql.BigInt, sourceId)
+            .query(`
+              SELECT TOP 1 *
+              FROM dbo.DeliveryChallan WITH (UPDLOCK, HOLDLOCK)
+              WHERE ${toIdentifier(deliveryPk)} = @SourceDeliveryChallanId
+            `);
+          sourceHeader = sourceResult.recordset?.[0] ?? null;
+        }
+        const source = sourceHeader ? normalizeDeliveryChallan(sourceHeader) : null;
+        const referenceNo = normalizeOptionalString(transfer.referenceNo);
+        if (
+          source &&
+          referenceNo &&
+          normalizeInventoryKeyValue(source.dcNumber) !==
+            normalizeInventoryKeyValue(referenceNo)
+        ) {
+          sourceHeader = null;
+        }
+        const validSource = sourceHeader ? normalizeDeliveryChallan(sourceHeader) : null;
+
+        const targetLocationResult = await new sql.Request(tx)
+          .input("LocationId", sql.Int, toLocationId)
+          .query(`SELECT TOP 1 * FROM dbo.Locations WHERE LocationId = @LocationId`);
+        const targetLocation = targetLocationResult.recordset?.[0] ?? {};
+        const requestedTargetProjectId = toNullableInt(transfer.projectId);
+        const locationProjectId = toNullableInt(targetLocation.ProjectId);
+        const targetProjectId =
+          (requestedTargetProjectId !== null && requestedTargetProjectId > 0
+            ? requestedTargetProjectId
+            : null) ??
+          (locationProjectId !== null && locationProjectId > 0
+            ? locationProjectId
+            : null) ??
+          toNullableInt(validSource?.projectId) ??
+          toNullableInt(transfer.sourceProjectId);
+        if (!targetProjectId) {
+          const error = new Error(`Cannot resolve a target project for REL-${transferId}.`);
+          error.statusCode = 409;
+          throw error;
+        }
+
+        let sourceRemainingQty = 0;
+        if (validSource) {
+          const sourceRows = await loadAvailableInventoryRows(tx, {
+            projectId:
+              toNullableInt(transfer.sourceProjectId) ??
+              toNullableInt(validSource.projectId),
+            locationId: fromLocationId,
+            includeZero: true,
+          });
+          sourceRemainingQty = sourceRows
+            .filter(
+              (row) =>
+                toNullableInt(row.deliveryChallanId) ===
+                  toNullableInt(validSource.id) &&
+                normalizeAvailabilitySourceType(row.sourceType) === "dc"
+            )
+            .reduce(
+              (sum, row) => sum + toAvailabilityQuantity(row.availableQty),
+              0
+            );
+        }
+
+        const originalDcNumber =
+          normalizeOptionalString(validSource?.originalDcNumber) ||
+          normalizeOptionalString(validSource?.dcNumber) ||
+          referenceNo ||
+          `LEGACY-${transferId}`;
+        const movedDcNumber = validSource
+          ? await generateNextMovedDeliveryChallanNumber(tx, originalDcNumber)
+          : `${referenceNo || "LEGACY-DC"}-REL${transferId}`;
+        const movementDate =
+          parseDateInput(transfer.transferDate ?? transfer.requestDate) || new Date();
+        const movedBy = normalizeOptionalString(transfer.requestedBy) ?? "Legacy migration";
+
+        const headerResult = await new sql.Request(tx)
+          .input("DCNumber", sql.NVarChar(100), movedDcNumber)
+          .input("ProjectId", sql.Int, targetProjectId)
+          .input("ReceiveGoodsId", sql.Int, toNullableInt(validSource?.receiveGoodsId))
+          .input("FromLocationId", sql.Int, fromLocationId)
+          .input("ToLocationId", sql.Int, toLocationId)
+          .input("CurrentLocationId", sql.Int, toLocationId)
+          .input(
+            "ToLocation",
+            sql.NVarChar(200),
+            normalizeOptionalString(targetLocation.Name ?? targetLocation.LocationName) ?? ""
+          )
+          .input("VehicleNumber", sql.NVarChar(50), normalizeOptionalString(transfer.vehicleNumber))
+          .input("EWayBillNumber", sql.NVarChar(100), normalizeOptionalString(transfer.eWayBillNumber))
+          .input("IssueDate", sql.Date, movementDate)
+          .input("Status", sql.NVarChar(50), "Moved DC")
+          .input("PODStatus", sql.NVarChar(50), POD_STATUS.PENDING)
+          .input("Notes", sql.NVarChar(sql.MAX), normalizeOptionalString(transfer.notes))
+          .input("SourceDeliveryChallanId", sql.BigInt, toNullableInt(validSource?.id))
+          .input("SourceDCNumber", sql.NVarChar(100), validSource?.dcNumber ?? referenceNo)
+          .input("OriginalDCNumber", sql.NVarChar(100), originalDcNumber)
+          .input("MovedBy", sql.NVarChar(255), movedBy)
+          .input("MovedAt", sql.DateTime2, movementDate)
+          .input("SourceRemainingQty", sql.Decimal(18, 2), sourceRemainingQty)
+          .input("LegacyReallocationId", sql.Int, transferId)
+          .query(`
+            INSERT INTO dbo.DeliveryChallan
+              (DCNumber, ProjectId, ReceiveGoodsId, FromLocationId, ToLocationId,
+               CurrentLocationId, ToLocation, VehicleNumber, EWayBillNumber, IssueDate,
+               Status, PODStatus, Notes, DCType, SourceDeliveryChallanId, SourceDCNumber,
+               OriginalDCNumber, MovedBy, MovedAt, SourceRemainingQty,
+               LegacyReallocationId, CreatedAt, UpdatedAt)
+            OUTPUT INSERTED.*
+            VALUES
+              (@DCNumber, @ProjectId, @ReceiveGoodsId, @FromLocationId, @ToLocationId,
+               @CurrentLocationId, @ToLocation, @VehicleNumber, @EWayBillNumber, @IssueDate,
+               @Status, @PODStatus, @Notes, N'Moved DC', @SourceDeliveryChallanId, @SourceDCNumber,
+               @OriginalDCNumber, @MovedBy, @MovedAt, @SourceRemainingQty,
+               @LegacyReallocationId, @MovedAt, @MovedAt)
+          `);
+        const movedHeader = headerResult.recordset?.[0] ?? null;
+        const movedId = toNullableInt(movedHeader?.[deliveryPk] ?? movedHeader?.Id);
+        if (!movedId) {
+          throw new Error(`Failed to migrate REL-${transferId}.`);
+        }
+
+        for (const legacyItem of transferItems) {
+          let sourceItem = null;
+          const legacySourceItemId = toNullableInt(legacyItem.deliveryChallanItemId);
+          if (validSource && legacySourceItemId !== null) {
+            const sourceItemResult = await new sql.Request(tx)
+              .input("DeliveryChallanItemId", sql.BigInt, legacySourceItemId)
+              .input("SourceDeliveryChallanId", sql.BigInt, validSource.id)
+              .query(`
+                SELECT TOP 1 *
+                FROM dbo.DeliveryChallanItems
+                WHERE Id = @DeliveryChallanItemId
+                  AND ${toIdentifier(deliveryFk)} = @SourceDeliveryChallanId
+              `);
+            sourceItem = sourceItemResult.recordset?.[0] ?? null;
+          }
+          const normalizedSourceItem = normalizeDeliveryChallanItem(sourceItem ?? {});
+          await new sql.Request(tx)
+            .input("DeliveryChallanId", sql.BigInt, movedId)
+            .input(
+              "ReceiveGoodsItemId",
+              sql.Int,
+              toNullableInt(normalizedSourceItem.receiveGoodsItemId ?? legacyItem.receiveGoodsItemId)
+            )
+            .input("PurchaseOrderItemId", sql.Int, toNullableInt(normalizedSourceItem.poItemId))
+            .input("ItemId", sql.Int, toNullableInt(normalizedSourceItem.itemId))
+            .input("ItemName", sql.NVarChar(200), legacyItem.name || normalizedSourceItem.name || "Item")
+            .input("Description", sql.NVarChar(500), legacyItem.description || normalizedSourceItem.description)
+            .input("Unit", sql.NVarChar(50), legacyItem.unit || normalizedSourceItem.unit || "PCS")
+            .input("HSN", sql.NVarChar(50), normalizedSourceItem.hsn)
+            .input("GST", sql.NVarChar(100), normalizedSourceItem.gst)
+            .input("Quantity", sql.Decimal(18, 2), toAvailabilityQuantity(legacyItem.quantity))
+            .input("Rate", sql.Decimal(18, 2), Number(normalizedSourceItem.rate) || 0)
+            .input("SourceType", sql.NVarChar(50), validSource ? "dc" : "legacy")
+            .input("SourceKey", sql.NVarChar(200), normalizeOptionalString(legacyItem.sourceKey))
+            .input("SourceRef", sql.NVarChar(255), validSource?.dcNumber ?? referenceNo)
+            .input("Notes", sql.NVarChar(500), normalizeOptionalString(transfer.notes))
+            .query(`
+              INSERT INTO dbo.DeliveryChallanItems
+                (${toIdentifier(deliveryFk)}, ReceiveGoodsItemId, PurchaseOrderItemId, ItemId,
+                 ItemName, Description, Unit, HSN, GST, Quantity, Rate, SourceType,
+                 SourceKey, SourceRef, Notes)
+              VALUES
+                (@DeliveryChallanId, @ReceiveGoodsItemId, @PurchaseOrderItemId, @ItemId,
+                 @ItemName, @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @SourceType,
+                 @SourceKey, @SourceRef, @Notes)
+            `);
+        }
+
+        if (validSource) {
+          await new sql.Request(tx)
+            .input("SourceDeliveryChallanId", sql.BigInt, validSource.id)
+            .input(
+              "SourceStatus",
+              sql.NVarChar(50),
+              sourceRemainingQty <= 0.0001 ? "Fully Moved" : "Partially Moved"
+            )
+            .query(`
+              UPDATE dbo.DeliveryChallan
+              SET Status = @SourceStatus, UpdatedAt = SYSUTCDATETIME()
+              WHERE ${toIdentifier(deliveryPk)} = @SourceDeliveryChallanId
+            `);
+        }
+        await new sql.Request(tx)
+          .input("TransferId", sql.Int, transferId)
+          .input("Notes", sql.NVarChar(1000), migratedNotes)
+          .query(`
+            UPDATE dbo.ReallocateInventory
+            SET Notes = @Notes
+            WHERE ${toIdentifier(reallocatePk)} = @TransferId
+          `);
+        await tx.commit();
+        tx = null;
+        createdCount += 1;
+      } catch (error) {
+        await rollbackTx(tx);
+        throw error;
+      }
+    }
+    if (createdCount > 0) {
+      console.log(`Migrated ${createdCount} legacy DC movement(s) to independent DC rows.`);
+    }
+    return { createdCount };
+  })();
+
+  try {
+    return await migrateLegacyDeliveryChallanMovementsPromise;
+  } finally {
+    migrateLegacyDeliveryChallanMovementsPromise = null;
+  }
 };
 
 const loadLatestRouteConsumptionRows = async (
@@ -10203,7 +10630,7 @@ const attachPersistedConsumptionBalances = async (db, consumptions = []) => {
       SELECT
         dc.${toIdentifier(deliveryPk)} AS HeaderDeliveryChallanId,
         dc.ProjectId AS HeaderProjectId,
-        dc.ToLocationId AS HeaderSourceLocationId,
+        COALESCE(dc.CurrentLocationId, dc.ToLocationId) AS HeaderSourceLocationId,
         dci.Id AS DeliveryChallanItemId,
         dci.ItemId,
         dci.Quantity AS SourceQty
@@ -19144,6 +19571,7 @@ app.delete("/api/boqs/:id", async (req, res) => {
 app.get("/api/delivery-challans", async (_req, res) => {
   try {
     await ensureDeliveryChallanTables();
+    await migrateLegacyDeliveryChallanMovements();
     await ensureReceiveTables();
     await ensureConsumptionTables();
     const pkCol = await refreshDeliveryChallanPk();
@@ -19284,6 +19712,95 @@ app.get("/api/delivery-challans/next-number", async (_req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to generate delivery challan number",
+    });
+  }
+});
+
+app.get("/api/delivery-challans/lookup", async (req, res) => {
+  const projectId = toNullableInt(req.query.projectId);
+  const locationId = toNullableInt(req.query.locationId);
+  if (!projectId || !locationId) {
+    return res.status(400).json({
+      ok: false,
+      error: "projectId and locationId are required for DC Lookup.",
+    });
+  }
+
+  try {
+    await ensureDeliveryChallanTables();
+    await migrateLegacyDeliveryChallanMovements();
+    const deliveryPk = await refreshDeliveryChallanPk();
+    const pool = await getPool();
+    const availableRows = await loadAvailableInventoryRows(pool, {
+      projectId,
+      locationId,
+      includeZero: false,
+    });
+    const dcRows = availableRows.filter(
+      (row) =>
+        normalizeAvailabilitySourceType(row.sourceType) === "dc" &&
+        toNullableInt(row.deliveryChallanId) !== null &&
+        toAvailabilityQuantity(row.availableQty) > 0
+    );
+    const rowsByDcId = dcRows.reduce((map, row) => {
+      const id = toNullableInt(row.deliveryChallanId);
+      if (!map.has(id)) map.set(id, []);
+      map.get(id).push(row);
+      return map;
+    }, new Map());
+
+    if (!rowsByDcId.size) {
+      return res.json({ ok: true, deliveryChallans: [] });
+    }
+
+    const headerRequest = pool.request();
+    const ids = Array.from(rowsByDcId.keys());
+    const idParams = ids.map((id, index) => {
+      const name = `LookupDcId${index}`;
+      headerRequest.input(name, sql.BigInt, id);
+      return `@${name}`;
+    });
+    const headersResult = await headerRequest.query(`
+      SELECT *
+      FROM dbo.DeliveryChallan
+      WHERE ${toIdentifier(deliveryPk)} IN (${idParams.join(", ")})
+    `);
+    const deliveryChallans = (headersResult.recordset ?? [])
+      .map((row) => {
+        const challan = normalizeDeliveryChallan(row);
+        const items = rowsByDcId.get(toNullableInt(challan.id)) ?? [];
+        return {
+          ...challan,
+          podDocumentData: "",
+          availableQuantity: items.reduce(
+            (sum, item) => sum + toAvailabilityQuantity(item.availableQty),
+            0
+          ),
+          items: items.map((item) => ({
+            sourceRowId: item.sourceRowId ?? item.sourceKey,
+            sourceKey: item.sourceKey,
+            deliveryChallanId: item.deliveryChallanId,
+            deliveryChallanItemId: item.deliveryChallanItemId,
+            receiveGoodsItemId: item.receiveGoodsItemId,
+            poItemId: item.poItemId,
+            itemId: item.itemId,
+            name: item.name,
+            description: item.description,
+            unit: item.unit,
+            hsn: item.hsn,
+            gst: item.gst,
+            rate: item.rate,
+            sourceQty: item.sourceQty,
+            availableQty: item.availableQty,
+          })),
+        };
+      })
+      .sort((left, right) => String(right.dcNumber).localeCompare(String(left.dcNumber)));
+    return res.json({ ok: true, deliveryChallans });
+  } catch (error) {
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to load DC Lookup.",
     });
   }
 });
@@ -19445,6 +19962,289 @@ app.get("/api/delivery-challans/:id", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error?.message ?? "Failed to fetch delivery challan",
+    });
+  }
+});
+
+app.post("/api/delivery-challans/:id/move", async (req, res) => {
+  const sourceId = toNullableInt(req.params.id);
+  const {
+    currentProjectId,
+    fromLocationId,
+    targetProjectId,
+    toLocationId,
+    requestDate = null,
+    requestedBy = null,
+    vehicleNumber = null,
+    eWayBillNumber = null,
+    notes = null,
+    items = [],
+  } = req.body ?? {};
+  const safeCurrentProjectId = toNullableInt(currentProjectId);
+  const safeFromLocationId = toNullableInt(fromLocationId);
+  const safeTargetProjectId = toNullableInt(targetProjectId);
+  const safeToLocationId = toNullableInt(toLocationId);
+  const parsedIssueDate = parseDateInput(requestDate);
+
+  if (!sourceId || !safeCurrentProjectId || !safeFromLocationId) {
+    return res.status(400).json({
+      ok: false,
+      error: "Current project and location are required to move a DC.",
+    });
+  }
+  if (!safeTargetProjectId || !safeToLocationId) {
+    return res.status(400).json({
+      ok: false,
+      error: "Destination project and location are required to move a DC.",
+    });
+  }
+  if (safeFromLocationId === safeToLocationId) {
+    return res.status(400).json({
+      ok: false,
+      error: "The destination location must be different from the current location.",
+    });
+  }
+  if (Number.isNaN(parsedIssueDate)) {
+    return res.status(400).json({ ok: false, error: "Invalid movement date." });
+  }
+
+  const requestedItems = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      sourceRowId: normalizeOptionalString(
+        item.sourceRowId ?? item.SourceRowId ?? item.sourceKey ?? item.SourceKey
+      ),
+      quantity: toAvailabilityQuantity(item.quantity ?? item.Quantity),
+    }))
+    .filter((item) => item.sourceRowId && item.quantity > 0);
+  if (!requestedItems.length) {
+    return res.status(400).json({
+      ok: false,
+      error: "Choose at least one item quantity to move.",
+    });
+  }
+
+  let tx;
+  try {
+    await ensureDeliveryChallanTables();
+    await migrateLegacyDeliveryChallanMovements();
+    await ensureLocationsTable();
+    const pkCol = await refreshDeliveryChallanPk();
+    const fkCol = await refreshDeliveryChallanItemsFk();
+    const pool = await getPool();
+    tx = pool.transaction();
+    await tx.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+
+    const sourceHeaderResult = await new sql.Request(tx)
+      .input("SourceDeliveryChallanId", sql.BigInt, sourceId)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.DeliveryChallan WITH (UPDLOCK, HOLDLOCK)
+        WHERE ${toIdentifier(pkCol)} = @SourceDeliveryChallanId
+      `);
+    const sourceHeader = sourceHeaderResult.recordset?.[0] ?? null;
+    if (!sourceHeader) {
+      const error = new Error("Source DC was not found.");
+      error.statusCode = 404;
+      throw error;
+    }
+    const lockedSource = normalizeDeliveryChallan(sourceHeader);
+    if (
+      toNullableInt(lockedSource.projectId) !== safeCurrentProjectId ||
+      toNullableInt(lockedSource.currentLocationId) !== safeFromLocationId
+    ) {
+      const error = new Error(
+        "The source DC project or current location changed. DC Lookup has been refreshed."
+      );
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const targetLocationResult = await new sql.Request(tx)
+      .input("ToLocationId", sql.Int, safeToLocationId)
+      .query(`SELECT TOP 1 * FROM dbo.Locations WHERE LocationId = @ToLocationId`);
+    const targetLocation = targetLocationResult.recordset?.[0] ?? null;
+    if (!targetLocation) {
+      const error = new Error("Destination location was not found.");
+      error.statusCode = 400;
+      throw error;
+    }
+    const targetLocationProjectId = toNullableInt(targetLocation.ProjectId);
+    if (
+      targetLocationProjectId !== null &&
+      targetLocationProjectId > 0 &&
+      targetLocationProjectId !== safeTargetProjectId
+    ) {
+      const error = new Error("The destination location does not belong to the selected destination project.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const availableRows = await loadAvailableInventoryRows(tx, {
+      projectId: safeCurrentProjectId,
+      locationId: safeFromLocationId,
+      includeZero: true,
+    });
+    const sourceRows = availableRows.filter(
+      (row) =>
+        toNullableInt(row.deliveryChallanId) === sourceId &&
+        normalizeAvailabilitySourceType(row.sourceType) === "dc" &&
+        toAvailabilityQuantity(row.availableQty) > 0
+    );
+    if (!sourceRows.length) {
+      const error = new Error("This DC has no eligible balance at the selected project and location.");
+      error.statusCode = 409;
+      throw error;
+    }
+    const sourceRowsById = new Map(
+      sourceRows.map((row) => [String(row.sourceRowId ?? row.sourceKey), row])
+    );
+    const selectedById = new Map();
+    requestedItems.forEach((item) => {
+      selectedById.set(
+        item.sourceRowId,
+        (selectedById.get(item.sourceRowId) ?? 0) + item.quantity
+      );
+    });
+    const moveItems = [];
+    for (const [sourceRowId, quantity] of selectedById.entries()) {
+      const sourceRow = sourceRowsById.get(sourceRowId);
+      if (!sourceRow) {
+        const error = new Error("One of the selected DC items is no longer available at this location.");
+        error.statusCode = 409;
+        throw error;
+      }
+      if (quantity > toAvailabilityQuantity(sourceRow.availableQty) + 0.0001) {
+        const error = new Error(
+          `Quantity for ${sourceRow.name || "the selected item"} cannot exceed its available balance (${sourceRow.availableQty}).`
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+      moveItems.push({ ...sourceRow, quantity });
+    }
+
+    const source = normalizeDeliveryChallan(sourceHeader);
+    const originalDcNumber =
+      normalizeOptionalString(source.originalDcNumber) ||
+      normalizeOptionalString(source.dcNumber);
+    const movedDcNumber = await generateNextMovedDeliveryChallanNumber(
+      tx,
+      originalDcNumber
+    );
+    const totalSourceAvailable = sourceRows.reduce(
+      (sum, row) => sum + toAvailabilityQuantity(row.availableQty),
+      0
+    );
+    const totalMovedQuantity = moveItems.reduce(
+      (sum, item) => sum + item.quantity,
+      0
+    );
+    const sourceRemainingQty = Math.max(totalSourceAvailable - totalMovedQuantity, 0);
+    const movedBy = normalizeOptionalString(requestedBy) ?? "Current user";
+    const movementNotes = normalizeOptionalString(notes) ?? null;
+
+    const insertHeader = new sql.Request(tx);
+    insertHeader.input("DCNumber", sql.NVarChar(100), movedDcNumber);
+    insertHeader.input("ProjectId", sql.Int, safeTargetProjectId);
+    insertHeader.input("ReceiveGoodsId", sql.Int, source.receiveGoodsId ?? null);
+    insertHeader.input("FromLocationId", sql.Int, safeFromLocationId);
+    insertHeader.input("ToLocationId", sql.Int, safeToLocationId);
+    insertHeader.input("CurrentLocationId", sql.Int, safeToLocationId);
+    insertHeader.input(
+      "ToLocation",
+      sql.NVarChar(200),
+      normalizeOptionalString(targetLocation.Name ?? targetLocation.LocationName) ?? ""
+    );
+    insertHeader.input("VehicleNumber", sql.NVarChar(50), normalizeOptionalString(vehicleNumber));
+    insertHeader.input("EWayBillNumber", sql.NVarChar(100), normalizeOptionalString(eWayBillNumber));
+    insertHeader.input("IssueDate", sql.Date, parsedIssueDate ?? new Date());
+    insertHeader.input("Status", sql.NVarChar(50), "Moved DC");
+    insertHeader.input("PODStatus", sql.NVarChar(50), POD_STATUS.PENDING);
+    insertHeader.input("Notes", sql.NVarChar(sql.MAX), movementNotes);
+    insertHeader.input("DCType", sql.NVarChar(50), "Moved DC");
+    insertHeader.input("SourceDeliveryChallanId", sql.BigInt, sourceId);
+    insertHeader.input("SourceDCNumber", sql.NVarChar(100), source.dcNumber);
+    insertHeader.input("OriginalDCNumber", sql.NVarChar(100), originalDcNumber);
+    insertHeader.input("MovedBy", sql.NVarChar(255), movedBy);
+    insertHeader.input("MovedAt", sql.DateTime2, new Date());
+    insertHeader.input("SourceRemainingQty", sql.Decimal(18, 2), sourceRemainingQty);
+    const movedHeaderResult = await insertHeader.query(`
+      INSERT INTO dbo.DeliveryChallan
+        (DCNumber, ProjectId, ReceiveGoodsId, FromLocationId, ToLocationId, CurrentLocationId, ToLocation,
+         VehicleNumber, EWayBillNumber, IssueDate, Status, PODStatus, Notes, DCType,
+         SourceDeliveryChallanId, SourceDCNumber, OriginalDCNumber, MovedBy, MovedAt,
+         SourceRemainingQty)
+      OUTPUT INSERTED.*
+      VALUES
+        (@DCNumber, @ProjectId, @ReceiveGoodsId, @FromLocationId, @ToLocationId, @CurrentLocationId, @ToLocation,
+         @VehicleNumber, @EWayBillNumber, @IssueDate, @Status, @PODStatus, @Notes, @DCType,
+         @SourceDeliveryChallanId, @SourceDCNumber, @OriginalDCNumber, @MovedBy, @MovedAt,
+         @SourceRemainingQty)
+    `);
+    const movedHeader = movedHeaderResult.recordset?.[0] ?? null;
+    const movedId = toNullableInt(movedHeader?.[pkCol] ?? movedHeader?.Id);
+    if (!movedId) {
+      throw new Error("Failed to create the moved DC.");
+    }
+
+    for (const item of moveItems) {
+      const insertItem = new sql.Request(tx);
+      insertItem.input("DeliveryChallanId", sql.BigInt, movedId);
+      insertItem.input("ReceiveGoodsItemId", sql.Int, toNullableInt(item.receiveGoodsItemId));
+      insertItem.input("PurchaseOrderItemId", sql.Int, toNullableInt(item.poItemId));
+      insertItem.input("ItemId", sql.Int, toNullableInt(item.itemId));
+      insertItem.input("ItemName", sql.NVarChar(200), item.name);
+      insertItem.input("Description", sql.NVarChar(500), item.description ?? null);
+      insertItem.input("Unit", sql.NVarChar(50), item.unit ?? "PCS");
+      insertItem.input("HSN", sql.NVarChar(50), item.hsn ?? null);
+      insertItem.input("GST", sql.NVarChar(100), item.gst ?? null);
+      insertItem.input("Quantity", sql.Decimal(18, 2), item.quantity);
+      insertItem.input("Rate", sql.Decimal(18, 2), Number(item.rate) || 0);
+      insertItem.input("SourceType", sql.NVarChar(50), "dc");
+      insertItem.input("SourceKey", sql.NVarChar(200), item.sourceRowId ?? item.sourceKey);
+      insertItem.input("SourceRef", sql.NVarChar(255), source.dcNumber);
+      insertItem.input("Notes", sql.NVarChar(500), movementNotes);
+      await insertItem.query(`
+        INSERT INTO dbo.DeliveryChallanItems
+          (${toIdentifier(fkCol)}, ReceiveGoodsItemId, PurchaseOrderItemId, ItemId, ItemName,
+           Description, Unit, HSN, GST, Quantity, Rate, SourceType, SourceKey, SourceRef, Notes)
+        VALUES
+          (@DeliveryChallanId, @ReceiveGoodsItemId, @PurchaseOrderItemId, @ItemId, @ItemName,
+           @Description, @Unit, @HSN, @GST, @Quantity, @Rate, @SourceType, @SourceKey, @SourceRef, @Notes)
+      `);
+    }
+
+    await new sql.Request(tx)
+      .input("SourceDeliveryChallanId", sql.BigInt, sourceId)
+      .input(
+        "SourceStatus",
+        sql.NVarChar(50),
+        sourceRemainingQty <= 0.0001 ? "Fully Moved" : "Partially Moved"
+      )
+      .query(`
+        UPDATE dbo.DeliveryChallan
+        SET Status = @SourceStatus, UpdatedAt = SYSUTCDATETIME()
+        WHERE ${toIdentifier(pkCol)} = @SourceDeliveryChallanId
+      `);
+
+    await tx.commit();
+    tx = null;
+    const movedItemsResult = await pool
+      .request()
+      .input("DeliveryChallanId", sql.BigInt, movedId)
+      .query(`SELECT * FROM dbo.DeliveryChallanItems WHERE ${toIdentifier(fkCol)} = @DeliveryChallanId`);
+    return res.status(201).json({
+      ok: true,
+      deliveryChallan: {
+        ...normalizeDeliveryChallan(movedHeader),
+        items: (movedItemsResult.recordset ?? []).map(normalizeDeliveryChallanItem),
+      },
+    });
+  } catch (error) {
+    await rollbackTx(tx);
+    return res.status(error?.statusCode ?? 500).json({
+      ok: false,
+      error: error?.message ?? "Failed to move the delivery challan.",
     });
   }
 });
@@ -19613,6 +20413,7 @@ app.post("/api/delivery-challans", async (req, res) => {
     insertHeaderReq.input("ReceiveGoodsId", sql.Int, resolvedReceiveGoodsId);
     insertHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
     insertHeaderReq.input("ToLocationId", sql.Int, destination.toLocationId);
+    insertHeaderReq.input("CurrentLocationId", sql.Int, destination.toLocationId);
     insertHeaderReq.input("ToLocation", sql.NVarChar(200), destination.toLocation);
     insertHeaderReq.input("VehicleNumber", sql.NVarChar(50), safeVehicleNumber);
     insertHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
@@ -19625,10 +20426,10 @@ app.post("/api/delivery-challans", async (req, res) => {
 
     const headerResult = await insertHeaderReq.query(`
       INSERT INTO dbo.DeliveryChallan
-        (DCNumber, ProjectId, ReceiveGoodsId, FromLocationId, ToLocationId, ToLocation, VehicleNumber, EWayBillNumber, IssueDate, Status, PODStatus, PODReference, PODDate, Notes)
+        (DCNumber, ProjectId, ReceiveGoodsId, FromLocationId, ToLocationId, CurrentLocationId, ToLocation, VehicleNumber, EWayBillNumber, IssueDate, Status, PODStatus, PODReference, PODDate, Notes)
       OUTPUT INSERTED.*
       VALUES
-        (@DCNumber, @ProjectId, @ReceiveGoodsId, @FromLocationId, @ToLocationId, @ToLocation, @VehicleNumber, @EWayBillNumber, @IssueDate, @Status, @PODStatus, @PODReference, @PODDate, @Notes)
+        (@DCNumber, @ProjectId, @ReceiveGoodsId, @FromLocationId, @ToLocationId, @CurrentLocationId, @ToLocation, @VehicleNumber, @EWayBillNumber, @IssueDate, @Status, @PODStatus, @PODReference, @PODDate, @Notes)
     `);
 
     const headerRow = headerResult.recordset?.[0];
@@ -19917,6 +20718,7 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
     updateHeaderReq.input("ReceiveGoodsId", sql.Int, resolvedReceiveGoodsId);
     updateHeaderReq.input("FromLocationId", sql.Int, safeFromLocationId);
     updateHeaderReq.input("ToLocationId", sql.Int, destination.toLocationId);
+    updateHeaderReq.input("CurrentLocationId", sql.Int, destination.toLocationId);
     updateHeaderReq.input("ToLocation", sql.NVarChar(200), destination.toLocation);
     updateHeaderReq.input("VehicleNumber", sql.NVarChar(50), safeVehicleNumber);
     updateHeaderReq.input("EWayBillNumber", sql.NVarChar(100), safeEWayBillNumber);
@@ -19938,6 +20740,7 @@ app.put("/api/delivery-challans/:id", async (req, res) => {
           ReceiveGoodsId = @ReceiveGoodsId,
           FromLocationId = @FromLocationId,
           ToLocationId = @ToLocationId,
+          CurrentLocationId = @CurrentLocationId,
           ToLocation = @ToLocation,
           VehicleNumber = @VehicleNumber,
           EWayBillNumber = @EWayBillNumber,
@@ -21932,6 +22735,18 @@ app.post("/api/reallocate-inventory", async (req, res) => {
       error: "At least one reallocation item is required",
     });
   }
+  if (
+    safeType === "Reallocate" &&
+    (safeReferenceType === "delivery_challan" ||
+      (safeReferenceType !== "consumption" &&
+        normalizedItems.some((item) => item.sourceType === "dc")))
+  ) {
+    return res.status(410).json({
+      ok: false,
+      error:
+        "DC movements must be created from DC Lookup using the delivery-challan move endpoint.",
+    });
+  }
 
   let tx;
   try {
@@ -22231,6 +23046,18 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
       error: "At least one reallocation item is required",
     });
   }
+  if (
+    safeType === "Reallocate" &&
+    (safeReferenceType === "delivery_challan" ||
+      (safeReferenceType !== "consumption" &&
+        normalizedItems.some((item) => item.sourceType === "dc")))
+  ) {
+    return res.status(410).json({
+      ok: false,
+      error:
+        "DC movements must be created from DC Lookup using the delivery-challan move endpoint.",
+    });
+  }
 
   let tx;
   try {
@@ -22272,6 +23099,17 @@ app.put("/api/reallocate-inventory/:id", async (req, res) => {
       return res.status(404).json({
         ok: false,
         error: "Reallocate inventory record not found",
+      });
+    }
+    if (
+      normalizeInventoryKeyValue(normalizeReallocateInventory(currentRow).status) ===
+      "migrated to dc"
+    ) {
+      await tx.rollback();
+      tx = null;
+      return res.status(409).json({
+        ok: false,
+        error: "Migrated DC movement audit records are read-only.",
       });
     }
 
@@ -22405,6 +23243,27 @@ app.delete("/api/reallocate-inventory/:id", async (req, res) => {
     tx = pool.transaction();
     await tx.begin();
 
+    const auditResult = await new sql.Request(tx)
+      .input("TransferId", sql.Int, id)
+      .query(`
+        SELECT TOP 1 *
+        FROM dbo.ReallocateInventory WITH (UPDLOCK, HOLDLOCK)
+        WHERE ${toIdentifier(pkCol)} = @TransferId
+      `);
+    const auditRecord = auditResult.recordset?.[0] ?? null;
+    if (
+      auditRecord &&
+      normalizeInventoryKeyValue(normalizeReallocateInventory(auditRecord).status) ===
+        "migrated to dc"
+    ) {
+      await tx.rollback();
+      tx = null;
+      return res.status(409).json({
+        ok: false,
+        error: "Migrated DC movement audit records are retained permanently.",
+      });
+    }
+
     await new sql.Request(tx)
       .input("TransferId", sql.Int, id)
       .query(`
@@ -22477,6 +23336,7 @@ const warmupSchema = async ({ fatal = false } = {}) => {
       ensureConsumptionTables(),
       ensureReallocateInventoryTables(),
     ]);
+    await migrateLegacyDeliveryChallanMovements();
     await ensureProjectManagementSchema();
     console.log("Schema warmup complete");
   } catch (error) {

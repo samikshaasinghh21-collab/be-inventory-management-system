@@ -119,6 +119,8 @@ const normalizeDeliveryChallanItem = (item = {}) => ({
   hsn: item.hsn ?? item.HSN ?? item.hsnCode ?? item.HSNCode ?? "",
   gst: item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate ?? "",
   quantity: Number(item.quantity ?? item.Quantity ?? 0) || 0,
+  sourceQty: Number(item.sourceQty ?? item.SourceQty ?? 0) || 0,
+  availableQty: Number(item.availableQty ?? item.AvailableQty ?? 0) || 0,
   consumedQty: Number(item.consumedQty ?? item.ConsumedQty ?? 0) || 0,
   balanceQty: Number(item.balanceQty ?? item.BalanceQty ?? 0) || 0,
   rate: Number(item.rate ?? item.Rate ?? 0) || 0,
@@ -128,6 +130,19 @@ const normalizeDeliveryChallanItem = (item = {}) => ({
 const normalizeDeliveryChallan = (challan = {}) => ({
   id: challan.id ?? challan.DeliveryChallanId ?? challan.Id ?? null,
   dcNumber: challan.dcNumber ?? challan.DCNumber ?? challan.DcNumber ?? "",
+  dcType: challan.dcType ?? challan.DCType ?? "Original DC",
+  sourceDeliveryChallanId:
+    challan.sourceDeliveryChallanId ?? challan.SourceDeliveryChallanId ?? null,
+  sourceDcNumber: challan.sourceDcNumber ?? challan.SourceDCNumber ?? "",
+  originalDcNumber: challan.originalDcNumber ?? challan.OriginalDCNumber ?? "",
+  movedBy: challan.movedBy ?? challan.MovedBy ?? "",
+  movedAt: challan.movedAt ?? challan.MovedAt ?? null,
+  sourceRemainingQty:
+    Number(challan.sourceRemainingQty ?? challan.SourceRemainingQty ?? 0) || 0,
+  legacyReallocationId:
+    challan.legacyReallocationId ?? challan.LegacyReallocationId ?? null,
+  availableQuantity:
+    Number(challan.availableQuantity ?? challan.AvailableQuantity ?? 0) || 0,
   projectId: challan.projectId ?? challan.ProjectId ?? null,
   receiveGoodsId:
     challan.receiveGoodsId ??
@@ -141,6 +156,12 @@ const normalizeDeliveryChallan = (challan = {}) => ({
     : [],
   fromLocationId: challan.fromLocationId ?? challan.FromLocationId ?? null,
   toLocationId: challan.toLocationId ?? challan.ToLocationId ?? null,
+  currentLocationId:
+    challan.currentLocationId ??
+    challan.CurrentLocationId ??
+    challan.toLocationId ??
+    challan.ToLocationId ??
+    null,
   toLocation: challan.toLocation ?? challan.ToLocation ?? "",
   vehicleNumber: challan.vehicleNumber ?? challan.VehicleNumber ?? "",
   eWayBillNumber:
@@ -251,6 +272,27 @@ export const createDeliveryChallan = async (payload) => {
     );
     throw error;
   }
+};
+
+export const fetchDeliveryChallanLookup = async ({ projectId, locationId }) => {
+  const response = await api.get("/delivery-challans/lookup", {
+    params: { projectId, locationId },
+  });
+  const list = Array.isArray(response.data?.deliveryChallans)
+    ? response.data.deliveryChallans
+    : [];
+  return list.map(normalizeDeliveryChallan);
+};
+
+export const moveDeliveryChallan = async (id, payload) => {
+  const response = await api.post(`/delivery-challans/${id}/move`, payload, {
+    timeout: 60000,
+  });
+  const normalized = normalizeDeliveryChallan(
+    response.data?.deliveryChallan ?? response.data
+  );
+  emitDeliveryChallanChange();
+  return normalized;
 };
 
 export const updateDeliveryChallan = async (id, payload) => {
