@@ -105,9 +105,9 @@ const mergeStoredProducts = (apiItems, storedItems) => {
     }
 
     return {
-      ...item,
       ...stored,
-      stock: stored.stock ?? item.stock ?? 0,
+      ...item,
+      stock: item.stock ?? stored.stock ?? 0,
       qty: stored.qty ?? item.qty ?? 0,
       serialRequired: item.serialRequired ?? stored.serialRequired ?? false,
       serialNumber:
@@ -127,12 +127,12 @@ const mergeStoredProducts = (apiItems, storedItems) => {
 
 function StatCard({ label, value, detail }) {
   return (
-    <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70">
-      <p className="text-3xl font-semibold tracking-tight text-slate-950">
+    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70">
+      <p className="text-2xl font-bold tracking-tight text-slate-950">
         {value}
       </p>
-      <p className="mt-3 text-sm font-medium text-slate-700">{label}</p>
-      <p className="mt-1 text-sm leading-6 text-slate-500">{detail}</p>
+      <p className="mt-2 text-sm font-semibold text-slate-700">{label}</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
     </div>
   );
 }
@@ -195,6 +195,7 @@ export default function ProductCatalogDashboard() {
     unit: "Nos",
     hsn: "",
     rate: "",
+    stock: "",
     serialNumber: "",
     serialRequired: false,
     description: "",
@@ -203,6 +204,7 @@ export default function ProductCatalogDashboard() {
   const [editApiError, setEditApiError] = useState("");
   const [manualStockItem, setManualStockItem] = useState(null);
   const [manualStockValue, setManualStockValue] = useState("");
+  const [manualStockOperation, setManualStockOperation] = useState("add");
   const [manualStockError, setManualStockError] = useState("");
   const [manualStockSaving, setManualStockSaving] = useState(false);
 
@@ -269,6 +271,7 @@ export default function ProductCatalogDashboard() {
       unit: product.unit || "Nos",
       hsn: product.hsn || "",
       rate: product.rate || product.rate === 0 ? String(roundUnitPrice(product.rate)) : "",
+      stock: String(Math.max(Number(product.stock) || 0, 0)),
       serialNumber: product.serialNumber || "",
       serialRequired: product.serialRequired ?? false,
       description: product.description || "",
@@ -292,6 +295,14 @@ export default function ProductCatalogDashboard() {
     if (editValues.rate === "" || Number.isNaN(rate) || rate <= 0) {
       nextErrors.rate = "Enter a valid selling price.";
     }
+    const stock = Number(editValues.stock);
+    if (
+      editValues.stock === "" ||
+      !Number.isInteger(stock) ||
+      stock < 0
+    ) {
+      nextErrors.stock = "Available stock must be a whole number of 0 or more.";
+    }
     setEditErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
@@ -309,11 +320,12 @@ export default function ProductCatalogDashboard() {
       unit: editValues.unit,
       hsn: editValues.hsn.trim(),
       rate: roundUnitPrice(editValues.rate),
+      price: roundUnitPrice(editValues.rate),
       serialNumber: editValues.serialNumber.trim(),
       serialRequired: editValues.serialRequired ?? false,
       description: editValues.description.trim(),
       qty: editingProduct.qty ?? 0,
-      stock: editingProduct.stock ?? 0,
+      stock: Number(editValues.stock),
     };
 
     try {
@@ -369,6 +381,7 @@ export default function ProductCatalogDashboard() {
   const openManualStockEntry = (item) => {
     setManualStockItem(item);
     setManualStockValue("");
+    setManualStockOperation("add");
     setManualStockError("");
     setEditApiError("");
   };
@@ -376,6 +389,7 @@ export default function ProductCatalogDashboard() {
   const closeManualStockEntry = () => {
     setManualStockItem(null);
     setManualStockValue("");
+    setManualStockOperation("add");
     setManualStockError("");
     setManualStockSaving(false);
   };
@@ -385,16 +399,27 @@ export default function ProductCatalogDashboard() {
       return;
     }
 
-    const quantityToAdd = Number(manualStockValue);
-    if (!Number.isFinite(quantityToAdd) || quantityToAdd <= 0) {
-      setManualStockError("Enter a valid stock quantity greater than 0.");
+    const adjustment = Number(manualStockValue);
+    if (!Number.isInteger(adjustment) || adjustment <= 0) {
+      setManualStockError("Enter a whole-number quantity greater than 0.");
+      return;
+    }
+
+    const currentStock = Math.max(Number(manualStockItem.stock ?? 0), 0);
+    if (manualStockOperation === "remove" && adjustment > currentStock) {
+      setManualStockError(
+        `You can remove at most ${currentStock} ${manualStockItem.unit || "units"}.`
+      );
       return;
     }
 
     try {
       setManualStockSaving(true);
       setManualStockError("");
-      const nextStock = Math.max(Number(manualStockItem.stock ?? 0), 0) + quantityToAdd;
+      const nextStock =
+        manualStockOperation === "add"
+          ? currentStock + adjustment
+          : currentStock - adjustment;
       const updatedItem = await updateQuantityApi(manualStockItem.id, nextStock);
       updateProduct(manualStockItem.id, updatedItem);
       setItems((prev) =>
@@ -462,6 +487,20 @@ export default function ProductCatalogDashboard() {
     (sum, item) => sum + item.qty * item.rate,
     0
   );
+  const totalStock = items.reduce(
+    (sum, item) => sum + Math.max(Number(item.stock) || 0, 0),
+    0
+  );
+  const inventoryValue = items.reduce(
+    (sum, item) =>
+      sum +
+      Math.max(Number(item.stock) || 0, 0) *
+        roundUnitPrice(item.rate ?? item.price ?? 0),
+    0
+  );
+  const outOfStockCount = items.filter(
+    (item) => (Number(item.stock) || 0) <= 0
+  ).length;
   const hasFilters = Boolean(
     productSearch.trim() || hsnSearch.trim() || categoryFilter.trim()
   );
@@ -554,6 +593,30 @@ export default function ProductCatalogDashboard() {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
         <div className="space-y-6">
+          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-col gap-5 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 px-6 py-7 text-white sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-300">
+                  Inventory
+                </p>
+                <h1 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
+                  Product Catalog
+                </h1>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                  Find products quickly, maintain product details, and keep available stock accurate.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={goToCreateProduct}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-400"
+              >
+                <AppIcon name="plus" className="h-4 w-4" />
+                Create Product
+              </button>
+            </div>
+          </section>
+
           <div className="flex flex-wrap gap-2">
             <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
               {selectionContextLabel}
@@ -610,26 +673,26 @@ export default function ProductCatalogDashboard() {
             </section>
           )}
 
-          <section className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+          <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
             <StatCard
               label="Catalog Items"
               value={formatCompactNumber(items.length)}
-              detail="Products available in the catalog."
+              detail="Active product records"
             />
             <StatCard
-              label="Visible Results"
-              value={formatCompactNumber(filteredItems.length)}
-              detail="Products matching the current search, HSN, and category filters."
+              label="Available Stock"
+              value={formatCompactNumber(totalStock)}
+              detail="Units currently on hand"
             />
             <StatCard
-              label="Selected Lines"
-              value={formatCompactNumber(selectedLines)}
-              detail="Rows currently selected in the catalog."
+              label="Out of Stock"
+              value={formatCompactNumber(outOfStockCount)}
+              detail="Products needing attention"
             />
             <StatCard
-              label="Selection Value"
-              value={formatCurrency(selectedValue)}
-              detail="Estimated value of the selected catalog items."
+              label="Inventory Value"
+              value={formatCurrency(inventoryValue)}
+              detail="Stock at current catalog price"
             />
           </section>
 
@@ -716,7 +779,7 @@ export default function ProductCatalogDashboard() {
                   Product Table
                 </p>
                 <h2 className="mt-2 text-lg font-semibold tracking-tight text-slate-950">
-                  Clean catalog overview
+                  Products and stock
                 </h2>
               </div>
             </div>
@@ -806,26 +869,24 @@ export default function ProductCatalogDashboard() {
                             </td>
                             <td className="px-5 py-4">
                               <div className="flex justify-end gap-2">
-                                {(Number(item.stock ?? 0) || 0) <= 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => openManualStockEntry(item)}
-                                    className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
-                                  >
-                                    Manual Stock
-                                  </button>
-                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => openManualStockEntry(item)}
+                                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
+                                >
+                                  Adjust stock
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => startEdit(item)}
-                                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
+                                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
                                 >
                                   Edit
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => handleDelete(item.id)}
-                                  className="rounded-full border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:border-red-300 hover:bg-red-100"
+                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-100"
                                 >
                                   Delete
                                 </button>
@@ -921,15 +982,13 @@ export default function ProductCatalogDashboard() {
                         </div>
 
                         <div className="mt-4 flex gap-2">
-                          {(Number(item.stock ?? 0) || 0) <= 0 && (
-                            <button
-                              type="button"
-                              onClick={() => openManualStockEntry(item)}
-                              className="flex-1 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
-                            >
-                              Manual Stock
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => openManualStockEntry(item)}
+                            className="flex-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
+                          >
+                            Adjust stock
+                          </button>
                           <button
                             type="button"
                             onClick={() => startEdit(item)}
@@ -1131,6 +1190,65 @@ export default function ProductCatalogDashboard() {
                     )}
                   </div>
 
+                  <div className="lg:col-span-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <label className="text-sm font-semibold text-slate-800">
+                          Available stock *
+                        </label>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          Set the exact quantity currently available for this product.
+                        </p>
+                      </div>
+                      <div className="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditValues((prev) => ({
+                              ...prev,
+                              stock: String(Math.max((Number(prev.stock) || 0) - 1, 0)),
+                            }))
+                          }
+                          className="grid h-11 w-11 place-items-center text-xl font-semibold text-slate-600 transition hover:bg-slate-100"
+                          aria-label="Decrease available stock"
+                        >
+                          −
+                        </button>
+                        <input
+                          value={editValues.stock}
+                          onChange={(event) =>
+                            setEditValues((prev) => ({
+                              ...prev,
+                              stock: event.target.value,
+                            }))
+                          }
+                          type="number"
+                          min="0"
+                          step="1"
+                          inputMode="numeric"
+                          className="h-11 w-28 border-x border-slate-200 text-center text-base font-bold text-slate-950 outline-none focus:bg-emerald-50"
+                          aria-invalid={Boolean(editErrors.stock)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditValues((prev) => ({
+                              ...prev,
+                              stock: String(Math.max(Number(prev.stock) || 0, 0) + 1),
+                            }))
+                          }
+                          className="grid h-11 w-11 place-items-center text-xl font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                          aria-label="Increase available stock"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                    {editErrors.stock && (
+                      <p className="mt-2 text-sm text-red-600">{editErrors.stock}</p>
+                    )}
+                  </div>
+
                   <div className="lg:col-span-2">
                     <label className="text-sm font-medium text-slate-700">
                       Serial Number
@@ -1169,7 +1287,7 @@ export default function ProductCatalogDashboard() {
 
               <div className="flex items-center justify-between border-t bg-slate-50 px-6 py-4">
                 <p className="text-xs text-slate-500">
-                  Update catalog details and keep pricing accurate.
+                  Product details and available stock will be updated together.
                 </p>
                 <div className="flex gap-3">
                   <button
@@ -1199,28 +1317,81 @@ export default function ProductCatalogDashboard() {
                   Inventory
                 </p>
                 <h2 className="text-xl font-semibold text-slate-950">
-                  Manual Stock Entry
+                  Adjust Stock
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Add stock for {manualStockItem.name || "this product"}.
+                  Increase or decrease the available quantity for {manualStockItem.name || "this product"}.
                 </p>
               </div>
               <div className="space-y-4 px-6 py-5">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                  Current stock: <span className="font-semibold">{manualStockItem.stock ?? 0}</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualStockOperation("add");
+                      setManualStockError("");
+                    }}
+                    className={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+                      manualStockOperation === "add"
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-100"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    + Increase
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualStockOperation("remove");
+                      setManualStockError("");
+                    }}
+                    className={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+                      manualStockOperation === "remove"
+                        ? "border-amber-500 bg-amber-50 text-amber-800 ring-2 ring-amber-100"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    − Decrease
+                  </button>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-700">
-                    Quantity to add
+                    Quantity to {manualStockOperation === "add" ? "add" : "remove"}
                   </label>
                   <input
                     type="number"
                     min="1"
                     step="1"
                     value={manualStockValue}
-                    onChange={(event) => setManualStockValue(event.target.value)}
+                    onChange={(event) => {
+                      setManualStockValue(event.target.value);
+                      setManualStockError("");
+                    }}
+                    autoFocus
                     className="mt-1 w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
                   />
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Current stock</span>
+                    <span className="font-semibold text-slate-800">
+                      {Math.max(Number(manualStockItem.stock) || 0, 0)} {manualStockItem.unit || "units"}
+                    </span>
+                  </div>
+                  <div className="my-3 border-t border-dashed border-slate-300" />
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-slate-700">New stock</span>
+                    <span className={`text-xl font-bold ${
+                      manualStockOperation === "remove" ? "text-amber-700" : "text-emerald-700"
+                    }`}>
+                      {Math.max(
+                        (Number(manualStockItem.stock) || 0) +
+                          (manualStockOperation === "add" ? 1 : -1) *
+                            (Number(manualStockValue) || 0),
+                        0
+                      )} {manualStockItem.unit || "units"}
+                    </span>
+                  </div>
                 </div>
                 {manualStockError ? (
                   <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -1240,10 +1411,18 @@ export default function ProductCatalogDashboard() {
                 <button
                   type="button"
                   onClick={() => void handleManualStockSave()}
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-                  disabled={manualStockSaving}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 ${
+                    manualStockOperation === "remove"
+                      ? "bg-amber-600 hover:bg-amber-700"
+                      : "bg-emerald-600 hover:bg-emerald-700"
+                  }`}
+                  disabled={manualStockSaving || !manualStockValue}
                 >
-                  {manualStockSaving ? "Saving..." : "Add Stock"}
+                  {manualStockSaving
+                    ? "Saving..."
+                    : manualStockOperation === "add"
+                      ? "Increase Stock"
+                      : "Decrease Stock"}
                 </button>
               </div>
             </div>

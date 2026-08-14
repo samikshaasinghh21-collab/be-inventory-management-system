@@ -14550,6 +14550,12 @@ app.post("/api/items", async (req, res) => {
 
     const cleanStock = Number.parseInt(stock, 10);
     const cleanPrice = Number.parseFloat(price);
+    if (Number.isFinite(cleanStock) && cleanStock < 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Opening stock cannot be negative",
+      });
+    }
     const cleanTaxPercentage = parseTaxPercentageValue(taxPercentage ?? gst);
     const validStock = Number.isFinite(cleanStock) ? cleanStock : 0;
     const validPrice = Number.isFinite(cleanPrice) ? cleanPrice : 0;
@@ -14664,6 +14670,12 @@ app.put("/api/items/:id", async (req, res) => {
 
     const cleanStock = Number.parseInt(stock, 10);
     const cleanPrice = Number.parseFloat(price);
+    if (Number.isFinite(cleanStock) && cleanStock < 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Available stock cannot be negative",
+      });
+    }
     const cleanTaxPercentage = parseTaxPercentageValue(taxPercentage ?? gst);
     const validStock = Number.isFinite(cleanStock) ? cleanStock : 0;
     const validPrice = Number.isFinite(cleanPrice) ? cleanPrice : 0;
@@ -14754,6 +14766,12 @@ app.patch("/api/items/:id/quantity", async (req, res) => {
     }
     if (!Number.isFinite(stock)) {
       return res.status(400).json({ ok: false, error: "Invalid stock value" });
+    }
+    if (stock < 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Available stock cannot be negative",
+      });
     }
 
     const pool = await getPool();

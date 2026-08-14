@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import LineItemsEditor from "./LineItemsEditor";
 import useSettings from "../../hooks/useSettings";
@@ -162,14 +162,101 @@ const formatLinkedPurchaseOrderSummary = (record = {}) => {
 };
 
 const getBoqRegisterItems = (record = {}) => {
-  if (
-    Array.isArray(record?.linkedPurchaseOrderItems) &&
-    record.linkedPurchaseOrderItems.length
-  ) {
-    return record.linkedPurchaseOrderItems;
-  }
   return Array.isArray(record?.items) ? record.items : [];
 };
+
+const toQuantity = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
+};
+
+const isExcludedPurchaseOrderStatus = (status) =>
+  ["cancelled", "canceled", "rejected", "void"].includes(
+    String(status || "").trim().toLowerCase()
+  );
+
+const getBoqLineProgress = (record = {}) => {
+  const movedByBoqItemId = new Map();
+  const purchaseOrdersByItemId = new Map();
+
+  (record.linkedPurchaseOrderItems || []).forEach((item) => {
+    if (isExcludedPurchaseOrderStatus(item.linkedPoStatus)) return;
+    const boqItemId = String(item.boqItemId ?? "").trim();
+    if (!boqItemId) return;
+    movedByBoqItemId.set(
+      boqItemId,
+      toQuantity(movedByBoqItemId.get(boqItemId)) +
+        toQuantity(item.quantity ?? item.orderedQty)
+    );
+    const references = purchaseOrdersByItemId.get(boqItemId) || new Set();
+    if (item.linkedPoNumber || item.linkedPurchaseOrderId) {
+      references.add(
+        item.linkedPoNumber || `PO #${item.linkedPurchaseOrderId}`
+      );
+    }
+    purchaseOrdersByItemId.set(boqItemId, references);
+  });
+
+  return getBoqRegisterItems(record).map((item, index) => {
+    const boqQty = toQuantity(item.quantity);
+    const boqItemId = String(item.id ?? item.lineItemId ?? "").trim();
+    const movedQty = Math.min(
+      toQuantity(movedByBoqItemId.get(boqItemId)),
+      boqQty
+    );
+    const remainingQty = Math.max(boqQty - movedQty, 0);
+    const movementStatus =
+      boqQty > 0 && remainingQty <= 0
+        ? "Fully Moved"
+        : movedQty > 0
+          ? "Partially Moved"
+          : "Pending";
+
+    return {
+      ...item,
+      progressKey: boqItemId || `boq-line-${index}`,
+      boqQty,
+      movedQty,
+      remainingQty,
+      movementStatus,
+      linkedPoReferences: Array.from(
+        purchaseOrdersByItemId.get(boqItemId) || []
+      ),
+    };
+  });
+};
+
+const getBoqMovementSummary = (record = {}) =>
+  getBoqLineProgress(record).reduce(
+    (summary, item) => ({
+      boqQty: summary.boqQty + item.boqQty,
+      movedQty: summary.movedQty + item.movedQty,
+      remainingQty: summary.remainingQty + item.remainingQty,
+      pendingLines:
+        summary.pendingLines + (item.movementStatus === "Pending" ? 1 : 0),
+      partialLines:
+        summary.partialLines +
+        (item.movementStatus === "Partially Moved" ? 1 : 0),
+      fullyMovedLines:
+        summary.fullyMovedLines +
+        (item.movementStatus === "Fully Moved" ? 1 : 0),
+    }),
+    {
+      boqQty: 0,
+      movedQty: 0,
+      remainingQty: 0,
+      pendingLines: 0,
+      partialLines: 0,
+      fullyMovedLines: 0,
+    }
+  );
+
+const movementStatusClass = (status) =>
+  ({
+    Pending: "bg-slate-100 text-slate-700",
+    "Partially Moved": "bg-amber-100 text-amber-800",
+    "Fully Moved": "bg-emerald-100 text-emerald-800",
+  })[status] || "bg-slate-100 text-slate-700";
 
 const attachLinkedPurchaseOrderItems = (boqs = [], purchaseOrders = []) => {
   const purchaseOrdersByBoqId = (Array.isArray(purchaseOrders) ? purchaseOrders : []).reduce(
@@ -190,10 +277,19 @@ const attachLinkedPurchaseOrderItems = (boqs = [], purchaseOrders = []) => {
   return (Array.isArray(boqs) ? boqs : []).map((boq) => {
     const linkedOrders = purchaseOrdersByBoqId[String(boq?.id)] ?? [];
     const linkedPurchaseOrderItems = linkedOrders.flatMap((order) =>
-      Array.isArray(order?.items) ? order.items : []
+      Array.isArray(order?.items)
+        ? order.items.map((item) => ({
+            ...item,
+            linkedPurchaseOrderId: order.id,
+            linkedPoNumber: order.poNumber,
+            linkedPoStatus: order.status,
+          }))
+        : []
     );
     return {
       ...boq,
+      linkedPurchaseOrders:
+        linkedOrders.length > 0 ? linkedOrders : boq.linkedPurchaseOrders || [],
       linkedPurchaseOrderItems,
     };
   });
@@ -213,6 +309,7 @@ const Boq = () => {
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [viewRecord, setViewRecord] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
   const navigate = useNavigate();
   const company = settings?.company || {};
   const logoUrl = resolveBrandLogo(company.logo || "");
@@ -819,62 +916,216 @@ const Boq = () => {
             {records.map((record) => {
               const registerItems = getBoqRegisterItems(record);
               const summary = buildGstSummary(registerItems);
+              const lineProgress = getBoqLineProgress(record);
+              const movementSummary = getBoqMovementSummary(record);
+              const isExpanded = String(expandedId) === String(record.id);
               return (
-                <tr key={record.id} className="border-t hover:bg-slate-50">
-                  <td className="p-3 font-medium text-slate-800">
-                    {record.boqNumber || "-"}
-                  </td>
-                  <td className="p-3">
-                    {projectMap[String(record.projectId)]?.name || "-"}
-                  </td>
-                  <td className="p-3">{record.version || "-"}</td>
-                  <td className="p-3">{record.status || "-"}</td>
-                  <td className="p-3 text-xs text-slate-600">
-                    {formatLinkedPurchaseOrderSummary(record)}
-                  </td>
-                  <td className="p-3">{registerItems.length || 0}</td>
-                  <td className="p-3 text-xs text-slate-600">
-                    {buildBoqLinePreview(registerItems)}
-                  </td>
-                  <td className="p-3">
-                    <GstSummaryBlock summary={summary} formatCurrency={formatCurrency} />
-                  </td>
-                  <td className="p-3 font-medium">
-                    {formatCurrency(summary.total)}
-                  </td>
-                  <td className="p-3">{formatDate(record.date) || "-"}</td>
-                  <td className="p-3 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => handleView(record)}
-                      className="text-slate-700 text-sm underline"
-                    >
-                      View
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePrint(record)}
-                      className="text-slate-600 text-sm"
-                    >
-                      Print
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleEdit(record)}
-                      className="text-indigo-600 text-sm"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(record.id)}
-                      className="text-red-600 text-sm"
-                      disabled={saving}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
+                <Fragment key={record.id}>
+                  <tr
+                    className={`cursor-pointer border-t transition hover:bg-slate-50 ${
+                      isExpanded ? "bg-indigo-50/60" : ""
+                    }`}
+                    onClick={() =>
+                      setExpandedId((current) =>
+                        String(current) === String(record.id) ? null : record.id
+                      )
+                    }
+                    aria-expanded={isExpanded}
+                  >
+                    <td className="p-3 font-medium text-slate-800">
+                      <span className="mr-2 inline-block text-xs text-slate-400">
+                        {isExpanded ? "▼" : "▶"}
+                      </span>
+                      {record.boqNumber || "-"}
+                    </td>
+                    <td className="p-3">
+                      {projectMap[String(record.projectId)]?.name || "-"}
+                    </td>
+                    <td className="p-3">{record.version || "-"}</td>
+                    <td className="p-3">{record.status || "-"}</td>
+                    <td className="p-3 text-xs text-slate-600">
+                      {formatLinkedPurchaseOrderSummary(record)}
+                    </td>
+                    <td className="p-3">{registerItems.length || 0}</td>
+                    <td className="p-3 text-xs text-slate-600">
+                      {buildBoqLinePreview(registerItems)}
+                    </td>
+                    <td className="p-3">
+                      <GstSummaryBlock summary={summary} formatCurrency={formatCurrency} />
+                    </td>
+                    <td className="p-3 font-medium">
+                      {formatCurrency(summary.total)}
+                    </td>
+                    <td className="p-3">{formatDate(record.date) || "-"}</td>
+                    <td className="p-3">
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleView(record);
+                          }}
+                          className="text-slate-700 text-sm underline"
+                        >
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handlePrint(record);
+                          }}
+                          className="text-slate-600 text-sm"
+                        >
+                          Print
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleEdit(record);
+                          }}
+                          className="text-indigo-600 text-sm"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleDelete(record.id);
+                          }}
+                          className="text-red-600 text-sm"
+                          disabled={saving}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {isExpanded && (
+                    <tr className="print-hidden border-t bg-slate-50/80">
+                      <td colSpan="11" className="p-5">
+                        <div className="space-y-5">
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="rounded-xl border border-slate-200 bg-white p-4">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                BOQ Quantity
+                              </p>
+                              <p className="mt-2 text-xl font-bold text-slate-950">
+                                {movementSummary.boqQty}
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                                Moved to PO
+                              </p>
+                              <p className="mt-2 text-xl font-bold text-blue-800">
+                                {movementSummary.movedQty}
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                Remaining BOQ
+                              </p>
+                              <p className="mt-2 text-xl font-bold text-amber-800">
+                                {movementSummary.remainingQty}
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                                Line Progress
+                              </p>
+                              <p className="mt-2 text-sm font-semibold text-emerald-900">
+                                {movementSummary.fullyMovedLines} fully moved ·{" "}
+                                {movementSummary.partialLines} partial ·{" "}
+                                {movementSummary.pendingLines} pending
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                            <p><strong>BOQ No:</strong> {record.boqNumber || record.id}</p>
+                            <p><strong>Project:</strong> {projectMap[String(record.projectId)]?.name || "-"}</p>
+                            <p><strong>Prepared By:</strong> {record.preparedBy || "-"}</p>
+                            <p><strong>Date:</strong> {formatDate(record.date) || "-"}</p>
+                            <p><strong>Version:</strong> {record.version || "-"}</p>
+                            <p><strong>Status:</strong> {record.status || "-"}</p>
+                            <p><strong>Linked POs:</strong> {getLinkedPurchaseOrders(record).length}</p>
+                            <p><strong>Total Value:</strong> {formatCurrency(summary.total)}</p>
+                          </div>
+
+                          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                            <div className="border-b border-slate-200 px-4 py-3">
+                              <h4 className="font-semibold text-slate-800">BOQ Line Movement</h4>
+                              <p className="mt-1 text-xs text-slate-500">
+                                BOQ Qty − quantity moved to active purchase orders = remaining BOQ quantity.
+                              </p>
+                            </div>
+                            <table className="min-w-[1350px] w-full text-sm">
+                              <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
+                                <tr>
+                                  <th className="p-3 text-left">Item</th>
+                                  <th className="p-3 text-left">HSN / GST</th>
+                                  <th className="p-3 text-left">Unit</th>
+                                  <th className="p-3 text-right">BOQ Qty</th>
+                                  <th className="p-3 text-right">Moved to PO</th>
+                                  <th className="p-3 text-right">Remaining Qty</th>
+                                  <th className="p-3 text-right">Unit Price</th>
+                                  <th className="p-3 text-right">BOQ Value</th>
+                                  <th className="p-3 text-left">Linked PO</th>
+                                  <th className="p-3 text-left">Movement Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {lineProgress.map((item) => (
+                                  <tr key={item.progressKey}>
+                                    <td className="p-3">
+                                      <p className="font-medium text-slate-900">{item.name || "-"}</p>
+                                      <p className="mt-1 max-w-xs text-xs text-slate-500">
+                                        {item.description || item.notes || "-"}
+                                      </p>
+                                    </td>
+                                    <td className="p-3 text-xs text-slate-600">
+                                      <p>HSN: {item.hsn || "-"}</p>
+                                      <p className="mt-1">GST: {item.gst || "-"}</p>
+                                    </td>
+                                    <td className="p-3">{item.unit || "-"}</td>
+                                    <td className="p-3 text-right font-semibold">{item.boqQty}</td>
+                                    <td className="p-3 text-right font-semibold text-blue-700">{item.movedQty}</td>
+                                    <td className="p-3 text-right font-semibold text-amber-700">{item.remainingQty}</td>
+                                    <td className="p-3 text-right">{formatCurrency(item.rate)}</td>
+                                    <td className="p-3 text-right font-medium">
+                                      {formatCurrency(item.boqQty * roundUnitPrice(item.rate))}
+                                    </td>
+                                    <td className="p-3 text-xs text-slate-600">
+                                      {item.linkedPoReferences.length
+                                        ? item.linkedPoReferences.join(", ")
+                                        : "Not linked"}
+                                    </td>
+                                    <td className="p-3">
+                                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${movementStatusClass(item.movementStatus)}`}>
+                                        {item.movementStatus}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {record.notes && (
+                            <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
+                              <p className="font-semibold text-slate-800">Notes</p>
+                              <p className="mt-2 whitespace-pre-wrap text-slate-600">{record.notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>

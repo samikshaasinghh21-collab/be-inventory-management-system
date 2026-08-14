@@ -630,7 +630,7 @@ const PurchaseOrderRegister = () => {
             />
           </div>
         </div>
-        <table className="min-w-[1280px] text-sm">
+        <table className="min-w-[1400px] text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="p-3 text-left min-w-[150px]">PO No</th>
@@ -639,6 +639,7 @@ const PurchaseOrderRegister = () => {
               <th className="p-3 text-left min-w-[160px]">Ship To</th>
               <th className="p-3 text-left min-w-[140px]">Status</th>
               <th className="p-3 text-left min-w-[120px]">Items</th>
+              <th className="p-3 text-right min-w-[130px]">Remaining Qty</th>
               <th className="p-3 text-left min-w-[140px]">Subtotal</th>
               <th className="p-3 text-left min-w-[140px]">GST</th>
               <th className="p-3 text-left min-w-[140px]">Total Value</th>
@@ -649,14 +650,14 @@ const PurchaseOrderRegister = () => {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   Loading purchase orders...
                 </td>
               </tr>
             )}
             {!loading && filteredRecords.length === 0 && (
               <tr>
-                <td colSpan="11" className="p-6 text-center text-slate-500">
+                <td colSpan="12" className="p-6 text-center text-slate-500">
                   {records.length === 0
                     ? "No purchase orders created yet."
                     : "No purchase orders match your search."}
@@ -673,6 +674,10 @@ const PurchaseOrderRegister = () => {
                 const summary = buildGstSummary(record.items || [], {
                   taxMode: getRecordTaxMode(record),
                 });
+                const remainingQty = (record.items || []).reduce(
+                  (total, item) => total + getPoItemQuantities(item).poBalance,
+                  0
+                );
                 const isLocked = isLockedPurchaseOrder(record.status);
                 const isCancelled = isCancelledPurchaseOrder(record.status);
                 const isUnlocked = isPoUnlocked(record.id);
@@ -691,6 +696,17 @@ const PurchaseOrderRegister = () => {
                       <td className="p-3">{location?.name || "-"}</td>
                       <td className="p-3">{statusBadge(record.status)}</td>
                       <td className="p-3">{record.items?.length || 0}</td>
+                      <td className="p-3 text-right">
+                        <span
+                          className={`inline-flex min-w-12 justify-center rounded-full px-2.5 py-1 font-semibold ${
+                            remainingQty > 0
+                              ? "bg-amber-50 text-amber-700"
+                              : "bg-emerald-50 text-emerald-700"
+                          }`}
+                        >
+                          {remainingQty}
+                        </span>
+                      </td>
                       <td className="p-3 font-medium">
                         {formatCurrency(summary.subtotal)}
                       </td>
@@ -807,7 +823,7 @@ const PurchaseOrderRegister = () => {
 
                     {expandedId === rowId && (
                       <tr className="bg-slate-50">
-                        <td colSpan="11" className="p-4">
+                        <td colSpan="12" className="p-4">
                           <div className="space-y-4">
                             {isLocked && (
                               <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
