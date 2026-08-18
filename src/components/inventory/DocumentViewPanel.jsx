@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { defaultBrandLogoUrl, resolveBrandLogo } from "../../utils/branding";
+import {
+  defaultBrandLogoUrl,
+  resolveBrandLogo,
+  resolveBrandName,
+} from "../../utils/branding";
 import { printSection } from "../../utils/printUtils";
 
 const toDisplay = (value) => {
@@ -18,6 +22,7 @@ const DocumentViewPanel = ({
   companyGstin = "",
   companyPhone = "",
   companyEmail = "",
+  hideCompanyName = false,
   hideCompanyGstin = false,
   hideCompanyEmail = false,
   logoUrl = "",
@@ -35,11 +40,21 @@ const DocumentViewPanel = ({
   bottomFullContent = null,
   bottomLeftContent = null,
   bottomRightContent = null,
+  bottomAfterContent = null,
   footerNote = "",
   footerCompanyName = "Bangalore Electronics",
   hideFooterNote = false,
+  compactFooter = false,
 }) => {
   const normalizedLogo = useMemo(() => resolveBrandLogo(logoUrl), [logoUrl]);
+  const normalizedCompanyName = useMemo(
+    () => resolveBrandName(companyName),
+    [companyName]
+  );
+  const normalizedFooterCompanyName = useMemo(
+    () => resolveBrandName(footerCompanyName),
+    [footerCompanyName]
+  );
   const [resolvedLogo, setResolvedLogo] = useState(normalizedLogo);
   const canPrint = Boolean(id);
   const normalizedCompanyEmail = String(companyEmail ?? "").trim();
@@ -54,6 +69,7 @@ const DocumentViewPanel = ({
     bottomRightContent || bottomRightTitle || bottomRightValue
   );
   const hasBottomFull = Boolean(bottomFullContent);
+  const hasBottomAfter = Boolean(bottomAfterContent);
 
   useEffect(() => {
     setResolvedLogo(normalizedLogo);
@@ -105,13 +121,15 @@ const DocumentViewPanel = ({
           <div className="mb-2">
             <img
               src={resolvedLogo}
-              alt={`${companyName || "Company"} logo`}
+              alt={`${normalizedCompanyName || "Company"} logo`}
               className="h-14 w-auto object-contain max-w-[260px]"
               style={{ height: 56, width: "auto", maxWidth: 260, objectFit: "contain" }}
               onError={() => setResolvedLogo(defaultBrandLogoUrl)}
             />
           </div>
-          <p className="font-semibold">{toDisplay(companyName)}</p>
+          {!hideCompanyName || String(companyName).trim().toLowerCase() === "be inventory" ? (
+            <p className="font-semibold">{toDisplay(normalizedCompanyName)}</p>
+          ) : null}
           <p className="text-[11px] whitespace-pre-line">
             {toDisplay(companyAddress)}
           </p>
@@ -260,11 +278,25 @@ const DocumentViewPanel = ({
         </div>
       )}
 
-      <div className="flex items-end justify-end p-3 text-[11px]">
+      {hasBottomAfter && (
+        <div className="print-breakable-section border-b border-slate-800 p-3 text-[11px]">
+          {bottomAfterContent}
+        </div>
+      )}
+
+      <div
+        className={`flex items-end justify-end text-[11px] ${
+          compactFooter ? "p-2" : "p-3"
+        }`}
+      >
         {!hideFooterNote && footerNote ? <p className="mr-auto">{footerNote}</p> : null}
         <div className="text-right">
-          <p className="font-semibold">For {toDisplay(footerCompanyName)}</p>
-          <div className="mt-8 border-t border-slate-700 pt-2">
+          <p className="font-semibold">For {toDisplay(normalizedFooterCompanyName)}</p>
+          <div
+            className={`border-t border-slate-700 ${
+              compactFooter ? "mt-2 pt-1" : "mt-8 pt-2"
+            }`}
+          >
             Authorised Signatory
           </div>
         </div>

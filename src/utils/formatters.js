@@ -15,6 +15,19 @@ export const roundUnitPrice = (value) => {
   return Number.isFinite(amount) ? Math.round(amount) : 0;
 };
 
+export const toWholeQuantity = (value) => {
+  if (value === "" || value === null || value === undefined) {
+    return 0;
+  }
+  const quantity = Number(value);
+  return Number.isFinite(quantity) ? Math.trunc(quantity) : 0;
+};
+
+export const formatQuantity = (value) =>
+  toWholeQuantity(value).toLocaleString("en-IN", {
+    maximumFractionDigits: 0,
+  });
+
 export const formatInrCurrency = (value) => {
   const amount = roundCurrencyValue(value);
   try {

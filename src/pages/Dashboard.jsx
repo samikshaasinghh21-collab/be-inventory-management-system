@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDate, parseDateValue } from "../utils/dateFormat";
-import { formatInrCurrency, roundUnitPrice } from "../utils/formatters";
+import {
+  formatInrCurrency,
+  formatQuantity,
+  roundUnitPrice,
+} from "../utils/formatters";
 import { ensureApiAvailable, isApiUnavailableError } from "../services/api";
 import { fetchProjects } from "../services/projectsApi";
 import {
@@ -916,7 +920,7 @@ const Dashboard = () => {
             />
             <SummaryCard
               title="Goods Delivered"
-              value={metrics.cards.deliveredQty.toLocaleString("en-IN")}
+              value={formatQuantity(metrics.cards.deliveredQty)}
               trend={`+${metrics.cards.deliveredThisMonth.toLocaleString("en-IN")}`}
               subtext="Items"
               accentClass="from-emerald-500 via-green-400 to-teal-300"
@@ -1046,7 +1050,7 @@ const Dashboard = () => {
                         <p className="text-lg font-semibold">Items Received</p>
                       </div>
                       <p className="mt-2 text-[44px] font-semibold leading-none tracking-tight text-slate-900">
-                        {metrics.cards.receivedQty.toLocaleString("en-IN")}
+                        {formatQuantity(metrics.cards.receivedQty)}
                       </p>
                       <p className="mt-2 text-sm text-emerald-600">
                         {metrics.cards.receivedGrowth >= 0 ? "+" : ""}

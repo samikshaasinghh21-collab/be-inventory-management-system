@@ -15,6 +15,7 @@ import useSettings from "../../hooks/useSettings";
 import { resolveBrandLogo } from "../../utils/branding";
 import { printSection } from "../../utils/printUtils";
 import { formatDateTimeDDMMYYYY } from "../../utils/dateFormat";
+import { formatQuantity } from "../../utils/formatters";
 import { fetchVendors } from "../../services/vendorsApi";
 import ReportFilters from "./reports/ReportFilters";
 import ReportTable from "./reports/ReportTable";
@@ -386,7 +387,7 @@ const ReportsPage = () => {
       metaRows: [
         { label: "Project", value: selectedProject?.name || "-" },
         { label: "Activities", value: filteredRows.length },
-        { label: "Total Qty", value: totalQuantity.toLocaleString("en-IN") },
+        { label: "Total Qty", value: formatQuantity(totalQuantity) },
         {
           label: "Received Qty",
           value: totalReceivedQuantity.toLocaleString("en-IN"),

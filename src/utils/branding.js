@@ -13,4 +13,11 @@ export const resolveBrandLogo = (logoUrl = "") => {
   return value;
 };
 
+export const resolveBrandName = (brandName = "") => {
+  const value = String(brandName || "").trim();
+  return value.toLowerCase() === "be inventory"
+    ? "BANGALORE ELECTRONICS"
+    : value || "BANGALORE ELECTRONICS";
+};
+
 export const defaultBrandLogoUrl = defaultBrandLogo;

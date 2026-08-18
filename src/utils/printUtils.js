@@ -135,6 +135,10 @@ const commonStyles = `
   .print-panel-body .document-view-panel > div {
     break-inside: avoid;
   }
+  .print-panel-body .document-view-panel > .print-breakable-section {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
   .print-body *,
   .document-view-panel * {
     max-width: 100%;
@@ -356,7 +360,10 @@ const buildDocument = ({
       : "";
 
   const normalizedLogo = makePngLogo(logoUrl);
-  const normalizedBrandName = brandName || "Bangalore Electronics";
+  const normalizedBrandName =
+    String(brandName || "").trim().toLowerCase() === "be inventory"
+      ? "BANGALORE ELECTRONICS"
+      : brandName || "BANGALORE ELECTRONICS";
   const normalizedBrandDescription = brandDescription || "Company address";
   const brandHeader =
     normalizedLogo || normalizedBrandName || normalizedBrandDescription

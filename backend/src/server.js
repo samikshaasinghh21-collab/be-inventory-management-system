@@ -1215,7 +1215,7 @@ const normalizeBoqItem = (row = {}) => {
     ? Math.max(quantity - consumedQty, 0)
     : null;
   return {
-    id: row.LineItemId ?? row.lineItemId ?? null,
+    id: row.id ?? row.LineItemId ?? row.lineItemId ?? null,
     boqId: row.BOQId ?? row.boqId ?? null,
     itemId,
     name: row.ItemName ?? row.name ?? "",
@@ -4642,55 +4642,14 @@ const validatePurchaseOrderBoqItemsAvailable = async (
   const safeProjectId = toNullableInt(projectId);
   const safeBoqId = toNullableInt(boqId);
   const safeExcludePurchaseOrderId = toNullableInt(excludePurchaseOrderId);
-  if (safeBoqId === null) {
+  const linkedItems = (Array.isArray(items) ? items : []).filter(
+    (item) => toNullableInt(item?.boqItemId) !== null
+  );
+  if (safeBoqId === null && !linkedItems.length) {
     return;
   }
 
   await ensureBoqTables();
-  const result = await new sql.Request(tx)
-    .input("BOQId", sql.Int, safeBoqId)
-    .query(`
-      SELECT TOP 1 BOQId, ProjectId, BOQNumber, Status
-      FROM dbo.BOQProjects
-      WHERE BOQId = @BOQId
-  `);
-
-  const boq = result.recordset?.[0] ?? null;
-  if (!boq) {
-    const error = new Error("Selected BOQ was not found.");
-    error.statusCode = 404;
-    throw error;
-  }
-
-  if (
-    safeProjectId !== null &&
-    toNullableInt(boq.ProjectId) !== safeProjectId
-  ) {
-    const error = new Error("The selected BOQ does not belong to the selected project.");
-    error.statusCode = 400;
-    error.details = {
-      projectId: safeProjectId,
-      boqId: safeBoqId,
-      boqProjectId: toNullableInt(boq.ProjectId),
-    };
-    throw error;
-  }
-
-  if (normalizeInventoryKeyValue(boq.Status) === "closed") {
-    const error = new Error(
-      `BOQ ${boq.BOQNumber || safeBoqId} is closed and cannot be linked to a purchase order.`
-    );
-    error.statusCode = 409;
-    throw error;
-  }
-
-  const linkedItems = (Array.isArray(items) ? items : []).filter(
-    (item) => toNullableInt(item?.boqItemId) !== null
-  );
-  if (!linkedItems.length) {
-    return;
-  }
-
   const requestedQtyByBoqItemId = new Map();
   linkedItems.forEach((item) => {
     const boqItemId = toNullableInt(item.boqItemId);
@@ -4706,25 +4665,75 @@ const validatePurchaseOrderBoqItemsAvailable = async (
 
   const boqItemIds = Array.from(requestedQtyByBoqItemId.keys());
   if (!boqItemIds.length) {
+    const headerResult = await new sql.Request(tx)
+      .input("BOQId", sql.Int, safeBoqId)
+      .query(`
+        SELECT TOP 1 BOQId, ProjectId, BOQNumber, Status
+        FROM dbo.BOQProjects
+        WHERE BOQId = @BOQId
+      `);
+    const headerBoq = headerResult.recordset?.[0] ?? null;
+    if (!headerBoq) {
+      const error = new Error("Selected BOQ was not found.");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (
+      safeProjectId !== null &&
+      toNullableInt(headerBoq.ProjectId) !== safeProjectId
+    ) {
+      const error = new Error("The selected BOQ does not belong to the selected project.");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (normalizeInventoryKeyValue(headerBoq.Status) === "closed") {
+      const error = new Error(
+        `BOQ ${headerBoq.BOQNumber || safeBoqId} is closed and cannot be linked to a purchase order.`
+      );
+      error.statusCode = 409;
+      throw error;
+    }
     return;
   }
 
   const itemReq = new sql.Request(tx);
   const inClause = buildPurchaseOrderItemInClause(itemReq, boqItemIds, "BoqItemId");
-  const itemResult = await itemReq
-    .input("BOQId", sql.Int, safeBoqId)
-    .query(`
-      SELECT LineItemId, BOQId, ItemId, ItemName, Quantity
-      FROM dbo.BOQLineItems
-      WHERE BOQId = @BOQId
-        AND LineItemId IN (${inClause})
+  const itemResult = await itemReq.query(`
+      SELECT bi.LineItemId, bi.BOQId, bi.ItemId, bi.ItemName, bi.Quantity,
+             bp.ProjectId, bp.BOQNumber, bp.Status
+      FROM dbo.BOQLineItems bi
+      INNER JOIN dbo.BOQProjects bp ON bp.BOQId = bi.BOQId
+      WHERE bi.LineItemId IN (${inClause})
     `);
 
   const boqRows = itemResult.recordset ?? [];
   if (boqRows.length !== boqItemIds.length) {
-    const error = new Error("One or more linked BOQ items do not belong to the selected BOQ.");
+    const error = new Error("One or more linked BOQ items could not be found.");
     error.statusCode = 400;
     throw error;
+  }
+
+  for (const row of boqRows) {
+    const rowBoqId = toNullableInt(row.BOQId);
+    if (safeBoqId !== null && rowBoqId !== safeBoqId) {
+      const error = new Error("The selected BOQ does not match the linked purchase-order items.");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (safeProjectId !== null && toNullableInt(row.ProjectId) !== safeProjectId) {
+      const error = new Error(
+        `BOQ ${row.BOQNumber || rowBoqId} does not belong to the selected project.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+    if (normalizeInventoryKeyValue(row.Status) === "closed") {
+      const error = new Error(
+        `BOQ ${row.BOQNumber || rowBoqId} is closed and cannot be linked to a purchase order.`
+      );
+      error.statusCode = 409;
+      throw error;
+    }
   }
 
   const orderedTotals = await loadBoqOrderedTotals(tx, boqItemIds, {
@@ -4744,7 +4753,7 @@ const validatePurchaseOrderBoqItemsAvailable = async (
       error.statusCode = 400;
       error.details = {
         projectId: safeProjectId,
-        boqId: safeBoqId,
+        boqId: toNullableInt(row.BOQId),
         boqItemId,
         itemId: toNullableInt(row.ItemId),
         boqQty,
@@ -4778,7 +4787,7 @@ const normalizeBoqItemsInput = (items = []) =>
           item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate
         ) ?? "",
       quantity:
-        Number(
+        Math.trunc(Number(
           item.quantity ??
             item.Quantity ??
             item.unitQty ??
@@ -4788,7 +4797,7 @@ const normalizeBoqItemsInput = (items = []) =>
             item.qty ??
             item.Qty ??
             0
-        ) || 0,
+        )) || 0,
       rate: Number(item.rate ?? item.Rate ?? item.unitPrice ?? item.UnitPrice ?? 0) || 0,
       notes: normalizeOptionalString(item.notes ?? item.Notes) ?? "",
     }))
@@ -20086,17 +20095,6 @@ app.post("/api/delivery-challans/:id/move", async (req, res) => {
       error.statusCode = 400;
       throw error;
     }
-    const targetLocationProjectId = toNullableInt(targetLocation.ProjectId);
-    if (
-      targetLocationProjectId !== null &&
-      targetLocationProjectId > 0 &&
-      targetLocationProjectId !== safeTargetProjectId
-    ) {
-      const error = new Error("The destination location does not belong to the selected destination project.");
-      error.statusCode = 400;
-      throw error;
-    }
-
     const availableRows = await loadAvailableInventoryRows(tx, {
       projectId: safeCurrentProjectId,
       locationId: safeFromLocationId,

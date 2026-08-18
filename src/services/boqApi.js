@@ -73,7 +73,7 @@ const normalizeBoqItem = (item = {}) => {
     : null;
   const amount = quantity * rate;
   return {
-    id: item.id ?? item.LineItemId ?? null,
+    id: item.id ?? item.lineItemId ?? item.LineItemId ?? null,
     boqId: item.boqId ?? item.BOQId ?? null,
     itemId: item.itemId ?? item.ItemId ?? item.inventoryItemId ?? item.InventoryItemId ?? null,
     name: item.name ?? item.ItemName ?? "",

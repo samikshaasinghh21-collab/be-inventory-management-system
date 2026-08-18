@@ -8,7 +8,7 @@ import {
 
 export const DEFAULT_SETTINGS = {
   profile: { fullName: "", email: "", phone: "", role: "", avatar: "", jobTitle: "", department: "" },
-  company: { name: "BE Inventory", email: "", phone: "", address: "", city: "", state: "", pincode: "", gstin: "" },
+  company: { name: "BANGALORE ELECTRONICS", email: "", phone: "", address: "", city: "", state: "", pincode: "", gstin: "" },
   preferences: { currency: "INR", dateFormat: "DD/MM/YYYY", timeZone: "Asia/Kolkata", language: "English", theme: "Light" },
   inventory: { defaultUnit: "PCS", lowStockThreshold: 5, reorderLevel: 10, valuationMethod: "FIFO", allowNegativeStock: false, autoReorder: false, trackBatch: false },
   notifications: { email: true, sms: false, lowStock: true, weeklySummary: false, projectUpdates: true },

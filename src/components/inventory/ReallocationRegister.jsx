@@ -10,6 +10,7 @@ import useSettings from "../../hooks/useSettings";
 import { defaultBrandLogoUrl, resolveBrandLogo } from "../../utils/branding";
 import { formatDate, parseDateValue } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
+import { formatQuantity } from "../../utils/formatters";
 
 const normalizeText = (value = "") => String(value).trim().toLowerCase();
 
@@ -17,12 +18,6 @@ const toQuantity = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-
-const formatQuantity = (value) =>
-  new Intl.NumberFormat("en-IN", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(toQuantity(value));
 
 const isDeliveryChallanReallocation = (record = {}) =>
   normalizeText(record.referenceType).replace(/\s+/g, "_") === "delivery_challan";

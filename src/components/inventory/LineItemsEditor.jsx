@@ -5,7 +5,11 @@ import {
   formatTaxPercentage,
   parseTaxPercentage,
 } from "../../utils/taxUtils";
-import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
+import {
+  formatInrCurrency,
+  roundUnitPrice,
+  toWholeQuantity,
+} from "../../utils/formatters";
 import AppIcon from "../layout/AppIcon";
 
 const createEmptyItem = (extraFieldKey = "notes") => {
@@ -263,6 +267,8 @@ const LineItemsEditor = ({
     let nextValue = value;
     if (field === "unit" && unitNumericOnly) {
       nextValue = sanitizeNumericValue(value);
+    } else if (field === "quantity" && value !== "") {
+      nextValue = String(toWholeQuantity(value));
     } else if (field === "rate" && value !== "") {
       nextValue = String(roundUnitPrice(value));
     }
@@ -508,6 +514,7 @@ const LineItemsEditor = ({
                     <input
                       type="number"
                       min="0"
+                      step="1"
                       value={item.quantity}
                       disabled={readOnly}
                       onChange={(event) =>

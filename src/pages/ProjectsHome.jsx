@@ -16,6 +16,7 @@ import { fetchCustomers } from "../services/customersApi";
 import { transformUppercaseFieldValue } from "../utils/inputTransform";
 import DateInput from "../components/common/DateInput";
 import { formatTimelineRange } from "../utils/dateFormat";
+import { formatQuantity } from "../utils/formatters";
 
 const STATUS_OPTIONS = ["Planned", "Active", "On Hold", "Completed"];
 const UPPERCASE_FIELDS = ["name", "code", "notes"];
@@ -197,11 +198,6 @@ const ProjectsHome = () => {
       return acc;
     }, {});
   }, [mrpSnapshot.recommendations]);
-
-  const formatQuantity = (value) =>
-    Number(value || 0).toLocaleString("en-IN", {
-      maximumFractionDigits: 2,
-    });
 
   const beginEdit = (project) => {
     setEditing(project);

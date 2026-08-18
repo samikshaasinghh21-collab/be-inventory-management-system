@@ -112,7 +112,8 @@ const createRecommendationLineItem = (recommendation = {}) => ({
   gst: recommendation.gst ?? "",
   serialNumber: "",
   serialRequired: false,
-  taxPercentage: recommendation.taxPercentage ?? 0,
+  taxPercentage:
+    recommendation.taxPercentage ?? parseTaxPercentage(recommendation.gst ?? 0),
   quantity: recommendation.recommendedOrder ?? recommendation.shortage ?? 0,
   rate: roundUnitPrice(recommendation.unitPrice ?? 0),
   notes: recommendation.notes ?? "",
@@ -164,7 +165,7 @@ const PurchaseOrder = () => {
   const [boqs, setBoqs] = useState([]);
   const [boqsLoading, setBoqsLoading] = useState(false);
   const [boqError, setBoqError] = useState("");
-  const [selectedBoqId, setSelectedBoqId] = useState("");
+  const [selectedBoqIds, setSelectedBoqIds] = useState([]);
   const [closedPoOverrideApproved, setClosedPoOverrideApproved] = useState(false);
   const [passwordPromptOpen, setPasswordPromptOpen] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
@@ -175,7 +176,7 @@ const PurchaseOrder = () => {
       setEditingId(record.id);
       setEditingStatus(record.status || "Draft");
       setClosedPoOverrideApproved(Boolean(location.state?.closedPoAuthorized));
-      setSelectedBoqId(record.boqId ? String(record.boqId) : "");
+      setSelectedBoqIds(record.boqId ? [String(record.boqId)] : []);
       setForm({
         poNumber: record.poNumber || "",
         projectId: record.projectId || "",
@@ -199,7 +200,8 @@ const PurchaseOrder = () => {
         gst: item.gst ?? "",
         serialNumber: item.serialNumber ?? "",
         serialRequired: item.serialRequired ?? false,
-        taxPercentage: item.taxPercentage ?? 0,
+        taxPercentage:
+          item.taxPercentage ?? parseTaxPercentage(item.gst ?? item.GST ?? 0),
         quantity: item.quantity ?? "",
           rate:
             item.unitPrice || item.unitPrice === 0 || item.rate || item.rate === 0
@@ -229,7 +231,7 @@ const PurchaseOrder = () => {
 
     setClosedPoOverrideApproved(false);
     setEditingStatus("");
-    setSelectedBoqId("");
+    setSelectedBoqIds([]);
     setForm((prev) => ({
       ...createFormState(),
       poNumber: prev.poNumber,
@@ -418,21 +420,34 @@ const PurchaseOrder = () => {
   // Keep BOQ selection aligned with the chosen project
   useEffect(() => {
     if (!form.projectId) {
-      setSelectedBoqId("");
+      setSelectedBoqIds([]);
       return;
     }
-    if (selectedBoqId) {
-      const match = boqs.find(
-        (boq) =>
-          String(boq.id) === String(selectedBoqId) &&
-          String(boq.projectId) === String(form.projectId) &&
-          !isClosedBoq(boq.status)
+    setSelectedBoqIds((current) => {
+      const validCurrent = current.filter((selectedId) =>
+        boqs.some(
+          (boq) =>
+            String(boq.id) === String(selectedId) &&
+            String(boq.projectId) === String(form.projectId) &&
+            !isClosedBoq(boq.status)
+        )
       );
-      if (!match) {
-        setSelectedBoqId("");
-      }
-    }
-  }, [form.projectId, selectedBoqId, boqs]);
+      if (!editingId) return validCurrent;
+
+      // Multi-BOQ orders are represented by the BOQ references on their lines.
+      const linkedBoqItemIds = new Set(
+        items.map((item) => String(item.boqItemId ?? "")).filter(Boolean)
+      );
+      const linkedBoqIds = boqs
+        .filter((boq) =>
+          (boq.items ?? []).some((item) =>
+            linkedBoqItemIds.has(String(item.id ?? item.boqItemId ?? ""))
+          )
+        )
+        .map((boq) => String(boq.id));
+      return linkedBoqIds.length ? linkedBoqIds : validCurrent;
+    });
+  }, [editingId, form.projectId, boqs, items]);
 
   const boqsForProject = useMemo(() => {
     if (!form.projectId) return [];
@@ -484,7 +499,7 @@ const PurchaseOrder = () => {
   const resetForm = () => {
     setForm(createFormState());
     setItems([createLineItem()]);
-    setSelectedBoqId("");
+    setSelectedBoqIds([]);
     setErrors({});
     setEditingId(null);
     setEditingStatus("");
@@ -557,7 +572,9 @@ const PurchaseOrder = () => {
       vendorId: form.vendorId || null,
       locationId: form.shipToLocationId || null,
       shipToLocationId: form.shipToLocationId || null,
-      boqId: selectedBoqId || null,
+      // Preserve the legacy header link for a single BOQ. Multiple BOQ links
+      // are persisted through each line item's boqItemId.
+      boqId: selectedBoqIds.length === 1 ? selectedBoqIds[0] : null,
       status: form.status,
       orderDate: form.orderDate || null,
       expectedDate: form.expectedDate || null,
@@ -609,18 +626,19 @@ const PurchaseOrder = () => {
   };
 
   const applyBoqToItems = () => {
-    const boq = boqs.find((b) => String(b.id) === String(selectedBoqId));
-    if (!boq) {
-      setBoqError("Select a BOQ to import.");
+    const selectedBoqs = boqs.filter((boq) =>
+      selectedBoqIds.includes(String(boq.id))
+    );
+    if (!selectedBoqs.length) {
+      setBoqError("Select at least one BOQ to import.");
       return;
     }
-    if (isClosedBoq(boq.status)) {
+    if (selectedBoqs.some((boq) => isClosedBoq(boq.status))) {
       setBoqError("Closed BOQs cannot be linked to a purchase order.");
       return;
     }
-    const boqItems = Array.isArray(boq.items) ? boq.items : [];
-
-    const mapped = boqItems
+    const mapped = selectedBoqs
+      .flatMap((boq) => (Array.isArray(boq.items) ? boq.items : []))
       .map((item) => {
         const qty = getBoqRemainingQuantity(item);
         if (qty <= 0) {
@@ -656,7 +674,7 @@ const PurchaseOrder = () => {
       .filter(Boolean);
 
     if (!mapped.length) {
-      setBoqError("The selected BOQ has no remaining line items to import.");
+      setBoqError("The selected BOQs have no remaining line items to import.");
       return;
     }
 
@@ -986,44 +1004,57 @@ const PurchaseOrder = () => {
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-sm font-medium text-slate-700">
-                    Link a BOQ (optional)
+                    Link BOQs (optional)
                   </p>
                   <p className="text-xs text-slate-500">
-                    Import scope and quantities from an approved BOQ for this project.
+                    Select one or more approved BOQs and import them into this purchase order.
                   </p>
                 </div>
                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                  <select
-                    value={selectedBoqId}
-                    onChange={(event) => setSelectedBoqId(event.target.value)}
-                    disabled={!form.projectId || boqsLoading || isEditingLockedWithoutOverride}
-                    className="w-full md:w-64 border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                  >
-                    <option value="">
-                      {boqsLoading
-                        ? "Loading BOQs..."
-                        : form.projectId
-                        ? boqsForProject.length
-                          ? "Select BOQ"
-                          : "No BOQs for this project"
-                        : "Select a project first"}
-                    </option>
-                    {boqsForProject.map((boq) => {
+                  <div className="w-full md:w-80 max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 text-sm">
+                    {boqsLoading || !form.projectId || !boqsForProject.length ? (
+                      <p className="px-2 py-1 text-slate-500">
+                        {boqsLoading
+                          ? "Loading BOQs..."
+                          : form.projectId
+                          ? "No BOQs for this project"
+                          : "Select a project first"}
+                      </p>
+                    ) : boqsForProject.map((boq) => {
                       const totalLines = Array.isArray(boq.items)
                         ? boq.items.filter((item) => getBoqRemainingQuantity(item) > 0).length
                         : 0;
+                      const value = String(boq.id);
                       return (
-                        <option key={boq.id} value={boq.id}>
-                          {boq.boqNumber} | v{boq.version} | {boq.status || "Draft"}
-                          {totalLines ? ` | ${totalLines} items` : ""}
-                        </option>
+                        <label
+                          key={boq.id}
+                          className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedBoqIds.includes(value)}
+                            onChange={(event) =>
+                              setSelectedBoqIds((current) =>
+                                event.target.checked
+                                  ? [...current, value]
+                                  : current.filter((id) => id !== value)
+                              )
+                            }
+                            disabled={isEditingLockedWithoutOverride}
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600"
+                          />
+                          <span>
+                            {boq.boqNumber} | v{boq.version} | {boq.status || "Draft"}
+                            {totalLines ? ` | ${totalLines} items` : ""}
+                          </span>
+                        </label>
                       );
                     })}
-                  </select>
+                  </div>
                   <button
                     type="button"
                     onClick={applyBoqToItems}
-                    disabled={!selectedBoqId || boqsLoading || isEditingLockedWithoutOverride}
+                    disabled={!selectedBoqIds.length || boqsLoading || isEditingLockedWithoutOverride}
                     className="md:ml-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
                   >
                     Use BOQ Items
@@ -1035,49 +1066,24 @@ const PurchaseOrder = () => {
                   {boqsLoading ? "Fetching BOQs..." : boqError}
                 </p>
               )}
-              {selectedBoqId && (
+              {selectedBoqIds.length > 0 && (
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-600">
-                  {(() => {
-                    const selectedBoq = boqs.find(
-                      (b) => String(b.id) === String(selectedBoqId)
-                    );
-                    if (!selectedBoq) return null;
-                    return (
-                      <>
-                        <div className="rounded-md bg-white border border-slate-200 p-3">
-                          <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                            BOQ
-                          </p>
-                          <p className="font-semibold text-slate-800">
-                            {selectedBoq.boqNumber} (v{selectedBoq.version})
-                          </p>
-                          <p className="text-slate-500">{selectedBoq.status || "Draft"}</p>
-                        </div>
-                        <div className="rounded-md bg-white border border-slate-200 p-3">
-                          <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                            Prepared By
-                          </p>
-                          <p className="font-semibold text-slate-800">
-                            {selectedBoq.preparedBy || "-"}
-                          </p>
-                          <p className="text-slate-500">
-                            {selectedBoq.date || "No date"}
-                          </p>
-                        </div>
-                        <div className="rounded-md bg-white border border-slate-200 p-3">
-                          <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                            Estimated Value
-                          </p>
-                          <p className="font-semibold text-slate-800">
-                            {formatCurrency(selectedBoq.total || 0)}
-                          </p>
-                          <p className="text-slate-500">
-                            {selectedBoq.items?.length || 0} items
-                          </p>
-                        </div>
-                      </>
-                    );
-                  })()}
+                  {boqs
+                    .filter((boq) => selectedBoqIds.includes(String(boq.id)))
+                    .map((selectedBoq) => (
+                      <div key={selectedBoq.id} className="rounded-md bg-white border border-slate-200 p-3">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">BOQ</p>
+                        <p className="font-semibold text-slate-800">
+                          {selectedBoq.boqNumber} (v{selectedBoq.version})
+                        </p>
+                        <p className="text-slate-500">
+                          {selectedBoq.preparedBy || "-"} · {selectedBoq.items?.length || 0} items
+                        </p>
+                        <p className="mt-1 font-medium text-slate-700">
+                          {formatCurrency(selectedBoq.total || 0)}
+                        </p>
+                      </div>
+                    ))}
                 </div>
               )}
             </div>

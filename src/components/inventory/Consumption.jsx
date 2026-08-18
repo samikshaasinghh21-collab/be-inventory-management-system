@@ -17,6 +17,7 @@ import useSettings from "../../hooks/useSettings";
 import DateInput from "../common/DateInput";
 import DocumentViewPanel from "./DocumentViewPanel";
 import { formatDate } from "../../utils/dateFormat";
+import { formatQuantity, toWholeQuantity } from "../../utils/formatters";
 import {
   getActiveProjectId,
   setActiveProjectId,
@@ -62,10 +63,7 @@ const toNullableInt = (value) => {
 
 const normalizeText = (value = "") => String(value ?? "").trim().toLowerCase();
 
-const formatQty = (value) =>
-  (Number(value) || 0).toLocaleString("en-IN", {
-    maximumFractionDigits: 2,
-  });
+const formatQty = formatQuantity;
 
 const resolveConsumptionProjectId = (record = {}, deliveryChallanMap = {}) => {
   const directProjectId = record.projectId ?? null;
@@ -266,17 +264,14 @@ const isSameDay = (left, right) =>
   left.getDate() === right.getDate();
 
 const formatQuantityInputText = (value) =>
-  Math.max(toNumber(value), 0)
-    .toFixed(2)
-    .replace(/\.00$/, "")
-    .replace(/(\.\d*[1-9])0$/, "$1");
+  String(Math.max(toWholeQuantity(value), 0));
 
 const clampQuantityText = (rawValue) => {
   const next = String(rawValue ?? "").trim();
   if (!next) {
     return "";
   }
-  if (!/^\d*(?:\.\d{0,2})?$/.test(next)) {
+  if (!/^\d*$/.test(next)) {
     return null;
   }
 
@@ -288,7 +283,10 @@ const clampQuantityText = (rawValue) => {
 };
 
 const clampRequestedQuantity = (value, availableQty) =>
-  Math.min(Math.max(toNumber(value), 0), Math.max(toNumber(availableQty), 0));
+  Math.min(
+    Math.max(toWholeQuantity(value), 0),
+    Math.max(toWholeQuantity(availableQty), 0)
+  );
 
 const hasQuantityValue = (value) =>
   value !== null && value !== undefined && value !== "";
@@ -1213,6 +1211,15 @@ const Consumption = () => {
     }
     return locations;
   }, [form.projectId, locations]);
+
+  const consumptionLocationOptions = useMemo(() => {
+    return locations.filter(
+      (location) =>
+        !["inactive", "disabled", "archived"].includes(
+          normalizeText(location.status || "active")
+        )
+    );
+  }, [locations]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2335,8 +2342,8 @@ const Consumption = () => {
         unit: row.unit || "PCS",
         hsn: row.hsn || "",
         gst: row.gst || "",
-        quantity: Math.max(toNumber(row.consumeQty), 0),
-        consumeQty: Math.max(toNumber(row.consumeQty), 0),
+        quantity: Math.max(toWholeQuantity(row.consumeQty), 0),
+        consumeQty: Math.max(toWholeQuantity(row.consumeQty), 0),
         rate: Math.max(toNumber(row.rate), 0),
         notes: row.notes || "",
       }))
@@ -2859,7 +2866,7 @@ const Consumption = () => {
                 <option value="">
                   {form.projectId ? "Select destination location" : "Select project first"}
                 </option>
-                {selectedProjectLocations.map((location) => (
+                {consumptionLocationOptions.map((location) => (
                   <option key={location.id} value={location.id}>
                     {location.name}
                   </option>
@@ -3425,9 +3432,9 @@ const Consumption = () => {
                           <input
                             className={qtyInput}
                             type="number"
-                            inputMode="decimal"
+                            inputMode="numeric"
                             min="0"
-                            step="0.01"
+                            step="1"
                             max={row.maxAvailableQty}
                             value={row.consumeQty}
                             placeholder="0"

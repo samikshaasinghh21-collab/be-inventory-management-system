@@ -774,7 +774,7 @@ const CreateProduct = () => {
                   <span className="text-sm font-medium text-slate-700">Current Stock</span>
                   <input
                     readOnly
-                    value={Number(form.currentStock || 0).toFixed(2)}
+                    value={Math.trunc(Number(form.currentStock) || 0)}
                     className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none"
                   />
                 </label>

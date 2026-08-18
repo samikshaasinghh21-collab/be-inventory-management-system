@@ -16,7 +16,11 @@ import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
 import DocumentViewPanel from "./DocumentViewPanel";
 import { buildGstSummary } from "../../utils/taxUtils";
-import { formatInrCurrency, roundUnitPrice } from "../../utils/formatters";
+import {
+  formatInrCurrency,
+  roundUnitPrice,
+  toWholeQuantity,
+} from "../../utils/formatters";
 import {
   getActiveProjectId,
   setActiveProjectId,
@@ -505,7 +509,7 @@ const Boq = () => {
       (item) => item.name.trim() || Number(item.quantity) > 0
     );
     const total = cleanedItems.reduce((sum, item) => {
-      const qty = Number(item.quantity) || 0;
+      const qty = toWholeQuantity(item.quantity);
       const rate = roundUnitPrice(item.rate);
       return sum + qty * rate;
     }, 0);
@@ -519,7 +523,7 @@ const Boq = () => {
       date: form.date,
       notes: form.notes,
       items: cleanedItems.map((item) => ({
-        id: item.lineItemId ?? null,
+        id: item.lineItemId ?? item.id ?? null,
         itemId: item.itemId ?? null,
         name: item.name,
         description: item.description,
@@ -527,7 +531,7 @@ const Boq = () => {
         unit: item.unit,
         hsn: item.hsn,
         gst: item.gst,
-        quantity: Number(item.quantity) || 0,
+        quantity: toWholeQuantity(item.quantity),
         availableQty:
           Number(item.availableQty ?? item.inventoryQty ?? item.currentStock ?? item.stock ?? 0) ||
           0,
@@ -576,8 +580,8 @@ const Boq = () => {
     setItems(
       record.items?.length
         ? record.items.map((item) => ({
-            id: item.id ?? Date.now() + Math.random(),
-            lineItemId: item.id ?? null,
+            id: item.id ?? item.lineItemId ?? Date.now() + Math.random(),
+            lineItemId: item.lineItemId ?? item.id ?? null,
             itemId: item.itemId ?? null,
             name: item.name ?? "",
             description: item.description ?? "",
@@ -589,7 +593,10 @@ const Boq = () => {
             inventoryQty: item.inventoryQty ?? item.currentStock ?? item.stock ?? null,
             currentStock: item.currentStock ?? item.stock ?? null,
             stock: item.stock ?? item.currentStock ?? null,
-            quantity: item.quantity ?? "",
+            quantity:
+              item.quantity === null || item.quantity === undefined
+                ? ""
+                : toWholeQuantity(item.quantity),
             rate: item.rate || item.rate === 0 ? roundUnitPrice(item.rate) : "",
             notes: item.notes ?? "",
           }))
@@ -872,7 +879,10 @@ const Boq = () => {
                       subtitle: "Approved bill of quantities log",
                       metaRows: boqRegisterMeta,
                       logoUrl,
-                      brandName,
+                      brandName:
+                        String(brandName).trim().toLowerCase() === "be inventory"
+                          ? "BANGALORE ELECTRONICS"
+                          : brandName,
                       brandDescription,
                     })
                   }
@@ -1141,6 +1151,7 @@ const Boq = () => {
           title="BILL OF QUANTITY"
           onClose={() => setViewRecord(null)}
           companyName={brandName}
+          hideCompanyName={String(brandName).trim().toLowerCase() === "be inventory"}
           companyAddress={brandDescription}
           companyGstin={company.gstin}
           companyPhone={company.phone}
@@ -1195,7 +1206,7 @@ const Boq = () => {
               align="right"
             />
           }
-          footerCompanyName={brandName}
+          footerCompanyName="Bangalore Electronics"
         />
           );
         })()

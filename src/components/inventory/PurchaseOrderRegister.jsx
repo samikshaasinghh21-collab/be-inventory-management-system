@@ -957,6 +957,7 @@ const PurchaseOrderRegister = () => {
           title="PURCHASE ORDER"
           onClose={() => setViewRecord(null)}
           companyName={brandName}
+          hideCompanyName={String(brandName).trim().toLowerCase() === "be inventory"}
           companyAddress={brandDescription}
           companyGstin={company.gstin}
           companyPhone={company.phone}
@@ -983,7 +984,7 @@ const PurchaseOrderRegister = () => {
           ]}
           tableColumns={[
             { key: "name", label: "Item" },
-            { key: "description", label: "Description" },
+            { key: "description", label: "DESCRIPTION" },
             { key: "unit", label: "Unit", widthClass: "w-20" },
             { key: "ordered", label: "Qty", align: "right", widthClass: "w-20" },
             { key: "rate", label: "Unit Price", align: "right", widthClass: "w-24" },
@@ -1005,6 +1006,30 @@ const PurchaseOrderRegister = () => {
             };
           })}
           bottomFullContent={
+            isLockedPurchaseOrder(viewRecord.status) ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {getPurchaseOrderLockMessage(viewRecord.status)}
+              </div>
+            ) : null
+          }
+          bottomLeftContent={
+            <div className="text-left text-xs">
+              <div>
+                <p className="font-semibold">NOTES</p>
+                <p className="whitespace-pre-wrap text-slate-700">
+                  {viewRecord.notes || "-"}
+                </p>
+              </div>
+            </div>
+          }
+          bottomRightContent={
+            <GstSummaryBlock
+              summary={summary}
+              formatCurrency={formatCurrency}
+              align="right"
+            />
+          }
+          bottomAfterContent={
             <div className="text-left">
               <p className="mb-2 font-semibold uppercase tracking-wide">
                 Terms &amp; Conditions
@@ -1015,34 +1040,9 @@ const PurchaseOrderRegister = () => {
               />
             </div>
           }
-          bottomLeftContent={
-            isLockedPurchaseOrder(viewRecord.status) || viewRecord.notes ? (
-              <div className="space-y-3 text-left text-xs">
-                {isLockedPurchaseOrder(viewRecord.status) && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                    {getPurchaseOrderLockMessage(viewRecord.status)}
-                  </div>
-                )}
-                {viewRecord.notes && (
-                  <div>
-                    <p className="font-semibold">Notes</p>
-                    <p className="whitespace-pre-wrap text-slate-700">
-                      {viewRecord.notes}
-                    </p>
-                  </div>
-                )}
-              </div>
-            ) : null
-          }
-          bottomRightContent={
-            <GstSummaryBlock
-              summary={summary}
-              formatCurrency={formatCurrency}
-              align="right"
-            />
-          }
-          footerCompanyName={brandName || "Company"}
+          footerCompanyName="Bangalore Electronics"
           hideFooterNote
+          compactFooter
         />
           );
         })()

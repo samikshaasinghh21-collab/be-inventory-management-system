@@ -49,7 +49,7 @@ import {
   updateMilestone,
 } from "../../services/projectManagementApi";
 import { formatDate } from "../../utils/dateFormat";
-import { formatInrCurrency } from "../../utils/formatters";
+import { formatInrCurrency, formatQuantity } from "../../utils/formatters";
 import { printSection } from "../../utils/printUtils";
 
 const STATUS_OPTIONS = [
@@ -3384,12 +3384,12 @@ const ProjectDetailDrawer = ({
                           <td className="px-4 py-3 text-right font-semibold text-slate-900">
                             {item.unit === "INR"
                               ? formatInrCurrency(item.requiredQty ?? item.reserved)
-                              : numberValue(item.requiredQty ?? item.reserved).toLocaleString("en-IN")}
+                              : formatQuantity(item.requiredQty ?? item.reserved)}
                           </td>
                           <td className="px-4 py-3 text-right text-slate-600">
                             {item.unit === "INR"
                               ? formatInrCurrency(item.issuedQty ?? item.issued)
-                              : numberValue(item.issuedQty ?? item.issued).toLocaleString("en-IN")}
+                              : formatQuantity(item.issuedQty ?? item.issued)}
                           </td>
                           <td className="px-4 py-3 text-right font-semibold text-slate-900">
                             {item.unit === "INR"
@@ -3398,11 +3398,11 @@ const ProjectDetailDrawer = ({
                                     numberValue(item.requiredQty ?? item.reserved) -
                                       numberValue(item.issuedQty ?? item.issued)
                                 )
-                              : numberValue(
+                              : formatQuantity(
                                   item.remainingQty ??
                                     numberValue(item.requiredQty ?? item.reserved) -
                                       numberValue(item.issuedQty ?? item.issued)
-                                ).toLocaleString("en-IN")}
+                                )}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {item.unit || "-"}

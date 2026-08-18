@@ -1,3 +1,5 @@
+import { formatQuantity } from "../../../utils/formatters";
+
 const WorkflowSummary = ({
   projectName = "",
   stages = [],
@@ -14,7 +16,7 @@ const WorkflowSummary = ({
           {projectName || "Select a project"}
         </h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          {totalActivities} activities across {totalQuantity.toLocaleString("en-IN")} quantity.
+          {totalActivities} activities across {formatQuantity(totalQuantity)} quantity.
         </p>
       </div>
 
@@ -37,14 +39,14 @@ const WorkflowSummary = ({
                   </p>
                   <p className="mt-1 text-sm text-slate-500">
                     {stage.count > 0
-                      ? `${stage.count} records | ${stage.totalQty.toLocaleString("en-IN")} qty`
+                      ? `${stage.count} records | ${formatQuantity(stage.totalQty)} qty`
                       : "No activity yet"}
                   </p>
                   {stage.count > 0 ? (
                     <p className="mt-1 text-xs text-slate-500">
-                      Received {stage.totalReceivedQty.toLocaleString("en-IN")} | Available{" "}
-                      {stage.totalAvailableQty.toLocaleString("en-IN")} | Balance{" "}
-                      {stage.totalBalanceQty.toLocaleString("en-IN")}
+                      Received {formatQuantity(stage.totalReceivedQty)} | Available{" "}
+                      {formatQuantity(stage.totalAvailableQty)} | Balance{" "}
+                      {formatQuantity(stage.totalBalanceQty)}
                     </p>
                   ) : null}
                   {stage.latestRefNo ? (

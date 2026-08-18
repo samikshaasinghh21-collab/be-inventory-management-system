@@ -1,6 +1,7 @@
 import api from "./api";
 import { DEFAULT_PURCHASE_ORDER_TERMS } from "../utils/purchaseOrderTerms";
 import { roundUnitPrice } from "../utils/formatters";
+import { parseTaxPercentage } from "../utils/taxUtils";
 
 const emitPurchaseOrdersChange = ({
   includeBoqs = false,
@@ -67,7 +68,15 @@ const normalizePoItem = (item = {}) => {
     serialRequired: !["0", "false", "no"].includes(
       String(serialRequiredRaw).trim().toLowerCase()
     ),
-    taxPercentage: Number(item.taxPercentage ?? item.TaxPercentage ?? 0),
+    taxPercentage: parseTaxPercentage(
+      item.taxPercentage ??
+        item.TaxPercentage ??
+        item.gst ??
+        item.GST ??
+        item.gstRate ??
+        item.GSTRate ??
+        0
+    ),
     location: item.location ?? item.Location ?? item.notes ?? item.Notes ?? "",
     notes: item.notes ?? item.Notes ?? item.location ?? item.Location ?? "",
     quantity,

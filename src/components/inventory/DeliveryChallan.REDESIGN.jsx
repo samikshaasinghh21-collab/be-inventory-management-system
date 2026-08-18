@@ -14,6 +14,7 @@ import DateInput from "../common/DateInput";
 import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
 import { defaultBrandLogoUrl, resolveBrandLogo } from "../../utils/branding";
+import { formatQuantity } from "../../utils/formatters";
 import {
   getActiveProjectId,
   setActiveProjectId,
@@ -103,8 +104,7 @@ const getReceiptItemAvailableQty = (item = {}) =>
 const getReceiptLocationId = (receipt = {}) =>
   String(receipt.locationId ?? receipt.LocationId ?? "").trim();
 
-const fmtQty = (value) =>
-  (Number(value) || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const fmtQty = formatQuantity;
 
 const ReceiptSelectionTable = ({
   receipts,

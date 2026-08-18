@@ -2,6 +2,7 @@ import {
   formatReportDate,
   getStatusBadgeClass,
 } from "./reportUtils";
+import { formatQuantity } from "../../../utils/formatters";
 
 const PAGE_SIZE = 10;
 
@@ -101,22 +102,22 @@ const ReportTable = ({
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">
                     {row.totalQty === null
                       ? "-"
-                      : Number(row.totalQty || 0).toLocaleString("en-IN")}
+                      : formatQuantity(row.totalQty)}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">
                     {row.receivedQty === null
                       ? "-"
-                      : Number(row.receivedQty || 0).toLocaleString("en-IN")}
+                      : formatQuantity(row.receivedQty)}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">
                     {row.availableQty === null
                       ? "-"
-                      : Number(row.availableQty || 0).toLocaleString("en-IN")}
+                      : formatQuantity(row.availableQty)}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">
                     {row.balanceQty === null
                       ? "-"
-                      : Number(row.balanceQty || 0).toLocaleString("en-IN")}
+                      : formatQuantity(row.balanceQty)}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">
                     {Number(row.qty || 0).toLocaleString("en-IN")}

@@ -2,7 +2,11 @@ import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import useMrpPlanning from "../hooks/useMrpPlanning";
 import { formatDate } from "../utils/dateFormat";
-import { formatInrCurrency, roundUnitPrice } from "../utils/formatters";
+import {
+  formatInrCurrency,
+  formatQuantity,
+  roundUnitPrice,
+} from "../utils/formatters";
 
 const statusMeta = {
   ok: {
@@ -28,11 +32,6 @@ const MaterialPlanning = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedProjectId = searchParams.get("projectId") || "all";
   const selectedProductId = searchParams.get("productId") || "all";
-
-  const formatQuantity = (value) =>
-    Number(value || 0).toLocaleString("en-IN", {
-      maximumFractionDigits: 2,
-    });
 
   const formatCurrency = formatInrCurrency;
 

@@ -41,6 +41,7 @@ import DocumentViewPanel from "./DocumentViewPanel";
 import { formatDate } from "../../utils/dateFormat";
 import { printSection } from "../../utils/printUtils";
 import { resolveBrandLogo } from "../../utils/branding";
+import { formatQuantity, toWholeQuantity } from "../../utils/formatters";
 import {
   getActiveProjectId,
   setActiveProjectId,
@@ -271,8 +272,7 @@ const mapReceiptItemsToChallanItems = (
     .filter(Boolean)
     .filter((item) => item.name && Number(item.quantity) > 0);
 
-const fmtQty = (value) =>
-  (Number(value) || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const fmtQty = formatQuantity;
 
 const toQuantity = (value) => Number(value) || 0;
 
@@ -416,6 +416,7 @@ const CHALLAN_DETAIL_TABS = {
 const createReallocationModalState = (requestedBy = "") => ({
   open: false,
   record: null,
+  records: [],
   currentProjectId: "",
   currentLocationId: "",
   targetProjectId: "",
@@ -734,6 +735,7 @@ const DeliveryChallan = () => {
     error: "",
     rows: [],
   });
+  const [selectedDcLookupIds, setSelectedDcLookupIds] = useState([]);
   const [reallocationModal, setReallocationModal] = useState(
     createReallocationModalState()
   );
@@ -1064,6 +1066,21 @@ const DeliveryChallan = () => {
         ),
     }));
   }, [dcLookup.rows]);
+  const selectedDcLookupEntries = useMemo(
+    () =>
+      dcLookupEntries.filter(({ record }) =>
+        selectedDcLookupIds.includes(String(record.id))
+      ),
+    [dcLookupEntries, selectedDcLookupIds]
+  );
+  const selectedDcLookupQuantity = useMemo(
+    () =>
+      selectedDcLookupEntries.reduce(
+        (sum, entry) => sum + toQuantity(entry.availableQty),
+        0
+      ),
+    [selectedDcLookupEntries]
+  );
   const dcLookupLocations = useMemo(() => {
     const selectedProjectId = String(dcLookup.projectId ?? "");
     return locations
@@ -1674,7 +1691,10 @@ const DeliveryChallan = () => {
         title: "Delivery Challan",
         subtitle: record.dcNumber || "Dispatch copy",
         logoUrl: company.logo || "",
-        brandName: companyName,
+        brandName:
+          String(companyName).trim().toLowerCase() === "be inventory"
+            ? "BANGALORE ELECTRONICS"
+            : companyName,
         brandDescription: company.address || "Company address",
       });
     }, 80);
@@ -1780,13 +1800,80 @@ const DeliveryChallan = () => {
     }
   };
 
+  const handleOpenSelectedReallocations = () => {
+    if (!selectedDcLookupEntries.length || !dcLookup.locationId) {
+      return;
+    }
+    if (selectedDcLookupEntries.length === 1) {
+      const [{ record, availableRows }] = selectedDcLookupEntries;
+      void handleOpenReallocation(record, {
+        currentProjectId: dcLookup.projectId,
+        currentLocationId: dcLookup.locationId,
+        availableRows,
+      });
+      return;
+    }
+
+    const selectedRecords = selectedDcLookupEntries.map(({ record }) => record);
+    const linkedRows = selectedDcLookupEntries.flatMap(
+      ({ record, availableRows }) =>
+        availableRows
+          .map((row, index) => {
+            const availableQty = Math.max(Number(row.availableQty) || 0, 0);
+            const sourceIdentity =
+              row.sourceRowId ||
+              row.sourceKey ||
+              row.deliveryChallanItemId ||
+              row.receiveGoodsItemId ||
+              index;
+            return {
+              id: `${record.id}-${sourceIdentity}`,
+              name: row.name || `Item ${index + 1}`,
+              description: row.description || "",
+              unit: row.unit || "PCS",
+              quantity: String(availableQty),
+              availableQty,
+              sourceQty: Math.max(Number(row.sourceQty) || 0, 0),
+              sourceKey: row.sourceKey || "",
+              sourceRowId: row.sourceRowId || row.sourceKey || "",
+              sourceRef: row.sourceRef || record.dcNumber || "",
+              receiveGoodsItemId: row.receiveGoodsItemId ?? null,
+              deliveryChallanId: row.deliveryChallanId ?? record.id,
+              deliveryChallanItemId: row.deliveryChallanItemId ?? null,
+              itemId: row.itemId ?? null,
+              sourceType: "dc",
+              originDeliveryChallanId: record.id,
+              originDcNumber: record.dcNumber || `DC-${record.id}`,
+            };
+          })
+          .filter((item) => item.availableQty > 0)
+    );
+
+    setReallocationModal({
+      ...createReallocationModalState(profileName),
+      open: true,
+      record: selectedRecords[0],
+      records: selectedRecords,
+      currentProjectId: String(dcLookup.projectId ?? ""),
+      currentLocationId: String(dcLookup.locationId ?? ""),
+      reallocationType: "full",
+      items: linkedRows,
+      error: linkedRows.length
+        ? ""
+        : "No remaining DC balance is available for the selected DCs.",
+    });
+  };
+
   const handleReallocationItemChange = (itemId, value) => {
     setReallocationModal((prev) => ({
       ...prev,
       reallocationType: "partial",
       items: prev.items.map((item) =>
         String(item.id) === String(itemId)
-          ? { ...item, quantity: value }
+          ? {
+              ...item,
+              quantity: value === "" ? "" : toWholeQuantity(value),
+            }
           : item
       ),
     }));
@@ -1806,6 +1893,114 @@ const DeliveryChallan = () => {
     }));
   };
 
+  const handleBatchReallocationSubmit = async () => {
+    const selectedRecords = reallocationModal.records || [];
+    const targetLocation = locations.find(
+      (locationItem) =>
+        String(locationItem.id) === String(reallocationModal.targetLocationId)
+    );
+    if (!targetLocation) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        error: "Select the next destination location.",
+      }));
+      return;
+    }
+    if (String(targetLocation.id) === String(reallocationModal.currentLocationId)) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        error: "Next location must be different from the current DC location.",
+      }));
+      return;
+    }
+    if (!reallocationModal.targetProjectId) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        error: "Select the next destination project.",
+      }));
+      return;
+    }
+
+    const positiveItems = reallocationModal.items
+      .map((item) => ({ ...item, quantity: Number(item.quantity) || 0 }))
+      .filter((item) => item.quantity > 0);
+    const invalidItem = positiveItems.find(
+      (item) => item.quantity > (Number(item.availableQty) || 0)
+    );
+    if (invalidItem) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        error: `${invalidItem.name} cannot exceed the available balance (${fmtQty(
+          invalidItem.availableQty
+        )}).`,
+      }));
+      return;
+    }
+    const missingRecord = selectedRecords.find(
+      (record) =>
+        !positiveItems.some(
+          (item) => String(item.originDeliveryChallanId) === String(record.id)
+        )
+    );
+    if (missingRecord) {
+      setReallocationModal((prev) => ({
+        ...prev,
+        error: `Enter a movement quantity for ${missingRecord.dcNumber || "each selected DC"}.`,
+      }));
+      return;
+    }
+
+    setReallocationModal((prev) => ({ ...prev, submitting: true, error: "" }));
+    let movedCount = 0;
+    try {
+      for (const record of selectedRecords) {
+        const recordItems = positiveItems.filter(
+          (item) => String(item.originDeliveryChallanId) === String(record.id)
+        );
+        await moveDeliveryChallan(record.id, {
+          currentProjectId:
+            parseNumberValue(reallocationModal.currentProjectId) ??
+            parseNumberValue(record.projectId),
+          fromLocationId: parseNumberValue(reallocationModal.currentLocationId),
+          targetProjectId: parseNumberValue(reallocationModal.targetProjectId),
+          toLocationId: parseNumberValue(targetLocation.id),
+          requestDate: reallocationModal.requestDate || null,
+          requestedBy:
+            String(reallocationModal.requestedBy || "").trim() || profileName,
+          vehicleNumber:
+            String(reallocationModal.vehicleNumber || "").trim() || null,
+          eWayBillNumber:
+            String(reallocationModal.eWayBillNumber || "").trim() || null,
+          notes: String(reallocationModal.notes || "").trim() || null,
+          items: recordItems.map((item) => ({
+            quantity: item.quantity,
+            sourceRowId: item.sourceRowId || item.sourceKey || null,
+          })),
+        });
+        movedCount += 1;
+      }
+      await Promise.all([loadRecords(), loadReallocations(), loadLocations()]);
+      setSelectedDcLookupIds([]);
+      closeReallocationModal();
+      setUpdateProof(
+        `${movedCount} selected DC${movedCount === 1 ? "" : "s"} moved to ${
+          targetLocation.name || "the selected location"
+        }.`
+      );
+    } catch (error) {
+      await Promise.all([loadRecords(), loadReallocations()]);
+      setReallocationModal((prev) => ({
+        ...prev,
+        submitting: false,
+        error: `${
+          error?.response?.data?.error ||
+          error?.message ||
+          "Failed to move the selected DCs."
+        }${movedCount ? ` ${movedCount} DC(s) were moved before the error.` : ""}`,
+      }));
+    }
+  };
+
   const handleReallocationSubmit = async (event) => {
     event.preventDefault();
     if (reallocationModal.submitting) {
@@ -1813,6 +2008,10 @@ const DeliveryChallan = () => {
     }
     const challan = reallocationModal.record;
     if (!challan?.id) {
+      return;
+    }
+    if ((reallocationModal.records || []).length > 1) {
+      await handleBatchReallocationSubmit();
       return;
     }
 
@@ -1998,7 +2197,7 @@ const DeliveryChallan = () => {
           sourceRowId: item.sourceRowId || item.sourceKey || null,
         })),
       });
-      await Promise.all([loadRecords(), loadReallocations()]);
+      await Promise.all([loadRecords(), loadReallocations(), loadLocations()]);
       closeReallocationModal();
       setUpdateProof(
         `${movedDc?.dcNumber || "Moved DC"} was created from ${
@@ -2398,12 +2597,9 @@ const DeliveryChallan = () => {
       const projectPreferredLocation =
         resolveProjectPreferredLocation(locations, nextProjectId) ||
         resolveProjectPreferredLocation(locations, prev.projectId);
-      const resolvedToLocation =
-        currentDestination &&
-        (!nextProjectId ||
-          String(currentDestination.projectId ?? "") === String(nextProjectId))
-          ? currentDestination
-          : projectPreferredLocation;
+      // Keep an explicit destination selection while receipt items are added or
+      // changed. Shared depots can be valid without matching the project id.
+      const resolvedToLocation = currentDestination || projectPreferredLocation;
 
       return {
         ...prev,
@@ -2484,14 +2680,13 @@ const DeliveryChallan = () => {
   };
 
   const handleLineItemQuantityChange = (itemId, nextValue) => {
-    const parsed = Number(nextValue);
-    const safeValue = Number.isFinite(parsed) ? parsed : 0;
+    const safeValue = toWholeQuantity(nextValue);
     setItems((prev) =>
       prev.map((item) => {
         if (String(item.id) !== String(itemId)) {
           return item;
         }
-        const availableQty = Number(item.availableQty ?? 0) || 0;
+        const availableQty = toWholeQuantity(item.availableQty);
         const clamped = Math.max(0, Math.min(safeValue, availableQty));
         return {
           ...item,
@@ -2723,13 +2918,12 @@ const DeliveryChallan = () => {
   const reallocationTargetLocations = useMemo(() => {
     return locations.filter(
       (locationItem) =>
-        isLocationAvailableForProject(
-          locationItem,
-          reallocationModal.targetProjectId
+        !["inactive", "disabled", "archived"].includes(
+          normalizeLookupText(locationItem.status || "active")
         ) &&
         String(locationItem.id) !== String(reallocationModal.currentLocationId)
     );
-  }, [locations, reallocationModal.currentLocationId, reallocationModal.targetProjectId]);
+  }, [locations, reallocationModal.currentLocationId]);
   const selectedReallocationTargetProject =
     projectMap[String(reallocationModal.targetProjectId)] || {};
   const printProject = printChallan
@@ -3294,7 +3488,7 @@ const DeliveryChallan = () => {
                                 type="number"
                                 min="0"
                                 max={availableQty}
-                                step="0.01"
+                                step="1"
                                 value={item.quantity ?? ""}
                                 onChange={(event) =>
                                   handleLineItemQuantityChange(item.id, event.target.value)
@@ -3357,15 +3551,16 @@ const DeliveryChallan = () => {
             Current Project
             <select
               value={dcLookup.projectId}
-              onChange={(event) =>
+              onChange={(event) => {
+                setSelectedDcLookupIds([]);
                 setDcLookup((prev) => ({
                   ...prev,
                   projectId: event.target.value,
                   locationId: "",
                   rows: [],
                   error: "",
-                }))
-              }
+                }));
+              }}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"
             >
               <option value="">Select project</option>
@@ -3380,26 +3575,24 @@ const DeliveryChallan = () => {
             Current Location
             <select
               value={dcLookup.locationId}
-              onChange={(event) =>
+              onChange={(event) => {
+                setSelectedDcLookupIds([]);
                 setDcLookup((prev) => ({
                   ...prev,
                   locationId: event.target.value,
                   rows: [],
                   error: "",
-                }))
-              }
+                }));
+              }}
               disabled={!dcLookup.projectId}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 disabled:bg-slate-100"
             >
               <option value="">Select location</option>
               {dcLookupLocations.map((locationItem) => {
-                const locationProject =
-                  projectMap[String(locationItem.projectId)]?.name || "";
                 return (
                   <option key={locationItem.id} value={locationItem.id}>
                     {getLocationDisplayName(locationItem)}
                     {locationItem.code ? ` (${locationItem.code})` : ""}
-                    {locationProject ? ` — ${locationProject}` : ""}
                   </option>
                 );
               })}
@@ -3416,15 +3609,70 @@ const DeliveryChallan = () => {
             {dcLookup.error}
           </div>
         ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/60 px-5 py-3">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-slate-600">
+            <span>
+              <strong className="text-slate-800">{selectedDcLookupEntries.length}</strong>{" "}
+              DC{selectedDcLookupEntries.length === 1 ? "" : "s"} selected
+            </span>
+            <span>
+              Total quantity:{" "}
+              <strong className="text-slate-800">{fmtQty(selectedDcLookupQuantity)}</strong>
+            </span>
+            {selectedDcLookupEntries.length ? (
+              <button
+                type="button"
+                onClick={() => setSelectedDcLookupIds([])}
+                className="font-medium text-slate-500 hover:text-slate-700"
+              >
+                Clear selection
+              </button>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenSelectedReallocations}
+            disabled={
+              !selectedDcLookupEntries.length ||
+              !dcLookupLocations.some(
+                (locationItem) =>
+                  String(locationItem.id) !== String(dcLookup.locationId)
+              )
+            }
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            Move Selected DCs
+          </button>
+        </div>
         <div className="overflow-x-auto border-t border-slate-200">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
+                <th className="w-12 p-3 text-left">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all delivery challans"
+                    checked={
+                      dcLookupEntries.length > 0 &&
+                      dcLookupEntries.every(({ record }) =>
+                        selectedDcLookupIds.includes(String(record.id))
+                      )
+                    }
+                    onChange={(event) =>
+                      setSelectedDcLookupIds(
+                        event.target.checked
+                          ? dcLookupEntries.map(({ record }) => String(record.id))
+                          : []
+                      )
+                    }
+                    disabled={!dcLookupEntries.length}
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                </th>
                 <th className="p-3 text-left">DC Number</th>
                 <th className="p-3 text-left">Current Project</th>
                 <th className="p-3 text-left">Current Location</th>
                 <th className="p-3 text-right">Available Quantity</th>
-                <th className="p-3 text-left">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -3435,8 +3683,23 @@ const DeliveryChallan = () => {
                   </td>
                 </tr>
               ) : dcLookupEntries.length ? (
-                dcLookupEntries.map(({ record, availableRows, availableQty }) => (
+                dcLookupEntries.map(({ record, availableQty }) => (
                   <tr key={record.id} className="border-t border-slate-200">
+                    <td className="p-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${record.dcNumber || "delivery challan"}`}
+                        checked={selectedDcLookupIds.includes(String(record.id))}
+                        onChange={(event) =>
+                          setSelectedDcLookupIds((current) =>
+                            event.target.checked
+                              ? Array.from(new Set([...current, String(record.id)]))
+                              : current.filter((id) => id !== String(record.id))
+                          )
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                    </td>
                     <td className="p-3 font-semibold text-slate-800">
                       {record.dcNumber || "-"}
                     </td>
@@ -3457,21 +3720,6 @@ const DeliveryChallan = () => {
                     </td>
                     <td className="p-3 text-right font-semibold text-slate-800">
                       {fmtQty(availableQty)}
-                    </td>
-                    <td className="p-3">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void handleOpenReallocation(record, {
-                            currentProjectId: dcLookup.projectId,
-                            currentLocationId: dcLookup.locationId,
-                            availableRows,
-                          })
-                        }
-                        className="font-medium text-emerald-700 hover:text-emerald-800"
-                      >
-                        Move DC
-                      </button>
                     </td>
                   </tr>
                 ))
@@ -3545,7 +3793,10 @@ const DeliveryChallan = () => {
                   subtitle: "Dispatch trail for the project",
                   metaRows: challanMetaRows,
                   logoUrl: companyLogo,
-                  brandName: companyName,
+                  brandName:
+                    String(companyName).trim().toLowerCase() === "be inventory"
+                      ? "BANGALORE ELECTRONICS"
+                      : companyName,
                   brandDescription: company.address,
                 })
               }
@@ -3872,6 +4123,7 @@ const DeliveryChallan = () => {
               title="DELIVERY CHALLAN"
               onClose={() => setViewChallanRecord(null)}
               companyName={companyName}
+              hideCompanyName={String(companyName).trim().toLowerCase() === "be inventory"}
               companyAddress={company.address || "Company address"}
               companyGstin={company.gstin}
               companyPhone={company.phone}
@@ -3997,7 +4249,7 @@ const DeliveryChallan = () => {
                   </div>
                 </div>
               }
-              footerCompanyName={companyName}
+              footerCompanyName="Bangalore Electronics"
             />
           </div>
         </div>
@@ -4357,10 +4609,12 @@ const DeliveryChallan = () => {
                   DC Lookup Movement
                 </p>
                 <h3 className="text-xl font-semibold text-slate-800">
-                  {reallocationModal.record?.dcNumber || "DC Movement"}
+                  {(reallocationModal.records || []).length > 1
+                    ? `Move ${reallocationModal.records.length} Selected DCs`
+                    : reallocationModal.record?.dcNumber || "DC Movement"}
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">
-                  Move full or partial DC balance to another project/location and create a separate moved DC.
+                  Move full or partial DC balances to one destination using a single selection.
                 </p>
               </div>
               <button
@@ -4373,6 +4627,34 @@ const DeliveryChallan = () => {
             </div>
 
             <div className="max-h-[calc(92vh-84px)] overflow-y-auto px-6 py-5">
+              {(reallocationModal.records || []).length > 1 ? (
+                <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Selected DCs
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {reallocationModal.records.map((record) => (
+                      <span
+                        key={record.id}
+                        className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
+                      >
+                        {record.dcNumber || `DC-${record.id}`}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-sm text-slate-600">
+                    Combined available quantity:{" "}
+                    <strong className="text-slate-800">
+                      {fmtQty(
+                        reallocationModal.items.reduce(
+                          (sum, item) => sum + toQuantity(item.availableQty),
+                          0
+                        )
+                      )}
+                    </strong>
+                  </p>
+                </div>
+              ) : (
               <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Original DC Details
@@ -4442,6 +4724,7 @@ const DeliveryChallan = () => {
                   </div>
                 </div>
               </div>
+              )}
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
                 <div>
@@ -4473,7 +4756,6 @@ const DeliveryChallan = () => {
                       setReallocationModal((prev) => ({
                         ...prev,
                         targetProjectId: event.target.value,
-                        targetLocationId: "",
                       }))
                     }
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
@@ -4498,8 +4780,7 @@ const DeliveryChallan = () => {
                         targetLocationId: event.target.value,
                       }))
                     }
-                    disabled={!reallocationModal.targetProjectId}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2"
                   >
                     <option value="">Select location</option>
                     {reallocationTargetLocations.map((locationItem) => (
@@ -4631,6 +4912,9 @@ const DeliveryChallan = () => {
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
+                      {(reallocationModal.records || []).length > 1 ? (
+                        <th className="p-3 text-left">DC Number</th>
+                      ) : null}
                       <th className="p-3 text-left">Item</th>
                       <th className="p-3 text-left">Unit</th>
                       <th className="p-3 text-right">Source Qty</th>
@@ -4641,13 +4925,21 @@ const DeliveryChallan = () => {
                   <tbody>
                     {reallocationModal.loading ? (
                       <tr>
-                        <td colSpan="5" className="p-6 text-center text-slate-500">
+                        <td
+                          colSpan={(reallocationModal.records || []).length > 1 ? 6 : 5}
+                          className="p-6 text-center text-slate-500"
+                        >
                           Loading current DC balance...
                         </td>
                       </tr>
                     ) : reallocationModal.items.length ? (
                       reallocationModal.items.map((item) => (
                         <tr key={item.id} className="border-t border-slate-200">
+                          {(reallocationModal.records || []).length > 1 ? (
+                            <td className="p-3 font-semibold text-emerald-700">
+                              {item.originDcNumber || "-"}
+                            </td>
+                          ) : null}
                           <td className="p-3">
                             <p className="font-medium text-slate-800">{item.name}</p>
                             {item.description ? (
@@ -4673,7 +4965,7 @@ const DeliveryChallan = () => {
                             <input
                               type="number"
                               min="0"
-                              step="0.01"
+                              step="1"
                               value={item.quantity ?? ""}
                               onChange={(event) =>
                                 handleReallocationItemChange(item.id, event.target.value)
@@ -4685,7 +4977,10 @@ const DeliveryChallan = () => {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="5" className="p-6 text-center text-slate-500">
+                        <td
+                          colSpan={(reallocationModal.records || []).length > 1 ? 6 : 5}
+                          className="p-6 text-center text-slate-500"
+                        >
                           No movable DC balance found.
                         </td>
                       </tr>
@@ -4707,7 +5002,11 @@ const DeliveryChallan = () => {
                   disabled={reallocationModal.loading || reallocationModal.submitting}
                   className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
-                  {reallocationModal.submitting ? "Saving..." : "Confirm Movement"}
+                  {reallocationModal.submitting
+                    ? "Moving selected DCs..."
+                    : (reallocationModal.records || []).length > 1
+                    ? `Move ${reallocationModal.records.length} DCs`
+                    : "Confirm Movement"}
                 </button>
               </div>
             </div>
@@ -5091,6 +5390,7 @@ const DeliveryChallan = () => {
             title="DELIVERY CHALLAN"
             onClose={() => setPrintChallan(null)}
             companyName={companyName}
+            hideCompanyName={String(companyName).trim().toLowerCase() === "be inventory"}
             companyAddress={company.address || "Company address"}
             companyGstin={company.gstin}
             companyPhone={company.phone}
@@ -5173,7 +5473,7 @@ const DeliveryChallan = () => {
                 </div>
               </div>
             }
-            footerCompanyName={companyName}
+            footerCompanyName="Bangalore Electronics"
           />
         )}
       </div>
