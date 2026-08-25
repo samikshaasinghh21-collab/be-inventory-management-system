@@ -9432,6 +9432,9 @@ const loadAvailableInventoryRows = async (
         item.DeliveryChallanId ??
         fallbackDeliveryChallanId
     );
+    const sourceType = normalizeAvailabilitySourceType(
+      item.sourceType ?? item.SourceType
+    );
     const explicitSourceKey = buildAvailabilitySourceKey({
       ...item,
       deliveryChallanId:
@@ -9439,6 +9442,9 @@ const loadAvailableInventoryRows = async (
         item.DeliveryChallanId ??
         fallbackDeliveryChallanId,
     });
+    const sourceKeyType = normalizeAvailabilitySourceType(
+      String(explicitSourceKey ?? "").split(":", 1)[0]
+    );
     if (explicitSourceKey) {
       const exact =
         sourceEntries.get(
@@ -9448,10 +9454,12 @@ const loadAvailableInventoryRows = async (
         exact[field] += movementQty;
         return;
       }
-      // A DC movement/consumption is line-specific. If its referenced DC row
-      // is not present at this location, never drain another DC with the same
-      // material name as a fallback.
-      if (deliveryChallanId !== null) {
+      // A movement sourced from another DC is line-specific. If its referenced
+      // DC row is not present at this location, never drain another DC with the
+      // same material name as a fallback. Receipt-sourced challans must still
+      // fall back to the material rows because editing a receipt can recreate
+      // its line IDs while existing challans retain the previous source keys.
+      if (sourceType === "dc" || sourceKeyType === "dc") {
         return;
       }
     }

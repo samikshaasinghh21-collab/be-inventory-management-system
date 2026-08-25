@@ -214,10 +214,9 @@ const validate = (form, project) => {
   if (!form.reportDate) return "Report date is required.";
   if (!form.shift) return "Shift is required.";
   if (!form.preparedBy.trim()) return "Prepared by is required.";
-  if (!form.summary.trim()) return "Executive summary is required.";
   if (!form.workCompleted.trim()) return "Work performed today is required.";
   if (
-    !form.taskRows.length ||
+    form.taskRows.length > 0 &&
     !form.taskRows.some((row) => row.workCompleted.trim())
   )
     return "Add work progress for at least one task.";
@@ -370,7 +369,7 @@ const ProjectManagementSiteReports = () => {
   const [projects, setProjects] = useState(() =>
     getProjectManagementProjects(),
   );
-  const [reports, setReports] = useState(() => siteReportsService.list());
+  const [rawReports, setReports] = useState(() => siteReportsService.list());
   const [form, setForm] = useState(emptyForm);
   const [drawer, setDrawer] = useState(false);
   const [view, setView] = useState(null);
@@ -394,14 +393,27 @@ const ProjectManagementSiteReports = () => {
     setReports(reportRows);
   };
   useEffect(() => {
-    const handler = () => { void refresh(); };
-    window.addEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, handler);
-    window.addEventListener("projects:changed", handler);
+    const handleProjectCacheChange = () => {
+      setProjects(getProjectManagementProjects());
+    };
+    const handleExternalProjectChange = () => {
+      void refresh().catch((loadError) =>
+        setError(loadError?.response?.data?.error || loadError.message)
+      );
+    };
+    window.addEventListener(
+      PROJECT_MANAGEMENT_PROJECTS_EVENT,
+      handleProjectCacheChange
+    );
+    window.addEventListener("projects:changed", handleExternalProjectChange);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh().catch((loadError) => setError(loadError?.response?.data?.error || loadError.message));
     return () => {
-      window.removeEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, handler);
-      window.removeEventListener("projects:changed", handler);
+      window.removeEventListener(
+        PROJECT_MANAGEMENT_PROJECTS_EVENT,
+        handleProjectCacheChange
+      );
+      window.removeEventListener("projects:changed", handleExternalProjectChange);
     };
   }, []);
   useEffect(() => {
@@ -418,6 +430,16 @@ const ProjectManagementSiteReports = () => {
   const project = projects.find(
     (item) => String(item.id) === String(form.projectId),
   );
+  const reports = useMemo(() => {
+    const projectNames = new Map(
+      projects.map((item) => [String(item.id), String(item.name || "").trim()]),
+    );
+    return rawReports.map((report) => ({
+      ...report,
+      projectName:
+        projectNames.get(String(report.projectId)) || report.projectName || "",
+    }));
+  }, [projects, rawReports]);
   const filtered = useMemo(
     () =>
       reports.filter((report) => {
@@ -506,7 +528,7 @@ const ProjectManagementSiteReports = () => {
         .map((task) => ({
           id: uid("taskrow"),
           taskId: task.id,
-          taskName: task.title || task.name || task.taskId,
+          taskName: task.taskName || task.title || task.name || task.taskId,
           owner: task.assignedTo || task.owner || "",
           previousProgress: taskProgress(task),
           reportedProgress: taskProgress(task),
@@ -601,7 +623,11 @@ const ProjectManagementSiteReports = () => {
       );
       await refresh();
     } catch (saveError) {
-      setError(saveError.message);
+      setError(
+        saveError?.response?.data?.error ||
+          saveError.message ||
+          "Site report could not be saved."
+      );
     }
   };
   const action = async (callback, success) => {
@@ -612,7 +638,11 @@ const ProjectManagementSiteReports = () => {
       await refresh();
       setView(null);
     } catch (actionError) {
-      setError(actionError.message);
+      setError(
+        actionError?.response?.data?.error ||
+          actionError.message ||
+          "Site report action failed."
+      );
     }
   };
   const submit = (report) =>
@@ -1174,7 +1204,7 @@ const ProjectManagementSiteReports = () => {
                 <h3 className="mb-3 font-semibold">Daily Narrative</h3>
                 <div className="grid gap-3 md:grid-cols-2">
                   {[
-                    ["summary", "Executive Summary *"],
+                    ["summary", "Executive Summary"],
                     ["workCompleted", "Work Performed Today *"],
                     ["tomorrowPlan", "Tomorrow's Plan"],
                     ["delays", "Delays / Constraints"],

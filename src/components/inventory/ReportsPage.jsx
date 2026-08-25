@@ -11,22 +11,24 @@ import {
 import { getProjects } from "../../services/projectsStore";
 import { fetchPurchaseOrders } from "../../services/purchaseOrdersApi";
 import { fetchReceiveGoods } from "../../services/receiveGoodsApi";
+import { fetchReallocateInventory } from "../../services/reallocateInventoryApi";
 import useSettings from "../../hooks/useSettings";
 import { resolveBrandLogo } from "../../utils/branding";
 import { printSection } from "../../utils/printUtils";
 import { formatDateTimeDDMMYYYY } from "../../utils/dateFormat";
 import { formatQuantity } from "../../utils/formatters";
 import { fetchVendors } from "../../services/vendorsApi";
+import { fetchProjectAvailableInventory } from "../../services/availableInventoryApi";
 import ReportFilters from "./reports/ReportFilters";
 import ReportTable from "./reports/ReportTable";
 import WorkflowSummary from "./reports/WorkflowSummary";
+import FinalInventoryTable from "./reports/FinalInventoryTable";
 import AppIcon from "../layout/AppIcon";
 import {
   REPORT_ACTIVITY_TYPES,
   buildExcelRows,
   buildReportRows,
   buildWorkflowStages,
-  formatReportDate,
   getUniqueStatuses,
   isRowWithinDateRange,
 } from "./reports/reportUtils";
@@ -38,6 +40,8 @@ const createDefaultFilters = (projectId = "") => ({
   types: REPORT_ACTIVITY_TYPES.map((activity) => activity.key),
   vendorId: "",
   productQuery: "",
+  locationId: "",
+  locationTag: "",
   status: "",
 });
 
@@ -49,6 +53,7 @@ const SOURCE_LABELS = [
   { key: "purchaseOrders", label: "Purchase Orders", load: fetchPurchaseOrders },
   { key: "receiveGoods", label: "Receive Goods", load: fetchReceiveGoods },
   { key: "deliveryChallans", label: "Delivery Challan", load: fetchDeliveryChallans },
+  { key: "reallocations", label: "Reallocation / Move", load: fetchReallocateInventory },
   { key: "consumptions", label: "Consumption", load: fetchConsumptions },
 ];
 
@@ -67,6 +72,7 @@ const ReportsPage = () => {
     purchaseOrders: [],
     receiveGoods: [],
     deliveryChallans: [],
+    reallocations: [],
     consumptions: [],
   });
   const [loading, setLoading] = useState(true);
@@ -81,6 +87,9 @@ const ReportsPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [availableInventory, setAvailableInventory] = useState([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState("");
 
   const loadReportData = async ({ silent = false } = {}) => {
     if (!silent) {
@@ -119,6 +128,7 @@ const ReportsPage = () => {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial API hydration
     void loadReportData();
   }, []);
 
@@ -138,6 +148,7 @@ const ReportsPage = () => {
       "purchase-orders:changed",
       "receive-goods:changed",
       "delivery-challans:changed",
+      "reallocate-inventory:changed",
       "consumptions:changed",
       "projects:changed",
       "vendors:changed",
@@ -158,6 +169,7 @@ const ReportsPage = () => {
     };
   }, []);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- hydrate live API state when report dependencies change */
   useEffect(() => {
     if (!records.projects.length) {
       return;
@@ -185,6 +197,59 @@ const ReportsPage = () => {
           }
     );
   }, [records.projects]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const projectId = appliedFilters.projectId;
+    if (!projectId || !records.locations.length) {
+      setAvailableInventory([]);
+      setInventoryError("");
+      setInventoryLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setInventoryLoading(true);
+    setInventoryError("");
+    void fetchProjectAvailableInventory({
+      projectId,
+      locations: records.locations,
+    })
+      .then((rows) => {
+        if (!cancelled) setAvailableInventory(rows);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAvailableInventory([]);
+          setInventoryError(
+            error?.response?.data?.error ||
+              error?.message ||
+              "Final inventory could not be calculated."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setInventoryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appliedFilters.projectId, records.locations]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const locationTags = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          records.locations
+            .map((location) => String(location.code || location.type || "").trim())
+            .filter(Boolean)
+        )
+      ).sort((left, right) => left.localeCompare(right)),
+    [records.locations]
+  );
 
   const allRows = useMemo(
     () =>
@@ -225,6 +290,18 @@ const ReportsPage = () => {
         return false;
       }
       if (
+        appliedFilters.locationId &&
+        String(row.locationId) !== String(appliedFilters.locationId)
+      ) {
+        return false;
+      }
+      if (
+        appliedFilters.locationTag &&
+        String(row.locationTag || "") !== String(appliedFilters.locationTag)
+      ) {
+        return false;
+      }
+      if (
         statusNeedle &&
         String(row.status || "").trim().toLowerCase() !== statusNeedle
       ) {
@@ -239,6 +316,31 @@ const ReportsPage = () => {
     });
   }, [allRows, appliedFilters]);
 
+  const filteredAvailableInventory = useMemo(() => {
+    const productNeedle = appliedFilters.productQuery.trim().toLowerCase();
+    return availableInventory.filter((row) => {
+      if (String(row.projectId) !== String(appliedFilters.projectId)) {
+        return false;
+      }
+      if (
+        appliedFilters.locationId &&
+        String(row.locationId) !== String(appliedFilters.locationId)
+      ) {
+        return false;
+      }
+      if (
+        appliedFilters.locationTag &&
+        String(row.locationTag || "") !== String(appliedFilters.locationTag)
+      ) {
+        return false;
+      }
+      if (!productNeedle) return true;
+      return [row.name, row.itemCode, row.hsn, row.description].some((value) =>
+        String(value || "").toLowerCase().includes(productNeedle)
+      );
+    });
+  }, [availableInventory, appliedFilters]);
+
   const selectedProject = useMemo(
     () =>
       records.projects.find(
@@ -252,39 +354,52 @@ const ReportsPage = () => {
     [filteredRows, appliedFilters.types]
   );
 
-  const totalQuantity = useMemo(
-    () => filteredRows.reduce((sum, row) => sum + Number(row.qty || 0), 0),
+  const totalOrderedQuantity = useMemo(
+    () =>
+      filteredRows
+        .filter((row) => row.activityKey === "purchase-order")
+        .reduce(
+          (sum, row) => sum + Number(row.totalQty ?? row.qty ?? 0),
+          0
+        ),
     [filteredRows]
   );
 
   const totalReceivedQuantity = useMemo(
     () =>
-      filteredRows.reduce(
-        (sum, row) => sum + Number(row.receivedQty ?? 0),
-          0
-      ),
+      filteredRows
+        .filter((row) => row.activityKey === "receive-goods")
+        .reduce((sum, row) => sum + Number(row.qty || 0), 0),
+    [filteredRows]
+  );
+
+  const totalConsumedQuantity = useMemo(
+    () =>
+      filteredRows
+        .filter((row) => row.activityKey === "consumption")
+        .reduce((sum, row) => sum + Number(row.qty || 0), 0),
     [filteredRows]
   );
 
   const totalAvailableQuantity = useMemo(
     () =>
-      filteredRows.reduce(
-        (sum, row) => sum + Number(row.availableQty ?? 0),
+      filteredAvailableInventory.reduce(
+        (sum, row) => sum + Number(row.availableQty || 0),
         0
       ),
-    [filteredRows]
+    [filteredAvailableInventory]
   );
 
   const totalBalanceQuantity = useMemo(
     () =>
-      filteredRows.reduce(
+      filteredRows
+        .filter((row) => row.activityKey === "purchase-order")
+        .reduce(
         (sum, row) => sum + Number(row.balanceQty ?? 0),
         0
       ),
     [filteredRows]
   );
-
-  const latestRow = filteredRows[filteredRows.length - 1] ?? null;
 
   const lastUpdatedLabel = useMemo(() => {
     if (!lastUpdatedAt) {
@@ -297,6 +412,7 @@ const ReportsPage = () => {
     setDraftFilters((prev) => ({
       ...prev,
       [field]: value,
+      ...(field === "projectId" ? { locationId: "", locationTag: "" } : {}),
     }));
   };
 
@@ -357,7 +473,7 @@ const ReportsPage = () => {
   };
 
   const handleExportExcel = async () => {
-    if (!filteredRows.length || isExportingExcel) {
+    if ((!filteredRows.length && !filteredAvailableInventory.length) || isExportingExcel) {
       return;
     }
     setIsExportingExcel(true);
@@ -367,6 +483,26 @@ const ReportsPage = () => {
       const worksheet = XLSX.utils.json_to_sheet(buildExcelRows(filteredRows));
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
+      const finalInventoryWorksheet = XLSX.utils.json_to_sheet(
+        filteredAvailableInventory.map((row) => ({
+          "Location Tag": row.locationTag || "-",
+          Location: row.locationName || "-",
+          Product: row.name || "-",
+          "Item Code": row.itemCode || "-",
+          Unit: row.unit || "PCS",
+          Source: row.sourceType || "-",
+          Reference: row.sourceRef || "-",
+          "Received / In": row.sourceQty,
+          Consumed: row.consumedQty,
+          "Moved Out": row.reallocatedQty,
+          "Final Available": row.availableQty,
+        }))
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        finalInventoryWorksheet,
+        "Final Available Inventory"
+      );
       const fileSafeProject =
         selectedProject?.name?.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") ||
         "project-report";
@@ -387,17 +523,20 @@ const ReportsPage = () => {
       metaRows: [
         { label: "Project", value: selectedProject?.name || "-" },
         { label: "Activities", value: filteredRows.length },
-        { label: "Total Qty", value: formatQuantity(totalQuantity) },
+        {
+          label: "Ordered Qty",
+          value: formatQuantity(totalOrderedQuantity),
+        },
         {
           label: "Received Qty",
           value: totalReceivedQuantity.toLocaleString("en-IN"),
         },
         {
-          label: "Available Qty",
+          label: "Final Available",
           value: totalAvailableQuantity.toLocaleString("en-IN"),
         },
         {
-          label: "Balance Qty",
+          label: "Open PO Balance",
           value: totalBalanceQuantity.toLocaleString("en-IN"),
         },
       ],
@@ -417,9 +556,9 @@ const ReportsPage = () => {
     },
     {
       id: "quantity",
-      label: "Total Quantity",
-      value: totalQuantity.toLocaleString("en-IN"),
-      hint: "Movement quantity across selected workflow steps",
+      label: "Ordered Quantity",
+      value: totalOrderedQuantity.toLocaleString("en-IN"),
+      hint: "Purchase-order quantity in the filtered records",
       tone: "bg-emerald-50 text-emerald-700 border-emerald-100",
     },
     {
@@ -431,23 +570,23 @@ const ReportsPage = () => {
     },
     {
       id: "available",
-      label: "Available Quantity",
+      label: "Final Available",
       value: totalAvailableQuantity.toLocaleString("en-IN"),
-      hint: "Open or currently available quantity in the filtered result",
+      hint: inventoryLoading ? "Calculating transaction balances" : "Current all-time transaction balance",
       tone: "bg-violet-50 text-violet-700 border-violet-100",
     },
     {
       id: "balance",
-      label: "Balance Quantity",
+      label: "Open PO Balance",
       value: totalBalanceQuantity.toLocaleString("en-IN"),
-      hint: "Balance quantity carried through the filtered workflow",
+      hint: "Quantity still pending against purchase orders",
       tone: "bg-rose-50 text-rose-700 border-rose-100",
     },
     {
-      id: "latest",
-      label: "Latest Activity",
-      value: latestRow ? latestRow.activityLabel : "No activity",
-      hint: latestRow ? formatReportDate(latestRow.date) : "Waiting for records",
+      id: "consumed",
+      label: "Consumed Quantity",
+      value: totalConsumedQuantity.toLocaleString("en-IN"),
+      hint: "Posted consumption in the filtered activity set",
       tone: "bg-slate-100 text-slate-700 border-slate-200",
     },
   ];
@@ -465,7 +604,7 @@ const ReportsPage = () => {
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
               View all live inventory activities under a project across BOQ, purchase
-              orders, receive goods, delivery challan, and consumption.
+              orders, receive goods, delivery challans, reallocations, and consumption.
             </p>
             <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
@@ -477,7 +616,7 @@ const ReportsPage = () => {
             <button
               type="button"
               onClick={handleExportExcel}
-              disabled={!filteredRows.length || isExportingExcel}
+              disabled={(!filteredRows.length && !filteredAvailableInventory.length) || isExportingExcel}
               className="app-btn app-btn-primary text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
               <AppIcon name="download" className="h-4 w-4" />
@@ -486,7 +625,7 @@ const ReportsPage = () => {
             <button
               type="button"
               onClick={handleExportPdf}
-              disabled={!filteredRows.length}
+              disabled={!filteredRows.length && !filteredAvailableInventory.length}
               className="app-btn app-btn-outline text-sm disabled:cursor-not-allowed disabled:opacity-60"
             >
               <AppIcon name="file" className="h-4 w-4" />
@@ -511,6 +650,8 @@ const ReportsPage = () => {
       <ReportFilters
         projects={records.projects}
         vendors={records.vendors}
+        locations={records.locations}
+        locationTags={locationTags}
         statuses={statuses}
         filters={draftFilters}
         onFieldChange={handleFilterFieldChange}
@@ -544,12 +685,17 @@ const ReportsPage = () => {
         ))}
       </section>
 
+      <FinalInventoryTable
+        rows={filteredAvailableInventory}
+        loading={inventoryLoading}
+        error={inventoryError}
+      />
+
       <section className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <WorkflowSummary
           projectName={selectedProject?.name || ""}
           stages={workflowStages}
           totalActivities={filteredRows.length}
-          totalQuantity={totalQuantity}
         />
         <ReportTable
           rows={filteredRows}

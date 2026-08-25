@@ -7,6 +7,8 @@ const inputClass =
 const ReportFilters = ({
   projects = [],
   vendors = [],
+  locations = [],
+  locationTags = [],
   statuses = [],
   filters,
   onFieldChange,
@@ -20,7 +22,7 @@ const ReportFilters = ({
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
       <div className="grid gap-4 xl:grid-cols-12">
-        <div className="xl:col-span-5">
+        <div className="xl:col-span-4">
           <label className="text-sm font-medium text-slate-700">
             Project <span className="text-rose-500">*</span>
           </label>
@@ -41,7 +43,7 @@ const ReportFilters = ({
           </select>
         </div>
 
-        <div className="xl:col-span-3">
+        <div className="xl:col-span-2">
           <label className="text-sm font-medium text-slate-700">From Date</label>
           <DateInput
             value={filters.fromDate}
@@ -52,7 +54,7 @@ const ReportFilters = ({
           />
         </div>
 
-        <div className="xl:col-span-4">
+        <div className="xl:col-span-2">
           <label className="text-sm font-medium text-slate-700">To Date</label>
           <DateInput
             value={filters.toDate}
@@ -61,6 +63,38 @@ const ReportFilters = ({
             disabled={disabled}
             showCalendarButton={!disabled}
           />
+        </div>
+
+        <div className="xl:col-span-2">
+          <label className="text-sm font-medium text-slate-700">Location Tag</label>
+          <select
+            value={filters.locationTag}
+            onChange={(event) => onFieldChange("locationTag", event.target.value)}
+            className={inputClass}
+            disabled={disabled}
+          >
+            <option value="">All Location Tags</option>
+            {locationTags.map((tag) => (
+              <option key={tag} value={tag}>{tag}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="xl:col-span-2">
+          <label className="text-sm font-medium text-slate-700">Location</label>
+          <select
+            value={filters.locationId}
+            onChange={(event) => onFieldChange("locationId", event.target.value)}
+            className={inputClass}
+            disabled={disabled}
+          >
+            <option value="">All Locations</option>
+            {locations.map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.name}{location.code ? ` - ${location.code}` : ""}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="xl:col-span-5">

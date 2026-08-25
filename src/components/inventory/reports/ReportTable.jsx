@@ -49,8 +49,8 @@ const ReportTable = ({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-[1320px] text-sm">
-          <thead className="bg-slate-50 text-slate-700">
+        <table className="w-full min-w-[1400px] table-auto text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
             <tr>
               <th className="px-4 py-3 text-left font-semibold min-w-[110px]">Date</th>
               <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Project</th>
@@ -60,14 +60,14 @@ const ReportTable = ({
               <th className="px-4 py-3 text-left font-semibold min-w-[170px]">Vendor</th>
               <th className="px-4 py-3 text-right font-semibold min-w-[100px]">Total Qty</th>
               <th className="px-4 py-3 text-right font-semibold min-w-[110px]">Received Qty</th>
-              <th className="px-4 py-3 text-right font-semibold min-w-[110px]">Available Qty</th>
               <th className="px-4 py-3 text-right font-semibold min-w-[110px]">Balance Qty</th>
-              <th className="px-4 py-3 text-right font-semibold min-w-[90px]">Moved Qty</th>
+              <th className="px-4 py-3 text-right font-semibold min-w-[100px]">Activity Qty</th>
+              <th className="px-4 py-3 text-left font-semibold min-w-[120px]">Location Tag</th>
               <th className="px-4 py-3 text-left font-semibold min-w-[160px]">Location</th>
               <th className="px-4 py-3 text-left font-semibold min-w-[130px]">Status</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
                 <td colSpan="13" className="px-4 py-10 text-center text-slate-500">
@@ -82,7 +82,7 @@ const ReportTable = ({
               </tr>
             ) : (
               pagedRows.map((row) => (
-                <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50/80">
+                <tr key={row.id} className="hover:bg-slate-50/80">
                   <td className="px-4 py-3 text-slate-700">
                     {formatReportDate(row.date)}
                   </td>
@@ -110,18 +110,14 @@ const ReportTable = ({
                       : formatQuantity(row.receivedQty)}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                    {row.availableQty === null
-                      ? "-"
-                      : formatQuantity(row.availableQty)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
                     {row.balanceQty === null
                       ? "-"
                       : formatQuantity(row.balanceQty)}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                    {Number(row.qty || 0).toLocaleString("en-IN")}
+                    {formatQuantity(row.qty || 0)}
                   </td>
+                  <td className="px-4 py-3 font-medium text-slate-700">{row.locationTag}</td>
                   <td className="px-4 py-3 text-slate-700">{row.location}</td>
                   <td className="px-4 py-3">
                     <span

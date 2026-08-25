@@ -26,8 +26,6 @@ import ProjectManagementPurchaseTracking from "../pages/projectManagement/Projec
 import ProjectManagementFinancials from "../pages/projectManagement/ProjectManagementFinancials";
 import ProjectManagementMilestones from "../pages/projectManagement/ProjectManagementMilestones";
 import ProjectManagementDocuments from "../pages/projectManagement/ProjectManagementDocuments";
-import ProjectManagementPlaceholder from "../pages/projectManagement/ProjectManagementPlaceholder";
-import { projectManagementPlaceholderPages } from "../pages/projectManagement/projectManagementData";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
 import CreateAccount from "../pages/CreateAccount";
@@ -231,19 +229,17 @@ const AppRoutes = () => {
           element={<ProjectManagementMilestones />}
         />
         <Route
+          path="/project-management/timeline"
+          element={<Navigate replace to="/project-management/milestones" />}
+        />
+        <Route
+          path="/project-management/project-attendance"
+          element={<Navigate replace to="/project-management/site-reports" />}
+        />
+        <Route
           path="/project-management/documents"
           element={<ProjectManagementDocuments />}
         />
-        {projectManagementPlaceholderPages
-          .filter((screen) => !["projects", "tasks", "team-allocation", "site-reports", "inventory-allocation", "purchase-tracking", "financials", "documents", "timeline"].includes(screen.key))
-          .map((screen) => (
-          <Route
-            key={screen.path}
-            path={screen.path}
-            element={<ProjectManagementPlaceholder page={screen.key} />}
-          />
-        ))}
-
         <Route path="/inventory/cart" element={<Cart />} />
         <Route path="/account" element={<Profile />} />
         <Route path="/profile" element={<Profile />} />

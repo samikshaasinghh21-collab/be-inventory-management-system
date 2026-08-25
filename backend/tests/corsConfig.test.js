@@ -13,3 +13,13 @@ test("rejects unrelated remote origins", () => {
   assert.equal(isAllowedOrigin("https://example.com"), false);
   assert.equal(isAllowedOrigin("http://remotehost:3000"), false);
 });
+
+test("allows an explicitly configured LAN frontend origin", () => {
+  assert.equal(
+    isAllowedOrigin(
+      "http://192.168.1.35:5173",
+      "http://192.168.1.35:5173,http://localhost:5173"
+    ),
+    true
+  );
+});

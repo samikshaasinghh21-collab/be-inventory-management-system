@@ -97,6 +97,7 @@ const DocumentForm = ({
   form, setForm, projects, categories, permissions, options, onProjectChange,
   onSave, onClose, saving, editing,
 }) => {
+  const [linkedRecordSearch, setLinkedRecordSearch] = useState("");
   const toggleLink = (type, option) => {
     const exists = form.links.some((link) => link.type === type && String(link.id) === String(option.id));
     setForm({
@@ -177,16 +178,27 @@ const DocumentForm = ({
             </div>
           </section>}
           <section className="mt-5 rounded-2xl border border-slate-200 p-4">
-            <div className="flex items-center gap-2"><Link2 className="h-4 w-4 text-indigo-600" /><h3 className="font-semibold text-slate-900">Linked records</h3></div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2"><Link2 className="h-4 w-4 text-indigo-600" /><h3 className="font-semibold text-slate-900">Linked records</h3></div>
+              <label className="relative w-full sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  className={`${inputClass} pl-9`}
+                  value={linkedRecordSearch}
+                  onChange={(event) => setLinkedRecordSearch(event.target.value)}
+                  placeholder="Search linked records..."
+                />
+              </label>
+            </div>
             {!form.projectId ? <p className="mt-3 text-sm text-slate-500">Select a project to load its related records.</p> :
               <div className="mt-3 grid gap-4 md:grid-cols-2 lg:grid-cols-3">{Object.entries(linkLabels).map(([type, label]) => (
                 <div key={type}><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
                   <div className="max-h-36 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-2">
-                    {(options[type] || []).map((option) => <label key={option.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
+                    {(options[type] || []).filter((option) => !linkedRecordSearch.trim() || String(option.label || "").toLowerCase().includes(linkedRecordSearch.trim().toLowerCase())).map((option) => <label key={option.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
                       <input type="checkbox" checked={form.links.some((link) => link.type === type && String(link.id) === String(option.id))} onChange={() => toggleLink(type, option)} />
                       <span className="truncate">{option.label}</span>
                     </label>)}
-                    {!(options[type] || []).length && <p className="px-2 py-3 text-xs text-slate-400">No records</p>}
+                    {!(options[type] || []).filter((option) => !linkedRecordSearch.trim() || String(option.label || "").toLowerCase().includes(linkedRecordSearch.trim().toLowerCase())).length && <p className="px-2 py-3 text-xs text-slate-400">No matching records</p>}
                   </div>
                 </div>
               ))}</div>}
@@ -426,16 +438,19 @@ const ProjectManagementDocuments = () => {
       </section>
 
       <section className={`${cardClass} overflow-hidden`}>
-        <div className="overflow-x-auto"><table className="min-w-[1200px] w-full text-left text-sm">
+        <div className="overflow-x-auto"><table className="min-w-[1320px] w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>
-            {[["documentNumber", "Document"], ["projectName", "Project"], ["category", "Category"], ["discipline", "Discipline"], ["revision", "Revision"], ["status", "Status"], ["updatedAt", "Updated"]].map(([field, label]) => <th key={field} className="cursor-pointer px-4 py-3 font-semibold" onClick={() => changeSort(field)}>{label}</th>)}
+            {[["documentNumber", "Document"], ["projectName", "Project"]].map(([field, label]) => <th key={field} className="cursor-pointer px-4 py-3 font-semibold" onClick={() => changeSort(field)}>{label}</th>)}
+            <th className="px-4 py-3 font-semibold">Milestone</th>
+            {[["category", "Category"], ["discipline", "Discipline"], ["revision", "Revision"], ["status", "Status"], ["updatedAt", "Updated"]].map(([field, label]) => <th key={field} className="cursor-pointer px-4 py-3 font-semibold" onClick={() => changeSort(field)}>{label}</th>)}
             <th className="px-4 py-3 font-semibold">Actions</th>
           </tr></thead>
           <tbody className="divide-y divide-slate-100">
-            {loading ? <tr><td colSpan="8" className="py-16 text-center text-slate-500">Loading controlled documents…</td></tr> :
+            {loading ? <tr><td colSpan="9" className="py-16 text-center text-slate-500">Loading controlled documents…</td></tr> :
               sortedDocuments.map((document) => <tr key={document.id} className="hover:bg-slate-50/70">
                 <td className="px-4 py-4"><button onClick={() => openDetail(document.id)} className="font-semibold text-indigo-700 hover:underline">{document.documentNumber}</button><p className="mt-1 max-w-xs truncate text-xs text-slate-500">{document.name}</p></td>
                 <td className="px-4 py-4"><p className="font-medium text-slate-800">{document.projectName}</p><p className="text-xs text-slate-400">{document.projectCode}</p></td>
+                <td className="px-4 py-4"><div className="flex max-w-xs flex-wrap gap-1">{document.milestones?.length ? document.milestones.map((milestone) => <span key={milestone.id} className="rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700">{milestone.label}</span>) : <span className="text-slate-400">Not linked</span>}</div></td>
                 <td className="px-4 py-4">{document.category === "Other" ? document.customCategory : document.category}</td>
                 <td className="px-4 py-4">{document.discipline || "—"}</td>
                 <td className="px-4 py-4 font-semibold">{document.revisionLabel}</td>
@@ -446,7 +461,7 @@ const ProjectManagementDocuments = () => {
                   <button title="Download current revision" onClick={() => downloadAuthenticatedFile(`/api/project-management/documents/${document.id}/download`, document.name)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><Download className="h-4 w-4" /></button>
                 </div></td>
               </tr>)}
-            {!loading && !documents.length && <tr><td colSpan="8" className="py-16 text-center"><FileText className="mx-auto h-10 w-10 text-slate-300" /><p className="mt-3 font-semibold text-slate-700">No documents match this view</p><p className="mt-1 text-sm text-slate-500">Change filters or create the first controlled document.</p></td></tr>}
+            {!loading && !documents.length && <tr><td colSpan="9" className="py-16 text-center"><FileText className="mx-auto h-10 w-10 text-slate-300" /><p className="mt-3 font-semibold text-slate-700">No documents match this view</p><p className="mt-1 text-sm text-slate-500">Change filters or create the first controlled document.</p></td></tr>}
           </tbody>
         </table></div>
         <footer className="flex items-center justify-between border-t px-4 py-3 text-sm text-slate-500"><span>{pagination.total} document(s)</span><div className="flex items-center gap-2">

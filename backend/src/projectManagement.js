@@ -49,6 +49,7 @@ export const ensureProjectManagementSchema = async () => {
         "007-project-management-modules.sql",
         "008-project-document-control.sql",
         "009-milestone-control-center.sql",
+        "011-project-stage-task-location-flow.sql",
       ]) {
         const migration = await fs.readFile(
           path.resolve(__dirname, `../migrations/${fileName}`),
@@ -84,6 +85,9 @@ const dateValue = (value) => (value ? new Date(value) : null);
 const percentValue = (value) =>
   Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
 const serialize = (value) => JSON.stringify(value ?? null);
+export const PROJECT_STAGES = Object.freeze(["Design", "Procure", "Implement", "Allocate"]);
+const projectStage = (value, fallback = "Design") =>
+  PROJECT_STAGES.includes(String(value || "").trim()) ? String(value).trim() : fallback;
 const fail = (statusCode, message) => {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -275,9 +279,14 @@ export const normalizeTaskUpdate = (input = {}, current = {}) => {
 };
 
 const taskFromRow = (row = {}) => ({
+  ...jsonValue(row.TaskDataJson, {}),
   id: row.TaskId,
   taskId: `TSK-${String(row.TaskId || 0).padStart(4, "0")}`,
   projectId: row.ProjectId,
+  milestoneId: row.MilestoneId || null,
+  milestoneName: row.MilestoneName || "",
+  milestoneNumber: row.MilestoneNumber || "",
+  stage: row.Stage || "",
   taskName: row.TaskName,
   title: row.TaskName,
   description: row.Description || "",
@@ -310,6 +319,7 @@ const milestoneFromRow = (row = {}) => {
     id: row.MilestoneId,
     milestoneNumber: row.MilestoneNumber || `MS-${row.MilestoneId}`,
     projectId: row.ProjectId,
+    stage: projectStage(row.Stage, "Implement"),
     name: row.MilestoneName,
     description: row.Description || "",
     priority: row.Priority || "Medium",
@@ -451,9 +461,21 @@ const replaceMilestoneTasks = async (transaction, milestoneId, projectId, taskId
       throw error;
     }
   }
-  await new sql.Request(transaction)
+  const currentResult = await new sql.Request(transaction)
     .input("MilestoneId", sql.Int, milestoneId)
-    .query(`DELETE dbo.MilestoneTasks WHERE MilestoneId=@MilestoneId`);
+    .query(`SELECT TaskId FROM dbo.MilestoneTasks WHERE MilestoneId=@MilestoneId`);
+  const removed = currentResult.recordset
+    .map((row) => Number(row.TaskId))
+    .filter((taskId) => !normalized.includes(taskId));
+  if (removed.length) {
+    fail(409, "Tasks cannot be left without a milestone. Move them to another milestone first");
+  }
+  if (normalized.length) {
+    await new sql.Request(transaction)
+      .input("TaskIds", sql.NVarChar(sql.MAX), serialize(normalized))
+      .query(`DELETE dbo.MilestoneTasks
+        WHERE TaskId IN (SELECT TRY_CONVERT(INT,value) FROM OPENJSON(@TaskIds))`);
+  }
   for (const taskId of normalized) {
     await new sql.Request(transaction)
       .input("MilestoneId", sql.Int, milestoneId)
@@ -566,17 +588,63 @@ const syncMilestoneCompletion = async (transaction, projectId) => {
   `);
 };
 
+const cleanProjectLocationIds = (payload = {}) => {
+  const candidates = [
+    ...(Array.isArray(payload.locationIds) ? payload.locationIds : []),
+    ...(Array.isArray(payload.locations)
+      ? payload.locations.map((location) => location?.id ?? location?.locationId ?? location)
+      : []),
+    payload.locationId,
+  ];
+  return [...new Set(candidates.map(idValue).filter(Boolean))];
+};
+
+const syncProjectLocations = async (transaction, projectId, payload = {}) => {
+  const locationIds = cleanProjectLocationIds(payload);
+  if (locationIds.length) {
+    const valid = await new sql.Request(transaction)
+      .input("LocationIds", sql.NVarChar(sql.MAX), serialize(locationIds))
+      .query(`SELECT LocationId FROM dbo.Locations
+        WHERE LocationId IN (SELECT TRY_CONVERT(INT,value) FROM OPENJSON(@LocationIds))`);
+    if (valid.recordset.length !== locationIds.length) {
+      fail(400, "Every location must be a valid location record");
+    }
+  }
+  await new sql.Request(transaction)
+    .input("ProjectId", sql.Int, projectId)
+    .query(`DELETE dbo.ProjectLocations WHERE ProjectId=@ProjectId`);
+  for (const [index, locationId] of locationIds.entries()) {
+    await new sql.Request(transaction)
+      .input("ProjectId", sql.Int, projectId)
+      .input("LocationId", sql.Int, locationId)
+      .input("IsPrimary", sql.Bit, index === 0)
+      .query(`INSERT dbo.ProjectLocations(ProjectId,LocationId,IsPrimary)
+        VALUES(@ProjectId,@LocationId,@IsPrimary)`);
+  }
+};
 const loadProjectGraphs = async (projectId = null) => {
   const pool = await getPool();
   const request = pool.request().input("ProjectId", sql.Int, projectId);
   const result = await request.query(`
     SELECT p.*,
       CAST(COALESCE((SELECT AVG(CAST(t.CompletionPercentage AS DECIMAL(10,2)))
-        FROM dbo.ProjectTasks t WHERE t.ProjectId=p.ProjectId AND t.Status<>N'Cancelled'),0) AS INT) AS Progress
+        FROM dbo.ProjectTasks t WHERE t.ProjectId=p.ProjectId AND t.Status<>N'Cancelled'),0) AS INT) AS Progress,
+      COALESCE((
+        SELECT l.LocationId AS id,l.Name AS name,l.Code AS code,l.Type AS type,
+          l.Manager AS manager,l.Phone AS phone,l.Address AS address,l.Status AS status,
+          pl.IsPrimary AS isPrimary
+        FROM dbo.ProjectLocations pl JOIN dbo.Locations l ON l.LocationId=pl.LocationId
+        WHERE pl.ProjectId=p.ProjectId
+        ORDER BY pl.IsPrimary DESC,l.Name FOR JSON PATH
+      ),N'[]') AS LocationsJson
     FROM dbo.Projects p
     WHERE @ProjectId IS NULL OR p.ProjectId=@ProjectId
     ORDER BY p.ProjectId DESC;
-    SELECT * FROM dbo.ProjectTasks WHERE @ProjectId IS NULL OR ProjectId=@ProjectId ORDER BY TaskId DESC;
+    SELECT t.*,mt.MilestoneId,m.MilestoneName,m.MilestoneNumber,m.Stage
+    FROM dbo.ProjectTasks t
+    LEFT JOIN dbo.MilestoneTasks mt ON mt.TaskId=t.TaskId
+    LEFT JOIN dbo.ProjectMilestones m ON m.MilestoneId=mt.MilestoneId
+    WHERE @ProjectId IS NULL OR t.ProjectId=@ProjectId ORDER BY t.TaskId DESC;
     SELECT m.*,
       CAST(COALESCE((
         SELECT AVG(CAST(t.CompletionPercentage AS DECIMAL(10,2)))
@@ -607,25 +675,34 @@ const loadProjectGraphs = async (projectId = null) => {
     FROM dbo.ProjectMilestones m
     WHERE m.IsDeleted=0 AND (@ProjectId IS NULL OR m.ProjectId=@ProjectId);
   `);
-  const projects = (result.recordsets?.[0] || []).map((row) => ({
-    ...jsonValue(row.ManagementDataJson, {}),
+  const projects = (result.recordsets?.[0] || []).map((row) => {
+    const legacy = jsonValue(row.ManagementDataJson, {});
+    const locations = jsonValue(row.LocationsJson, []);
+    return ({
+    ...legacy,
     id: row.ProjectId,
     name: row.ProjectName ?? row.projectName ?? "",
     code: row.ProjectCode || "",
     customerId: row.CustomerId,
     client: row.Client || row.ClientCompany || "",
     companyName: row.ClientCompany || "",
+    department: row.Department || legacy.department || "",
     address: row.ClientAddress || "",
     status: row.Status ?? row.status ?? "Draft",
     startDate: row.StartDate ?? row.startDate ?? null,
     endDate: row.EndDate ?? row.endDate ?? null,
     notes: row.Notes || "",
+    locations,
+    locationIds: locations.map((location) => location.id),
+    locationId: locations[0]?.id || legacy.locationId || null,
+    siteName: locations[0]?.name || legacy.siteName || "",
     progress: Number(row.Progress || 0),
     tasks: [],
     milestones: [],
     siteReports: [],
     documents: [],
-  }));
+  });
+  });
   const byId = new Map(projects.map((project) => [project.id, project]));
   (result.recordsets?.[1] || []).forEach((row) =>
     byId.get(row.ProjectId)?.tasks.push(taskFromRow(row))
@@ -663,41 +740,65 @@ const dataUrlFile = (photo) => {
   };
 };
 
-const reportFromRow = (row = {}) => ({
-  id: row.ReportId,
-  reportNumber: row.ReportNumber,
-  projectId: row.ProjectId,
-  projectName: row.ProjectName || "",
-  reportDate: row.ReportDate,
-  siteName: row.SiteName || "",
-  shift: row.Shift || "General",
-  weather: row.Weather || "Clear",
-  summary: row.WorkPerformed || "",
-  workCompleted: row.WorkPerformed || "",
-  tomorrowPlan: row.TomorrowPlan || "",
-  delays: row.IssuesDelays || "",
-  status: row.Status,
-  managerRemarks: row.ManagerRemarks || "",
-  preparedBy: row.SubmittedByName || "",
-  submittedAt: row.SubmittedAt,
-  approvedBy: row.ApprovedByName || "",
-  approvedAt: row.ApprovedAt,
-  rejectionReason: row.RejectionReason || "",
-  createdAt: row.CreatedAt,
-  updatedAt: row.UpdatedAt,
-  taskRows: [],
-  manpowerRows: [],
-  materialRows: [],
-  equipmentRows: [],
-  issueRows: [],
-  photos: [],
-  attachments: [],
-});
+const reportDataPayload = (input = {}) => {
+  const {
+    taskRows: _taskRows,
+    manpowerRows: _manpowerRows,
+    materialRows: _materialRows,
+    equipmentRows: _equipmentRows,
+    safetyRows: _safetyRows,
+    qualityRows: _qualityRows,
+    issueRows: _issueRows,
+    visitorRows: _visitorRows,
+    photos: _photos,
+    attachments: _attachments,
+    ...metadata
+  } = input;
+  return metadata;
+};
+
+const reportFromRow = (row = {}) => {
+  const reportData = jsonValue(row.ReportDataJson, {});
+  return {
+    ...reportData,
+    id: row.ReportId,
+    reportNumber: row.ReportNumber,
+    projectId: row.ProjectId,
+    projectName: row.ResolvedProjectName ?? row.ProjectName ?? "",
+    reportDate: row.ReportDate,
+    siteName: row.SiteName || "",
+    shift: row.Shift || "General",
+    weather: row.Weather || "Clear",
+    summary: reportData.summary || row.WorkPerformed || "",
+    workCompleted: row.WorkPerformed || "",
+    tomorrowPlan: row.TomorrowPlan || "",
+    delays: row.IssuesDelays || "",
+    status: row.Status,
+    managerRemarks: row.ManagerRemarks || "",
+    preparedBy: reportData.preparedBy || row.SubmittedByName || "",
+    submittedAt: row.SubmittedAt,
+    approvedBy: row.ApprovedByName || "",
+    approvedAt: row.ApprovedAt,
+    rejectionReason: row.RejectionReason || "",
+    createdAt: row.CreatedAt,
+    updatedAt: row.UpdatedAt,
+    taskRows: [],
+    manpowerRows: [],
+    materialRows: [],
+    equipmentRows: [],
+    safetyRows: [],
+    qualityRows: [],
+    issueRows: [],
+    visitorRows: [],
+    photos: [],
+    attachments: [],
+  };
+};
 
 const loadReports = async (reportId = null) => {
   const pool = await getPool();
   const result = await pool.request().input("ReportId", sql.Int, reportId).query(`
-    SELECT r.*,p.ProjectName AS ProjectName,s.FullName AS SubmittedByName,a.FullName AS ApprovedByName
+    SELECT r.*,p.ProjectName AS ResolvedProjectName,s.FullName AS SubmittedByName,a.FullName AS ApprovedByName
     FROM dbo.DailySiteReports r JOIN dbo.Projects p ON p.ProjectId=r.ProjectId
     JOIN dbo.AppUsers s ON s.UserId=r.SubmittedBy
     LEFT JOIN dbo.AppUsers a ON a.UserId=r.ApprovedBy
@@ -863,6 +964,7 @@ const documentFromRow = (row = {}, user = {}) => ({
   status: row.Status,
   revision: Number(row.CurrentRevision || 0),
   revisionLabel: `R${Number(row.CurrentRevision || 0)}`,
+  milestones: jsonValue(row.MilestonesJson, []),
   uploadedBy: row.UploadedByName || "",
   uploadedById: row.UploadedBy,
   uploadedAt: row.UploadedAt,
@@ -887,7 +989,11 @@ const documentSelectSql = `
   SELECT d.*,p.projectName AS ProjectName,p.ProjectCode,
     u.FullName AS UploadedByName,uu.FullName AS UpdatedByName,
     s.FullName AS SubmittedByName,a.FullName AS ApprovedByName,
-    rj.FullName AS RejectedByName,sp.FullName AS SupersededByName
+    rj.FullName AS RejectedByName,sp.FullName AS SupersededByName,
+    COALESCE((SELECT dl.LinkId AS id,dl.LinkLabel AS label
+      FROM dbo.DocumentLinks dl
+      WHERE dl.DocumentId=d.DocumentId AND dl.LinkType=N'Milestone'
+      ORDER BY dl.LinkLabel FOR JSON PATH),N'[]') AS MilestonesJson
   FROM dbo.ProjectDocuments d
   JOIN dbo.Projects p ON p.ProjectId=d.ProjectId
   JOIN dbo.AppUsers u ON u.UserId=d.UploadedBy
@@ -1061,8 +1167,12 @@ const validateDocumentLinks = async (transaction, projectId, inputLinks) => {
       .input("LinkId", sql.NVarChar(100), link.id);
     let query;
     if (link.type === "Site") {
-      query = `SELECT CONVERT(NVARCHAR(100),LocationId) AS Id,Name AS Label
-        FROM dbo.Locations WHERE ProjectId=@ProjectId AND CONVERT(NVARCHAR(100),LocationId)=@LinkId`;
+      query = `SELECT CONVERT(NVARCHAR(100),l.LocationId) AS Id,l.Name AS Label
+        FROM dbo.Locations l WHERE CONVERT(NVARCHAR(100),l.LocationId)=@LinkId
+          AND (l.ProjectId=@ProjectId OR EXISTS(
+            SELECT 1 FROM dbo.ProjectLocations pl
+            WHERE pl.ProjectId=@ProjectId AND pl.LocationId=l.LocationId
+          ))`;
     } else if (link.type === "Task") {
       query = `SELECT CONVERT(NVARCHAR(100),TaskId) AS Id,TaskName AS Label
         FROM dbo.ProjectTasks WHERE ProjectId=@ProjectId AND CONVERT(NVARCHAR(100),TaskId)=@LinkId`;
@@ -1376,16 +1486,18 @@ export const createProjectManagementRouter = () => {
         .input("CustomerId", sql.Int, customerId)
         .input("Client", sql.NVarChar(255), textValue(req.body?.client))
         .input("ClientCompany", sql.NVarChar(255), textValue(req.body?.companyName ?? req.body?.client))
+        .input("Department", sql.NVarChar(150), textValue(req.body?.department))
         .input("Status", sql.NVarChar(50), textValue(req.body?.status) || "Draft")
         .input("StartDate", sql.Date, dateValue(req.body?.startDate))
         .input("EndDate", sql.Date, dateValue(req.body?.endDate))
         .input("Notes", sql.NVarChar(sql.MAX), textValue(req.body?.notes ?? req.body?.description))
         .input("ManagementDataJson", sql.NVarChar(sql.MAX), serialize(req.body))
         .query(`
-          INSERT dbo.Projects (ProjectName,ProjectCode,CustomerId,Client,ClientCompany,Status,StartDate,EndDate,Notes,ManagementDataJson)
-          OUTPUT INSERTED.ProjectId VALUES (@ProjectName,@ProjectCode,@CustomerId,@Client,@ClientCompany,@Status,@StartDate,@EndDate,@Notes,@ManagementDataJson)
+          INSERT dbo.Projects (ProjectName,ProjectCode,CustomerId,Client,ClientCompany,Department,Status,StartDate,EndDate,Notes,ManagementDataJson)
+          OUTPUT INSERTED.ProjectId VALUES (@ProjectName,@ProjectCode,@CustomerId,@Client,@ClientCompany,@Department,@Status,@StartDate,@EndDate,@Notes,@ManagementDataJson)
         `);
       const projectId = created.recordset[0].ProjectId;
+      await syncProjectLocations(transaction, projectId, req.body || {});
       let milestoneSequence = 0;
       for (const milestone of req.body?.milestones || []) {
         milestoneSequence += 1;
@@ -1393,6 +1505,7 @@ export const createProjectManagementRouter = () => {
           .input("ProjectId", sql.Int, projectId)
           .input("Number", sql.NVarChar(120), buildMilestoneNumber(req.body?.code, projectId, milestoneSequence))
           .input("Name", sql.NVarChar(255), textValue(milestone.name))
+          .input("Stage", sql.NVarChar(20), projectStage(milestone.stage))
           .input("Description", sql.NVarChar(sql.MAX), textValue(milestone.description))
           .input("Priority", sql.NVarChar(20), ["Low", "Medium", "High", "Critical"].includes(milestone.priority) ? milestone.priority : "Medium")
           .input("Deliverable", sql.NVarChar(sql.MAX), textValue(milestone.deliverable))
@@ -1404,11 +1517,11 @@ export const createProjectManagementRouter = () => {
           .input("UserId", sql.Int, req.user.id)
           .query(`
             INSERT dbo.ProjectMilestones
-              (ProjectId,MilestoneNumber,MilestoneName,Description,Priority,Deliverable,AcceptanceCriteria,
+              (ProjectId,MilestoneNumber,MilestoneName,Description,Stage,Priority,Deliverable,AcceptanceCriteria,
                BaselineStartDate,BaselineTargetDate,StartDate,TargetDate,
                ResponsiblePersonId,ResponsiblePersonName,CreatedBy,UpdatedBy)
             OUTPUT INSERTED.MilestoneId
-            VALUES (@ProjectId,@Number,@Name,@Description,@Priority,@Deliverable,@Acceptance,
+            VALUES (@ProjectId,@Number,@Name,@Description,@Stage,@Priority,@Deliverable,@Acceptance,
               @StartDate,@TargetDate,@StartDate,@TargetDate,@ResponsiblePersonId,@ResponsiblePersonName,@UserId,@UserId)
           `);
         await replaceMilestoneTasks(transaction, inserted.recordset[0].MilestoneId, projectId, milestone.taskIds || []);
@@ -1422,50 +1535,111 @@ export const createProjectManagementRouter = () => {
   });
 
   router.put("/projects/:projectId", requirePermission("tasks.manage"), async (req, res, next) => {
+    let transaction;
     try {
       const projectId = idValue(req.params.projectId);
       const pool = await getPool();
-      const existing = await pool.request().input("ProjectId", sql.Int, projectId)
+      transaction = pool.transaction();
+      await transaction.begin();
+      const existing = await new sql.Request(transaction).input("ProjectId", sql.Int, projectId)
         .query(`SELECT * FROM dbo.Projects WHERE ProjectId=@ProjectId`);
       const row = existing.recordset[0];
-      if (!row) return res.status(404).json({ ok: false, error: "Project not found" });
-      const result = await pool.request()
+      if (!row) fail(404, "Project not found");
+      const customerId =
+        req.body?.customerId === undefined && req.body?.clientId === undefined
+          ? row.CustomerId
+          : idValue(req.body?.customerId ?? req.body?.clientId);
+      if (!customerId) {
+        fail(400, "A customer is required");
+      }
+      const result = await new sql.Request(transaction)
         .input("ProjectId", sql.Int, projectId)
         .input("ProjectName", sql.NVarChar(255), textValue(req.body?.name) || row.ProjectName || row.projectName)
         .input("ProjectCode", sql.NVarChar(100), req.body?.code === undefined ? row.ProjectCode : textValue(req.body.code))
+        .input(
+          "CustomerId",
+          sql.Int,
+          customerId
+        )
+        .input(
+          "Client",
+          sql.NVarChar(255),
+          req.body?.client === undefined ? row.Client : textValue(req.body.client)
+        )
+        .input(
+          "ClientCompany",
+          sql.NVarChar(255),
+          req.body?.companyName === undefined
+            ? row.ClientCompany
+            : textValue(req.body.companyName)
+        )
+        .input(
+          "Department",
+          sql.NVarChar(150),
+          req.body?.department === undefined ? row.Department : textValue(req.body.department)
+        )
         .input("Status", sql.NVarChar(50), textValue(req.body?.status) || row.Status || row.status)
         .input("StartDate", sql.Date, req.body?.startDate === undefined ? (row.StartDate ?? row.startDate) : dateValue(req.body.startDate))
         .input("EndDate", sql.Date, req.body?.endDate === undefined ? (row.EndDate ?? row.endDate) : dateValue(req.body.endDate))
-        .input("Notes", sql.NVarChar(sql.MAX), req.body?.notes === undefined ? row.Notes : textValue(req.body.notes))
+        .input(
+          "Notes",
+          sql.NVarChar(sql.MAX),
+          req.body?.notes === undefined && req.body?.description === undefined
+            ? row.Notes
+            : textValue(req.body?.notes ?? req.body?.description)
+        )
         .input("ManagementDataJson", sql.NVarChar(sql.MAX), serialize(req.body))
         .query(`
-          UPDATE dbo.Projects SET ProjectName=@ProjectName,ProjectCode=@ProjectCode,Status=@Status,
+          UPDATE dbo.Projects SET ProjectName=@ProjectName,ProjectCode=@ProjectCode,
+            CustomerId=@CustomerId,Client=@Client,ClientCompany=@ClientCompany,Department=@Department,Status=@Status,
             StartDate=@StartDate,EndDate=@EndDate,Notes=@Notes,ManagementDataJson=@ManagementDataJson,
             UpdatedAt=SYSUTCDATETIME()
           WHERE ProjectId=@ProjectId
         `);
-      if (!result.rowsAffected[0]) return res.status(404).json({ ok: false, error: "Project not found" });
+      if (!result.rowsAffected[0]) fail(404, "Project not found");
+      if (req.body?.locations !== undefined || req.body?.locationIds !== undefined || req.body?.locationId !== undefined) {
+        await syncProjectLocations(transaction, projectId, req.body || {});
+      }
+      await transaction.commit();
       return res.json({ ok: true, project: (await loadProjectGraphs(projectId))[0] });
-    } catch (error) { return next(error); }
+    } catch (error) {
+      if (transaction) try { await transaction.rollback(); } catch { /* noop */ }
+      return next(error);
+    }
   });
 
   router.get("/projects/:projectId/tasks", async (req, res, next) => {
     try {
       const pool = await getPool();
       const result = await pool.request().input("ProjectId", sql.Int, idValue(req.params.projectId))
-        .query(`SELECT * FROM dbo.ProjectTasks WHERE ProjectId=@ProjectId ORDER BY TaskId DESC`);
+        .query(`SELECT t.*,mt.MilestoneId,m.MilestoneName,m.MilestoneNumber,m.Stage
+          FROM dbo.ProjectTasks t
+          JOIN dbo.MilestoneTasks mt ON mt.TaskId=t.TaskId
+          JOIN dbo.ProjectMilestones m ON m.MilestoneId=mt.MilestoneId
+          WHERE t.ProjectId=@ProjectId ORDER BY m.Stage,m.TargetDate,t.TaskId DESC`);
       return res.json({ ok: true, tasks: result.recordset.map(taskFromRow) });
     } catch (error) { return next(error); }
   });
 
   router.post("/projects/:projectId/tasks", requirePermission("tasks.manage"), async (req, res, next) => {
+    let transaction;
     try {
       const projectId = idValue(req.params.projectId);
+      const milestoneId = idValue(req.body?.milestoneId);
       const name = textValue(req.body?.taskName ?? req.body?.title ?? req.body?.name);
       if (!name) return res.status(400).json({ ok: false, error: "Task name is required" });
+      if (!milestoneId) return res.status(400).json({ ok: false, error: "A milestone is required before a task can be created" });
       const normalized = normalizeTaskUpdate(req.body, {});
       const pool = await getPool();
-      const result = await pool.request()
+      transaction = pool.transaction();
+      await transaction.begin();
+      const milestoneResult = await new sql.Request(transaction)
+        .input("MilestoneId", sql.Int, milestoneId)
+        .input("ProjectId", sql.Int, projectId)
+        .query(`SELECT MilestoneId FROM dbo.ProjectMilestones
+          WHERE MilestoneId=@MilestoneId AND ProjectId=@ProjectId AND IsDeleted=0 AND IsCancelled=0`);
+      if (!milestoneResult.recordset[0]) fail(400, "Select an active milestone from this project");
+      const result = await new sql.Request(transaction)
         .input("ProjectId", sql.Int, projectId).input("TaskName", sql.NVarChar(255), name)
         .input("Description", sql.NVarChar(sql.MAX), textValue(req.body?.description))
         .input("Status", sql.NVarChar(20), normalized.status)
@@ -1477,17 +1651,33 @@ export const createProjectManagementRouter = () => {
         .input("StartDate", sql.Date, dateValue(req.body?.startDate))
         .input("DueDate", sql.Date, normalized.dueDate)
         .input("Priority", sql.NVarChar(20), textValue(req.body?.priority) || "Medium")
+        .input("TaskDataJson", sql.NVarChar(sql.MAX), serialize(req.body))
         .input("UserId", sql.Int, req.user.id)
         .query(`
           INSERT dbo.ProjectTasks
             (ProjectId,TaskName,Description,Status,CompletionPercentage,RemainingWorkRemarks,Remarks,
-             AssignedEmployeeId,AssignedEmployeeName,StartDate,DueDate,Priority,CreatedBy,UpdatedBy)
+             AssignedEmployeeId,AssignedEmployeeName,StartDate,DueDate,Priority,TaskDataJson,CreatedBy,UpdatedBy)
           OUTPUT INSERTED.*
           VALUES (@ProjectId,@TaskName,@Description,@Status,@Percentage,@Remaining,@Remarks,
-             @EmployeeId,@EmployeeName,@StartDate,@DueDate,@Priority,@UserId,@UserId)
+             @EmployeeId,@EmployeeName,@StartDate,@DueDate,@Priority,@TaskDataJson,@UserId,@UserId)
         `);
-      return res.status(201).json({ ok: true, task: taskFromRow(result.recordset[0]), summary: await progressSummary(pool.request(), projectId) });
-    } catch (error) { return next(error); }
+      const taskId = result.recordset[0].TaskId;
+      await new sql.Request(transaction)
+        .input("MilestoneId", sql.Int, milestoneId)
+        .input("TaskId", sql.Int, taskId)
+        .query(`INSERT dbo.MilestoneTasks(MilestoneId,TaskId) VALUES(@MilestoneId,@TaskId)`);
+      await syncMilestoneCompletion(transaction, projectId);
+      await transaction.commit();
+      const [project] = await loadProjectGraphs(projectId);
+      return res.status(201).json({
+        ok: true,
+        task: project.tasks.find((task) => Number(task.id) === Number(taskId)),
+        summary: await progressSummary(pool.request(), projectId),
+      });
+    } catch (error) {
+      if (transaction) try { await transaction.rollback(); } catch { /* noop */ }
+      return next(error);
+    }
   });
 
   const requireTaskUpdateAccess = async (req, res, next) => {
@@ -1583,6 +1773,7 @@ export const createProjectManagementRouter = () => {
         if (!matches(milestone.status, req.query.status)) return false;
         if (!matches(milestone.health, req.query.health)) return false;
         if (!matches(milestone.priority, req.query.priority)) return false;
+        if (!matches(milestone.stage, req.query.stage)) return false;
         if (req.query.owner && !String(milestone.responsiblePerson || "").toLowerCase().includes(String(req.query.owner).toLowerCase())) return false;
         const target = dateOnly(milestone.targetDate);
         if (fromDate !== null && target !== null && target < fromDate) return false;
@@ -1671,6 +1862,7 @@ export const createProjectManagementRouter = () => {
       const result = await new sql.Request(transaction)
         .input("ProjectId", sql.Int, projectId).input("Number", sql.NVarChar(120), milestoneNumber)
         .input("Name", sql.NVarChar(255), textValue(req.body.name))
+        .input("Stage", sql.NVarChar(20), projectStage(req.body.stage))
         .input("Description", sql.NVarChar(sql.MAX), textValue(req.body.description))
         .input("Priority", sql.NVarChar(20), priority)
         .input("Deliverable", sql.NVarChar(sql.MAX), textValue(req.body.deliverable))
@@ -1685,11 +1877,11 @@ export const createProjectManagementRouter = () => {
         .input("UserId", sql.Int, req.user.id)
         .query(`
           INSERT dbo.ProjectMilestones
-            (ProjectId,MilestoneNumber,MilestoneName,Description,Priority,Deliverable,AcceptanceCriteria,
+            (ProjectId,MilestoneNumber,MilestoneName,Description,Stage,Priority,Deliverable,AcceptanceCriteria,
              BaselineStartDate,BaselineTargetDate,StartDate,TargetDate,ActualStartDate,Notes,
              ResponsiblePersonId,ResponsiblePersonName,IsCancelled,CreatedBy,UpdatedBy)
           OUTPUT INSERTED.MilestoneId VALUES
-            (@ProjectId,@Number,@Name,@Description,@Priority,@Deliverable,@Acceptance,
+            (@ProjectId,@Number,@Name,@Description,@Stage,@Priority,@Deliverable,@Acceptance,
              @BaselineStart,@BaselineTarget,@StartDate,@TargetDate,@ActualStart,@Notes,
              @PersonId,@PersonName,0,@UserId,@UserId)
         `);
@@ -1715,17 +1907,20 @@ export const createProjectManagementRouter = () => {
       const existing = await new sql.Request(transaction).input("Id", sql.Int, milestoneId)
         .query(`SELECT * FROM dbo.ProjectMilestones WHERE MilestoneId=@Id AND IsDeleted=0`);
       const row = existing.recordset[0];
-      if (!row) return res.status(404).json({ ok: false, error: "Milestone not found" });
+      if (!row) fail(404, "Milestone not found");
       const startDate = req.body.startDate === undefined ? row.StartDate : dateValue(req.body.startDate);
       const targetDate = req.body.targetDate === undefined ? row.TargetDate : dateValue(req.body.targetDate);
       if (startDate && targetDate && dateOnly(targetDate) < dateOnly(startDate)) fail(400, "Target date cannot be before the start date");
       const priority = req.body.priority === undefined ? row.Priority : req.body.priority;
       if (!["Low", "Medium", "High", "Critical"].includes(priority)) fail(400, "Select a valid milestone priority");
+      const stage = req.body.stage === undefined ? projectStage(row.Stage, "Implement") : projectStage(req.body.stage, null);
+      if (!stage) fail(400, "Select a valid project stage");
       await new sql.Request(transaction)
         .input("Id", sql.Int, milestoneId)
         .input("Name", sql.NVarChar(255), textValue(req.body.name) || row.MilestoneName)
         .input("Description", sql.NVarChar(sql.MAX), req.body.description === undefined ? row.Description : textValue(req.body.description))
         .input("Priority", sql.NVarChar(20), priority)
+        .input("Stage", sql.NVarChar(20), stage)
         .input("Deliverable", sql.NVarChar(sql.MAX), req.body.deliverable === undefined ? row.Deliverable : textValue(req.body.deliverable))
         .input("Acceptance", sql.NVarChar(sql.MAX), req.body.acceptanceCriteria === undefined ? row.AcceptanceCriteria : textValue(req.body.acceptanceCriteria))
         .input("BaselineStart", sql.Date, req.body.baselineStartDate === undefined ? row.BaselineStartDate : dateValue(req.body.baselineStartDate))
@@ -1737,7 +1932,7 @@ export const createProjectManagementRouter = () => {
         .input("PersonName", sql.NVarChar(200), req.body.responsiblePerson === undefined && req.body.owner === undefined
           ? row.ResponsiblePersonName : textValue(req.body.responsiblePerson ?? req.body.owner))
         .input("UserId", sql.Int, req.user.id)
-        .query(`UPDATE dbo.ProjectMilestones SET MilestoneName=@Name,Description=@Description,StartDate=@StartDate,
+        .query(`UPDATE dbo.ProjectMilestones SET MilestoneName=@Name,Description=@Description,Stage=@Stage,StartDate=@StartDate,
           TargetDate=@TargetDate,Priority=@Priority,Deliverable=@Deliverable,AcceptanceCriteria=@Acceptance,
           BaselineStartDate=@BaselineStart,BaselineTargetDate=@BaselineTarget,ActualStartDate=@ActualStart,
           Notes=@Notes,ResponsiblePersonId=@PersonId,ResponsiblePersonName=@PersonName,
@@ -1818,6 +2013,13 @@ export const createProjectManagementRouter = () => {
       const current = await pool.request().input("Id", sql.Int, id)
         .query(`SELECT * FROM dbo.ProjectMilestones WHERE MilestoneId=@Id`);
       if (!current.recordset[0]) fail(404, "Milestone not found");
+      if (action === "delete") {
+        const links = await pool.request().input("Id", sql.Int, id)
+          .query(`SELECT COUNT(*) AS Total FROM dbo.MilestoneTasks WHERE MilestoneId=@Id`);
+        if (Number(links.recordset[0]?.Total || 0) > 0) {
+          fail(409, "A milestone containing tasks cannot be archived");
+        }
+      }
       const query = action === "cancel"
         ? `UPDATE dbo.ProjectMilestones SET IsCancelled=1,CancelledBy=@UserId,CancelledAt=SYSUTCDATETIME(),
             CancellationReason=@Reason,UpdatedBy=@UserId,UpdatedAt=SYSUTCDATETIME() WHERE MilestoneId=@Id AND IsDeleted=0`
@@ -1909,7 +2111,12 @@ export const createProjectManagementRouter = () => {
       if (!projectId) return res.status(400).json({ ok: false, error: "Project is required" });
       const pool = await getPool();
       const result = await pool.request().input("ProjectId", sql.Int, projectId).query(`
-        SELECT CONVERT(NVARCHAR(100),LocationId) AS id,Name AS label FROM dbo.Locations WHERE ProjectId=@ProjectId ORDER BY Name;
+        SELECT CONVERT(NVARCHAR(100),l.LocationId) AS id,l.Name AS label
+        FROM dbo.Locations l
+        WHERE l.ProjectId=@ProjectId OR EXISTS(
+          SELECT 1 FROM dbo.ProjectLocations pl
+          WHERE pl.ProjectId=@ProjectId AND pl.LocationId=l.LocationId
+        ) ORDER BY l.Name;
         SELECT CONVERT(NVARCHAR(100),TaskId) AS id,TaskName AS label FROM dbo.ProjectTasks WHERE ProjectId=@ProjectId ORDER BY TaskName;
         SELECT CONVERT(NVARCHAR(100),MilestoneId) AS id,MilestoneName AS label FROM dbo.ProjectMilestones WHERE ProjectId=@ProjectId ORDER BY MilestoneName;
         SELECT CONVERT(NVARCHAR(100),ReportId) AS id,ReportNumber AS label FROM dbo.DailySiteReports WHERE ProjectId=@ProjectId ORDER BY ReportDate DESC;
@@ -1952,7 +2159,10 @@ export const createProjectManagementRouter = () => {
         AND (@DateTo IS NULL OR d.DocumentDate<=@DateTo)
         AND (@Search IS NULL OR d.DocumentName LIKE N'%'+@Search+N'%'
           OR d.DocumentNumber LIKE N'%'+@Search+N'%'
-          OR d.ExternalReference LIKE N'%'+@Search+N'%')`;
+          OR d.ExternalReference LIKE N'%'+@Search+N'%'
+          OR EXISTS(SELECT 1 FROM dbo.DocumentLinks dl
+            WHERE dl.DocumentId=d.DocumentId AND dl.LinkType=N'Milestone'
+              AND dl.LinkLabel LIKE N'%'+@Search+N'%'))`;
       const result = await request.query(`
         ${documentSelectSql} WHERE ${where}
         ORDER BY d.UpdatedAt DESC,d.DocumentId DESC
@@ -2298,18 +2508,19 @@ export const createProjectManagementRouter = () => {
       if (reportId) {
         const existing = await new sql.Request(transaction).input("Id", sql.Int, reportId)
           .query(`SELECT Status FROM dbo.DailySiteReports WHERE ReportId=@Id`);
-        if (!existing.recordset[0]) return res.status(404).json({ ok: false, error: "Report not found" });
+        if (!existing.recordset[0]) fail(404, "Report not found");
         if (!["Draft", "Rejected"].includes(existing.recordset[0].Status)) {
-          return res.status(409).json({ ok: false, error: "Only draft or rejected reports can be edited" });
+          fail(409, "Only draft or rejected reports can be edited");
         }
         await new sql.Request(transaction).input("Id", sql.Int, reportId).input("ProjectId", sql.Int, projectId)
           .input("ReportDate", sql.Date, dateValue(input.reportDate)).input("SiteName", sql.NVarChar(255), textValue(input.siteName))
           .input("Shift", sql.NVarChar(50), textValue(input.shift)).input("Weather", sql.NVarChar(50), textValue(input.weather))
           .input("Work", sql.NVarChar(sql.MAX), work).input("Tomorrow", sql.NVarChar(sql.MAX), textValue(input.tomorrowPlan))
           .input("Issues", sql.NVarChar(sql.MAX), textValue(input.delays ?? input.issuesDelays))
+          .input("ReportDataJson", sql.NVarChar(sql.MAX), serialize(reportDataPayload(input)))
           .query(`UPDATE dbo.DailySiteReports SET ProjectId=@ProjectId,ReportDate=@ReportDate,SiteName=@SiteName,
             Shift=@Shift,Weather=@Weather,WorkPerformed=@Work,TomorrowPlan=@Tomorrow,IssuesDelays=@Issues,
-            Status=N'Draft',UpdatedAt=SYSUTCDATETIME() WHERE ReportId=@Id`);
+            ReportDataJson=@ReportDataJson,Status=N'Draft',UpdatedAt=SYSUTCDATETIME() WHERE ReportId=@Id`);
         await new sql.Request(transaction).input("Id", sql.Int, reportId).query(`
           DELETE dbo.DailySiteReportTasks WHERE ReportId=@Id;
           DELETE dbo.DailySiteReportDetails WHERE ReportId=@Id;
@@ -2321,10 +2532,11 @@ export const createProjectManagementRouter = () => {
           .input("SiteName", sql.NVarChar(255), textValue(input.siteName)).input("Shift", sql.NVarChar(50), textValue(input.shift))
           .input("Weather", sql.NVarChar(50), textValue(input.weather)).input("Work", sql.NVarChar(sql.MAX), work)
           .input("Tomorrow", sql.NVarChar(sql.MAX), textValue(input.tomorrowPlan))
-          .input("Issues", sql.NVarChar(sql.MAX), textValue(input.delays ?? input.issuesDelays)).input("UserId", sql.Int, req.user.id)
+          .input("Issues", sql.NVarChar(sql.MAX), textValue(input.delays ?? input.issuesDelays))
+          .input("ReportDataJson", sql.NVarChar(sql.MAX), serialize(reportDataPayload(input))).input("UserId", sql.Int, req.user.id)
           .query(`INSERT dbo.DailySiteReports
-            (ReportNumber,ProjectId,ReportDate,SiteName,Shift,Weather,WorkPerformed,TomorrowPlan,IssuesDelays,SubmittedBy)
-            OUTPUT INSERTED.ReportId VALUES (@Number,@ProjectId,@ReportDate,@SiteName,@Shift,@Weather,@Work,@Tomorrow,@Issues,@UserId)`);
+            (ReportNumber,ProjectId,ReportDate,SiteName,Shift,Weather,WorkPerformed,TomorrowPlan,IssuesDelays,ReportDataJson,SubmittedBy)
+            OUTPUT INSERTED.ReportId VALUES (@Number,@ProjectId,@ReportDate,@SiteName,@Shift,@Weather,@Work,@Tomorrow,@Issues,@ReportDataJson,@UserId)`);
         reportId = result.recordset[0].ReportId;
       }
       const detailGroups = [
@@ -2344,7 +2556,6 @@ export const createProjectManagementRouter = () => {
           progressRemarks: row.workCompleted, generalRemarks: `Updated from Daily Site Report ${reportId}`,
         };
         const normalized = normalizeTaskUpdate(taskInput);
-        await writeTaskUpdate(transaction, idValue(row.taskId), taskInput, [], req.user);
         await new sql.Request(transaction).input("ReportId", sql.Int, reportId).input("TaskId", sql.Int, idValue(row.taskId))
           .input("Status", sql.NVarChar(20), normalized.status).input("Percentage", sql.Int, normalized.completionPercentage)
           .input("Work", sql.NVarChar(sql.MAX), textValue(row.workCompleted))
@@ -2407,16 +2618,51 @@ export const createProjectManagementRouter = () => {
   });
 
   router.post("/reports/:reportId/approve", requireManager, async (req, res, next) => {
+    let transaction;
     try {
+      const reportId = idValue(req.params.reportId);
       const pool = await getPool();
-      const result = await pool.request().input("Id", sql.Int, idValue(req.params.reportId)).input("UserId", sql.Int, req.user.id)
+      transaction = pool.transaction();
+      await transaction.begin();
+      const existing = await new sql.Request(transaction)
+        .input("Id", sql.Int, reportId)
+        .query(`SELECT ProjectId FROM dbo.DailySiteReports WITH (UPDLOCK,ROWLOCK)
+          WHERE ReportId=@Id AND Status=N'Submitted'`);
+      const projectId = existing.recordset[0]?.ProjectId;
+      if (!projectId) fail(409, "Only submitted reports can be approved");
+      await new sql.Request(transaction)
+        .input("Id", sql.Int, reportId)
+        .input("UserId", sql.Int, req.user.id)
         .input("Remarks", sql.NVarChar(sql.MAX), textValue(req.body?.managerRemarks))
         .query(`UPDATE dbo.DailySiteReports SET Status=N'Approved',ManagerRemarks=@Remarks,ApprovedBy=@UserId,
-          ApprovedAt=SYSUTCDATETIME(),UpdatedAt=SYSUTCDATETIME() WHERE ReportId=@Id AND Status=N'Submitted'`);
-      if (!result.rowsAffected[0]) return res.status(409).json({ ok: false, error: "Only submitted reports can be approved" });
+          ApprovedAt=SYSUTCDATETIME(),UpdatedAt=SYSUTCDATETIME() WHERE ReportId=@Id`);
+      const taskRows = await new sql.Request(transaction)
+        .input("Id", sql.Int, reportId)
+        .query(`SELECT TaskId,Status,CompletionPercentage,WorkPerformed,RemainingWorkRemarks
+          FROM dbo.DailySiteReportTasks WHERE ReportId=@Id ORDER BY ReportTaskId`);
+      for (const row of taskRows.recordset) {
+        await writeTaskUpdate(
+          transaction,
+          row.TaskId,
+          {
+            status: row.Status,
+            completionPercentage: row.CompletionPercentage,
+            remainingWorkRemarks: row.RemainingWorkRemarks,
+            progressRemarks: row.WorkPerformed,
+            generalRemarks: `Approved from Daily Site Report ${reportId}`,
+          },
+          [],
+          req.user
+        );
+      }
+      await syncMilestoneCompletion(transaction, projectId);
+      await transaction.commit();
       await writeAudit(req, { action: "site-report.approve", targetType: "daily-site-report", targetId: req.params.reportId, after: { managerRemarks: req.body?.managerRemarks } });
-      return res.json({ ok: true, report: (await loadReports(idValue(req.params.reportId)))[0] });
-    } catch (error) { return next(error); }
+      return res.json({ ok: true, report: (await loadReports(reportId))[0] });
+    } catch (error) {
+      if (transaction) try { await transaction.rollback(); } catch { /* noop */ }
+      return next(error);
+    }
   });
 
   router.post("/reports/:reportId/reject", requireManager, async (req, res, next) => {
@@ -2441,7 +2687,10 @@ export const createProjectManagementRouter = () => {
       const id = idValue(req.params.reportId);
       const existing = await new sql.Request(transaction).input("Id", sql.Int, id)
         .query(`SELECT Status FROM dbo.DailySiteReports WHERE ReportId=@Id`);
-      if (!["Draft", "Rejected"].includes(existing.recordset[0]?.Status)) return res.status(409).json({ ok: false, error: "Only draft or rejected reports can be deleted" });
+      if (!existing.recordset[0]) fail(404, "Report not found");
+      if (!["Draft", "Rejected"].includes(existing.recordset[0].Status)) {
+        fail(409, "Only draft or rejected reports can be deleted");
+      }
       await new sql.Request(transaction).input("Id", sql.Int, id).query(`
         DELETE dbo.MilestoneReportLinks WHERE ReportId=@Id;
         DELETE dbo.DailySiteReportAttachments WHERE ReportId=@Id;

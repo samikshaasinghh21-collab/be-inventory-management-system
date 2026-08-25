@@ -13,6 +13,7 @@ import {
   milestoneStatus,
   normalizeReportTaskStatus,
   normalizeTaskUpdate,
+  PROJECT_STAGES,
 } from "../src/projectManagement.js";
 import { hasPermission, requirePermission } from "../src/auth.js";
 
@@ -74,6 +75,11 @@ test("a collection containing only cancelled tasks has zero derived progress", (
 test("milestone numbering sanitizes the project code and pads its sequence", () => {
   assert.equal(buildMilestoneNumber("KSP/IT-02", 9, 7), "MS-KSPIT02-0007");
   assert.equal(buildMilestoneNumber("", 42, 1), "MS-42-0001");
+});
+
+test("project workflow exposes the four controlled stages", () => {
+  assert.deepEqual([...PROJECT_STAGES], ["Design", "Procure", "Implement", "Allocate"]);
+  assert.equal(Object.isFrozen(PROJECT_STAGES), true);
 });
 
 test("milestone status is derived from progress except cancellation", () => {

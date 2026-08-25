@@ -1,12 +1,4 @@
 import api from "./api";
-import { 
-  validatePAN, 
-  validateUAN, 
-  validateEmail, 
-  validatePhoneNumber,
-  formatDateToMMDDYYYY,
-  calculateGrossSalary as calcGrossSalary
-} from "../utils/hrmsValidation";
 
 const emitHrmsEmployeesChange = () => {
   if (typeof window !== "undefined") {
@@ -92,9 +84,6 @@ export const normalizeHrmsEmployee = (employee = {}) => {
   const tdsAmount = toOptionalNumber(
     employee.tdsAmount ?? employee.tds ?? employee.TDSAmount ?? employee.TDS
   );
-  const tds = tdsAmount;
-  const pt = professionalTax;
-
   return {
     ...employee,
     id,
@@ -273,6 +262,41 @@ export const fetchHrmsEmployees = async (page = 1, pageSize = 50, filters = {}) 
     console.error('Error fetching employees:', error);
     throw error;
   }
+};
+
+export const fetchAllHrmsEmployees = async (pageSize = 200, filters = {}) => {
+  const employeesByKey = new Map();
+
+  for (let page = 1; page <= 100; page += 1) {
+    const response = await fetchHrmsEmployees(page, pageSize, filters);
+    const pageEmployees = Array.isArray(response.employees) ? response.employees : [];
+    let added = 0;
+
+    pageEmployees.forEach((employee) => {
+      const key = String(
+        employee.employeeId || employee.id || `${employee.name}|${employee.email}`
+      ).trim();
+      if (!key || employeesByKey.has(key)) return;
+      employeesByKey.set(key, employee);
+      added += 1;
+    });
+
+    const totalPages = Number(
+      response.pagination?.totalPages || response.pagination?.pages || 0
+    );
+    const total = Number(response.total || response.pagination?.totalRecords || 0);
+    if (
+      pageEmployees.length === 0 ||
+      added === 0 ||
+      (totalPages > 0 && page >= totalPages) ||
+      (total > 0 && employeesByKey.size >= total) ||
+      (totalPages === 0 && total === 0 && pageEmployees.length < pageSize)
+    ) {
+      break;
+    }
+  }
+
+  return Array.from(employeesByKey.values());
 };
 
 export const fetchHrmsEmployee = async (id) => {

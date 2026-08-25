@@ -23,6 +23,9 @@ CREATE TABLE dbo.ProjectTasks (
   CONSTRAINT CK_ProjectTasks_Percentage CHECK(CompletionPercentage BETWEEN 0 AND 100)
 );
 
+IF COL_LENGTH('dbo.ProjectTasks', 'TaskDataJson') IS NULL
+  ALTER TABLE dbo.ProjectTasks ADD TaskDataJson NVARCHAR(MAX) NULL;
+
 IF OBJECT_ID('dbo.TaskUpdates', 'U') IS NULL
 CREATE TABLE dbo.TaskUpdates (
   TaskUpdateId INT IDENTITY(1,1) PRIMARY KEY, TaskId INT NOT NULL,
@@ -98,6 +101,9 @@ CREATE TABLE dbo.DailySiteReports (
   UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT FK_DailySiteReports_Project FOREIGN KEY(ProjectId) REFERENCES dbo.Projects(ProjectId)
 );
+
+IF COL_LENGTH('dbo.DailySiteReports', 'ReportDataJson') IS NULL
+  ALTER TABLE dbo.DailySiteReports ADD ReportDataJson NVARCHAR(MAX) NULL;
 
 IF OBJECT_ID('dbo.DailySiteReportDetails', 'U') IS NULL
 CREATE TABLE dbo.DailySiteReportDetails (

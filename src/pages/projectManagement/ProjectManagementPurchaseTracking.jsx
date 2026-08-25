@@ -22,6 +22,7 @@ import DateInput from "../../components/common/DateInput";
 import useSettings from "../../hooks/useSettings";
 import {
   getProjectManagementProjects,
+  hydrateProjectManagementProjects,
   PROJECT_MANAGEMENT_PROJECTS_EVENT,
 } from "../../services/projectManagementProjectsStore";
 import {
@@ -34,6 +35,8 @@ import {
   savePurchaseFollowUp,
   updateLocalPurchase,
 } from "../../services/purchaseTrackingStore";
+import { fetchItems } from "../../services/inventoryApi";
+import { fetchVendors } from "../../services/vendorsApi";
 import { formatInrCurrency } from "../../utils/formatters";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -73,7 +76,9 @@ const csvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 const emptyPurchaseForm = () => ({
   projectId: "",
   poNumber: "",
+  vendorId: "",
   vendor: "",
+  productId: "",
   itemSummary: "",
   amount: "",
   orderDate: today(),
@@ -130,8 +135,10 @@ const MetricCard = ({ icon, label, value, helper, tone }) => (
   </article>
 );
 
-const buildRows = ({ orders, projects, followUps }) => {
+const buildRows = ({ orders, projects, followUps, vendors, products }) => {
   const projectMap = new Map(projects.map((item) => [keyOf(item.id), item]));
+  const vendorMap = new Map(vendors.map((item) => [keyOf(item.id), item]));
+  const productMap = new Map(products.map((item) => [keyOf(item.id), item]));
 
   return orders.map((order) => {
     const orderReceipts = Array.isArray(order.receipts) ? order.receipts : [];
@@ -186,10 +193,14 @@ const buildRows = ({ orders, projects, followUps }) => {
       0
     );
 
+    const selectedProduct = productMap.get(keyOf(order.productId));
+    const selectedVendor = vendorMap.get(keyOf(order.vendorId));
     return {
       ...order,
       project: projectMap.get(keyOf(order.projectId)),
-      vendor: { name: order.vendor || order.vendorName || "" },
+      vendor: selectedVendor || { name: order.vendor || order.vendorName || "" },
+      itemSummary:
+        selectedProduct?.name || order.itemSummary || order.summary || "",
       location: { name: order.location || order.locationName || "" },
       receipts: orderReceipts,
       latestReceipt,
@@ -211,6 +222,8 @@ const ProjectManagementPurchaseTracking = () => {
   const currentUser = settings?.profile?.name || settings?.profile?.fullName || "";
   const [orders, setOrders] = useState(() => listLocalPurchases());
   const [projects, setProjects] = useState(() => getProjectManagementProjects());
+  const [vendors, setVendors] = useState([]);
+  const [products, setProducts] = useState([]);
   const [followUps, setFollowUps] = useState(() => getPurchaseFollowUps());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -233,8 +246,15 @@ const ProjectManagementPurchaseTracking = () => {
     else setLoading(true);
     setError("");
     try {
-      await refreshPurchaseTracking();
+      const [, , vendorRows, productRows] = await Promise.all([
+        hydrateProjectManagementProjects(),
+        refreshPurchaseTracking(),
+        fetchVendors(),
+        fetchItems(),
+      ]);
       setProjects(getProjectManagementProjects());
+      setVendors(vendorRows);
+      setProducts(productRows);
       setOrders(listLocalPurchases());
       setFollowUps(getPurchaseFollowUps());
     } catch (loadError) {
@@ -253,20 +273,25 @@ const ProjectManagementPurchaseTracking = () => {
 
   useEffect(() => {
     const refreshConnected = () => load({ quiet: true });
+    const syncProjectCache = () => setProjects(getProjectManagementProjects());
     const refreshLocal = () => setFollowUps(getPurchaseFollowUps());
     window.addEventListener("projects:changed", refreshConnected);
-    window.addEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, refreshConnected);
+    window.addEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, syncProjectCache);
     window.addEventListener(PURCHASE_TRACKING_EVENT, refreshLocal);
+    window.addEventListener("vendors:changed", refreshConnected);
+    window.addEventListener("products:changed", refreshConnected);
     return () => {
       window.removeEventListener("projects:changed", refreshConnected);
-      window.removeEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, refreshConnected);
+      window.removeEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, syncProjectCache);
       window.removeEventListener(PURCHASE_TRACKING_EVENT, refreshLocal);
+      window.removeEventListener("vendors:changed", refreshConnected);
+      window.removeEventListener("products:changed", refreshConnected);
     };
   }, [load]);
 
   const rows = useMemo(
-    () => buildRows({ orders, projects, followUps }),
-    [orders, projects, followUps]
+    () => buildRows({ orders, projects, followUps, vendors, products }),
+    [orders, projects, followUps, vendors, products]
   );
 
   const visibleRows = useMemo(() => rows.filter((row) => {
@@ -361,7 +386,17 @@ const ProjectManagementPurchaseTracking = () => {
       ...emptyPurchaseForm(),
       projectId: keyOf(row.projectId),
       poNumber: row.poNumber || "",
+      vendorId:
+        keyOf(row.vendorId) ||
+        keyOf(vendors.find((vendor) => vendor.name === row.vendor?.name)?.id),
       vendor: row.vendor?.name || "",
+      productId:
+        keyOf(row.productId) ||
+        keyOf(
+          products.find(
+            (product) => product.name === (row.itemSummary || row.summary)
+          )?.id
+        ),
       itemSummary: row.itemSummary || row.summary || "",
       amount: row.amount || "",
       orderDate: String(row.orderDate || today()).slice(0, 10),
@@ -380,8 +415,8 @@ const ProjectManagementPurchaseTracking = () => {
 
   const savePurchase = async () => {
     if (!purchaseForm) return;
-    if (!purchaseForm.projectId || !purchaseForm.vendor.trim() || !purchaseForm.itemSummary.trim() || !purchaseForm.orderDate) {
-      setError("Project, vendor, item summary, and order date are required.");
+    if (!purchaseForm.projectId || !purchaseForm.vendorId || !purchaseForm.productId || !purchaseForm.orderDate) {
+      setError("Project, inventory vendor, product, and order date are required.");
       return;
     }
     if (numberValue(purchaseForm.receivedQty) > numberValue(purchaseForm.orderedQty)) {
@@ -399,6 +434,14 @@ const ProjectManagementPurchaseTracking = () => {
       const receivedQty = numberValue(purchaseForm.receivedQty);
       const payload = {
         ...purchaseForm,
+        vendor:
+          vendors.find(
+            (vendor) => keyOf(vendor.id) === keyOf(purchaseForm.vendorId)
+          )?.name || purchaseForm.vendor,
+        itemSummary:
+          products.find(
+            (product) => keyOf(product.id) === keyOf(purchaseForm.productId)
+          )?.name || purchaseForm.itemSummary,
         amount: numberValue(purchaseForm.amount),
         orderedQty,
         receivedQty,
@@ -561,9 +604,9 @@ const ProjectManagementPurchaseTracking = () => {
               <div className="grid gap-4 sm:grid-cols-2">
                 <label><span className="mb-1 block text-xs font-medium text-slate-500">Project *</span><select value={purchaseForm.projectId} disabled={Boolean(editingPurchaseId)} onChange={(event) => setPurchaseForm((current) => ({ ...current, projectId: event.target.value }))} className={`${inputClass} disabled:bg-slate-100`}><option value="">Select project</option>{projects.map((project) => <option key={project.id} value={keyOf(project.id)}>{project.name || project.code}</option>)}</select></label>
                 <label><span className="mb-1 block text-xs font-medium text-slate-500">PO Number</span><input value={purchaseForm.poNumber} onChange={(event) => setPurchaseForm((current) => ({ ...current, poNumber: event.target.value }))} placeholder="Auto-generated if blank" className={inputClass}/></label>
-                <label><span className="mb-1 block text-xs font-medium text-slate-500">Vendor *</span><input value={purchaseForm.vendor} onChange={(event) => setPurchaseForm((current) => ({ ...current, vendor: event.target.value }))} placeholder="Vendor name" className={inputClass}/></label>
+                <label><span className="mb-1 block text-xs font-medium text-slate-500">Vendor *</span><select value={purchaseForm.vendorId} onChange={(event) => { const vendor = vendors.find((item) => keyOf(item.id) === event.target.value); setPurchaseForm((current) => ({ ...current, vendorId: event.target.value, vendor: vendor?.name || "" })); }} className={inputClass}><option value="">Select inventory vendor</option>{vendors.map((vendor) => <option key={vendor.id} value={keyOf(vendor.id)}>{vendor.name}</option>)}</select></label>
                 <label><span className="mb-1 block text-xs font-medium text-slate-500">Status</span><select value={purchaseForm.status} onChange={(event) => setPurchaseForm((current) => ({ ...current, status: event.target.value }))} className={inputClass}>{purchaseStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
-                <label className="sm:col-span-2"><span className="mb-1 block text-xs font-medium text-slate-500">Item Summary *</span><input value={purchaseForm.itemSummary} onChange={(event) => setPurchaseForm((current) => ({ ...current, itemSummary: event.target.value }))} placeholder="Materials or services covered by this purchase" className={inputClass}/></label>
+                <label className="sm:col-span-2"><span className="mb-1 block text-xs font-medium text-slate-500">Product *</span><select value={purchaseForm.productId} onChange={(event) => { const product = products.find((item) => keyOf(item.id) === event.target.value); setPurchaseForm((current) => ({ ...current, productId: event.target.value, itemSummary: product?.name || "", unit: product?.unit || current.unit })); }} className={inputClass}><option value="">Select inventory product</option>{products.map((product) => <option key={product.id} value={keyOf(product.id)}>{product.name}{product.hsn ? ` · HSN ${product.hsn}` : ""}</option>)}</select></label>
                 <label><span className="mb-1 block text-xs font-medium text-slate-500">Order Date *</span><DateInput value={purchaseForm.orderDate} onChange={(value) => setPurchaseForm((current) => ({ ...current, orderDate: value }))} placeholder="dd/mm/yyyy" className={inputClass}/></label>
                 <label><span className="mb-1 block text-xs font-medium text-slate-500">Expected Delivery</span><DateInput value={purchaseForm.expectedDate} onChange={(value) => setPurchaseForm((current) => ({ ...current, expectedDate: value }))} placeholder="dd/mm/yyyy" className={inputClass}/></label>
                 <label><span className="mb-1 block text-xs font-medium text-slate-500">Actual Delivery</span><DateInput value={purchaseForm.actualDelivery} onChange={(value) => setPurchaseForm((current) => ({ ...current, actualDelivery: value }))} placeholder="dd/mm/yyyy" className={inputClass}/></label>

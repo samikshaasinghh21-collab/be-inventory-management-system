@@ -66,6 +66,9 @@ const normalizeAvailableInventoryItem = (item = {}) => ({
   ),
 });
 
+const locationTag = (location = {}) =>
+  String(location.code || location.type || "").trim();
+
 export const fetchAvailableInventory = async ({
   projectId,
   locationId,
@@ -115,4 +118,36 @@ export const fetchAvailableInventory = async ({
     });
   }
   return normalized;
+};
+
+export const fetchProjectAvailableInventory = async ({
+  projectId,
+  locations = [],
+} = {}) => {
+  const uniqueLocations = Array.from(
+    new Map(
+      (Array.isArray(locations) ? locations : [])
+        .filter((location) => location?.id !== null && location?.id !== undefined)
+        .map((location) => [String(location.id), location])
+    ).values()
+  );
+
+  const rowsByLocation = await Promise.all(
+    uniqueLocations.map(async (location) => {
+      const rows = await fetchAvailableInventory({
+        projectId,
+        locationId: location.id,
+      });
+      return rows.map((row) => ({
+        ...row,
+        locationId: row.locationId ?? location.id,
+        locationName: location.name || "",
+        locationCode: location.code || "",
+        locationType: location.type || "",
+        locationTag: locationTag(location),
+      }));
+    })
+  );
+
+  return rowsByLocation.flat();
 };

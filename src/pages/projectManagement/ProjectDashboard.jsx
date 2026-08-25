@@ -1,15 +1,13 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AppIcon from "../../components/layout/AppIcon";
 import { formatInrCurrency } from "../../utils/formatters";
 import {
-  projectCostSummary,
-  projectKpis,
-  projectStatusSummary,
-  recentProjects,
-  teamAllocationSummary,
-  upcomingDeadlines,
-} from "./projectManagementData";
+  getProjectManagementProjects,
+  hydrateProjectManagementProjects,
+  PROJECT_MANAGEMENT_PROJECTS_EVENT,
+} from "../../services/projectManagementProjectsStore";
+import { formatDate } from "../../utils/dateFormat";
 
 const kpiColors = {
   violet: "bg-violet-100 text-violet-600",
@@ -22,8 +20,10 @@ const kpiColors = {
 
 const statusStyles = {
   Planning: "bg-blue-50 text-blue-700",
+  Active: "bg-emerald-50 text-emerald-700",
   "In Progress": "bg-emerald-50 text-emerald-700",
   "On Hold": "bg-amber-50 text-amber-700",
+  Delayed: "bg-rose-50 text-rose-700",
   Completed: "bg-violet-50 text-violet-700",
   Cancelled: "bg-rose-50 text-rose-700",
 };
@@ -104,19 +104,19 @@ const DonutChart = ({ segments, centerValue, centerLabel, sizeClass = "h-44 w-44
   );
 };
 
-const CostSummary = () => (
+const CostSummary = ({ summary }) => (
   <SectionCard title="Project Cost Summary" className="xl:col-span-5">
     <div className="grid gap-6 lg:grid-cols-[240px_1fr] lg:items-center">
       <div className="flex justify-center">
         <DonutChart
-          segments={projectCostSummary.segments}
-          centerValue={formatInrCurrency(projectCostSummary.totalBudget)}
+          segments={summary.segments}
+          centerValue={formatInrCurrency(summary.totalBudget)}
           centerLabel="Total Budget"
         />
       </div>
 
       <div className="space-y-4">
-        {projectCostSummary.segments.map((segment) => (
+        {summary.segments.map((segment) => (
           <div key={segment.label} className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <span
@@ -138,18 +138,18 @@ const CostSummary = () => (
       <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
         <div
           className="h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-500"
-          style={{ width: `${projectCostSummary.utilization}%` }}
+          style={{ width: `${summary.utilization}%` }}
         />
       </div>
       <span className="text-sm font-semibold text-blue-700">
-        {projectCostSummary.utilization}%
+        {summary.utilization}%
       </span>
     </div>
   </SectionCard>
 );
 
-const StatusBarChart = () => {
-  const maxValue = Math.max(...projectStatusSummary.map((item) => item.value), 1);
+const StatusBarChart = ({ rows }) => {
+  const maxValue = Math.max(...rows.map((item) => item.value), 1);
 
   return (
     <SectionCard
@@ -164,7 +164,7 @@ const StatusBarChart = () => {
       }
     >
       <div className="flex h-64 items-end gap-3 border-b border-l border-slate-200 px-3 pb-0 sm:gap-5">
-        {projectStatusSummary.map((status) => {
+        {rows.map((status) => {
           const height = Math.max((status.value / maxValue) * 100, 10);
 
           return (
@@ -194,14 +194,14 @@ const StatusBarChart = () => {
   );
 };
 
-const TeamAllocation = () => {
+const TeamAllocation = ({ summary }) => {
   const totalRow = {
     label: "Total Employees Allocated",
-    value: teamAllocationSummary.total,
+    value: summary.total,
     color: "#2563eb",
     icon: "users",
   };
-  const rows = [totalRow, ...teamAllocationSummary.segments];
+  const rows = [totalRow, ...summary.segments];
 
   return (
     <SectionCard title="Team Allocation Summary" className="xl:col-span-5">
@@ -227,8 +227,8 @@ const TeamAllocation = () => {
 
         <div className="flex justify-center">
           <DonutChart
-            segments={teamAllocationSummary.segments}
-            centerValue={teamAllocationSummary.total}
+            segments={summary.segments}
+            centerValue={summary.total}
             centerLabel="Total"
             sizeClass="h-40 w-40"
           />
@@ -238,7 +238,7 @@ const TeamAllocation = () => {
   );
 };
 
-const DeadlineList = () => (
+const DeadlineList = ({ deadlines }) => (
   <SectionCard
     title="Upcoming Deadlines"
     className="xl:col-span-7"
@@ -252,7 +252,7 @@ const DeadlineList = () => (
     }
   >
     <div className="divide-y divide-slate-100">
-      {upcomingDeadlines.map((item) => (
+      {deadlines.length ? deadlines.map((item) => (
         <div
           key={item.id}
           className="grid gap-3 py-3 sm:grid-cols-[1fr_auto_auto] sm:items-center"
@@ -270,8 +270,28 @@ const DeadlineList = () => (
             {item.daysRemaining} Days Left
           </span>
         </div>
-      ))}
+      )) : (
+        <p className="py-8 text-center text-sm text-slate-500">
+          No upcoming project deadlines.
+        </p>
+      )}
     </div>
+  </SectionCard>
+);
+
+const DelayedTasks = ({ tasks, onOpenMilestones }) => (
+  <SectionCard
+    title="Delayed Tasks"
+    action={<button type="button" onClick={onOpenMilestones} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">Open Milestones</button>}
+  >
+    {tasks.length ? (
+      <div className="overflow-x-auto">
+        <table className="min-w-[850px] w-full text-sm">
+          <thead className="bg-rose-50 text-left text-xs uppercase tracking-wide text-rose-700"><tr><th className="px-4 py-3">Task</th><th className="px-4 py-3">Project</th><th className="px-4 py-3">Stage</th><th className="px-4 py-3">Milestone</th><th className="px-4 py-3">Owner</th><th className="px-4 py-3">Due</th><th className="px-4 py-3">Delay</th></tr></thead>
+          <tbody className="divide-y divide-slate-100">{tasks.map((task) => <tr key={`${task.projectId}-${task.id}`} className="bg-white hover:bg-rose-50/40"><td className="px-4 py-3 font-semibold text-slate-900">{task.taskName || task.title}</td><td className="px-4 py-3 text-slate-700">{task.projectName}</td><td className="px-4 py-3"><span className="rounded-full bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">{task.stage || "Implement"}</span></td><td className="px-4 py-3 text-slate-700">{task.milestoneName}</td><td className="px-4 py-3 text-slate-600">{task.assignedTo || task.assignedEmployeeName || "Unassigned"}</td><td className="px-4 py-3 text-slate-700">{formatDate(task.dueDate)}</td><td className="px-4 py-3"><span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-700">{task.daysDelayed} day{task.daysDelayed === 1 ? "" : "s"}</span></td></tr>)}</tbody>
+        </table>
+      </div>
+    ) : <p className="py-8 text-center text-sm text-slate-500">No delayed tasks for the selected project view.</p>}
   </SectionCard>
 );
 
@@ -294,7 +314,7 @@ const ProjectStatusBadge = ({ status }) => (
   </span>
 );
 
-const RecentProjectsTable = () => (
+const RecentProjectsTable = ({ projects, onOpenProjects }) => (
   <SectionCard title="Recent Projects">
     <div className="overflow-x-auto">
       <table className="min-w-[1050px] w-full text-sm">
@@ -312,7 +332,7 @@ const RecentProjectsTable = () => (
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {recentProjects.map((project) => (
+          {projects.length ? projects.map((project) => (
             <tr key={project.id} className="transition hover:bg-slate-50">
               <td className="px-4 py-4 font-semibold text-slate-700">{project.id}</td>
               <td className="px-4 py-4 font-semibold text-slate-950">{project.name}</td>
@@ -332,6 +352,7 @@ const RecentProjectsTable = () => (
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={onOpenProjects}
                     className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
                     aria-label={`View ${project.name}`}
                     title="View project"
@@ -340,6 +361,7 @@ const RecentProjectsTable = () => (
                   </button>
                   <button
                     type="button"
+                    onClick={onOpenProjects}
                     className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
                     aria-label={`Edit ${project.name}`}
                     title="Edit project"
@@ -349,7 +371,13 @@ const RecentProjectsTable = () => (
                 </div>
               </td>
             </tr>
-          ))}
+          )) : (
+            <tr>
+              <td colSpan="9" className="px-4 py-12 text-center text-slate-500">
+                No projects have been created in the database yet.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -358,6 +386,161 @@ const RecentProjectsTable = () => (
 
 const ProjectDashboard = () => {
   const navigate = useNavigate();
+  const [projects, setProjects] = useState(() => getProjectManagementProjects());
+  const [projectFilter, setProjectFilter] = useState("All");
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    const syncProjects = () => setProjects(getProjectManagementProjects());
+    window.addEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, syncProjects);
+    void hydrateProjectManagementProjects()
+      .then(setProjects)
+      .catch((error) =>
+        setLoadError(
+          error?.response?.data?.error ||
+            error?.message ||
+            "Project dashboard data could not be loaded."
+        )
+      );
+    return () =>
+      window.removeEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, syncProjects);
+  }, []);
+
+  const dashboard = useMemo(() => {
+    const scopedProjects = projectFilter === "All"
+      ? projects
+      : projects.filter((project) => String(project.id) === String(projectFilter));
+    const amount = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const budgetFor = (project) =>
+      amount(project.approvedBudget) || amount(project.estimatedBudget);
+    const spentFor = (project) => {
+      const entries = Array.isArray(project.financials) ? project.financials : [];
+      return entries.length
+        ? entries.reduce((sum, row) => sum + amount(row.actual ?? row.amount), 0)
+        : amount(project.expenses);
+    };
+    const totalBudget = scopedProjects.reduce((sum, project) => sum + budgetFor(project), 0);
+    const budgetUsed = scopedProjects.reduce((sum, project) => sum + spentFor(project), 0);
+    const remainingBudget = Math.max(totalBudget - budgetUsed, 0);
+    const onHoldAmount = scopedProjects
+      .filter((project) => project.status === "On Hold")
+      .reduce((sum, project) => sum + budgetFor(project), 0);
+    const utilization = totalBudget
+      ? Math.min(100, Math.round((budgetUsed / totalBudget) * 1000) / 10)
+      : 0;
+
+    const statusDefinitions = [
+      ["Planning", "#2563eb"],
+      ["Active", "#22c55e"],
+      ["On Hold", "#f59e0b"],
+      ["Delayed", "#ef4444"],
+      ["Completed", "#8b5cf6"],
+      ["Cancelled", "#64748b"],
+    ];
+    const statusRows = statusDefinitions.map(([label, color]) => ({
+      label,
+      color,
+      value: scopedProjects.filter((project) => project.status === label).length,
+    }));
+
+    const allocations = scopedProjects.flatMap((project) => project.teamAllocations || [])
+      .filter((row) => !["Released", "Cancelled"].includes(row.status));
+    const teamDefinitions = [
+      ["Project Managers", "manager", "#2563eb", "briefcase"],
+      ["Engineers", "engineer", "#22c55e", "users"],
+      ["Technicians", "technician", "#f59e0b", "tool"],
+      ["Support Staff", "support", "#ef4444", "contacts"],
+    ];
+    const teamSegments = teamDefinitions.map(([label, keyword, color, icon]) => ({
+      label,
+      color,
+      icon,
+      value: allocations.filter((row) =>
+        String(row.role || "").toLowerCase().includes(keyword)
+      ).length,
+    }));
+    const categorizedTeamCount = teamSegments.reduce((sum, row) => sum + row.value, 0);
+    if (allocations.length > categorizedTeamCount) {
+      teamSegments[3].value += allocations.length - categorizedTeamCount;
+    }
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const deadlines = scopedProjects
+      .map((project) => {
+        const deadline = project.endDate ? new Date(project.endDate) : null;
+        if (!deadline || Number.isNaN(deadline.getTime())) return null;
+        deadline.setHours(0, 0, 0, 0);
+        return {
+          id: project.id,
+          projectName: project.name,
+          deadline: formatDate(project.endDate),
+          daysRemaining: Math.ceil((deadline.getTime() - now.getTime()) / 86400000),
+        };
+      })
+      .filter((row) => row && row.daysRemaining >= 0)
+      .sort((left, right) => left.daysRemaining - right.daysRemaining)
+      .slice(0, 5);
+
+    const recent = [...scopedProjects]
+      .sort((left, right) =>
+        String(right.updatedAt || right.createdAt || right.id).localeCompare(
+          String(left.updatedAt || left.createdAt || left.id)
+        )
+      )
+      .slice(0, 5)
+      .map((project) => ({
+        id: project.code || project.id,
+        name: project.name,
+        client: project.companyName || project.client || "-",
+        manager: project.projectManager || "-",
+        status: project.status || "Draft",
+        progress: Math.max(0, Math.min(100, amount(project.progress))),
+        budget: budgetFor(project),
+        deadline: formatDate(project.endDate),
+      }));
+
+    const delayedTasks = scopedProjects.flatMap((project) => (project.tasks || []).map((task) => {
+      const due = task.dueDate ? new Date(task.dueDate) : null;
+      if (!due || Number.isNaN(due.getTime()) || ["Completed", "Cancelled"].includes(task.status)) return null;
+      due.setHours(0, 0, 0, 0);
+      const daysDelayed = Math.floor((now.getTime() - due.getTime()) / 86400000);
+      return daysDelayed > 0 ? { ...task, projectId: project.id, projectName: project.name, daysDelayed } : null;
+    })).filter(Boolean).sort((left, right) => right.daysDelayed - left.daysDelayed);
+    const active = scopedProjects.filter((project) => project.status === "Active").length;
+    const completed = scopedProjects.filter((project) => project.status === "Completed").length;
+    const delayed = scopedProjects.filter((project) => project.status === "Delayed").length;
+    const upcomingCount = deadlines.filter((row) => row.daysRemaining <= 30).length;
+    return {
+      kpis: [
+        { id: "total-projects", label: "Total Projects", value: scopedProjects.length, helper: projectFilter === "All" ? "Database records" : "Selected project", icon: "folder", color: "violet" },
+        { id: "active-projects", label: "Active Projects", value: active, helper: "Currently executing", icon: "activity", color: "emerald" },
+        { id: "completed-projects", label: "Completed Projects", value: completed, helper: "Closed projects", icon: "grid", color: "blue" },
+        { id: "delayed-projects", label: "Delayed Projects", value: delayed, helper: "Needs attention", icon: "clock", color: "rose" },
+        { id: "delayed-tasks", label: "Delayed Tasks", value: delayedTasks.length, helper: "Past due and incomplete", icon: "clipboard", color: "rose" },
+        { id: "upcoming-deadlines", label: "Upcoming Deadlines", value: upcomingCount, helper: "Next 30 days", icon: "calendar", color: "amber" },
+        { id: "total-project-cost", label: "Total Project Cost", value: totalBudget, helper: "Approved budgets", icon: "chart", color: "purple", format: "currency" },
+      ],
+      costSummary: {
+        totalBudget,
+        utilization,
+        segments: [
+          { label: "Total Budget", value: totalBudget, color: "#2563eb" },
+          { label: "Budget Used", value: budgetUsed, color: "#22c55e" },
+          { label: "Remaining Budget", value: remainingBudget, color: "#f59e0b" },
+          { label: "On Hold", value: onHoldAmount, color: "#ef4444" },
+        ],
+      },
+      statusRows,
+      teamSummary: { total: allocations.length, segments: teamSegments },
+      deadlines,
+      recent,
+      delayedTasks,
+    };
+  }, [projectFilter, projects]);
 
   return (
     <div className="space-y-5">
@@ -374,6 +557,15 @@ const ProjectDashboard = () => {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
+          <select
+            value={projectFilter}
+            onChange={(event) => setProjectFilter(event.target.value)}
+            className="min-w-64 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            aria-label="Filter dashboard by project"
+          >
+            <option value="All">All Projects</option>
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.code ? ` (${project.code})` : ""}</option>)}
+          </select>
           <button
             type="button"
             onClick={() => navigate("/project-management/projects")}
@@ -382,31 +574,37 @@ const ProjectDashboard = () => {
             <AppIcon name="plus" className="h-4 w-4" />
             New Project
           </button>
-          <select className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100">
-            <option>May 2024</option>
-            <option>June 2024</option>
-            <option>July 2024</option>
-          </select>
         </div>
       </section>
 
+      {loadError ? (
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {loadError}
+        </p>
+      ) : null}
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        {projectKpis.map((item) => (
+        {dashboard.kpis.map((item) => (
           <KpiCard key={item.id} item={item} />
         ))}
       </section>
 
+      <DelayedTasks tasks={dashboard.delayedTasks} onOpenMilestones={() => navigate("/project-management/milestones")} />
+
       <section className="grid gap-4 xl:grid-cols-12">
-        <CostSummary />
-        <StatusBarChart />
+        <CostSummary summary={dashboard.costSummary} />
+        <StatusBarChart rows={dashboard.statusRows} />
       </section>
 
       <section className="grid gap-4 xl:grid-cols-12">
-        <TeamAllocation />
-        <DeadlineList />
+        <TeamAllocation summary={dashboard.teamSummary} />
+        <DeadlineList deadlines={dashboard.deadlines} />
       </section>
 
-      <RecentProjectsTable />
+      <RecentProjectsTable
+        projects={dashboard.recent}
+        onOpenProjects={() => navigate("/project-management/projects")}
+      />
     </div>
   );
 };

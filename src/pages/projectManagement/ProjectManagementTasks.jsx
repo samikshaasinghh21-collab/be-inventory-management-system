@@ -248,6 +248,10 @@ const buildTaskRows = (projects = []) =>
       projectId: task.projectId || project.id,
       projectName: task.projectName || project.name,
       projectCode: project.code,
+      milestoneId: task.milestoneId,
+      milestoneName: task.milestoneName || "Unassigned milestone",
+      milestoneNumber: task.milestoneNumber || "",
+      stage: task.stage || "Implement",
       projectManager: project.projectManager,
       projectStatus: project.status,
       client: project.client || project.companyName,
@@ -372,6 +376,8 @@ const TaskDetailDrawer = ({ task, onClose, onViewProject }) => {
           <section className="grid gap-4 md:grid-cols-2">
             <DetailItem label="Project" value={task.projectName || "-"} />
             <DetailItem label="Project Code" value={task.projectCode || "-"} />
+            <DetailItem label="Stage" value={task.stage || "-"} />
+            <DetailItem label="Milestone" value={task.milestoneName || "-"} />
             <DetailItem label="Client" value={task.client || "-"} />
             <DetailItem label="Project Manager" value={task.projectManager || "-"} />
             <DetailItem label="Assigned To" value={task.assignedTo || "-"} />
@@ -451,8 +457,13 @@ const ProjectManagementTasks = () => {
   const [ownerFilter, setOwnerFilter] = useState("All");
   const [selectedTask, setSelectedTask] = useState(null);
   const [taskToUpdate, setTaskToUpdate] = useState(null);
+  const [loadError, setLoadError] = useState("");
 
-  const reload = async () => setProjects(await hydrateProjectManagementProjects());
+  const reload = async () => {
+    const rows = await hydrateProjectManagementProjects();
+    setProjects(rows);
+    setLoadError("");
+  };
 
   useEffect(() => {
     const handleProjectsChange = () => setProjects(getProjectManagementProjects());
@@ -463,7 +474,15 @@ const ProjectManagementTasks = () => {
       );
       window.addEventListener("projects:changed", handleProjectsChange);
     }
-    void hydrateProjectManagementProjects().then(setProjects);
+    void hydrateProjectManagementProjects()
+      .then(setProjects)
+      .catch((error) =>
+        setLoadError(
+          error?.response?.data?.error ||
+            error?.message ||
+            "Project tasks could not be loaded."
+        )
+      );
 
     return () => {
       if (typeof window !== "undefined") {
@@ -504,6 +523,9 @@ const ProjectManagementTasks = () => {
         getTaskDescription(task),
         task.projectName,
         task.projectCode,
+        task.milestoneName,
+        task.milestoneNumber,
+        task.stage,
         task.client,
         task.assignedTo,
         task.assignedBy,
@@ -582,18 +604,24 @@ const ProjectManagementTasks = () => {
             Tasks
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Track assigned project tasks, owners, due dates, status, and progress.
+            Tasks are organized by project stage and always remain under their milestone.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => navigate("/project-management/projects")}
+          onClick={() => navigate("/project-management/milestones")}
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
         >
           <UserPlus className="h-4 w-4" />
-          Assign Task
+          Open Milestones
         </button>
       </section>
+
+      {loadError ? (
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {loadError}
+        </p>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {kpis.map((item) => (
@@ -651,12 +679,14 @@ const ProjectManagementTasks = () => {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-[1540px] w-full text-sm">
+          <table className="min-w-[1760px] w-full text-sm">
             <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Task ID</th>
                 <th className="px-4 py-3 text-left font-semibold">Task Name</th>
                 <th className="px-4 py-3 text-left font-semibold">Project</th>
+                <th className="px-4 py-3 text-left font-semibold">Stage</th>
+                <th className="px-4 py-3 text-left font-semibold">Milestone</th>
                 <th className="px-4 py-3 text-left font-semibold">Client</th>
                 <th className="px-4 py-3 text-left font-semibold">Assigned To</th>
                 <th className="px-4 py-3 text-left font-semibold">Assigned By</th>
@@ -675,7 +705,7 @@ const ProjectManagementTasks = () => {
             <tbody className="divide-y divide-slate-100 bg-white">
               {filteredTasks.length === 0 ? (
                 <tr>
-                  <td colSpan="14" className="px-4 py-14 text-center">
+                  <td colSpan="16" className="px-4 py-14 text-center">
                     <div className="flex flex-col items-center">
                       <span className="grid h-14 w-14 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
                         <ListChecks className="h-6 w-6" />
@@ -686,15 +716,15 @@ const ProjectManagementTasks = () => {
                           : "No tasks assigned yet"}
                       </h3>
                       <p className="mt-2 max-w-md text-sm text-slate-500">
-                        Assign tasks from the Projects page and they will appear here.
+                        Create a milestone first, then create tasks inside that milestone.
                       </p>
                       <button
                         type="button"
-                        onClick={() => navigate("/project-management/projects")}
+                        onClick={() => navigate("/project-management/milestones")}
                         className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
                       >
                         <UserPlus className="h-4 w-4" />
-                        Go to Projects
+                        Go to Milestones
                       </button>
                     </div>
                   </td>
@@ -721,6 +751,8 @@ const ProjectManagementTasks = () => {
                         {task.projectCode || "No project code"}
                       </p>
                     </td>
+                    <td className="px-4 py-4"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">{task.stage}</span></td>
+                    <td className="px-4 py-4"><p className="font-semibold text-slate-800">{task.milestoneName}</p><p className="mt-1 text-xs text-slate-500">{task.milestoneNumber}</p></td>
                     <td className="px-4 py-4 text-slate-600">
                       {task.client || "-"}
                     </td>
@@ -774,11 +806,11 @@ const ProjectManagementTasks = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => navigate("/project-management/projects")}
+                          onClick={() => navigate("/project-management/milestones")}
                           className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
                         >
                           <FolderKanban className="h-4 w-4" />
-                          Project
+                          Milestone
                         </button>
                       </div>
                     </td>
@@ -798,20 +830,20 @@ const ProjectManagementTasks = () => {
             </span>
             <div>
               <h2 className="text-base font-semibold text-slate-950">
-                Task assignments come from project records
+                Task assignments come from milestones
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                Create or assign a task from any project and this register updates from SQL Server.
+                Open a milestone, use “Create Task under Milestone,” and this register updates from SQL Server.
               </p>
             </div>
           </div>
           <button
             type="button"
-            onClick={() => navigate("/project-management/projects")}
+            onClick={() => navigate("/project-management/milestones")}
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
           >
             <UserPlus className="h-4 w-4" />
-            Assign from Projects
+            Open Milestones
           </button>
         </div>
       </section>

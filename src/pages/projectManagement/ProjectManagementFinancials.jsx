@@ -259,12 +259,13 @@ const ProjectManagementFinancials = () => {
 
   useEffect(() => {
     const refresh = () => void load({ quiet: true });
-    window.addEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, refresh);
+    const syncProjectCache = () => setProjects(getProjectManagementProjects());
+    window.addEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, syncProjectCache);
     window.addEventListener("projects:changed", refresh);
     window.addEventListener("invoices:changed", refresh);
     window.addEventListener("purchase-orders:changed", refresh);
     return () => {
-      window.removeEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, refresh);
+      window.removeEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, syncProjectCache);
       window.removeEventListener("projects:changed", refresh);
       window.removeEventListener("invoices:changed", refresh);
       window.removeEventListener("purchase-orders:changed", refresh);

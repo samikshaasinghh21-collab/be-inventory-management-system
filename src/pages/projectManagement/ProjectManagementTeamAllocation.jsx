@@ -24,7 +24,7 @@ import {
   updateProjectModuleRecord,
 } from "../../services/projectManagementApi";
 import {
-  fetchHrmsEmployees,
+  fetchAllHrmsEmployees,
   getHrmsEmployeeErrorMessage,
 } from "../../services/hrmsEmployeesApi";
 import { formatDate, parseDateValue } from "../../utils/dateFormat";
@@ -53,6 +53,7 @@ const cardClass = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm";
 const emptyForm = {
   id: null,
   projectId: "",
+  employeeId: "",
   employee: "",
   role: "",
   department: "",
@@ -110,14 +111,24 @@ const compareDateAsc = (a, b) => {
   return timeA - timeB;
 };
 
-const getEmployeeKey = (value) => normalizeText(value);
+const getEmployeeKey = (value, employeeId = "") => {
+  const normalizedId = String(employeeId || "").trim();
+  const normalizedName = normalizeText(value);
+  if (normalizedId) return `id:${normalizedId}`;
+  return normalizedName ? `name:${normalizedName}` : "";
+};
 
 const getAllocationAvailability = (allocation, employeeTotals) => {
   if (allocation.availability === "On Leave") return "On Leave";
   if (allocation.status === "Released") return "Available";
   if (allocation.status === "On Hold") return "On Leave";
 
-  const total = employeeTotals[getEmployeeKey(allocation.employee || allocation.member)] || 0;
+  const total = employeeTotals[
+    getEmployeeKey(
+      allocation.employee || allocation.member,
+      allocation.employeeId
+    )
+  ] || 0;
   if (total > 100) return "Overallocated";
   if (total >= 100) return "Occupied";
   return "Available";
@@ -149,18 +160,19 @@ const buildAllocationRows = (projects = []) =>
 const summarizeEmployees = (rows = []) => {
   const activeRows = rows.filter(isActiveAllocation);
   const totals = activeRows.reduce((acc, row) => {
-    const key = getEmployeeKey(row.employee);
+    const key = getEmployeeKey(row.employee, row.employeeId);
     if (!key) return acc;
     acc[key] = (acc[key] || 0) + percentValue(row.allocationPercent);
     return acc;
   }, {});
 
   const byEmployee = activeRows.reduce((acc, row) => {
-    const key = getEmployeeKey(row.employee);
+    const key = getEmployeeKey(row.employee, row.employeeId);
     if (!key) return acc;
     if (!acc[key]) {
       acc[key] = {
         key,
+        employeeId: row.employeeId || "",
         employee: row.employee,
         department: row.department || "Unassigned",
         role: row.role || "Team Member",
@@ -318,7 +330,10 @@ const ProjectManagementTeamAllocation = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState(() => getProjectManagementProjects());
   const [employees, setEmployees] = useState([]);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
   const [employeeLoadError, setEmployeeLoadError] = useState("");
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const [employeePickerOpen, setEmployeePickerOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("All");
   const [departmentFilter, setDepartmentFilter] = useState("All");
@@ -340,7 +355,15 @@ const ProjectManagementTeamAllocation = () => {
       );
       window.addEventListener("projects:changed", handleProjectsChange);
     }
-    void hydrateProjectManagementProjects().then(setProjects);
+    void hydrateProjectManagementProjects()
+      .then(setProjects)
+      .catch((loadError) =>
+        setError(
+          loadError?.response?.data?.error ||
+            loadError?.message ||
+            "Project allocations could not be loaded."
+        )
+      );
 
     return () => {
       if (typeof window !== "undefined") {
@@ -357,10 +380,11 @@ const ProjectManagementTeamAllocation = () => {
     let cancelled = false;
 
     const loadEmployees = async () => {
+      if (!cancelled) setEmployeesLoading(true);
       try {
-        const response = await fetchHrmsEmployees(1, 200);
+        const response = await fetchAllHrmsEmployees();
         if (!cancelled) {
-          setEmployees(Array.isArray(response.employees) ? response.employees : []);
+          setEmployees(Array.isArray(response) ? response : []);
           setEmployeeLoadError("");
         }
       } catch (loadError) {
@@ -373,17 +397,39 @@ const ProjectManagementTeamAllocation = () => {
             )
           );
         }
+      } finally {
+        if (!cancelled) setEmployeesLoading(false);
       }
     };
 
-    loadEmployees();
+    void loadEmployees();
+    window.addEventListener("hrms:employees:changed", loadEmployees);
 
     return () => {
       cancelled = true;
+      window.removeEventListener("hrms:employees:changed", loadEmployees);
     };
   }, []);
 
-  const allocationRows = useMemo(() => buildAllocationRows(projects), [projects]);
+  const hrmsEmployeeIdByName = useMemo(() => {
+    const ids = new Map();
+    employees.forEach((employee) => {
+      const name = String(employee.name || employee.fullName || "").trim();
+      const employeeId = String(employee.employeeId || employee.id || "").trim();
+      if (name && employeeId) ids.set(normalizeText(name), employeeId);
+    });
+    return ids;
+  }, [employees]);
+
+  const allocationRows = useMemo(
+    () =>
+      buildAllocationRows(projects).map((row) => ({
+        ...row,
+        employeeId:
+          row.employeeId || hrmsEmployeeIdByName.get(normalizeText(row.employee)) || "",
+      })),
+    [hrmsEmployeeIdByName, projects]
+  );
   const employeeSummary = useMemo(
     () => summarizeEmployees(allocationRows),
     [allocationRows]
@@ -401,6 +447,8 @@ const ProjectManagementTeamAllocation = () => {
         department: employee.department || "",
         role: employee.designation || "",
         employeeId: employee.employeeId || employee.id || "",
+        email: employee.email || "",
+        status: employee.status || "Active",
       });
     });
 
@@ -412,7 +460,9 @@ const ProjectManagementTeamAllocation = () => {
           name,
           department: row.department || "",
           role: row.role || "",
-          employeeId: "",
+          employeeId: row.employeeId || "",
+          email: "",
+          status: "",
         });
       }
     });
@@ -421,6 +471,31 @@ const ProjectManagementTeamAllocation = () => {
       String(a.name).localeCompare(String(b.name))
     );
   }, [allocationRows, employees]);
+
+  const hrmsEmployeeOptions = useMemo(() => {
+    const term = normalizeText(employeeSearch);
+    return employees
+      .map((employee) => ({
+        employeeId: String(employee.employeeId || employee.id || "").trim(),
+        name: String(employee.name || employee.fullName || "").trim(),
+        department: String(employee.department || "").trim(),
+        role: String(employee.designation || "").trim(),
+        email: String(employee.email || "").trim(),
+        status: String(employee.status || "Active").trim(),
+      }))
+      .filter((employee) => employee.employeeId && employee.name)
+      .filter((employee) => {
+        if (!term) return true;
+        return [
+          employee.name,
+          employee.employeeId,
+          employee.department,
+          employee.role,
+          employee.email,
+        ].some((value) => normalizeText(value).includes(term));
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [employeeSearch, employees]);
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -472,27 +547,29 @@ const ProjectManagementTeamAllocation = () => {
   const selectedEmployeeSummary = useMemo(() => {
     if (!selectedRow) return null;
     return employeeSummary.list.find(
-      (item) => item.key === getEmployeeKey(selectedRow.employee)
+      (item) => item.key === getEmployeeKey(selectedRow.employee, selectedRow.employeeId)
     );
   }, [employeeSummary.list, selectedRow]);
 
   const formEmployeeSummary = useMemo(() => {
     if (!form.employee.trim()) return null;
     return employeeSummary.list.find(
-      (item) => item.key === getEmployeeKey(form.employee)
+      (item) => item.key === getEmployeeKey(form.employee, form.employeeId)
     );
-  }, [employeeSummary.list, form.employee]);
+  }, [employeeSummary.list, form.employee, form.employeeId]);
 
   const projectedAllocationTotal = useMemo(() => {
     if (!form.employee.trim()) return 0;
     const currentTotal =
-      employeeSummary.totals[getEmployeeKey(form.employee)] || 0;
+      employeeSummary.totals[getEmployeeKey(form.employee, form.employeeId)] || 0;
     const existingAllocation =
-      form.id && selectedRow && getEmployeeKey(selectedRow.employee) === getEmployeeKey(form.employee)
+      form.id && selectedRow &&
+      getEmployeeKey(selectedRow.employee, selectedRow.employeeId) ===
+        getEmployeeKey(form.employee, form.employeeId)
         ? percentValue(selectedRow.allocationPercent)
         : 0;
     return currentTotal - existingAllocation + percentValue(form.allocationPercent);
-  }, [employeeSummary.totals, form.allocationPercent, form.employee, form.id, selectedRow]);
+  }, [employeeSummary.totals, form.allocationPercent, form.employee, form.employeeId, form.id, selectedRow]);
 
   const metrics = useMemo(() => {
     const activeEmployeeCount = employeeSummary.list.length;
@@ -553,6 +630,8 @@ const ProjectManagementTeamAllocation = () => {
 
   const resetForm = () => {
     setForm(emptyForm);
+    setEmployeeSearch("");
+    setEmployeePickerOpen(false);
     setDrawerOpen(false);
     setError("");
   };
@@ -564,15 +643,23 @@ const ProjectManagementTeamAllocation = () => {
       ...emptyForm,
       projectId: projectOptions[0]?.id || "",
     });
+    setEmployeeSearch("");
+    setEmployeePickerOpen(false);
     setDrawerOpen(true);
   };
 
   const openEditDrawer = (row) => {
     setMessage("");
     setError("");
+    const matchedEmployee = employeeDirectory.find(
+      (item) =>
+        (row.employeeId && String(item.employeeId) === String(row.employeeId)) ||
+        normalizeText(item.name) === normalizeText(row.employee)
+    );
     setForm({
       id: row.id,
       projectId: row.projectId,
+      employeeId: row.employeeId || matchedEmployee?.employeeId || "",
       employee: row.employee,
       role: row.role,
       department: row.department || "",
@@ -582,21 +669,33 @@ const ProjectManagementTeamAllocation = () => {
       status: row.status || "Active",
       availability: row.availability || "Available",
     });
+    setEmployeeSearch("");
+    setEmployeePickerOpen(false);
     setDrawerOpen(true);
+  };
+
+  const selectEmployee = (employee) => {
+    setForm((current) => ({
+      ...current,
+      employeeId: employee.employeeId,
+      employee: employee.name,
+      department: employee.department || current.department,
+      role: current.role || employee.role,
+    }));
+    setEmployeeSearch("");
+    setEmployeePickerOpen(false);
+    setError("");
+  };
+
+  const clearEmployee = () => {
+    setForm((current) => ({ ...current, employeeId: "", employee: "" }));
+    setEmployeeSearch("");
+    setEmployeePickerOpen(true);
   };
 
   const handleFormChange = (field, value) => {
     setForm((current) => {
       const next = { ...current, [field]: value };
-      if (field === "employee") {
-        const matched = employeeDirectory.find(
-          (item) => getEmployeeKey(item.name) === getEmployeeKey(value)
-        );
-        if (matched) {
-          next.department = current.department || matched.department || current.department;
-          next.role = current.role || matched.role || current.role;
-        }
-      }
       return next;
     });
   };
@@ -609,8 +708,16 @@ const ProjectManagementTeamAllocation = () => {
       setError("Choose a project before saving the allocation.");
       return;
     }
-    if (!form.employee.trim()) {
-      setError("Select or enter an employee name.");
+    if (!form.employeeId || !form.employee.trim()) {
+      setError("Select an employee from the HRMS employee list.");
+      return;
+    }
+    const selectedHrmsEmployee = employees.find(
+      (employee) =>
+        String(employee.employeeId || employee.id || "") === String(form.employeeId)
+    );
+    if (!selectedHrmsEmployee) {
+      setError("This employee is no longer available in HRMS. Select another employee.");
       return;
     }
     if (!form.role.trim()) {
@@ -640,6 +747,7 @@ const ProjectManagementTeamAllocation = () => {
 
     const allocationRecord = {
       id: form.id || makeId("team"),
+      employeeId: form.employeeId,
       employee: form.employee.trim(),
       member: form.employee.trim(),
       role: form.role.trim(),
@@ -1290,21 +1398,108 @@ const ProjectManagementTeamAllocation = () => {
                   </select>
                 </label>
 
-                <label className="space-y-1.5">
+                <div className="space-y-1.5">
                   <span className="text-sm font-medium text-slate-700">Employee</span>
-                  <input
-                    list="team-allocation-employees"
-                    value={form.employee}
-                    onChange={(event) => handleFormChange("employee", event.target.value)}
-                    placeholder="Select or enter employee"
-                    className={inputClass}
-                  />
-                  <datalist id="team-allocation-employees">
-                    {employeeDirectory.map((employee) => (
-                      <option key={employee.name} value={employee.name} />
-                    ))}
-                  </datalist>
-                </label>
+                  <div className="relative">
+                    {form.employeeId && form.employee ? (
+                      <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-indigo-600 text-white">
+                            <Users className="h-3.5 w-3.5" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-indigo-950">
+                              {form.employee}
+                            </p>
+                            <p className="truncate text-xs text-indigo-600">
+                              HRMS #{form.employeeId}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={clearEmployee}
+                          className="rounded-md p-1 text-indigo-500 transition hover:bg-indigo-100 hover:text-indigo-800"
+                          aria-label={`Remove ${form.employee}`}
+                          title="Remove employee tag"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            value={employeeSearch}
+                            onFocus={() => setEmployeePickerOpen(true)}
+                            onChange={(event) => {
+                              setEmployeeSearch(event.target.value);
+                              setEmployeePickerOpen(true);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") setEmployeePickerOpen(false);
+                              if (event.key === "Enter" && hrmsEmployeeOptions.length === 1) {
+                                event.preventDefault();
+                                selectEmployee(hrmsEmployeeOptions[0]);
+                              }
+                            }}
+                            placeholder={employeesLoading ? "Loading HRMS employees..." : "Search HRMS employee"}
+                            className={`${inputClass} pl-9`}
+                            role="combobox"
+                            aria-expanded={employeePickerOpen}
+                            aria-controls="team-allocation-employee-options"
+                            autoComplete="off"
+                          />
+                        </div>
+                        {employeePickerOpen ? (
+                          <div
+                            id="team-allocation-employee-options"
+                            className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
+                          >
+                            {employeesLoading ? (
+                              <p className="px-3 py-4 text-center text-sm text-slate-500">
+                                Loading employees from HRMS...
+                              </p>
+                            ) : hrmsEmployeeOptions.length ? (
+                              hrmsEmployeeOptions.map((employee) => (
+                                <button
+                                  type="button"
+                                  key={employee.employeeId}
+                                  onClick={() => selectEmployee(employee)}
+                                  className="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none"
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-semibold text-slate-900">
+                                      {employee.name}
+                                    </span>
+                                    <span className="block truncate text-xs text-slate-500">
+                                      {[employee.role, employee.department, employee.email]
+                                        .filter(Boolean)
+                                        .join(" · ") || "HRMS employee"}
+                                    </span>
+                                  </span>
+                                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600">
+                                    #{employee.employeeId}
+                                  </span>
+                                </button>
+                              ))
+                            ) : (
+                              <p className="px-3 py-4 text-center text-sm text-slate-500">
+                                {employeeLoadError
+                                  ? "HRMS employees could not be loaded."
+                                  : "No HRMS employee matches this search."}
+                              </p>
+                            )}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Search by employee name, ID, department, designation, or email.
+                  </p>
+                </div>
 
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-slate-700">Role</span>

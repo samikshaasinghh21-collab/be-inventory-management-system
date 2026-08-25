@@ -30,6 +30,13 @@ export const REPORT_ACTIVITY_TYPES = [
     dotClass: "bg-amber-500",
   },
   {
+    key: "reallocation",
+    label: "Reallocation / Move",
+    timelineLabel: "Inventory Moved",
+    badgeClass: "border-violet-200 bg-violet-50 text-violet-700",
+    dotClass: "bg-violet-500",
+  },
+  {
     key: "consumption",
     label: "Consumption",
     timelineLabel: "Consumed",
@@ -191,6 +198,8 @@ const createRow = ({
   receivedQty = null,
   availableQty = null,
   balanceQty = null,
+  locationId,
+  locationTag,
   location,
   status,
 }) => {
@@ -225,6 +234,8 @@ const createRow = ({
     receivedQty: hasReceivedQty ? toNumber(receivedQty) : null,
     availableQty: hasAvailableQty ? toNumber(availableQty) : null,
     balanceQty: hasBalanceQty ? toNumber(balanceQty) : null,
+    locationId: locationId ? String(locationId) : "",
+    locationTag: locationTag || DASH_PLACEHOLDER,
     location: location || DASH_PLACEHOLDER,
     status: status || DASH_PLACEHOLDER,
   };
@@ -462,6 +473,7 @@ export const buildReportRows = ({
   purchaseOrders = [],
   receiveGoods = [],
   deliveryChallans = [],
+  reallocations = [],
   consumptions = [],
   projects = [],
   vendors = [],
@@ -524,7 +536,8 @@ export const buildReportRows = ({
   purchaseOrders.forEach((order) => {
     const project = projectMap[String(order.projectId)];
     const vendor = vendorMap[String(order.vendorId)];
-    const location = locationMap[String(order.locationId)];
+    const orderLocationId = order.shipToLocationId || order.locationId;
+    const location = locationMap[String(orderLocationId)];
     (order.items || []).forEach((item, index) => {
       const orderedQty = toNumber(
         item.orderedQty ?? item.quantity ?? item.Quantity ?? item.Qty
@@ -564,6 +577,8 @@ export const buildReportRows = ({
           receivedQty,
           availableQty,
           balanceQty,
+          locationId: orderLocationId,
+          locationTag: location?.code || location?.type,
           location: location?.name,
           status: order.status || "Draft",
         })
@@ -612,6 +627,8 @@ export const buildReportRows = ({
           receivedQty,
           availableQty,
           balanceQty,
+          locationId,
+          locationTag: location?.code || location?.type,
           location: location?.name,
           status: receipt.status || order?.status || "Received",
         })
@@ -622,7 +639,8 @@ export const buildReportRows = ({
   deliveryChallans.forEach((challan) => {
     const project = projectMap[String(challan.projectId)];
     const fromLocation = locationMap[String(challan.fromLocationId)];
-    const toLocation = locationMap[String(challan.toLocationId)];
+    const currentLocationId = challan.currentLocationId || challan.toLocationId;
+    const toLocation = locationMap[String(currentLocationId)];
     (challan.items || []).forEach((item, index) => {
       rows.push(
         createRow({
@@ -636,6 +654,8 @@ export const buildReportRows = ({
           product: item.name,
           qty: item.quantity,
           totalQty: item.quantity,
+          locationId: currentLocationId,
+          locationTag: toLocation?.code || toLocation?.type,
           location: toLocation?.name || challan.toLocation || fromLocation?.name,
           status: challan.status || "Draft",
         })
@@ -643,9 +663,38 @@ export const buildReportRows = ({
     });
   });
 
+  reallocations.forEach((transfer) => {
+    const projectId = transfer.projectId || transfer.sourceProjectId;
+    const project = projectMap[String(projectId)];
+    const destination = locationMap[String(transfer.toLocationId)];
+    (transfer.items || []).forEach((item, index) => {
+      rows.push(
+        createRow({
+          activityKey: "reallocation",
+          documentId: transfer.id,
+          lineId: item.id ?? index,
+          date: transfer.transferDate || transfer.requestDate || transfer.createdAt,
+          projectId,
+          projectName: project?.name,
+          refNo:
+            transfer.referenceNumber ||
+            buildFallbackRef("MOVE", transfer.id),
+          product: item.name || item.item,
+          qty: item.quantity,
+          totalQty: item.quantity,
+          locationId: transfer.toLocationId,
+          locationTag: destination?.code || destination?.type,
+          location: destination?.name,
+          status: transfer.status || "Moved",
+        })
+      );
+    });
+  });
+
   consumptions.forEach((consumption) => {
     const project = projectMap[String(consumption.projectId)];
-    const location = locationMap[String(consumption.locationId)];
+    const sourceLocationId = consumption.fromLocationId || consumption.locationId;
+    const location = locationMap[String(sourceLocationId)];
     (consumption.items || []).forEach((item, index) => {
       const deliveryMetric = consumptionDeliveryMetrics.get(
         getConsumptionMetricKey(consumption, item, index)
@@ -671,6 +720,8 @@ export const buildReportRows = ({
           receivedQty: metric?.receivedQty ?? null,
           availableQty: metric?.availableQty ?? null,
           balanceQty: metric?.balanceQty ?? null,
+          locationId: sourceLocationId,
+          locationTag: location?.code || location?.type,
           location: location?.name,
           status: consumption.status || "Logged",
         })
@@ -699,10 +750,6 @@ export const buildWorkflowStages = (rows = [], selectedActivityKeys = []) => {
         (sum, row) => sum + toNumber(row.receivedQty),
         0
       );
-      const totalAvailableQty = stageRows.reduce(
-        (sum, row) => sum + toNumber(row.availableQty),
-        0
-      );
       const totalBalanceQty = stageRows.reduce(
         (sum, row) => sum + toNumber(row.balanceQty),
         0
@@ -713,7 +760,6 @@ export const buildWorkflowStages = (rows = [], selectedActivityKeys = []) => {
         count: stageRows.length,
         totalQty,
         totalReceivedQty,
-        totalAvailableQty,
         totalBalanceQty,
         latestLabel: latestRow ? formatReportDate(latestRow.date) : "Pending",
         latestRefNo: latestRow?.refNo || "",
@@ -764,8 +810,8 @@ export const buildExcelRows = (rows = []) =>
     "Movement Qty": row.qty,
     "Total Qty": row.totalQty ?? DASH_PLACEHOLDER,
     "Received Qty": row.receivedQty ?? DASH_PLACEHOLDER,
-    "Available Qty": row.availableQty ?? DASH_PLACEHOLDER,
     "Balance Qty": row.balanceQty ?? DASH_PLACEHOLDER,
+    "Location Tag": row.locationTag,
     Location: row.location,
     Status: row.status,
   }));

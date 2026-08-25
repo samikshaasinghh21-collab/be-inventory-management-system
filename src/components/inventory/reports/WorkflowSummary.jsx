@@ -4,8 +4,8 @@ const WorkflowSummary = ({
   projectName = "",
   stages = [],
   totalActivities = 0,
-  totalQuantity = 0,
 }) => {
+  const activeStages = stages.filter((stage) => stage.isActive).length;
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
       <div className="border-b border-slate-100 pb-4">
@@ -16,7 +16,7 @@ const WorkflowSummary = ({
           {projectName || "Select a project"}
         </h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          {totalActivities} activities across {formatQuantity(totalQuantity)} quantity.
+          {totalActivities} live activity rows across {activeStages} workflow stage{activeStages === 1 ? "" : "s"}.
         </p>
       </div>
 
@@ -44,9 +44,13 @@ const WorkflowSummary = ({
                   </p>
                   {stage.count > 0 ? (
                     <p className="mt-1 text-xs text-slate-500">
-                      Received {formatQuantity(stage.totalReceivedQty)} | Available{" "}
-                      {formatQuantity(stage.totalAvailableQty)} | Balance{" "}
-                      {formatQuantity(stage.totalBalanceQty)}
+                      {stage.key === "receive-goods"
+                        ? `Received ${formatQuantity(stage.totalReceivedQty)}`
+                        : stage.key === "purchase-order"
+                          ? `Open PO balance ${formatQuantity(stage.totalBalanceQty)}`
+                          : stage.key === "consumption"
+                            ? `Consumed ${formatQuantity(stage.totalQty)}`
+                            : "See transaction rows for details"}
                     </p>
                   ) : null}
                   {stage.latestRefNo ? (

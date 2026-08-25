@@ -6,8 +6,10 @@ import {
   RefreshCw, Search, Send, ShieldCheck, Trash2, Truck, X,
 } from "lucide-react";
 import useSettings from "../../hooks/useSettings";
-import { getProjectManagementProjects } from "../../services/projectManagementProjectsStore";
-import { getProducts } from "../../services/productsStore";
+import { hydrateProjectManagementProjects } from "../../services/projectManagementProjectsStore";
+import { fetchBoqs } from "../../services/boqApi";
+import { fetchItems } from "../../services/inventoryApi";
+import { fetchLocations } from "../../services/locationsApi";
 import {
   approveInventoryAllocation, cancelInventoryAllocation,
   createInventoryAllocation, deleteInventoryAllocation,
@@ -39,36 +41,6 @@ const Field = ({ label, required, children }) => <label className="block text-sm
   <span className="mt-1.5 block">{children}</span>
 </label>;
 const inputClass = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
-
-const localLocations = (projects) => {
-  const rows = projects.map((project) => ({
-    id: project.locationId || `site-${project.id}`,
-    name: project.siteName || project.city || `${project.name} Site`,
-    type: "Site",
-    projectId: project.id,
-  }));
-  const warehouses = projects.flatMap((project) =>
-    (project.inventoryAllocations || []).map((item) => item.storeLocation).filter(Boolean)
-  );
-  return [
-    ...rows,
-    ...Array.from(new Set(["Local Main Store", ...warehouses])).map((name) => ({
-      id: `warehouse-${name.toLowerCase().replace(/\W+/g, "-")}`,
-      name,
-      type: "Warehouse",
-      projectId: "",
-    })),
-  ];
-};
-
-const localBoqs = () => {
-  try {
-    const rows = JSON.parse(localStorage.getItem("boqs") || "[]");
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
-  }
-};
 
 const ProjectManagementInventoryAllocation = () => {
   const navigate = useNavigate();
@@ -106,12 +78,16 @@ const ProjectManagementInventoryAllocation = () => {
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const projectRows = getProjectManagementProjects();
-      const allocationRows = await fetchInventoryAllocations();
-      const locationRows = localLocations(projectRows);
-      const boqRows = localBoqs();
+      const projectRows = await hydrateProjectManagementProjects();
+      const [allocationRows, locationRows, boqRows, productRows] =
+        await Promise.all([
+          fetchInventoryAllocations(),
+          fetchLocations(),
+          fetchBoqs(),
+          fetchItems(),
+        ]);
       setAllocations(allocationRows); setProjects(projectRows); setLocations(locationRows); setBoqs(boqRows);
-      setProducts(getProducts());
+      setProducts(productRows);
       if (selected) setSelected(allocationRows.find((row) => String(row.id) === String(selected.id)) || null);
     } catch (err) { setError(err?.response?.data?.error || err?.message || "Failed to load allocations."); }
     finally { setLoading(false); }
@@ -140,7 +116,7 @@ const ProjectManagementInventoryAllocation = () => {
       rate: q(product.rate ?? product.price ?? product.unitPrice),
       availableQty: q(product.availableQty ?? product.currentStock ?? product.stock ?? product.quantity),
       sourceKey: String(product.sourceKey || product.id || product.itemCode || `product-${index + 1}`),
-      sourceRef: product.itemCode || product.code || "Local product",
+      sourceRef: product.itemCode || product.code || "Inventory item",
     }));
     const projectMaterialRows = (project?.inventoryAllocations || []).flatMap((allocation, index) => {
       const sourceItems = Array.isArray(allocation.items) ? allocation.items : [allocation];
@@ -153,7 +129,7 @@ const ProjectManagementInventoryAllocation = () => {
         rate: q(item.rate),
         availableQty: q(item.availableQty ?? item.stock ?? item.requiredQty ?? item.required ?? item.remainingQty),
         sourceKey: String(item.sourceKey || item.itemCode || item.id || `project-material-${index}-${itemIndex}`),
-        sourceRef: item.sourceRef || item.itemCode || "Project local stock",
+        sourceRef: item.sourceRef || item.itemCode || "Project allocation",
       }));
     });
     const bySource = new Map();

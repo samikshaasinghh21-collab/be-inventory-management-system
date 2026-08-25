@@ -24,6 +24,7 @@ import {
   approveDailySiteReport,
   cancelMilestone,
   createMilestone,
+  createProjectTask,
   createMilestoneRisk,
   deleteMilestone,
   deleteMilestoneRisk,
@@ -48,10 +49,12 @@ const cardClass = "rounded-2xl border border-slate-200 bg-white shadow-sm";
 const priorities = ["All", "Low", "Medium", "High", "Critical"];
 const statuses = ["All", "Pending", "Partial", "Completed", "Cancelled"];
 const healthOptions = ["All", "On Track", "At Risk", "Overdue", "Completed", "Cancelled"];
+const stageOptions = ["Design", "Procure", "Implement", "Allocate"];
 const tabs = ["Overview", "Linked Tasks", "Actual Reports", "Documents", "Risks & Issues", "Activity"];
 const emptyForm = {
   id: null,
   projectId: "",
+  stage: "Design",
   name: "",
   description: "",
   priority: "Medium",
@@ -67,6 +70,19 @@ const emptyForm = {
   taskIds: [],
   dependencyIds: [],
   reportIds: [],
+};
+const emptyTask = {
+  taskName: "",
+  description: "",
+  assignedEmployeeName: "",
+  priority: "Medium",
+  startDate: "",
+  dueDate: "",
+  status: "Pending",
+  completionPercentage: 0,
+  estimatedHours: "",
+  dependencies: "",
+  remarks: "",
 };
 const emptyRisk = {
   id: null,
@@ -151,12 +167,14 @@ const ProjectManagementMilestones = () => {
   const [form, setForm] = useState(null);
   const [detail, setDetail] = useState(null);
   const [riskForm, setRiskForm] = useState(null);
+  const [taskForm, setTaskForm] = useState(null);
   const [activeTab, setActiveTab] = useState("Overview");
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [healthFilter, setHealthFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
+  const [stageFilter, setStageFilter] = useState("All");
   const [ownerFilter, setOwnerFilter] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -202,6 +220,7 @@ const ProjectManagementMilestones = () => {
       if (statusFilter !== "All" && item.status !== statusFilter) return false;
       if (healthFilter !== "All" && item.health !== healthFilter) return false;
       if (priorityFilter !== "All" && item.priority !== priorityFilter) return false;
+      if (stageFilter !== "All" && item.stage !== stageFilter) return false;
       if (ownerFilter && !String(item.responsiblePerson || "").toLowerCase().includes(ownerFilter.toLowerCase())) return false;
       if (fromDate && String(item.targetDate || "").slice(0, 10) < fromDate) return false;
       if (toDate && String(item.targetDate || "").slice(0, 10) > toDate) return false;
@@ -209,7 +228,7 @@ const ProjectManagementMilestones = () => {
         item.milestoneNumber, item.name, item.projectName, item.deliverable, item.responsiblePerson,
       ].some((value) => String(value || "").toLowerCase().includes(term));
     });
-  }, [milestones, search, projectFilter, statusFilter, healthFilter, priorityFilter, ownerFilter, fromDate, toDate]);
+  }, [milestones, search, projectFilter, statusFilter, healthFilter, priorityFilter, stageFilter, ownerFilter, fromDate, toDate]);
 
   const refreshDetail = async (id = detail?.id) => {
     if (!id) return;
@@ -288,6 +307,30 @@ const ProjectManagementMilestones = () => {
     setRiskForm(null);
   };
 
+  const saveTask = async () => {
+    if (!taskForm?.taskName?.trim()) return setError("Task name is required.");
+    if (!taskForm?.dueDate) return setError("Task due date is required.");
+    if (taskForm.startDate && taskForm.dueDate < taskForm.startDate) return setError("Task due date cannot be before its start date.");
+    setBusy(true);
+    setError("");
+    try {
+      await createProjectTask(detail.projectId, {
+        ...taskForm,
+        milestoneId: detail.id,
+        assignedTo: taskForm.assignedEmployeeName,
+      });
+      setTaskForm(null);
+      setMessage(`Task created under ${detail.name}.`);
+      await load();
+      await refreshDetail(detail.id);
+      setActiveTab("Linked Tasks");
+    } catch (saveError) {
+      setError(saveError?.response?.data?.error || saveError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const reportAction = (action, report) => {
     if (action === "submit") {
       return run(() => submitDailySiteReport(report.id), `${report.reportNumber} submitted.`);
@@ -338,7 +381,7 @@ const ProjectManagementMilestones = () => {
       </section>
 
       <section className={`${cardClass} p-4`}>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-8">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-9">
           <label className="relative xl:col-span-2">
             <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
             <input className={`${inputClass} pl-9`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search milestone, project, owner..." />
@@ -356,6 +399,10 @@ const ProjectManagementMilestones = () => {
           <select className={inputClass} value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}>
             {priorities.map((priority) => <option key={priority}>{priority === "All" ? "All Priorities" : priority}</option>)}
           </select>
+          <select className={inputClass} value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}>
+            <option value="All">All Stages</option>
+            {stageOptions.map((stage) => <option key={stage}>{stage}</option>)}
+          </select>
           <input className={inputClass} value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} placeholder="Owner" />
           <div className="grid grid-cols-2 gap-2">
             <DateInput value={fromDate} onChange={setFromDate} />
@@ -369,7 +416,7 @@ const ProjectManagementMilestones = () => {
           <table className="w-full min-w-[1180px] text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="p-4">Milestone</th><th className="p-4">Project</th><th className="p-4">Responsible</th>
+                <th className="p-4">Milestone</th><th className="p-4">Project</th><th className="p-4">Stage</th><th className="p-4">Responsible</th>
                 <th className="p-4">Target</th><th className="p-4">Linked records</th><th className="p-4">Progress</th>
                 <th className="p-4">Status</th><th className="p-4">Health</th><th className="p-4">Actions</th>
               </tr>
@@ -385,6 +432,7 @@ const ProjectManagementMilestones = () => {
                     </button>
                   </td>
                   <td className="p-4">{item.projectName}</td>
+                  <td className="p-4"><Badge>{item.stage || "Implement"}</Badge></td>
                   <td className="p-4">{item.responsiblePerson || "Unassigned"}</td>
                   <td className="p-4">{formatDate(item.targetDate)}</td>
                   <td className="p-4 text-xs text-slate-600">{item.taskCount} tasks · {item.reportCount} reports · {item.documentCount} docs</td>
@@ -402,8 +450,8 @@ const ProjectManagementMilestones = () => {
                   </td>
                 </tr>
               ))}
-              {!loading && !filtered.length && <tr><td colSpan="9" className="p-14 text-center text-slate-500">No milestones match the selected filters.</td></tr>}
-              {loading && <tr><td colSpan="9" className="p-14 text-center text-slate-500">Loading milestone control center…</td></tr>}
+              {!loading && !filtered.length && <tr><td colSpan="10" className="p-14 text-center text-slate-500">No milestones match the selected filters.</td></tr>}
+              {loading && <tr><td colSpan="10" className="p-14 text-center text-slate-500">Loading milestone control center…</td></tr>}
             </tbody>
           </table>
         </div>
@@ -417,7 +465,7 @@ const ProjectManagementMilestones = () => {
                 <div>
                   <p className="text-xs font-bold text-indigo-600">{detail.milestoneNumber} · {detail.projectName}</p>
                   <h2 className="mt-1 text-2xl font-bold text-slate-950">{detail.name}</h2>
-                  <div className="mt-2 flex flex-wrap gap-2"><Badge>{detail.status}</Badge><Badge>{detail.health}</Badge><Badge>{detail.priority}</Badge></div>
+                  <div className="mt-2 flex flex-wrap gap-2"><Badge>{detail.stage || "Implement"}</Badge><Badge>{detail.status}</Badge><Badge>{detail.health}</Badge><Badge>{detail.priority}</Badge></div>
                 </div>
                 <div className="flex gap-2">
                   {detail.permissions?.canManage && <button onClick={() => openEdit(detail)} className="rounded-xl border p-2.5"><Pencil className="h-4 w-4" /></button>}
@@ -489,6 +537,13 @@ const ProjectManagementMilestones = () => {
 
               {activeTab === "Linked Tasks" && (
                 <div className="space-y-3">
+                  {detail.permissions?.canManage && detail.status !== "Cancelled" && (
+                    <div className="flex justify-end">
+                      <button onClick={() => setTaskForm({ ...emptyTask, startDate: String(detail.startDate || "").slice(0, 10), dueDate: String(detail.targetDate || "").slice(0, 10) })} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white">
+                        <Plus className="h-4 w-4" /> Create Task under Milestone
+                      </button>
+                    </div>
+                  )}
                   {(detail.tasks || []).map((task) => (
                     <section key={task.id} className={`${cardClass} grid gap-4 p-4 md:grid-cols-6 md:items-center`}>
                       <div className="md:col-span-2"><p className="font-bold">{task.taskName}</p><p className="text-xs text-slate-500">{task.description}</p></div>
@@ -624,6 +679,7 @@ const ProjectManagementMilestones = () => {
             <div className="grid gap-4 p-5 md:grid-cols-2">
               <label className="text-sm font-medium">Project *<select disabled={Boolean(form.id)} className={`${inputClass} mt-1`} value={form.projectId} onChange={(event) => setForm({ ...form, projectId: event.target.value, taskIds: [], dependencyIds: [], reportIds: [] })}><option value="">Select project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
               <label className="text-sm font-medium">Milestone name *<input className={`${inputClass} mt-1`} value={form.name || ""} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+              <label className="text-sm font-medium">Project stage *<select className={`${inputClass} mt-1`} value={form.stage || "Design"} onChange={(event) => setForm({ ...form, stage: event.target.value })}>{stageOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
               <label className="text-sm font-medium">Priority<select className={`${inputClass} mt-1`} value={form.priority || "Medium"} onChange={(event) => setForm({ ...form, priority: event.target.value })}>{priorities.slice(1).map((value) => <option key={value}>{value}</option>)}</select></label>
               <label className="text-sm font-medium">Responsible person<input className={`${inputClass} mt-1`} value={form.responsiblePerson || ""} onChange={(event) => setForm({ ...form, responsiblePerson: event.target.value })} /></label>
               <label className="text-sm font-medium">Current start<DateInput value={String(form.startDate || "").slice(0, 10)} onChange={(value) => setForm({ ...form, startDate: value || "" })} /></label>
@@ -633,12 +689,41 @@ const ProjectManagementMilestones = () => {
               <label className="text-sm font-medium md:col-span-2">Deliverable<textarea rows="2" className={`${inputClass} mt-1`} value={form.deliverable || ""} onChange={(event) => setForm({ ...form, deliverable: event.target.value })} /></label>
               <label className="text-sm font-medium md:col-span-2">Acceptance criteria<textarea rows="2" className={`${inputClass} mt-1`} value={form.acceptanceCriteria || ""} onChange={(event) => setForm({ ...form, acceptanceCriteria: event.target.value })} /></label>
               <label className="text-sm font-medium md:col-span-2">Description<textarea rows="2" className={`${inputClass} mt-1`} value={form.description || ""} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-              <label className="text-sm font-medium">Linked tasks<select multiple className={`${inputClass} mt-1 min-h-32`} value={(form.taskIds || []).map(String)} onChange={(event) => setForm({ ...form, taskIds: Array.from(event.target.selectedOptions).map((option) => Number(option.value)) })}>{(selectedProject?.tasks || []).map((task) => <option key={task.id} value={task.id}>{task.taskName || task.title}</option>)}</select></label>
               <label className="text-sm font-medium">Dependencies<select multiple className={`${inputClass} mt-1 min-h-32`} value={(form.dependencyIds || []).map(String)} onChange={(event) => setForm({ ...form, dependencyIds: Array.from(event.target.selectedOptions).map((option) => Number(option.value)) })}>{(selectedProject?.milestones || []).filter((item) => item.id !== form.id).map((item) => <option key={item.id} value={item.id}>{item.milestoneNumber || item.name} — {item.name}</option>)}</select></label>
               <label className="text-sm font-medium md:col-span-2">Explicit report links<select multiple className={`${inputClass} mt-1 min-h-28`} value={(form.reportIds || []).map(String)} onChange={(event) => setForm({ ...form, reportIds: Array.from(event.target.selectedOptions).map((option) => Number(option.value)) })}>{projectReports.map((report) => <option key={report.id} value={report.id}>{report.reportNumber} — {formatDate(report.reportDate)}</option>)}</select></label>
               <label className="text-sm font-medium md:col-span-2">Notes<textarea rows="2" className={`${inputClass} mt-1`} value={form.notes || ""} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
             </div>
             <footer className="sticky bottom-0 flex justify-end gap-2 border-t bg-white p-5"><button onClick={() => setForm(null)} className="rounded-xl border px-4 py-2.5">Cancel</button><button disabled={busy} onClick={() => void saveMilestone()} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Save Milestone</button></footer>
+          </div>
+        </div>
+      )}
+
+      {taskForm && detail && (
+        <div className="fixed inset-0 z-[95] grid place-items-center bg-slate-950/50 p-4">
+          <div className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+            <header className="flex items-start justify-between border-b p-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">{detail.stage || "Implement"} · {detail.milestoneNumber}</p>
+                <h2 className="mt-1 text-xl font-bold">Create Task under {detail.name}</h2>
+                <p className="mt-1 text-sm text-slate-500">This task will stay linked to this milestone and contribute to its progress.</p>
+              </div>
+              <button onClick={() => setTaskForm(null)}><X /></button>
+            </header>
+            <div className="grid gap-4 p-5 md:grid-cols-2">
+              <label className="text-sm font-medium md:col-span-2">Task name *<input className={`${inputClass} mt-1`} value={taskForm.taskName} onChange={(event) => setTaskForm({ ...taskForm, taskName: event.target.value })} /></label>
+              <label className="text-sm font-medium md:col-span-2">Description<textarea rows="3" className={`${inputClass} mt-1`} value={taskForm.description} onChange={(event) => setTaskForm({ ...taskForm, description: event.target.value })} /></label>
+              <label className="text-sm font-medium">Assigned employee<input className={`${inputClass} mt-1`} value={taskForm.assignedEmployeeName} onChange={(event) => setTaskForm({ ...taskForm, assignedEmployeeName: event.target.value })} /></label>
+              <label className="text-sm font-medium">Priority<select className={`${inputClass} mt-1`} value={taskForm.priority} onChange={(event) => setTaskForm({ ...taskForm, priority: event.target.value })}>{priorities.slice(1).map((value) => <option key={value}>{value}</option>)}</select></label>
+              <label className="text-sm font-medium">Start date<DateInput value={taskForm.startDate} onChange={(value) => setTaskForm({ ...taskForm, startDate: value || "" })} /></label>
+              <label className="text-sm font-medium">Due date *<DateInput value={taskForm.dueDate} onChange={(value) => setTaskForm({ ...taskForm, dueDate: value || "" })} /></label>
+              <label className="text-sm font-medium">Estimated hours<input type="number" min="0" className={`${inputClass} mt-1`} value={taskForm.estimatedHours} onChange={(event) => setTaskForm({ ...taskForm, estimatedHours: event.target.value })} /></label>
+              <label className="text-sm font-medium">Dependencies<input className={`${inputClass} mt-1`} value={taskForm.dependencies} onChange={(event) => setTaskForm({ ...taskForm, dependencies: event.target.value })} /></label>
+              <label className="text-sm font-medium md:col-span-2">Remarks<textarea rows="2" className={`${inputClass} mt-1`} value={taskForm.remarks} onChange={(event) => setTaskForm({ ...taskForm, remarks: event.target.value })} /></label>
+            </div>
+            <footer className="flex justify-end gap-2 border-t p-5">
+              <button onClick={() => setTaskForm(null)} className="rounded-xl border px-4 py-2.5">Cancel</button>
+              <button disabled={busy} onClick={() => void saveTask()} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Create Task</button>
+            </footer>
           </div>
         </div>
       )}

@@ -37,7 +37,6 @@ import { fetchLocations } from "../../services/locationsApi";
 import {
   PROJECT_MANAGEMENT_PROJECTS_EVENT,
   hydrateProjectManagementProjects,
-  ensureProjectManagementProjects,
   getProjectManagementProjects as getProjects,
   saveProjectManagementProject as saveProject,
 } from "../../services/projectManagementProjectsStore";
@@ -73,6 +72,7 @@ const FILTER_OPTIONS = [
   "Cancelled",
 ];
 const PRIORITY_OPTIONS = ["Critical", "High", "Medium", "Low"];
+const PROJECT_STAGES = ["Design", "Procure", "Implement", "Allocate"];
 const PROJECT_CATEGORIES = [
   "Electrical Installation",
   "Automation",
@@ -157,6 +157,7 @@ const emptyProjectForm = {
   otherCostBudget: "",
   siteName: "",
   locationId: "",
+  locationIds: [],
   siteAddress: "",
   city: "",
   state: "",
@@ -165,6 +166,7 @@ const emptyProjectForm = {
 };
 
 const emptyTaskForm = {
+  milestoneId: "",
   title: "",
   description: "",
   parentTask: "",
@@ -183,6 +185,7 @@ const emptyTaskForm = {
 const newMilestoneForm = () => ({
   id: makeId("milestone-draft"),
   name: "",
+  stage: "Design",
   description: "",
   startDate: "",
   targetDate: "",
@@ -249,536 +252,6 @@ const DOCUMENT_FOLDERS = [
   "Purchase Orders",
   "Site Photos",
   "Reports",
-];
-
-const MOCK_PROJECTS = [
-  {
-    id: "pm-mall-cctv",
-    name: "Mall CCTV Installation",
-    code: "BE-PM-2026-001",
-    client: "Orion Mall Management Pvt Ltd",
-    companyName: "Orion Mall Management Pvt Ltd",
-    projectCategory: "Electrical Installation",
-    description:
-      "Installation of IP CCTV cameras, NVR racks, PoE switches, and control room monitoring across basement, retail floors, and loading bay areas.",
-    priority: "Critical",
-    status: "Active",
-    projectManager: "Rahul Sharma",
-    siteEngineer: "Arun Kumar",
-    teamLead: "Meera Nair",
-    department: "Projects",
-    startDate: "2026-05-18",
-    endDate: "2026-07-12",
-    actualEndDate: null,
-    milestoneTemplate: "Installation & commissioning",
-    estimatedBudget: 4850000,
-    approvedBudget: 5200000,
-    materialBudget: 3180000,
-    labourBudget: 1120000,
-    otherCostBudget: 900000,
-    expenses: 3025000,
-    progress: 64,
-    teamSize: 8,
-    resourceUtilization: 82,
-    pendingInvoices: 3,
-    openIssues: 1,
-    siteName: "Orion Mall Rajajinagar",
-    siteAddress: "Dr Rajkumar Road, Rajajinagar, Bengaluru, Karnataka",
-    city: "Bengaluru",
-    state: "Karnataka",
-    siteContactPerson: "Kiran Desai",
-    siteContactNumber: "+91 98450 11223",
-    tasks: [
-      {
-        id: "task-cctv-001",
-        taskId: "TSK-001",
-        title: "Camera Installation",
-        description: "Install and align 120 indoor/outdoor IP camera points.",
-        assignedTo: "Arun Kumar",
-        owner: "Arun Kumar",
-        assignedBy: "Rahul Sharma",
-        startDate: "2026-05-22",
-        dueDate: "2026-06-24",
-        priority: "Critical",
-        status: "In Progress",
-        progress: 68,
-        estimatedHours: 96,
-        actualHours: 62,
-        dependencies: "Cabling completion",
-      },
-      {
-        id: "task-cctv-002",
-        taskId: "TSK-002",
-        title: "Control room rack setup",
-        description: "Install NVR rack, UPS, monitor wall, and network patching.",
-        assignedTo: "Meera Nair",
-        owner: "Meera Nair",
-        assignedBy: "Rahul Sharma",
-        startDate: "2026-06-03",
-        dueDate: "2026-06-20",
-        priority: "High",
-        status: "Under Review",
-        progress: 85,
-        estimatedHours: 40,
-        actualHours: 38,
-        dependencies: "Power point readiness",
-      },
-      {
-        id: "task-cctv-003",
-        taskId: "TSK-003",
-        title: "Client demo and handover",
-        description: "Demonstrate live feeds, playback, and incident export workflow.",
-        assignedTo: "Sneha Patil",
-        owner: "Sneha Patil",
-        assignedBy: "Rahul Sharma",
-        startDate: "2026-07-05",
-        dueDate: "2026-07-10",
-        priority: "Medium",
-        status: "Not Started",
-        progress: 0,
-        estimatedHours: 16,
-        actualHours: 0,
-        dependencies: "TSK-001, TSK-002",
-      },
-    ],
-    teamAllocations: [
-      {
-        id: "team-cctv-001",
-        employee: "Rahul Sharma",
-        member: "Rahul Sharma",
-        role: "Project Manager",
-        department: "Projects",
-        allocationPercent: 100,
-        startDate: "2026-05-18",
-        endDate: "2026-07-12",
-        availability: "Occupied",
-        status: "Active",
-      },
-      {
-        id: "team-cctv-002",
-        employee: "Arun Kumar",
-        member: "Arun Kumar",
-        role: "Site Engineer",
-        department: "Electrical",
-        allocationPercent: 90,
-        startDate: "2026-05-20",
-        endDate: "2026-07-08",
-        availability: "Occupied",
-        status: "Active",
-      },
-      {
-        id: "team-cctv-003",
-        employee: "Meera Nair",
-        member: "Meera Nair",
-        role: "Team Lead",
-        department: "Projects",
-        allocationPercent: 80,
-        startDate: "2026-05-22",
-        endDate: "2026-07-10",
-        availability: "Available",
-        status: "Active",
-      },
-    ],
-    milestones: [
-      {
-        id: "ms-cctv-001",
-        name: "Site survey complete",
-        description: "Camera point marking and cable route approval completed.",
-        targetDate: "2026-05-24",
-        completionDate: "2026-05-23",
-        owner: "Arun Kumar",
-        status: "Completed",
-      },
-      {
-        id: "ms-cctv-002",
-        name: "Camera installation",
-        description: "All camera points installed and labelled.",
-        targetDate: "2026-06-24",
-        completionDate: "",
-        owner: "Arun Kumar",
-        status: "In Progress",
-      },
-      {
-        id: "ms-cctv-003",
-        name: "Final handover",
-        description: "Client acceptance, documentation, and training.",
-        targetDate: "2026-07-12",
-        completionDate: "",
-        owner: "Rahul Sharma",
-        status: "Pending",
-      },
-    ],
-    inventoryAllocations: [
-      {
-        id: "inv-cctv-001",
-        itemCode: "CAM-IP-5MP",
-        itemName: "5MP IP Dome Camera",
-        category: "CCTV",
-        requiredQty: 120,
-        issuedQty: 86,
-        remainingQty: 34,
-        unit: "Nos",
-        storeLocation: "Bengaluru Main Store",
-        issueDate: "2026-05-25",
-        status: "Partial",
-      },
-      {
-        id: "inv-cctv-002",
-        itemCode: "NVR-64CH",
-        itemName: "64 Channel NVR",
-        category: "Recorder",
-        requiredQty: 3,
-        issuedQty: 3,
-        remainingQty: 0,
-        unit: "Nos",
-        storeLocation: "Security Systems Store",
-        issueDate: "2026-05-28",
-        status: "Issued",
-      },
-    ],
-    purchases: [
-      {
-        id: "po-cctv-001",
-        poNumber: "PO-BE-2606-018",
-        vendor: "SecureVision Technologies",
-        itemSummary: "PoE switches and camera mounting accessories",
-        amount: 685000,
-        expectedDelivery: "2026-06-19",
-        actualDelivery: "",
-        status: "In Transit",
-        linkedTask: "Camera Installation",
-      },
-      {
-        id: "po-cctv-002",
-        poNumber: "PO-BE-2605-044",
-        vendor: "Bengaluru Cable House",
-        itemSummary: "CAT6 cable, conduits, junction boxes",
-        amount: 415000,
-        expectedDelivery: "2026-05-29",
-        actualDelivery: "2026-05-29",
-        status: "Received",
-        linkedTask: "Camera Installation",
-      },
-    ],
-    financials: [
-      { id: "fin-cctv-001", label: "Materials", type: "Materials", amount: 1985000, budget: 3180000, actual: 1985000, status: "On Track" },
-      { id: "fin-cctv-002", label: "Labour", type: "Labour", amount: 720000, budget: 1120000, actual: 720000, status: "On Track" },
-      { id: "fin-cctv-003", label: "Transport", type: "Transport", amount: 145000, budget: 250000, actual: 145000, status: "On Track" },
-      { id: "fin-cctv-004", label: "Tools", type: "Tools", amount: 95000, budget: 180000, actual: 95000, status: "On Track" },
-      { id: "fin-cctv-005", label: "Miscellaneous", type: "Miscellaneous", amount: 80000, budget: 470000, actual: 80000, status: "On Track" },
-    ],
-    documents: [
-      { id: "doc-cctv-001", name: "Orion CCTV Work Order.pdf", category: "Contracts", uploadedBy: "Rahul Sharma", uploadedDate: "2026-05-18", size: "1.8 MB" },
-      { id: "doc-cctv-002", name: "Camera Layout Rev-2.dwg", category: "Drawings", uploadedBy: "Arun Kumar", uploadedDate: "2026-05-24", size: "4.6 MB" },
-      { id: "doc-cctv-003", name: "CCTV BOQ Final.xlsx", category: "BOQ", uploadedBy: "Meera Nair", uploadedDate: "2026-05-21", size: "620 KB" },
-    ],
-    activities: [
-      { id: "act-cctv-001", title: "Task \"Camera Installation\" assigned to Arun", description: "Critical CCTV installation task assigned to Arun Kumar.", actor: "Rahul Sharma", date: "2026-06-16T10:30:00+05:30" },
-      { id: "act-cctv-002", title: "Inventory allocated", description: "86 cameras and 3 NVRs issued from Bengaluru Main Store.", actor: "Meera Nair", date: "2026-06-15T16:15:00+05:30" },
-      { id: "act-cctv-003", title: "Purchase order approved", description: "PO-BE-2606-018 approved for PoE switches and accessories.", actor: "Rahul Sharma", date: "2026-06-15T11:20:00+05:30" },
-      { id: "act-cctv-004", title: "Project status changed to Active", description: "Mall CCTV Installation moved from Planning to Active.", actor: "Rahul Sharma", date: "2026-05-20T09:00:00+05:30" },
-      { id: "act-cctv-005", title: "Budget approved", description: "Approved budget set to ₹52,00,000.", actor: "Finance Team", date: "2026-05-18T14:10:00+05:30" },
-    ],
-    createdAt: "2026-05-18T09:00:00+05:30",
-    updatedAt: "2026-06-16T10:30:00+05:30",
-  },
-  {
-    id: "pm-factory-wiring",
-    name: "Factory Electrical Wiring",
-    code: "BE-PM-2026-002",
-    client: "Pragati Precision Components",
-    companyName: "Pragati Precision Components",
-    projectCategory: "Electrical Installation",
-    description:
-      "Electrical wiring, panel dressing, cable tray extension, earthing checks, and load testing for a new machining bay.",
-    priority: "High",
-    status: "Delayed",
-    projectManager: "Vikram Rao",
-    siteEngineer: "Naveen Gowda",
-    teamLead: "Farah Khan",
-    department: "Electrical",
-    startDate: "2026-04-22",
-    endDate: "2026-06-10",
-    actualEndDate: null,
-    milestoneTemplate: "Standard execution",
-    estimatedBudget: 7200000,
-    approvedBudget: 7550000,
-    materialBudget: 4100000,
-    labourBudget: 2200000,
-    otherCostBudget: 1250000,
-    expenses: 6725000,
-    progress: 78,
-    teamSize: 12,
-    resourceUtilization: 94,
-    pendingInvoices: 5,
-    openIssues: 4,
-    siteName: "Peenya Industrial Area Unit 3",
-    siteAddress: "3rd Phase, Peenya Industrial Area, Bengaluru, Karnataka",
-    city: "Bengaluru",
-    state: "Karnataka",
-    siteContactPerson: "Mahesh Kulkarni",
-    siteContactNumber: "+91 99002 44118",
-    tasks: [
-      { id: "task-wire-001", taskId: "TSK-001", title: "Cable tray installation", description: "Install galvanized cable trays across machining bay.", assignedTo: "Naveen Gowda", owner: "Naveen Gowda", assignedBy: "Vikram Rao", startDate: "2026-04-24", dueDate: "2026-05-12", priority: "High", status: "Completed", progress: 100, estimatedHours: 120, actualHours: 132, dependencies: "-" },
-      { id: "task-wire-002", taskId: "TSK-002", title: "Panel termination", description: "Terminate power lines and control wiring at panel DB-4.", assignedTo: "Farah Khan", owner: "Farah Khan", assignedBy: "Vikram Rao", startDate: "2026-05-18", dueDate: "2026-06-12", priority: "Critical", status: "Blocked", progress: 58, estimatedHours: 90, actualHours: 74, dependencies: "Client shutdown approval" },
-      { id: "task-wire-003", taskId: "TSK-003", title: "Load testing", description: "Perform phase load balancing and insulation testing.", assignedTo: "Naveen Gowda", owner: "Naveen Gowda", assignedBy: "Vikram Rao", startDate: "2026-06-13", dueDate: "2026-06-18", priority: "High", status: "Assigned", progress: 0, estimatedHours: 24, actualHours: 0, dependencies: "TSK-002" },
-    ],
-    teamAllocations: [
-      { id: "team-wire-001", employee: "Vikram Rao", member: "Vikram Rao", role: "Project Manager", department: "Projects", allocationPercent: 100, startDate: "2026-04-22", endDate: "2026-06-20", availability: "Occupied", status: "Active" },
-      { id: "team-wire-002", employee: "Naveen Gowda", member: "Naveen Gowda", role: "Site Engineer", department: "Electrical", allocationPercent: 100, startDate: "2026-04-23", endDate: "2026-06-20", availability: "Overallocated", status: "Active" },
-      { id: "team-wire-003", employee: "Farah Khan", member: "Farah Khan", role: "Team Lead", department: "Electrical", allocationPercent: 90, startDate: "2026-04-24", endDate: "2026-06-18", availability: "Occupied", status: "Active" },
-    ],
-    milestones: [
-      { id: "ms-wire-001", name: "Cable tray completion", description: "Cable tray installation completed in machining bay.", targetDate: "2026-05-12", completionDate: "2026-05-14", owner: "Naveen Gowda", status: "Completed" },
-      { id: "ms-wire-002", name: "Panel termination", description: "Power and control wiring termination.", targetDate: "2026-06-08", completionDate: "", owner: "Farah Khan", status: "Delayed" },
-      { id: "ms-wire-003", name: "Load test sign-off", description: "Final load testing and acceptance.", targetDate: "2026-06-18", completionDate: "", owner: "Vikram Rao", status: "Pending" },
-    ],
-    inventoryAllocations: [
-      { id: "inv-wire-001", itemCode: "CBL-4C-16SQ", itemName: "4 Core 16 sq mm Copper Cable", category: "Cable", requiredQty: 1800, issuedQty: 1650, remainingQty: 150, unit: "Mtr", storeLocation: "Electrical Store", issueDate: "2026-04-26", status: "Partial" },
-      { id: "inv-wire-002", itemCode: "MCCB-125A", itemName: "125A MCCB", category: "Switchgear", requiredQty: 18, issuedQty: 18, remainingQty: 0, unit: "Nos", storeLocation: "Switchgear Store", issueDate: "2026-05-06", status: "Issued" },
-    ],
-    purchases: [
-      { id: "po-wire-001", poNumber: "PO-BE-2605-031", vendor: "Karnataka Electricals", itemSummary: "Cable trays, saddles, glands", amount: 985000, expectedDelivery: "2026-05-18", actualDelivery: "2026-05-22", status: "Delayed", linkedTask: "Cable tray installation" },
-      { id: "po-wire-002", poNumber: "PO-BE-2606-006", vendor: "PowerGrid Controls", itemSummary: "Panel accessories and terminal blocks", amount: 450000, expectedDelivery: "2026-06-17", actualDelivery: "", status: "Ordered", linkedTask: "Panel termination" },
-    ],
-    financials: [
-      { id: "fin-wire-001", label: "Materials", type: "Materials", amount: 3810000, budget: 4100000, actual: 3810000, status: "Risk" },
-      { id: "fin-wire-002", label: "Labour", type: "Labour", amount: 2140000, budget: 2200000, actual: 2140000, status: "Risk" },
-      { id: "fin-wire-003", label: "Transport", type: "Transport", amount: 310000, budget: 250000, actual: 310000, status: "Over Budget" },
-      { id: "fin-wire-004", label: "Tools", type: "Tools", amount: 175000, budget: 150000, actual: 175000, status: "Over Budget" },
-      { id: "fin-wire-005", label: "Miscellaneous", type: "Miscellaneous", amount: 290000, budget: 850000, actual: 290000, status: "On Track" },
-    ],
-    documents: [
-      { id: "doc-wire-001", name: "Factory Wiring Contract.pdf", category: "Contracts", uploadedBy: "Vikram Rao", uploadedDate: "2026-04-22", size: "2.4 MB" },
-      { id: "doc-wire-002", name: "Panel Termination Report.pdf", category: "Reports", uploadedBy: "Farah Khan", uploadedDate: "2026-06-12", size: "980 KB" },
-    ],
-    activities: [
-      { id: "act-wire-001", title: "Site report uploaded", description: "Panel termination delay report uploaded by Farah Khan.", actor: "Farah Khan", date: "2026-06-16T09:45:00+05:30" },
-      { id: "act-wire-002", title: "Project status changed to Active", description: "Factory Electrical Wiring moved to Active after site mobilization.", actor: "Vikram Rao", date: "2026-04-24T10:15:00+05:30" },
-      { id: "act-wire-003", title: "Team allocation completed", description: "Electrical crew assigned for machining bay wiring.", actor: "Vikram Rao", date: "2026-04-23T15:30:00+05:30" },
-    ],
-    createdAt: "2026-04-22T09:00:00+05:30",
-    updatedAt: "2026-06-16T09:45:00+05:30",
-  },
-  {
-    id: "pm-warehouse-access",
-    name: "Warehouse Access Control Setup",
-    code: "BE-PM-2026-003",
-    client: "Nandi Logistics Park",
-    companyName: "Nandi Logistics Park",
-    projectCategory: "Automation",
-    description:
-      "Biometric access, RFID readers, boom barrier integration, and attendance controller setup for warehouse gates.",
-    priority: "High",
-    status: "Planning",
-    projectManager: "Priya Iyer",
-    siteEngineer: "Sandeep R",
-    teamLead: "Kavya Menon",
-    department: "Automation",
-    startDate: "2026-06-20",
-    endDate: "2026-08-05",
-    actualEndDate: null,
-    milestoneTemplate: "Installation & commissioning",
-    estimatedBudget: 3650000,
-    approvedBudget: 3900000,
-    materialBudget: 2350000,
-    labourBudget: 850000,
-    otherCostBudget: 700000,
-    expenses: 420000,
-    progress: 18,
-    teamSize: 6,
-    resourceUtilization: 56,
-    pendingInvoices: 1,
-    openIssues: 0,
-    siteName: "Nandi Logistics Park Gate 2",
-    siteAddress: "Nelamangala Road, Bengaluru Rural, Karnataka",
-    city: "Bengaluru Rural",
-    state: "Karnataka",
-    siteContactPerson: "Ramesh Hegde",
-    siteContactNumber: "+91 98801 77821",
-    tasks: [
-      { id: "task-access-001", taskId: "TSK-001", title: "Gate controller design", description: "Finalize controller locations and cabling plan.", assignedTo: "Sandeep R", owner: "Sandeep R", assignedBy: "Priya Iyer", startDate: "2026-06-20", dueDate: "2026-06-28", priority: "High", status: "Assigned", progress: 10, estimatedHours: 22, actualHours: 2, dependencies: "-" },
-      { id: "task-access-002", taskId: "TSK-002", title: "RFID reader installation", description: "Install RFID readers and test gate entry logs.", assignedTo: "Kavya Menon", owner: "Kavya Menon", assignedBy: "Priya Iyer", startDate: "2026-07-01", dueDate: "2026-07-20", priority: "Medium", status: "Not Started", progress: 0, estimatedHours: 52, actualHours: 0, dependencies: "TSK-001" },
-    ],
-    teamAllocations: [
-      { id: "team-access-001", employee: "Priya Iyer", member: "Priya Iyer", role: "Project Manager", department: "Projects", allocationPercent: 70, startDate: "2026-06-20", endDate: "2026-08-05", availability: "Available", status: "Planned" },
-      { id: "team-access-002", employee: "Sandeep R", member: "Sandeep R", role: "Site Engineer", department: "Automation", allocationPercent: 80, startDate: "2026-06-20", endDate: "2026-08-03", availability: "Available", status: "Planned" },
-    ],
-    milestones: [
-      { id: "ms-access-001", name: "Design approval", description: "Gate controller and reader plan approved by client.", targetDate: "2026-06-28", completionDate: "", owner: "Priya Iyer", status: "Pending" },
-      { id: "ms-access-002", name: "Device installation", description: "Biometric and RFID devices installed.", targetDate: "2026-07-20", completionDate: "", owner: "Kavya Menon", status: "Pending" },
-    ],
-    inventoryAllocations: [
-      { id: "inv-access-001", itemCode: "BIO-AC-7IN", itemName: "Biometric Access Controller", category: "Access Control", requiredQty: 12, issuedQty: 0, remainingQty: 12, unit: "Nos", storeLocation: "Automation Store", issueDate: "", status: "Approved" },
-      { id: "inv-access-002", itemCode: "RFID-UHF-RDR", itemName: "UHF RFID Reader", category: "Access Control", requiredQty: 8, issuedQty: 0, remainingQty: 8, unit: "Nos", storeLocation: "Automation Store", issueDate: "", status: "Requested" },
-    ],
-    purchases: [
-      { id: "po-access-001", poNumber: "PO-BE-2606-026", vendor: "AccessPro Systems", itemSummary: "RFID readers and access controllers", amount: 1190000, expectedDelivery: "2026-06-27", actualDelivery: "", status: "Approved", linkedTask: "RFID reader installation" },
-    ],
-    financials: [
-      { id: "fin-access-001", label: "Materials", type: "Materials", amount: 280000, budget: 2350000, actual: 280000, status: "On Track" },
-      { id: "fin-access-002", label: "Labour", type: "Labour", amount: 90000, budget: 850000, actual: 90000, status: "On Track" },
-      { id: "fin-access-003", label: "Transport", type: "Transport", amount: 25000, budget: 150000, actual: 25000, status: "On Track" },
-      { id: "fin-access-004", label: "Tools", type: "Tools", amount: 10000, budget: 100000, actual: 10000, status: "On Track" },
-      { id: "fin-access-005", label: "Miscellaneous", type: "Miscellaneous", amount: 15000, budget: 450000, actual: 15000, status: "On Track" },
-    ],
-    documents: [
-      { id: "doc-access-001", name: "Access Control BOQ.xlsx", category: "BOQ", uploadedBy: "Priya Iyer", uploadedDate: "2026-06-14", size: "410 KB" },
-      { id: "doc-access-002", name: "Gate Layout Markup.pdf", category: "Drawings", uploadedBy: "Sandeep R", uploadedDate: "2026-06-15", size: "1.2 MB" },
-    ],
-    activities: [
-      { id: "act-access-001", title: "Budget approved", description: "Approved budget set to ₹39,00,000.", actor: "Finance Team", date: "2026-06-15T13:40:00+05:30" },
-      { id: "act-access-002", title: "Purchase order approved", description: "AccessPro Systems PO approved for access control devices.", actor: "Priya Iyer", date: "2026-06-15T10:05:00+05:30" },
-    ],
-    createdAt: "2026-06-14T11:00:00+05:30",
-    updatedAt: "2026-06-15T13:40:00+05:30",
-  },
-  {
-    id: "pm-solar-backup",
-    name: "Solar Backup Installation",
-    code: "BE-PM-2026-004",
-    client: "Sattva Tech Park",
-    companyName: "Sattva Tech Park",
-    projectCategory: "Infrastructure",
-    description:
-      "Hybrid solar backup system for security control room, server UPS backup, and emergency lighting circuits.",
-    priority: "Medium",
-    status: "Completed",
-    projectManager: "Anil Thomas",
-    siteEngineer: "Divya Bhat",
-    teamLead: "Mohammed Irfan",
-    department: "Operations",
-    startDate: "2026-03-10",
-    endDate: "2026-05-05",
-    actualEndDate: "2026-05-02",
-    milestoneTemplate: "Fast-track delivery",
-    estimatedBudget: 6100000,
-    approvedBudget: 6250000,
-    materialBudget: 4250000,
-    labourBudget: 1100000,
-    otherCostBudget: 900000,
-    expenses: 5830000,
-    progress: 100,
-    teamSize: 9,
-    resourceUtilization: 76,
-    pendingInvoices: 0,
-    openIssues: 0,
-    siteName: "Sattva Tech Park Tower B",
-    siteAddress: "Outer Ring Road, Marathahalli, Bengaluru, Karnataka",
-    city: "Bengaluru",
-    state: "Karnataka",
-    siteContactPerson: "Rohit Menon",
-    siteContactNumber: "+91 97422 55331",
-    tasks: [
-      { id: "task-solar-001", taskId: "TSK-001", title: "Panel and inverter installation", description: "Install rooftop solar panels and hybrid inverter set.", assignedTo: "Divya Bhat", owner: "Divya Bhat", assignedBy: "Anil Thomas", startDate: "2026-03-15", dueDate: "2026-04-05", priority: "High", status: "Completed", progress: 100, estimatedHours: 110, actualHours: 104, dependencies: "-" },
-      { id: "task-solar-002", taskId: "TSK-002", title: "Commissioning and client training", description: "Commission backup system and train facility staff.", assignedTo: "Mohammed Irfan", owner: "Mohammed Irfan", assignedBy: "Anil Thomas", startDate: "2026-04-28", dueDate: "2026-05-02", priority: "Medium", status: "Completed", progress: 100, estimatedHours: 18, actualHours: 16, dependencies: "TSK-001" },
-    ],
-    teamAllocations: [
-      { id: "team-solar-001", employee: "Anil Thomas", member: "Anil Thomas", role: "Project Manager", department: "Projects", allocationPercent: 100, startDate: "2026-03-10", endDate: "2026-05-05", availability: "Available", status: "Released" },
-      { id: "team-solar-002", employee: "Divya Bhat", member: "Divya Bhat", role: "Site Engineer", department: "Operations", allocationPercent: 80, startDate: "2026-03-12", endDate: "2026-05-02", availability: "Available", status: "Released" },
-    ],
-    milestones: [
-      { id: "ms-solar-001", name: "Material delivery", description: "Solar panels, inverter, and batteries delivered.", targetDate: "2026-03-18", completionDate: "2026-03-17", owner: "Divya Bhat", status: "Completed" },
-      { id: "ms-solar-002", name: "Commissioning", description: "System commissioned and accepted by client.", targetDate: "2026-05-05", completionDate: "2026-05-02", owner: "Anil Thomas", status: "Completed" },
-    ],
-    inventoryAllocations: [
-      { id: "inv-solar-001", itemCode: "SOL-PNL-550W", itemName: "550W Solar Panel", category: "Solar", requiredQty: 48, issuedQty: 48, remainingQty: 0, unit: "Nos", storeLocation: "Renewables Store", issueDate: "2026-03-16", status: "Issued" },
-      { id: "inv-solar-002", itemCode: "BAT-LFP-5KWH", itemName: "5kWh LFP Battery Module", category: "Battery", requiredQty: 10, issuedQty: 10, remainingQty: 0, unit: "Nos", storeLocation: "Renewables Store", issueDate: "2026-03-18", status: "Issued" },
-    ],
-    purchases: [
-      { id: "po-solar-001", poNumber: "PO-BE-2603-012", vendor: "SunGrid Energy", itemSummary: "Solar panels and hybrid inverter", amount: 3450000, expectedDelivery: "2026-03-18", actualDelivery: "2026-03-17", status: "Received", linkedTask: "Panel and inverter installation" },
-    ],
-    financials: [
-      { id: "fin-solar-001", label: "Materials", type: "Materials", amount: 4050000, budget: 4250000, actual: 4050000, status: "On Track" },
-      { id: "fin-solar-002", label: "Labour", type: "Labour", amount: 1030000, budget: 1100000, actual: 1030000, status: "On Track" },
-      { id: "fin-solar-003", label: "Transport", type: "Transport", amount: 265000, budget: 300000, actual: 265000, status: "On Track" },
-      { id: "fin-solar-004", label: "Tools", type: "Tools", amount: 145000, budget: 150000, actual: 145000, status: "On Track" },
-      { id: "fin-solar-005", label: "Miscellaneous", type: "Miscellaneous", amount: 340000, budget: 450000, actual: 340000, status: "On Track" },
-    ],
-    documents: [
-      { id: "doc-solar-001", name: "Commissioning Report.pdf", category: "Reports", uploadedBy: "Anil Thomas", uploadedDate: "2026-05-02", size: "2.1 MB" },
-      { id: "doc-solar-002", name: "Solar Invoice Pack.zip", category: "Invoices", uploadedBy: "Finance Team", uploadedDate: "2026-05-04", size: "6.8 MB" },
-    ],
-    activities: [
-      { id: "act-solar-001", title: "Site report uploaded", description: "Commissioning report uploaded for client handover.", actor: "Anil Thomas", date: "2026-05-02T17:00:00+05:30" },
-      { id: "act-solar-002", title: "Team allocation completed", description: "Solar installation team released after handover.", actor: "Anil Thomas", date: "2026-05-02T18:15:00+05:30" },
-    ],
-    createdAt: "2026-03-10T10:00:00+05:30",
-    updatedAt: "2026-05-04T11:00:00+05:30",
-  },
-  {
-    id: "pm-network-rack",
-    name: "Office Network Rack Upgrade",
-    code: "BE-PM-2026-005",
-    client: "Apex Finserv India",
-    companyName: "Apex Finserv India",
-    projectCategory: "Maintenance",
-    description:
-      "Upgrade network rack, patch panels, UPS, cable dressing, and switch migration for a corporate office floor.",
-    priority: "Low",
-    status: "On Hold",
-    projectManager: "Neha Reddy",
-    siteEngineer: "Arvind S",
-    teamLead: "Pooja Rao",
-    department: "Service",
-    startDate: "2026-06-05",
-    endDate: "2026-06-28",
-    actualEndDate: null,
-    milestoneTemplate: "Maintenance contract",
-    estimatedBudget: 1850000,
-    approvedBudget: 1950000,
-    materialBudget: 1180000,
-    labourBudget: 420000,
-    otherCostBudget: 350000,
-    expenses: 520000,
-    progress: 42,
-    teamSize: 5,
-    resourceUtilization: 61,
-    pendingInvoices: 2,
-    openIssues: 1,
-    siteName: "Apex Finserv Infantry Road",
-    siteAddress: "Infantry Road, Bengaluru, Karnataka",
-    city: "Bengaluru",
-    state: "Karnataka",
-    siteContactPerson: "Nisha Kapoor",
-    siteContactNumber: "+91 99725 66110",
-    tasks: [
-      { id: "task-rack-001", taskId: "TSK-001", title: "Rack audit", description: "Audit rack layout and migration risk.", assignedTo: "Arvind S", owner: "Arvind S", assignedBy: "Neha Reddy", startDate: "2026-06-05", dueDate: "2026-06-08", priority: "Medium", status: "Completed", progress: 100, estimatedHours: 12, actualHours: 10, dependencies: "-" },
-      { id: "task-rack-002", taskId: "TSK-002", title: "Switch migration window", description: "Migrate switch links during approved downtime.", assignedTo: "Pooja Rao", owner: "Pooja Rao", assignedBy: "Neha Reddy", startDate: "2026-06-14", dueDate: "2026-06-16", priority: "High", status: "Blocked", progress: 25, estimatedHours: 18, actualHours: 4, dependencies: "Client downtime approval" },
-    ],
-    teamAllocations: [
-      { id: "team-rack-001", employee: "Neha Reddy", member: "Neha Reddy", role: "Project Manager", department: "Service", allocationPercent: 60, startDate: "2026-06-05", endDate: "2026-06-28", availability: "Available", status: "On Hold" },
-      { id: "team-rack-002", employee: "Arvind S", member: "Arvind S", role: "Site Engineer", department: "Service", allocationPercent: 50, startDate: "2026-06-05", endDate: "2026-06-28", availability: "On Leave", status: "On Hold" },
-    ],
-    milestones: [
-      { id: "ms-rack-001", name: "Rack audit complete", description: "Existing rack and cable map documented.", targetDate: "2026-06-08", completionDate: "2026-06-08", owner: "Arvind S", status: "Completed" },
-      { id: "ms-rack-002", name: "Migration window", description: "Switch migration during client-approved downtime.", targetDate: "2026-06-16", completionDate: "", owner: "Pooja Rao", status: "Delayed" },
-    ],
-    inventoryAllocations: [
-      { id: "inv-rack-001", itemCode: "PP-CAT6-24P", itemName: "24 Port CAT6 Patch Panel", category: "Networking", requiredQty: 8, issuedQty: 4, remainingQty: 4, unit: "Nos", storeLocation: "Networking Store", issueDate: "2026-06-07", status: "Partial" },
-      { id: "inv-rack-002", itemCode: "UPS-3KVA-RACK", itemName: "3KVA Rack UPS", category: "UPS", requiredQty: 2, issuedQty: 0, remainingQty: 2, unit: "Nos", storeLocation: "UPS Store", issueDate: "", status: "Shortage" },
-    ],
-    purchases: [
-      { id: "po-rack-001", poNumber: "PO-BE-2606-019", vendor: "NetRack Solutions", itemSummary: "Rack UPS and cable managers", amount: 315000, expectedDelivery: "2026-06-18", actualDelivery: "", status: "Requested", linkedTask: "Switch migration window" },
-    ],
-    financials: [
-      { id: "fin-rack-001", label: "Materials", type: "Materials", amount: 310000, budget: 1180000, actual: 310000, status: "On Track" },
-      { id: "fin-rack-002", label: "Labour", type: "Labour", amount: 120000, budget: 420000, actual: 120000, status: "On Track" },
-      { id: "fin-rack-003", label: "Transport", type: "Transport", amount: 35000, budget: 70000, actual: 35000, status: "On Track" },
-      { id: "fin-rack-004", label: "Tools", type: "Tools", amount: 25000, budget: 80000, actual: 25000, status: "On Track" },
-      { id: "fin-rack-005", label: "Miscellaneous", type: "Miscellaneous", amount: 30000, budget: 200000, actual: 30000, status: "On Track" },
-    ],
-    documents: [
-      { id: "doc-rack-001", name: "Rack Audit Photos.zip", category: "Site Photos", uploadedBy: "Arvind S", uploadedDate: "2026-06-08", size: "18.2 MB" },
-      { id: "doc-rack-002", name: "Network Rack BOQ.xlsx", category: "BOQ", uploadedBy: "Neha Reddy", uploadedDate: "2026-06-06", size: "290 KB" },
-    ],
-    activities: [
-      { id: "act-rack-001", title: "Project status changed to On Hold", description: "Client downtime approval pending for switch migration.", actor: "Neha Reddy", date: "2026-06-14T18:20:00+05:30" },
-      { id: "act-rack-002", title: "Inventory allocated", description: "Patch panels issued from Networking Store.", actor: "Pooja Rao", date: "2026-06-07T12:10:00+05:30" },
-    ],
-    createdAt: "2026-06-05T09:30:00+05:30",
-    updatedAt: "2026-06-14T18:20:00+05:30",
-  },
 ];
 
 const detailTabs = [
@@ -1059,8 +532,7 @@ const formatDateValue = (value) => {
 };
 
 const getInitialProjects = () => {
-  const existing = getProjects();
-  return existing.length ? existing : MOCK_PROJECTS;
+  return getProjects();
 };
 
 const getCostBreakdownRows = (project = {}) =>
@@ -1166,93 +638,6 @@ const buildTeamAllocations = (form, existing = []) => {
   ].filter((item) => item.member);
 };
 
-const buildDefaultTasks = (form) => [
-  {
-    id: makeId("task"),
-    taskId: "TSK-001",
-    title: "Project kickoff and responsibility handover",
-    description: "Confirm scope, site contacts, timeline, and responsibility matrix.",
-    owner: form.projectManager,
-    assignedTo: form.projectManager,
-    assignedBy: form.projectManager || "Project office",
-    startDate: form.startDate,
-    dueDate: form.startDate,
-    priority: form.priority,
-    status: form.status === "Active" ? "Completed" : "Assigned",
-    progress: form.status === "Active" ? 100 : 15,
-    estimatedHours: 4,
-    actualHours: form.status === "Active" ? 4 : 0,
-    dependencies: "-",
-    comments: "Initial project setup activity.",
-  },
-  {
-    id: makeId("task"),
-    taskId: "TSK-002",
-    title: "Material requirement and site readiness review",
-    description: "Validate BOQ, inventory availability, and site prerequisites.",
-    owner: form.siteEngineer || form.projectManager,
-    assignedTo: form.siteEngineer || form.projectManager,
-    assignedBy: form.projectManager || "Project office",
-    startDate: form.startDate,
-    dueDate: form.startDate,
-    priority: form.priority === "Low" ? "Medium" : form.priority,
-    status: "Assigned",
-    progress: 0,
-    estimatedHours: 6,
-    actualHours: 0,
-    dependencies: "TSK-001",
-    comments: "",
-  },
-  {
-    id: makeId("task"),
-    taskId: "TSK-003",
-    title: "Execution checkpoint",
-    description: form.milestoneTemplate || "Milestone tracking checkpoint.",
-    owner: form.teamLead || form.projectManager,
-    assignedTo: form.teamLead || form.projectManager,
-    assignedBy: form.projectManager || "Project office",
-    startDate: form.startDate,
-    dueDate: form.endDate,
-    priority: "Medium",
-    status: "Not Started",
-    progress: 0,
-    estimatedHours: 8,
-    actualHours: 0,
-    dependencies: "TSK-002",
-    comments: "",
-  },
-];
-
-const buildDefaultMilestones = (form) => [
-  {
-    id: makeId("milestone"),
-    name: "Project kickoff",
-    description: "Scope, client communication, and responsibility handover completed.",
-    targetDate: form.startDate,
-    completionDate: form.status === "Active" ? form.startDate : "",
-    owner: form.projectManager,
-    status: form.status === "Active" ? "Completed" : "Pending",
-  },
-  {
-    id: makeId("milestone"),
-    name: "Material readiness",
-    description: "Materials allocated or purchase requests initiated.",
-    targetDate: form.startDate,
-    completionDate: "",
-    owner: form.siteEngineer || form.projectManager,
-    status: "Pending",
-  },
-  {
-    id: makeId("milestone"),
-    name: "Planned completion",
-    description: form.milestoneTemplate || "Final execution and handover checkpoint.",
-    targetDate: form.endDate,
-    completionDate: form.actualEndDate,
-    owner: form.teamLead || form.projectManager,
-    status: form.actualEndDate ? "Completed" : "Pending",
-  },
-];
-
 const buildDefaultInventory = (form) => {
   const materialBudget = numberValue(form.materialBudget);
   if (!materialBudget) return [];
@@ -1356,6 +741,11 @@ const mapProjectToForm = (project = {}) => ({
   otherCostBudget: project.otherCostBudget || "",
   siteName: project.siteName || "",
   locationId: project.locationId || "",
+  locationIds: Array.isArray(project.locationIds)
+    ? project.locationIds.map(String)
+    : Array.isArray(project.locations)
+      ? project.locations.map((location) => String(location.id || location.locationId)).filter(Boolean)
+      : project.locationId ? [String(project.locationId)] : [],
   siteAddress: project.siteAddress || project.address || "",
   city: project.city || "",
   state: project.state || "",
@@ -1369,17 +759,11 @@ const buildProjectPayload = (form, existingProject = null) => {
     form,
     existingProject?.teamAllocations || []
   );
-  const tasks = existingProject?.tasks?.length
-    ? existingProject.tasks
-    : buildDefaultTasks(form);
+  const tasks = existingProject?.tasks || [];
   const inventoryAllocations = existingProject?.inventoryAllocations?.length
     ? existingProject.inventoryAllocations
     : buildDefaultInventory(form);
-  const milestones = form.milestones?.length
-    ? form.milestones
-    : existingProject?.milestones?.length
-      ? existingProject.milestones
-      : buildDefaultMilestones(form);
+  const milestones = form.milestones || existingProject?.milestones || [];
   const financials = existingProject?.financials?.length
     ? existingProject.financials
     : buildDefaultFinancials(form);
@@ -1430,6 +814,11 @@ const buildProjectPayload = (form, existingProject = null) => {
       existingProject?.resourceUtilization || (teamAllocations.length ? 68 : 0),
     siteName: form.siteName.trim(),
     locationId: form.locationId || null,
+    locationIds: (form.locationIds || []).map((value) => Number(value)).filter(Number.isFinite),
+    locations: (form.locationIds || []).map((value, index) => ({
+      id: Number(value),
+      isPrimary: index === 0,
+    })),
     siteAddress: form.siteAddress.trim(),
     city: form.city.trim(),
     state: form.state.trim(),
@@ -1512,7 +901,7 @@ const TableActionButton = ({ children, onClick }) => (
   <button
     type="button"
     onClick={onClick}
-    className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+    className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
   >
     {children}
   </button>
@@ -1714,11 +1103,13 @@ const ProjectFormModal = ({
     }
   };
 
-  const updateLocation = (locationId) => {
+  const updateLocations = (locationIds) => {
+    const normalizedIds = [...new Set(locationIds.map(String))];
     const selectedLocation =
-      locations.find((location) => String(location.id) === String(locationId)) || null;
+      locations.find((location) => String(location.id) === normalizedIds[0]) || null;
     setForm((prev) => ({
       ...prev,
+      locationIds: normalizedIds,
       locationId: selectedLocation ? String(selectedLocation.id) : "",
       siteName: selectedLocation?.name || "",
       siteAddress: selectedLocation?.address || prev.siteAddress,
@@ -1735,7 +1126,6 @@ const ProjectFormModal = ({
   const title = mode === "edit" ? "Edit Project" : "Create Project";
   const legacyCustomerOption = makeLegacySelectOption(form.client, customerSelectOptions);
   const legacyTeamLeadOption = makeLegacySelectOption(form.teamLead, employeeSelectOptions);
-  const legacyLocationOption = makeLegacySelectOption(form.siteName, locationSelectOptions);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-5 backdrop-blur-sm">
@@ -1881,7 +1271,7 @@ const ProjectFormModal = ({
                 </div>
               </section>
 
-              <section className={sectionClass}>
+              {mode === "edit" && <section className={sectionClass}>
                 <div className="mb-4 flex items-start justify-between gap-4">
                   <SectionTitle
                     icon={CheckCircle2}
@@ -1909,6 +1299,12 @@ const ProjectFormModal = ({
                             <input className={inputClass} value={milestone.name || ""}
                               onChange={(event) => updateMilestoneField(index, "name", event.target.value)} />
                           </Field>
+                          <Field label="Project Stage" required>
+                            <SelectField value={milestone.stage || "Design"}
+                              onChange={(value) => updateMilestoneField(index, "stage", value)}>
+                              {PROJECT_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+                            </SelectField>
+                          </Field>
                           <Field label="Responsible Person">
                             <input className={inputClass} value={milestone.responsiblePerson || milestone.owner || ""}
                               onChange={(event) => updateMilestoneField(index, "responsiblePerson", event.target.value)}
@@ -1926,17 +1322,6 @@ const ProjectFormModal = ({
                             <textarea className={inputClass} rows="2" value={milestone.description || ""}
                               onChange={(event) => updateMilestoneField(index, "description", event.target.value)} />
                           </Field>
-                          {project?.tasks?.length ? (
-                            <Field label="Linked Tasks" className="md:col-span-2">
-                              <select multiple className={`${inputClass} min-h-24`}
-                                value={(milestone.taskIds || milestone.linkedTasks || []).map(String)}
-                                onChange={(event) => updateMilestoneField(index, "taskIds", Array.from(event.target.selectedOptions).map((option) => Number(option.value)))}>
-                                {project.tasks.map((task) => (
-                                  <option key={task.id} value={task.id}>{task.taskName || task.title}</option>
-                                ))}
-                              </select>
-                            </Field>
-                          ) : null}
                         </div>
                         <button type="button" onClick={() => removeMilestone(index)}
                           className="mt-3 text-sm font-semibold text-rose-600 hover:text-rose-700">
@@ -1946,7 +1331,7 @@ const ProjectFormModal = ({
                     ))}
                   </div>
                 )}
-              </section>
+              </section>}
 
               <section className={sectionClass}>
                 <SectionTitle
@@ -2113,26 +1498,20 @@ const ProjectFormModal = ({
                   subtitle="Site address, city, state, and contact ownership."
                 />
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="Site Name">
-                    <SelectField
-                      value={
-                        form.locationId ||
-                        (legacyLocationOption ? legacyLocationOption.value : "")
-                      }
-                      onChange={updateLocation}
+                  <Field label="Project Locations">
+                    <select
+                      multiple
+                      value={(form.locationIds || []).map(String)}
+                      onChange={(event) => updateLocations(Array.from(event.target.selectedOptions).map((option) => option.value))}
+                      className={`${inputClass} min-h-32`}
                     >
-                      <option value="">Select location</option>
-                      {legacyLocationOption ? (
-                        <option value={legacyLocationOption.value}>
-                          {legacyLocationOption.label}
-                        </option>
-                      ) : null}
                       {locationSelectOptions.map((location) => (
                         <option key={location.value} value={location.value}>
                           {location.label}
                         </option>
                       ))}
-                    </SelectField>
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500">Use Ctrl/Command to select multiple sites. The first selected site is the primary location.</p>
                   </Field>
                   <Field label="Site Address">
                     <input
@@ -2224,6 +1603,7 @@ const ProjectFormModal = ({
 const TaskAssignmentModal = ({ project, onClose, onSave }) => {
   const [form, setForm] = useState(() => ({
     ...emptyTaskForm,
+    milestoneId: project?.milestones?.find((milestone) => !milestone.isDeleted)?.id || "",
     assignedBy: project?.projectManager || "Project office",
     owner: project?.teamLead || project?.siteEngineer || project?.projectManager || "",
     priority: project?.priority || "Medium",
@@ -2241,6 +1621,7 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
 
   const assignTask = () => {
     const nextErrors = {};
+    if (!form.milestoneId) nextErrors.milestoneId = "Create and select a milestone first.";
     if (!form.title.trim()) nextErrors.title = "Task title is required.";
     if (!form.owner.trim()) nextErrors.owner = "Owner is required.";
     if (!form.dueDate) nextErrors.dueDate = "Due date is required.";
@@ -2255,10 +1636,13 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
       description: form.description.trim(),
       projectId: project.id,
       projectName: project.name,
+      milestoneId: Number(form.milestoneId),
+      milestoneName: project.milestones?.find((milestone) => String(milestone.id) === String(form.milestoneId))?.name || "",
+      stage: project.milestones?.find((milestone) => String(milestone.id) === String(form.milestoneId))?.stage || "",
       parentTask: form.parentTask,
       owner: form.owner.trim(),
       assignedTo: form.owner.trim(),
-      assignedBy: form.assignedBy || project.projectManager || "Project office",
+      assignedBy: form.assignedBy.trim() || project.projectManager || "Project office",
       priority: form.priority,
       startDate: form.startDate || null,
       dueDate: form.dueDate,
@@ -2282,7 +1666,7 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
           id: makeId("activity"),
           title: "Task assigned",
           description: `${task.title} assigned to ${task.owner}.`,
-          actor: project.projectManager || "Project office",
+          actor: task.assignedBy,
           date: todayIso(),
         },
         ...(project.activities || []),
@@ -2299,9 +1683,6 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">
               Task Assignment
             </p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-950">
-              {project.name}
-            </h2>
           </div>
           <button
             type="button"
@@ -2337,19 +1718,6 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
               placeholder="Task description"
             />
           </Field>
-          <Field label="Parent Task">
-            <SelectField
-              value={form.parentTask}
-              onChange={(value) => updateField("parentTask", value)}
-            >
-              <option value="">No parent task</option>
-              {(project.tasks || []).map((task) => (
-                <option key={task.id} value={task.id}>
-                  {getTaskName(task) || task.taskId || task.id}
-                </option>
-              ))}
-            </SelectField>
-          </Field>
           <Field label="Assigned To" required error={errors.owner}>
             <input
               value={form.owner}
@@ -2361,9 +1729,20 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
           <Field label="Assigned By">
             <input
               value={form.assignedBy}
-              readOnly
-              className={`${inputClass} bg-slate-50 text-slate-500`}
+              onChange={(event) => updateField("assignedBy", event.target.value)}
+              className={inputClass}
+              placeholder="Enter assigner's name"
             />
+          </Field>
+          <Field label="Milestone" required error={errors.milestoneId}>
+            <SelectField value={String(form.milestoneId || "")} onChange={(value) => updateField("milestoneId", value)}>
+              <option value="">Select milestone</option>
+              {(project.milestones || []).map((milestone) => (
+                <option key={milestone.id} value={milestone.id}>
+                  {milestone.stage || "Implement"} · {milestone.name || milestone.milestoneName}
+                </option>
+              ))}
+            </SelectField>
           </Field>
           <Field label="Start Date">
             <DateInput
@@ -2515,6 +1894,396 @@ const DetailTabButton = ({ tab, active, onClick }) => {
   );
 };
 
+const presentRecordValue = (value) => {
+  if (value === 0) return "0";
+  if (Array.isArray(value)) return value.filter(Boolean).join(", ") || "-";
+  return value || "-";
+};
+
+const recordQuantity = (record, value) =>
+  record.unit === "INR"
+    ? formatInrCurrency(value)
+    : `${formatQuantity(value)}${record.unit ? ` ${record.unit}` : ""}`;
+
+const getRecordDetailConfig = ({ type, record }, project) => {
+  const base = {
+    eyebrow: "Project record",
+    icon: Eye,
+    title: "Record details",
+    subtitle: project.name || "Project",
+    status: "",
+    secondaryStatus: "",
+    highlights: [],
+    fields: [],
+  };
+
+  if (type === "task") {
+    return {
+      ...base,
+      eyebrow: "Task record",
+      icon: ListChecks,
+      title: getTaskName(record) || "Task details",
+      subtitle: record.taskId || record.id || project.code,
+      status: getTaskStatus(record),
+      secondaryStatus: record.priority || "Medium",
+      highlights: [
+        { label: "Progress", value: `${getTaskProgress(record)}%` },
+        { label: "Estimated", value: `${numberValue(record.estimatedHours)} hrs` },
+        { label: "Actual", value: `${numberValue(record.actualHours)} hrs` },
+      ],
+      fields: [
+        { label: "Assigned To", value: getAssignedTo(record) },
+        { label: "Assigned By", value: getAssignedBy(record, project) },
+        { label: "Start Date", value: formatDateValue(record.startDate) },
+        { label: "Due Date", value: formatDateValue(record.dueDate) },
+        { label: "Dependencies", value: record.dependencies },
+        { label: "Parent Task", value: record.parentTask },
+        { label: "Attachments", value: record.attachments },
+        { label: "Comments", value: record.comments, wide: true },
+        {
+          label: "Description",
+          value: getTaskDescription(record) || "No task description recorded.",
+          wide: true,
+        },
+      ],
+    };
+  }
+
+  if (type === "team") {
+    const allocation = numberValue(
+      record.allocationPercent ?? String(record.allocation || "").replace("%", "")
+    );
+    return {
+      ...base,
+      eyebrow: "Team allocation",
+      icon: Users,
+      title: record.employee || record.member || "Team member",
+      subtitle: record.role || "Project resource",
+      status: TEAM_STATUS_OPTIONS.includes(record.status) ? record.status : "Active",
+      secondaryStatus: TEAM_AVAILABILITY_OPTIONS.includes(record.availability)
+        ? record.availability
+        : "Available",
+      highlights: [
+        { label: "Allocation", value: `${allocation}%` },
+        { label: "Department", value: record.department || project.department || "-" },
+        { label: "Role", value: record.role || "-" },
+      ],
+      fields: [
+        { label: "Employee ID", value: record.employeeId || record.id },
+        { label: "Department", value: record.department || project.department },
+        { label: "Allocation Start", value: formatDateValue(record.startDate || project.startDate) },
+        { label: "Allocation End", value: formatDateValue(record.endDate || project.endDate) },
+        { label: "Availability", value: record.availability || "Available" },
+        { label: "Resource Status", value: record.status || "Active" },
+      ],
+    };
+  }
+
+  if (type === "milestone") {
+    return {
+      ...base,
+      eyebrow: "Milestone record",
+      icon: CheckCircle2,
+      title: record.name || record.milestoneName || "Milestone details",
+      subtitle: record.milestoneNumber || record.id || project.code,
+      status: MILESTONE_STATUS_OPTIONS.includes(record.status) ? record.status : "Pending",
+      highlights: [
+        { label: "Progress", value: `${percentValue(record.progress)}%` },
+        { label: "Owner", value: record.owner || record.responsiblePerson || "-" },
+        { label: "Target", value: formatDateValue(record.targetDate) },
+      ],
+      fields: [
+        { label: "Owner", value: record.owner || record.responsiblePerson },
+        { label: "Start Date", value: formatDateValue(record.startDate) },
+        { label: "Target Date", value: formatDateValue(record.targetDate) },
+        { label: "Completion Date", value: formatDateValue(record.completionDate) },
+        { label: "Linked Tasks", value: record.taskIds || record.linkedTasks },
+        {
+          label: "Description",
+          value: record.description || "No milestone description recorded.",
+          wide: true,
+        },
+      ],
+    };
+  }
+
+  if (type === "inventory") {
+    const required = record.requiredQty ?? record.reserved;
+    const issued = record.issuedQty ?? record.issued;
+    const remaining =
+      record.remainingQty ?? numberValue(required) - numberValue(issued);
+    return {
+      ...base,
+      eyebrow: "Inventory allocation",
+      icon: Boxes,
+      title: record.itemName || record.item || "Inventory item",
+      subtitle: record.itemCode || record.id || project.code,
+      status: INVENTORY_STATUS_OPTIONS.includes(record.status)
+        ? record.status
+        : "Requested",
+      highlights: [
+        { label: "Required", value: recordQuantity(record, required) },
+        { label: "Issued", value: recordQuantity(record, issued) },
+        { label: "Remaining", value: recordQuantity(record, remaining) },
+      ],
+      fields: [
+        { label: "Item Code", value: record.itemCode },
+        { label: "Category", value: record.category },
+        { label: "Unit", value: record.unit },
+        { label: "Store Location", value: record.storeLocation },
+        { label: "Issue Date", value: formatDateValue(record.issueDate) },
+        { label: "Allocation Status", value: record.status || "Requested" },
+      ],
+    };
+  }
+
+  if (type === "purchase") {
+    return {
+      ...base,
+      eyebrow: "Purchase record",
+      icon: ReceiptText,
+      title: record.poNumber || record.reference || "Purchase details",
+      subtitle: record.vendor || project.name,
+      status: PURCHASE_STATUS_OPTIONS.includes(record.status) ? record.status : "Requested",
+      highlights: [
+        { label: "Amount", value: formatInrCurrency(record.amount) },
+        { label: "Expected", value: formatDateValue(record.expectedDelivery || record.eta) },
+        { label: "Delivered", value: formatDateValue(record.actualDelivery) },
+      ],
+      fields: [
+        { label: "Vendor", value: record.vendor },
+        { label: "Linked Task", value: record.linkedTask },
+        { label: "Expected Delivery", value: formatDateValue(record.expectedDelivery || record.eta) },
+        { label: "Actual Delivery", value: formatDateValue(record.actualDelivery) },
+        {
+          label: "Item Summary",
+          value: record.itemSummary || record.summary || "No item summary recorded.",
+          wide: true,
+        },
+      ],
+    };
+  }
+
+  if (type === "financial") {
+    return {
+      ...base,
+      eyebrow: "Financial record",
+      icon: CircleDollarSign,
+      title: record.category || record.label || record.type || "Cost details",
+      subtitle: `${project.code || "Project"} cost ledger`,
+      status: record.status || "On Track",
+      highlights: [
+        { label: "Budget", value: formatInrCurrency(record.budget) },
+        { label: "Actual", value: formatInrCurrency(record.actual) },
+        { label: "Variance", value: formatInrCurrency(record.variance) },
+      ],
+      fields: [
+        { label: "Cost Category", value: record.category || record.label || record.type },
+        { label: "Budget", value: formatInrCurrency(record.budget) },
+        { label: "Actual Spend", value: formatInrCurrency(record.actual) },
+        { label: "Variance", value: formatInrCurrency(record.variance) },
+        { label: "Ledger Status", value: record.status || "On Track" },
+      ],
+    };
+  }
+
+  if (type === "document") {
+    return {
+      ...base,
+      eyebrow: "Document record",
+      icon: FileText,
+      title: record.name || record.fileName || "Document details",
+      subtitle: record.category || "Project document",
+      status: record.status || record.category || "Available",
+      highlights: [
+        { label: "File Size", value: record.size || "-" },
+        { label: "Uploaded", value: formatDateValue(record.uploadedDate || record.date) },
+        { label: "Version", value: record.version || record.revision || "Current" },
+      ],
+      fields: [
+        { label: "Category", value: record.category || "Reports" },
+        { label: "Uploaded By", value: record.uploadedBy },
+        { label: "Uploaded Date", value: formatDateValue(record.uploadedDate || record.date) },
+        { label: "File Size", value: record.size },
+        { label: "Version", value: record.version || record.revision || "Current" },
+        { label: "File Type", value: record.fileType || record.type },
+        { label: "Description", value: record.description, wide: true },
+      ],
+    };
+  }
+
+  if (type === "activity") {
+    return {
+      ...base,
+      eyebrow: "Activity record",
+      icon: Activity,
+      title: record.title || "Activity details",
+      subtitle: formatDateValue(record.date),
+      status: "Recorded",
+      highlights: [
+        { label: "Actor", value: record.actor || "Project office" },
+        {
+          label: "Time",
+          value: record.date
+            ? new Date(record.date).toLocaleTimeString("en-IN", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "-",
+        },
+        { label: "Project", value: project.code || project.name || "-" },
+      ],
+      fields: [
+        { label: "Recorded By", value: record.actor || "Project office" },
+        { label: "Activity Date", value: formatDateValue(record.date) },
+        {
+          label: "Description",
+          value: record.description || "No additional activity details recorded.",
+          wide: true,
+        },
+      ],
+    };
+  }
+
+  return base;
+};
+
+const RecordDetailModal = ({ detail, project, onClose }) => {
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const config = getRecordDetailConfig(detail, project);
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-slate-950/50 p-4 sm:p-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={config.title}
+        className="my-auto w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.24)]"
+      >
+        <div className="h-1 bg-indigo-600" />
+        <header className="border-b border-slate-200 bg-white px-6 py-5 sm:px-7">
+          <div className="flex items-start justify-between gap-5">
+            <div className="flex min-w-0 items-start gap-3.5">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100">
+                {createElement(config.icon, { className: "h-5 w-5" })}
+              </span>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
+                  {config.eyebrow}
+                </p>
+                <h2 className="mt-1 break-words text-xl font-semibold text-slate-950">
+                  {config.title}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">{config.subtitle}</p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-start gap-3">
+              <div className="hidden flex-wrap justify-end gap-2 sm:flex">
+                {config.status ? <StatusPill label={config.status} /> : null}
+                {config.secondaryStatus ? (
+                  <Badge label={config.secondaryStatus} type="priority" />
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                aria-label="Close record details"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2 sm:hidden">
+            {config.status ? <StatusPill label={config.status} /> : null}
+            {config.secondaryStatus ? (
+              <Badge label={config.secondaryStatus} type="priority" />
+            ) : null}
+          </div>
+        </header>
+
+        <div className="max-h-[68vh] overflow-y-auto bg-white">
+          {config.highlights.length ? (
+            <div className="grid border-b border-slate-200 bg-slate-50 sm:grid-cols-3 sm:divide-x sm:divide-slate-200">
+              {config.highlights.map((item) => (
+                <div
+                  key={item.label}
+                  className="border-b border-slate-200 px-6 py-4 last:border-b-0 sm:border-b-0"
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    {item.label}
+                  </p>
+                  <p className="mt-1.5 break-words text-base font-semibold text-slate-900">
+                    {presentRecordValue(item.value)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="px-6 py-6 sm:px-7">
+            <div className="mb-4 flex items-end justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-950">Details</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Information recorded for this item.
+                </p>
+              </div>
+              <span className="text-xs font-medium text-slate-400">
+                {config.fields.length} fields
+              </span>
+            </div>
+            <dl className="grid overflow-hidden rounded-lg border border-slate-200 sm:grid-cols-2">
+              {config.fields.map((field) => (
+                <div
+                  key={field.label}
+                  className={`border-b border-slate-200 px-4 py-3.5 last:border-b-0 sm:px-5 ${
+                    field.wide
+                      ? "sm:col-span-2"
+                      : "sm:border-r sm:even:border-r-0"
+                  }`}
+                >
+                  <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    {field.label}
+                  </dt>
+                  <dd className="mt-1.5 whitespace-pre-wrap break-words text-sm font-medium leading-5 text-slate-900">
+                    {presentRecordValue(field.value)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </div>
+
+        <footer className="flex items-center justify-between gap-4 border-t border-slate-200 bg-slate-50 px-6 py-3.5 sm:px-7">
+          <p className="hidden text-xs text-slate-500 sm:block">
+            {project.code || project.name} · Project Management
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+          >
+            Close
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+};
+
 const ProjectPrintTable = ({ title, columns, rows, emptyMessage }) => (
   <section className="details-section">
     <h3>{title}</h3>
@@ -2595,7 +2364,7 @@ const ProjectCompleteFilePrint = ({ project }) => {
         <h3>Scope and Site Details</h3>
         {[
           ["Description", project.description || project.notes],
-          ["Site Name", project.siteName],
+          ["Locations", (project.locations || []).map((location) => location.name).filter(Boolean).join(", ") || project.siteName],
           ["Site Address", project.siteAddress || project.address],
           ["City / State", [project.city, project.state].filter(Boolean).join(", ")],
           ["Site Contact", project.siteContactPerson],
@@ -2727,6 +2496,7 @@ const ProjectDetailDrawer = ({
   onAssignTask,
 }) => {
   const [activeTab, setActiveTab] = useState(initialTab || "overview");
+  const [recordDetail, setRecordDetail] = useState(null);
   const [taskSearch, setTaskSearch] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState("All");
   const [taskPriorityFilter, setTaskPriorityFilter] = useState("All");
@@ -2974,6 +2744,8 @@ const ProjectDetailDrawer = ({
                 />
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <DetailRow label="Client" value={project.client || project.companyName} />
+                  <DetailRow label="Department" value={project.department} />
+                  <DetailRow label="Locations" value={(project.locations || []).map((location) => location.name).filter(Boolean).join(", ") || project.siteName} />
                   <DetailRow
                     label="Site Address"
                     value={project.siteAddress || project.address}
@@ -3070,6 +2842,8 @@ const ProjectDetailDrawer = ({
                       <th className="px-4 py-3 text-left font-semibold">Task ID</th>
                       <th className="px-4 py-3 text-left font-semibold">Task Name</th>
                       <th className="px-4 py-3 text-left font-semibold">Description</th>
+                      <th className="px-4 py-3 text-left font-semibold">Stage</th>
+                      <th className="px-4 py-3 text-left font-semibold">Milestone</th>
                       <th className="px-4 py-3 text-left font-semibold">Assigned To</th>
                       <th className="px-4 py-3 text-left font-semibold">Assigned By</th>
                       <th className="px-4 py-3 text-left font-semibold">Start Date</th>
@@ -3092,7 +2866,7 @@ const ProjectDetailDrawer = ({
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {filteredTaskRows.length === 0 ? (
                       <tr>
-                        <td colSpan="14" className="px-4 py-10 text-center text-slate-500">
+                        <td colSpan="16" className="px-4 py-10 text-center text-slate-500">
                           No tasks assigned yet.
                         </td>
                       </tr>
@@ -3110,6 +2884,8 @@ const ProjectDetailDrawer = ({
                               {getTaskDescription(task) || "-"}
                             </span>
                           </td>
+                          <td className="px-4 py-3 text-slate-600">{task.stage || "Implement"}</td>
+                          <td className="px-4 py-3 text-slate-600">{task.milestoneName || "-"}</td>
                           <td className="px-4 py-3 text-slate-600">
                             {getAssignedTo(task) || "-"}
                           </td>
@@ -3142,7 +2918,12 @@ const ProjectDetailDrawer = ({
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex gap-2">
-                              <TableActionButton>View</TableActionButton>
+                              <TableActionButton
+                                onClick={() => setRecordDetail({ type: "task", record: task })}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                View
+                              </TableActionButton>
                               <TableActionButton>Edit</TableActionButton>
                             </div>
                           </td>
@@ -3249,7 +3030,12 @@ const ProjectDetailDrawer = ({
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex gap-2">
-                              <TableActionButton>View</TableActionButton>
+                              <TableActionButton
+                                onClick={() => setRecordDetail({ type: "team", record: member })}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                View
+                              </TableActionButton>
                               <TableActionButton>Edit</TableActionButton>
                             </div>
                           </td>
@@ -3318,7 +3104,14 @@ const ProjectDetailDrawer = ({
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex gap-2">
-                              <TableActionButton>View</TableActionButton>
+                              <TableActionButton
+                                onClick={() =>
+                                  setRecordDetail({ type: "milestone", record: milestone })
+                                }
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                View
+                              </TableActionButton>
                               <TableActionButton>Edit</TableActionButton>
                             </div>
                           </td>
@@ -3424,7 +3217,14 @@ const ProjectDetailDrawer = ({
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex gap-2">
-                              <TableActionButton>View</TableActionButton>
+                              <TableActionButton
+                                onClick={() =>
+                                  setRecordDetail({ type: "inventory", record: item })
+                                }
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                View
+                              </TableActionButton>
                               <TableActionButton>Edit</TableActionButton>
                             </div>
                           </td>
@@ -3503,7 +3303,14 @@ const ProjectDetailDrawer = ({
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex gap-2">
-                              <TableActionButton>View</TableActionButton>
+                              <TableActionButton
+                                onClick={() =>
+                                  setRecordDetail({ type: "purchase", record: purchase })
+                                }
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                View
+                              </TableActionButton>
                               <TableActionButton>Edit</TableActionButton>
                             </div>
                           </td>
@@ -3552,6 +3359,7 @@ const ProjectDetailDrawer = ({
                       <th className="px-4 py-3 text-right font-semibold">Actual</th>
                       <th className="px-4 py-3 text-right font-semibold">Variance</th>
                       <th className="px-4 py-3 text-left font-semibold">Status</th>
+                      <th className="px-4 py-3 text-left font-semibold">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
@@ -3575,6 +3383,16 @@ const ProjectDetailDrawer = ({
                           </td>
                           <td className="px-4 py-3">
                             <StatusPill label={item.status} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <TableActionButton
+                              onClick={() =>
+                                setRecordDetail({ type: "financial", record: item })
+                              }
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              View
+                            </TableActionButton>
                           </td>
                         </tr>
                       ))}
@@ -3665,7 +3483,14 @@ const ProjectDetailDrawer = ({
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex gap-2">
-                              <TableActionButton>View</TableActionButton>
+                              <TableActionButton
+                                onClick={() =>
+                                  setRecordDetail({ type: "document", record: document })
+                                }
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                View
+                              </TableActionButton>
                               <TableActionButton>Download</TableActionButton>
                             </div>
                           </td>
@@ -3715,12 +3540,22 @@ const ProjectDetailDrawer = ({
                                   {activity.actor || "Project office"}
                                 </p>
                               </div>
-                              <p className="text-xs font-semibold text-slate-500">
-                                {new Date(activity.date).toLocaleTimeString("en-IN", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </p>
+                              <div className="flex items-center gap-2 md:flex-col md:items-end">
+                                <p className="text-xs font-semibold text-slate-500">
+                                  {new Date(activity.date).toLocaleTimeString("en-IN", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </p>
+                                <TableActionButton
+                                  onClick={() =>
+                                    setRecordDetail({ type: "activity", record: activity })
+                                  }
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                  View details
+                                </TableActionButton>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -3732,6 +3567,13 @@ const ProjectDetailDrawer = ({
             </section>
           )}
         </div>
+        {recordDetail ? (
+          <RecordDetailModal
+            detail={recordDetail}
+            project={project}
+            onClose={() => setRecordDetail(null)}
+          />
+        ) : null}
         <ProjectCompleteFilePrint project={project} />
       </div>
     </div>
@@ -3752,6 +3594,7 @@ const ProjectManagementProjects = () => {
   const [selectedDetailTab, setSelectedDetailTab] = useState("overview");
   const [taskProject, setTaskProject] = useState(null);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     const handleProjectsChange = () => setProjects(getProjects());
@@ -3779,9 +3622,21 @@ const ProjectManagementProjects = () => {
         handleProjectsChange
       );
       window.addEventListener("projects:changed", handleProjectsChange);
-      ensureProjectManagementProjects(MOCK_PROJECTS);
     }
-    void hydrateProjectManagementProjects(MOCK_PROJECTS).then(setProjects);
+    void hydrateProjectManagementProjects()
+      .then((rows) => {
+        setProjects(rows);
+        setLoadError("");
+      })
+      .catch((error) => {
+        console.error("Failed to load project management projects", error);
+        setProjects([]);
+        setLoadError(
+          error?.response?.data?.error ||
+            error?.message ||
+            "Projects could not be loaded from the database."
+        );
+      });
     void loadMasterData();
 
     return () => {
@@ -3860,6 +3715,15 @@ const ProjectManagementProjects = () => {
   const openEditModal = (project) => {
     setEditingProject(project);
     setProjectModalOpen(true);
+  };
+
+  const openTaskAssignment = (project) => {
+    if (!(project.milestones || []).length) {
+      window.alert("Create a milestone under Design, Procure, Implement, or Allocate before creating tasks.");
+      navigate("/project-management/milestones");
+      return;
+    }
+    setTaskProject(project);
   };
 
   const saveProjectRecord = async (project) => {
@@ -4004,6 +3868,12 @@ const ProjectManagementProjects = () => {
         </button>
       </section>
 
+      {loadError ? (
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {loadError}
+        </p>
+      ) : null}
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((item) => (
           <KpiCard key={item.label} {...item} />
@@ -4143,7 +4013,7 @@ const ProjectManagementProjects = () => {
                             </button>
                             <button
                               type="button"
-                              onClick={() => setTaskProject(project)}
+                              onClick={() => openTaskAssignment(project)}
                               className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
                             >
                               <UserPlus className="h-4 w-4" />
@@ -4236,7 +4106,7 @@ const ProjectManagementProjects = () => {
             setSelectedProject(null);
             openEditModal(project);
           }}
-          onAssignTask={(project) => setTaskProject(project)}
+          onAssignTask={openTaskAssignment}
         />
       )}
     </div>

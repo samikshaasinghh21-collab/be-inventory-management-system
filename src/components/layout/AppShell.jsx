@@ -94,9 +94,9 @@ const AppShell = ({ children }) => {
     const syncSettings = () => {
       setSettings(safeReadSettings());
     };
-    const handleExpiredSession = () => window.location.assign("/login");
 
     window.addEventListener("settings:changed", syncSettings);
+<<<<<<< HEAD
     window.addEventListener("auth:expired", handleExpiredSession);
     const initializeShell = async () => {
       try {
@@ -121,10 +121,16 @@ const AppShell = ({ children }) => {
       }
     };
     void initializeShell();
+=======
+    loadCurrentUser()
+      .then((user) => (user ? hydrateSettings() : null))
+      .catch(() => {
+        // Keep the dashboard open with cached data when the API is unavailable.
+      });
+>>>>>>> c7a04e8 (Update project management and inventory reporting)
     return () => {
       active = false;
       window.removeEventListener("settings:changed", syncSettings);
-      window.removeEventListener("auth:expired", handleExpiredSession);
     };
   }, []);
 
