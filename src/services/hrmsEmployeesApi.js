@@ -211,7 +211,18 @@ export const normalizeHrmsEmployee = (employee = {}) => {
       "",
     bloodGroup: employee.bloodGroup ?? employee.BloodGroup ?? "",
     dateOfBirth: toDisplayDate(employee.dateOfBirth ?? employee.DateOfBirth),
-    documentNumber: employee.documentNumber ?? employee.DocumentNumber ?? "",
+    aadhaarNumber:
+      employee.aadhaarNumber ??
+      employee.AadhaarNumber ??
+      employee.documentNumber ??
+      employee.DocumentNumber ??
+      "",
+    documentNumber:
+      employee.aadhaarNumber ??
+      employee.AadhaarNumber ??
+      employee.documentNumber ??
+      employee.DocumentNumber ??
+      "",
     esiNumber: employee.esiNumber ?? employee.ESINumber ?? "",
     gender: employee.gender ?? employee.Gender ?? "",
     maritalStatus: employee.maritalStatus ?? employee.MaritalStatus ?? "",

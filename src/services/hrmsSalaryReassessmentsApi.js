@@ -46,11 +46,10 @@ const toOptionalNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const calculatePfAmount = (grossSalary) =>
-  Math.round(toNumber(grossSalary) * 0.12);
+const calculatePfAmount = (annualGrossSalary) =>
+  Math.round(calculateMonthlySalary(annualGrossSalary) * 0.12);
 
-const calculateEsiAmount = (grossSalary) =>
-  Math.round(toNumber(grossSalary) * 0.015);
+const calculateEsiAmount = () => 0;
 
 const calculateMonthlySalary = (grossSalary) =>
   Math.round(toNumber(grossSalary) / 12);
@@ -89,19 +88,20 @@ const buildCompensationRows = (revisedSalary = 0, record = {}) => {
     calculateEsiAmount(grossSalary);
   const professionalTax = toNumber(record.professionalTax ?? record.pt);
   const tdsAmount = toNumber(record.tdsAmount ?? record.tds);
+  const monthlySalary = calculateMonthlySalary(grossSalary);
   const totalDeductions =
     deduction + pfAmount + esiAmount + professionalTax + tdsAmount;
 
   return [
-    ["Gross Salary", grossSalary],
-    ["Monthly Salary", calculateMonthlySalary(grossSalary)],
+    ["Annual Gross Salary", grossSalary],
+    ["Monthly Gross Salary", monthlySalary],
     ["Allowances", allowances],
     ["Deduction", deduction],
-    ["PF", pfAmount],
-    ["ESI", esiAmount],
+    ["Monthly PF", pfAmount],
+    ["Monthly ESI", esiAmount],
     ["TDS", tdsAmount],
     ["Professional Tax", professionalTax],
-    ["Net Salary", grossSalary + allowances - totalDeductions],
+    ["Net Salary", monthlySalary + allowances - totalDeductions],
   ];
 };
 
@@ -155,7 +155,8 @@ export const normalizeHrmsSalaryReassessment = (record = {}) => {
     toOptionalNumber(record.tdsAmount ?? record.tds ?? record.TDSAmount) ?? 0;
   const totalDeductions =
     salaryDeduction + pfAmount + esiAmount + professionalTax + tdsAmount;
-  const netSalary = revisedSalary + allowances - totalDeductions;
+  const monthlySalary = calculateMonthlySalary(revisedSalary);
+  const netSalary = monthlySalary + allowances - totalDeductions;
   const status =
     record.status ??
     record.Status ??
@@ -247,11 +248,11 @@ export const normalizeHrmsSalaryReassessment = (record = {}) => {
       "Pending",
     salaryStatus: status,
     totalDeductions,
-    totalEarnings: revisedSalary + allowances,
+    totalEarnings: monthlySalary + allowances,
     savedAt: record.savedAt ?? record.SavedDate ?? null,
     esiAmount,
     esi: esiAmount,
-    monthlySalary: calculateMonthlySalary(revisedSalary),
+    monthlySalary,
     netSalary,
     pfAmount,
     providentFund: pfAmount,

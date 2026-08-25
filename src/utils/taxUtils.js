@@ -31,13 +31,21 @@ export const getItemQuantity = (item = {}) =>
 export const calculateLineSubtotal = (item = {}) =>
   getItemQuantity(item) * getItemUnitPrice(item);
 
+export const getItemTaxPercentage = (item = {}) => {
+  const gstValue = item.gst ?? item.GST ?? item.gstRate ?? item.GSTRate;
+  if (String(gstValue ?? "").trim() !== "") {
+    return parseTaxPercentage(gstValue);
+  }
+  return parseTaxPercentage(item.taxPercentage ?? item.TaxPercentage ?? 0);
+};
+
 export const calculateLineTax = (item = {}) =>
-  (calculateLineSubtotal(item) * parseTaxPercentage(item.taxPercentage ?? item.gst)) / 100;
+  (calculateLineSubtotal(item) * getItemTaxPercentage(item)) / 100;
 
 export const buildLineTaxBreakdown = (item = {}, options = {}) => {
   const quantity = getItemQuantity(item);
   const unitPrice = getItemUnitPrice(item);
-  const taxPercentage = parseTaxPercentage(item.taxPercentage ?? item.gst);
+  const taxPercentage = getItemTaxPercentage(item);
   const taxMode = options.taxMode === "inter" ? "inter" : "intra";
   const taxableAmount = roundCurrencyValue(quantity * unitPrice);
   const gstAmount = roundCurrencyValue((taxableAmount * taxPercentage) / 100);
@@ -71,7 +79,7 @@ export const buildGstSummary = (items = [], options = {}) => {
   const groups = new Map();
   for (const item of items) {
     const lineSubtotal = calculateLineSubtotal(item);
-    const taxPercentage = parseTaxPercentage(item.taxPercentage ?? item.gst);
+    const taxPercentage = getItemTaxPercentage(item);
     const taxAmount = (lineSubtotal * taxPercentage) / 100;
     summary.subtotal += lineSubtotal;
     summary.totalTax += taxAmount;

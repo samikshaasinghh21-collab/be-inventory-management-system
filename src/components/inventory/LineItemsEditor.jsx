@@ -39,6 +39,11 @@ const createEmptyItem = (extraFieldKey = "notes") => {
 };
 
 const sanitizeNumericValue = (value) => String(value ?? "").replace(/\D/g, "");
+const sanitizePercentageValue = (value) => {
+  const cleaned = String(value ?? "").replace(/[^\d.]/g, "");
+  const [whole = "", ...decimalParts] = cleaned.split(".");
+  return decimalParts.length ? `${whole}.${decimalParts.join("")}` : whole;
+};
 
 const normalizeCatalogItem = (item = {}) => {
   const rate = roundUnitPrice(item.rate ?? item.price ?? item.salesPrice ?? item.unitPrice ?? 0);
@@ -116,6 +121,7 @@ const LineItemsEditor = ({
   hiddenCatalogItemNames = [],
   hideSelectedCatalogItems = false,
   unitNumericOnly = false,
+  gstNumericPercentage = false,
   useInventoryQuantityForQuantity = false,
 }) => {
   const [catalogItems, setCatalogItems] = useState(() =>
@@ -267,6 +273,8 @@ const LineItemsEditor = ({
     let nextValue = value;
     if (field === "unit" && unitNumericOnly) {
       nextValue = sanitizeNumericValue(value);
+    } else if (field === "gst" && gstNumericPercentage) {
+      nextValue = sanitizePercentageValue(value);
     } else if (field === "quantity" && value !== "") {
       nextValue = String(toWholeQuantity(value));
     } else if (field === "rate" && value !== "") {
@@ -278,7 +286,7 @@ const LineItemsEditor = ({
             ...item,
             [field]: nextValue,
             ...(field === "gst"
-              ? { taxPercentage: parseTaxPercentage(value) }
+              ? { taxPercentage: parseTaxPercentage(nextValue) }
               : {}),
           }
         : item
@@ -313,7 +321,13 @@ const LineItemsEditor = ({
           ? sanitizeNumericValue(matchedCatalogItem.unit || item.unit)
           : matchedCatalogItem.unit || item.unit,
         hsn: matchedCatalogItem.hsn || item.hsn,
-        gst: matchedCatalogItem.gst || item.gst,
+        gst: gstNumericPercentage
+          ? String(
+              parseTaxPercentage(
+                matchedCatalogItem.gst ?? matchedCatalogItem.taxPercentage ?? item.gst
+              )
+            )
+          : matchedCatalogItem.gst || item.gst,
         taxPercentage:
           matchedCatalogItem.taxPercentage ?? item.taxPercentage ?? 0,
         rate:
@@ -452,7 +466,12 @@ const LineItemsEditor = ({
                     <td className="p-3">
                       <input
                         type="text"
-                        value={item.gst ?? ""}
+                        inputMode={gstNumericPercentage ? "decimal" : undefined}
+                        value={
+                          gstNumericPercentage
+                            ? sanitizePercentageValue(item.gst)
+                            : item.gst ?? ""
+                        }
                         disabled={readOnly}
                         onChange={(event) =>
                           handleUpdate(item.id, "gst", event.target.value)

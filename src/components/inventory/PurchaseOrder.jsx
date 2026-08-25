@@ -15,6 +15,7 @@ import DateInput from "../common/DateInput";
 import {
   buildGstSummary,
   formatTaxPercentage,
+  getItemTaxPercentage,
   parseTaxPercentage,
 } from "../../utils/taxUtils";
 import { getGstTaxMode } from "../../utils/gstUtils";
@@ -597,7 +598,7 @@ const PurchaseOrder = () => {
             formatTaxPercentage(item.taxPercentage ?? 0),
           serialNumber: String(item.serialNumber ?? "").trim(),
           serialRequired: item.serialRequired ?? false,
-          taxPercentage: parseTaxPercentage(item.gst ?? item.taxPercentage ?? 0),
+          taxPercentage: getItemTaxPercentage(item),
           location: lineLocation,
           notes: lineLocation,
           quantity: qty,
@@ -1126,6 +1127,7 @@ const PurchaseOrder = () => {
             onPickFromProducts={goPickProducts}
             pickLabel="Pick from Products"
             showHsnGst
+            gstNumericPercentage
             priceLabel="Unit Price"
             extraFieldKey="location"
             extraFieldLabel="Ship To"

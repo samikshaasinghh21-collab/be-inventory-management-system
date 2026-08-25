@@ -1,4 +1,4 @@
-import api from "./api";
+import api, { isApiUnavailableError } from "./api";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 
 let currentUser = null;
@@ -11,7 +11,10 @@ export const loadCurrentUser = async () => {
   try {
     const { data } = await api.get("/auth/me");
     currentUser = data.user;
-  } catch {
+  } catch (error) {
+    if (isApiUnavailableError(error)) {
+      throw error;
+    }
     currentUser = null;
   }
   emit();

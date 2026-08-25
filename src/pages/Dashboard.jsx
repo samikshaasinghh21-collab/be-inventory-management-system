@@ -6,7 +6,7 @@ import {
   formatQuantity,
   roundUnitPrice,
 } from "../utils/formatters";
-import { ensureApiAvailable, isApiUnavailableError } from "../services/api";
+import { isApiUnavailableError } from "../services/api";
 import { fetchProjects } from "../services/projectsApi";
 import {
   getProjects as getLocalProjects,
@@ -122,8 +122,17 @@ const SummaryCard = ({
   </div>
 );
 
+const safelyReadList = (reader) => {
+  try {
+    const value = reader();
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+};
+
 const getFallbackDashboardData = () => ({
-  projects: getLocalProjects(),
+  projects: safelyReadList(getLocalProjects),
   boqs: [],
   purchaseOrders: [],
   receiveGoods: [],
@@ -131,8 +140,10 @@ const getFallbackDashboardData = () => ({
   locations: [],
   vendors: [],
   items: [],
-  consumption: getWorkflowList(WORKFLOW_CONSUMPTION_KEY),
-  goodsDelivered: getWorkflowList(WORKFLOW_GOODS_DELIVERED_KEY),
+  consumption: safelyReadList(() => getWorkflowList(WORKFLOW_CONSUMPTION_KEY)),
+  goodsDelivered: safelyReadList(() =>
+    getWorkflowList(WORKFLOW_GOODS_DELIVERED_KEY)
+  ),
 });
 
 const Dashboard = () => {
@@ -164,33 +175,17 @@ const Dashboard = () => {
     else setLoading(true);
 
     try {
-      await ensureApiAvailable();
-    } catch (error) {
-      if (isApiUnavailableError(error)) {
-        setData(getFallbackDashboardData());
-        setErrors([
-          error?.response?.data?.error ||
-            error?.message ||
-            "Inventory API is unavailable.",
-        ]);
-
-        if (silent) setRefreshing(false);
-        else setLoading(false);
-        return;
-      }
-    }
-
-    const results = await Promise.allSettled([
-      fetchProjects(),
-      fetchBoqs(),
-      fetchPurchaseOrders(),
-      fetchReceiveGoods(),
-      fetchDeliveryChallans(),
-      fetchLocations(),
-      fetchVendors(),
-      fetchItems(),
-      fetchConsumptions(),
-    ]);
+      const results = await Promise.allSettled([
+        fetchProjects(),
+        fetchBoqs(),
+        fetchPurchaseOrders(),
+        fetchReceiveGoods(),
+        fetchDeliveryChallans(),
+        fetchLocations(),
+        fetchVendors(),
+        fetchItems(),
+        fetchConsumptions(),
+      ]);
 
     const unavailableResults = results.filter(
       (result) =>
@@ -206,8 +201,6 @@ const Dashboard = () => {
           "Inventory API is unavailable.",
       ]);
 
-      if (silent) setRefreshing(false);
-      else setLoading(false);
       return;
     }
 
@@ -252,10 +245,18 @@ const Dashboard = () => {
       ),
       goodsDelivered: getWorkflowList(WORKFLOW_GOODS_DELIVERED_KEY),
     });
-    setErrors(nextErrors);
-
-    if (silent) setRefreshing(false);
-    else setLoading(false);
+      setErrors(nextErrors);
+    } catch (error) {
+      setData(getFallbackDashboardData());
+      setErrors([
+        error?.response?.data?.error ||
+          error?.message ||
+          "Dashboard data could not be loaded.",
+      ]);
+    } finally {
+      if (silent) setRefreshing(false);
+      else setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

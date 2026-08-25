@@ -11,7 +11,11 @@ import {
   updateUser, revokeUserSessions, sendUserPasswordReset, removePasskey,
   regenerateRecoveryCodes, setStepUpFallbackHandler, stepUpWithPassword,
 } from "../../services/settingsApi";
-import { saveSettings as updateSettingsContext } from "../../services/settingsStore";
+import {
+  DEFAULT_SETTINGS,
+  getSettings,
+  saveSettings as updateSettingsContext,
+} from "../../services/settingsStore";
 
 const NAV = [
   ["profile", "My Profile", "Your identity and sessions", UserRound, "personal"],
@@ -27,6 +31,69 @@ const inputClass = "mt-1 h-11 w-full rounded-xl border border-slate-200 bg-white
 const buttonPrimary = "inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-50";
 const buttonSecondary = "inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100 disabled:opacity-50";
 const clone = (value) => JSON.parse(JSON.stringify(value ?? {}));
+const readCachedSettings = () => {
+  try {
+    return getSettings();
+  } catch {
+    return clone(DEFAULT_SETTINGS);
+  }
+};
+const hasPermission = (profile, permission) => {
+  const permissions = Array.isArray(profile?.permissions)
+    ? profile.permissions
+    : [];
+  return permissions.includes("*") || permissions.includes(permission);
+};
+const normalizeSettingsData = (source = {}) => {
+  const cached = readCachedSettings();
+  const profile = {
+    ...DEFAULT_SETTINGS.profile,
+    ...(cached.profile || {}),
+    ...(source.profile || {}),
+  };
+  profile.name =
+    source.profile?.name || profile.name || profile.fullName || "";
+
+  return {
+    profile,
+    notifications: {
+      ...DEFAULT_SETTINGS.notifications,
+      ...(cached.notifications || {}),
+      ...(source.notifications || {}),
+    },
+    appearance: {
+      ...DEFAULT_SETTINGS.preferences,
+      ...(cached.preferences || {}),
+      ...(source.appearance || {}),
+    },
+    workspace: {
+      organization: {
+        ...DEFAULT_SETTINGS.company,
+        ...(cached.company || {}),
+        ...(source.workspace?.organization || {}),
+      },
+      inventory: {
+        ...DEFAULT_SETTINGS.inventory,
+        ...(cached.inventory || {}),
+        ...(source.workspace?.inventory || {}),
+      },
+      security: {
+        ...DEFAULT_SETTINGS.security,
+        ...(cached.security || {}),
+        ...(source.workspace?.security || {}),
+      },
+    },
+    capabilities: {
+      manageWorkspace:
+        source.capabilities?.manageWorkspace ??
+        hasPermission(profile, "workspace.manage"),
+      manageUsers:
+        source.capabilities?.manageUsers ?? hasPermission(profile, "users.manage"),
+      viewAudit:
+        source.capabilities?.viewAudit ?? hasPermission(profile, "audit.view"),
+    },
+  };
+};
 
 const Card = ({ title, description, children, action }) => (
   <section className="rounded-[18px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -122,6 +189,7 @@ const AppearancePanel = ({ value, setValue }) => <Card title="Appearance and reg
 
 const SecurityPanel = ({ policy, setPolicy, canAdmin, twoFactorEnabled, sessions, reloadSessions }) => {
   const [passwords, setPasswords] = useState({ currentPassword: "", newPassword: "", confirm: "" });
+  const [changingPassword, setChangingPassword] = useState(false);
   const [totp, setTotp] = useState(null);
   const [code, setCode] = useState("");
   const [passkeys, setPasskeys] = useState([]);
@@ -133,8 +201,25 @@ const SecurityPanel = ({ policy, setPolicy, canAdmin, twoFactorEnabled, sessions
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadPasskeys().catch(() => {}); }, []);
   const change = async () => {
+    if (changingPassword) return;
+    if (!passwords.currentPassword) return setMessage("Enter your current password.");
+    if (passwords.newPassword.length < 14) return setMessage("New password must contain at least 14 characters.");
+    if (!/[A-Za-z]/.test(passwords.newPassword) || !/\d/.test(passwords.newPassword)) return setMessage("New password must include letters and numbers.");
     if (passwords.newPassword !== passwords.confirm) return setMessage("New passwords do not match.");
-    try { await changePassword(passwords); setMessage("Password changed. Sign in again."); } catch (error) { setMessage(error.response?.data?.error || "Password change failed."); }
+    setChangingPassword(true);
+    setMessage("");
+    try {
+      await changePassword({
+        currentPassword: passwords.currentPassword,
+        newPassword: passwords.newPassword,
+      });
+      setPasswords({ currentPassword: "", newPassword: "", confirm: "" });
+      setMessage("Password changed. Sign in again.");
+    } catch (error) {
+      setMessage(error?.response?.data?.error || "Password change failed.");
+    } finally {
+      setChangingPassword(false);
+    }
   };
   return <div className="space-y-5">
     <Card title="Password" description="Changing your password signs out every device."><Grid>
@@ -142,7 +227,7 @@ const SecurityPanel = ({ policy, setPolicy, canAdmin, twoFactorEnabled, sessions
       <span />
       <Field label="New password" type="password" value={passwords.newPassword} onChange={(e) => setPasswords({ ...passwords, newPassword: e.target.value })} hint="At least 14 characters; known breached and common passwords are rejected." />
       <Field label="Confirm new password" type="password" value={passwords.confirm} onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })} />
-    </Grid><div className="mt-4 flex items-center gap-3"><button type="button" className={buttonSecondary} onClick={change}>Change password</button>{message && <p className="text-sm text-slate-600">{message}</p>}</div>
+    </Grid><div className="mt-4 flex items-center gap-3"><button type="button" className={buttonSecondary} disabled={changingPassword} onClick={change}>{changingPassword ? <><Loader2 className="h-4 w-4 animate-spin" />Changing...</> : "Change password"}</button>{message && <p className="text-sm text-slate-600">{message}</p>}</div>
     </Card>
     <Card title="Passkeys" description="Use device biometrics, Windows Hello, or a security key for phishing-resistant sign-in.">
       <div className="space-y-3">
@@ -192,10 +277,11 @@ const AuditPanel = ({ audit }) => <Card title="Audit log" description="Immutable
 
 const SettingsPage = () => {
   const [active, setActive] = useState("profile");
-  const [data, setData] = useState(null);
-  const [form, setForm] = useState({});
-  const [baseline, setBaseline] = useState("{}");
+  const [data, setData] = useState(() => normalizeSettingsData());
+  const [form, setForm] = useState(() => clone(data.profile));
+  const [baseline, setBaseline] = useState(() => JSON.stringify(data.profile));
   const [status, setStatus] = useState(null);
+  const [loadingSettings, setLoadingSettings] = useState(true);
   const [saving, setSaving] = useState(false);
   const [stepUp, setStepUp] = useState(null);
   const stepUpResolver = useRef(null);
@@ -218,11 +304,36 @@ const SettingsPage = () => {
       stepUpResolver.current = null;
       setStepUp(null);
     } catch (error) {
-      setStepUp((current) => ({ ...current, busy: false, error: error.response?.data?.error || "Verification failed." }));
+      setStepUp((current) => ({ ...current, busy: false, error: error?.response?.data?.error || "Verification failed." }));
     }
   };
 
-  useEffect(() => { loadSettingsFromApis().then((result) => { setData(result); setForm(clone(result.profile)); setBaseline(JSON.stringify(result.profile)); }).catch((error) => setStatus({ type: "error", message: error.response?.data?.error || "Settings could not be loaded." })); }, []);
+  useEffect(() => {
+    let activeRequest = true;
+    const loadSettings = async () => {
+      try {
+        const result = normalizeSettingsData(await loadSettingsFromApis());
+        if (!activeRequest) return;
+        setData(result);
+        setForm(clone(result.profile));
+        setBaseline(JSON.stringify(result.profile));
+      } catch (error) {
+        if (!activeRequest) return;
+        setStatus({
+          type: "error",
+          message:
+            error?.response?.data?.error ||
+            "Settings API is unavailable. Cached/default settings are shown.",
+        });
+      } finally {
+        if (activeRequest) setLoadingSettings(false);
+      }
+    };
+    void loadSettings();
+    return () => {
+      activeRequest = false;
+    };
+  }, []);
   const capabilities = data?.capabilities || {};
   const nav = NAV.filter(([, , , , ownership]) => ownership === "personal" || (ownership === "admin" && capabilities.manageWorkspace) || (ownership === "audit" && capabilities.viewAudit));
   const categoryValue = useMemo(() => {
@@ -232,15 +343,21 @@ const SettingsPage = () => {
     return data.workspace?.[active] || {};
   }, [active, data]);
   const dirty = JSON.stringify(form) !== baseline;
-  const loadSessions = async () => setSessions(await getSessions());
-  const loadUsers = async () => setUsers(await getUsers());
+  const loadSessions = async () => {
+    const nextSessions = await getSessions();
+    setSessions(Array.isArray(nextSessions) ? nextSessions : []);
+  };
+  const loadUsers = async () => {
+    const nextUsers = await getUsers();
+    setUsers(Array.isArray(nextUsers) ? nextUsers : []);
+  };
   useEffect(() => {
     if (!data) return;
     // Category changes intentionally replace the independently saved form.
     const value = clone(categoryValue); setForm(value); setBaseline(JSON.stringify(value)); setStatus(null);
     if (active === "profile" || active === "security") loadSessions().catch(() => {});
-    if (active === "users") Promise.all([loadUsers(), getRoles().then(setRoles)]).catch((e) => setStatus({ type: "error", message: e.response?.data?.error || "Users could not be loaded." }));
-    if (active === "audit") getAuditEvents().then((result) => setAudit(result.events)).catch(() => {});
+    if (active === "users") Promise.all([loadUsers(), getRoles().then((nextRoles) => setRoles(Array.isArray(nextRoles) ? nextRoles : []))]).catch((e) => setStatus({ type: "error", message: e?.response?.data?.error || "Users could not be loaded." }));
+    if (active === "audit") getAuditEvents().then((result) => setAudit(Array.isArray(result?.events) ? result.events : [])).catch(() => setAudit([]));
   }, [active, data, categoryValue]);
   useEffect(() => {
     const warn = (event) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } };
@@ -265,14 +382,13 @@ const SettingsPage = () => {
       setForm(clone(saved)); setBaseline(JSON.stringify(saved)); setStatus({ type: "success", message: "Changes saved." });
       const current = clone(data); if (active === "profile") current.profile = saved; if (active === "organization") current.workspace.organization = saved; if (active === "inventory") current.workspace.inventory = saved; if (active === "notifications") current.notifications = saved; if (active === "appearance") current.appearance = saved;
       updateSettingsContext({ profile: current.profile, company: current.workspace?.organization || {}, inventory: current.workspace?.inventory || {}, notifications: current.notifications, preferences: current.appearance, security: current.workspace?.security || {} });
-    } catch (error) { setStatus({ type: "error", message: error.response?.data?.error || "Changes could not be saved." }); } finally { setSaving(false); }
+    } catch (error) { setStatus({ type: "error", message: error?.response?.data?.error || "Changes could not be saved." }); } finally { setSaving(false); }
   };
-  if (!data) return <div className="grid min-h-[420px] place-items-center"><Loader2 className="h-7 w-7 animate-spin text-blue-600" /></div>;
   const activeMeta = nav.find(([id]) => id === active) || nav[0];
   const saveable = ["profile", "organization", "security", "inventory", "notifications", "appearance"].includes(active);
   return <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
     <header className="mb-6 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
-      <div><p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">{data.workspace?.organization?.name || "Workspace"}</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Settings</h1><p className="mt-1 text-sm text-slate-500">Manage your account, workspace, users, and security.</p></div>
+      <div><p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">{data.workspace?.organization?.name || "Workspace"}</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Settings</h1><p className="mt-1 text-sm text-slate-500">Manage your account, workspace, users, and security.</p>{loadingSettings && <span className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading latest settings...</span>}</div>
       {saveable && <div className="flex items-center gap-3">{dirty && <span className="text-sm font-medium text-amber-700">Unsaved changes</span>}<button className={buttonSecondary} type="button" disabled={!dirty} onClick={() => setForm(JSON.parse(baseline))}>Discard Changes</button><button className={buttonPrimary} type="button" disabled={!dirty || saving} onClick={save}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save Changes</button></div>}
     </header>
     <div className="mb-5 lg:hidden"><label className="text-sm font-medium text-slate-700">Settings category<div className="relative"><select className={`${inputClass} appearance-none pr-10`} value={active} onChange={(e) => choose(e.target.value)}>{nav.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-4 h-4 w-4 text-slate-400" /></div></label></div>

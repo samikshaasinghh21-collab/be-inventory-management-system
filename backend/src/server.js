@@ -11737,7 +11737,10 @@ const buildHrmsEmployeePayload = async (source = {}, tx) => {
     esiAmount,
     panNumber: trimToLength(source.panNumber ?? source.PANNumber, 10),
     documentNumber: trimToLength(
-      source.documentNumber ?? source.DocumentNumber,
+      source.aadhaarNumber ??
+        source.AadhaarNumber ??
+        source.documentNumber ??
+        source.DocumentNumber,
       100
     ),
     uanNumber: trimToLength(source.uanNumber ?? source.UANNumber, 50),
@@ -11808,6 +11811,7 @@ const normalizeHrmsEmployeeRow = (row = {}) => ({
   esi: normalizeHrmsOptionalDecimal(row.ESIAmount),
   panNumber: row.PANNumber ?? "",
   documentNumber: row.DocumentNumber ?? "",
+  aadhaarNumber: row.DocumentNumber ?? "",
   uanNumber: row.UANNumber ?? "",
   esiNumber: row.ESINumber ?? "",
   permanentAddress: row.PermanentAddress ?? "",
@@ -12290,11 +12294,13 @@ const normalizeHrmsDecimal = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const calculateHrmsPfAmount = (grossSalary) =>
-  Math.round(normalizeHrmsDecimal(grossSalary) * 0.12);
+const calculateHrmsMonthlyGross = (annualGrossSalary) =>
+  Math.round(normalizeHrmsDecimal(annualGrossSalary) / 12);
 
-const calculateHrmsEsiAmount = (grossSalary) =>
-  Math.round(normalizeHrmsDecimal(grossSalary) * 0.015);
+const calculateHrmsPfAmount = (annualGrossSalary) =>
+  Math.round(calculateHrmsMonthlyGross(annualGrossSalary) * 0.12);
+
+const calculateHrmsEsiAmount = () => 0;
 
 const buildHrmsSalaryReassessmentPayload = (source = {}) => {
   const reviewDate = parseHrmsDateInput(source.reviewDate ?? source.ReviewDate);
@@ -12355,7 +12361,8 @@ const buildHrmsSalaryReassessmentPayload = (source = {}) => {
   );
   const totalDeductions =
     salaryDeduction + pfAmount + esiAmount + professionalTax + tdsAmount;
-  const netSalary = revisedSalary + allowances - totalDeductions;
+  const netSalary =
+    calculateHrmsMonthlyGross(revisedSalary) + allowances - totalDeductions;
 
   return {
     employeeId: trimToLength(source.employeeId ?? source.EmployeeID, 20),
@@ -12503,6 +12510,8 @@ const normalizeHrmsSalaryReassessmentRow = (row = {}) => ({
   incrementPercent: Number(row.RecommendedIncrementPercent ?? 0),
   bonus: Number(row.Bonus ?? 0),
   revisedSalary: Number(row.RevisedSalary ?? 0),
+  allowances: Number(row.Allowances ?? 0),
+  allowance: Number(row.Allowances ?? 0),
   salaryDeduction: Number(row.SalaryDeduction ?? 0),
   deduction: Number(row.SalaryDeduction ?? 0),
   pfAmount:
@@ -12517,21 +12526,28 @@ const normalizeHrmsSalaryReassessmentRow = (row = {}) => ({
   esi:
     normalizeHrmsOptionalDecimal(row.ESIAmount) ??
     calculateHrmsEsiAmount(row.RevisedSalary),
+  professionalTax: Number(row.ProfessionalTax ?? 0),
+  pt: Number(row.ProfessionalTax ?? 0),
+  tdsAmount: Number(row.TDSAmount ?? 0),
+  tds: Number(row.TDSAmount ?? 0),
   totalDeductions:
-    normalizeHrmsOptionalDecimal(row.TotalDeductions) ??
     Number(row.SalaryDeduction ?? 0) +
       (normalizeHrmsOptionalDecimal(row.ProvidentFund) ??
         calculateHrmsPfAmount(row.RevisedSalary)) +
       (normalizeHrmsOptionalDecimal(row.ESIAmount) ??
-        calculateHrmsEsiAmount(row.RevisedSalary)),
+        calculateHrmsEsiAmount(row.RevisedSalary)) +
+      Number(row.ProfessionalTax ?? 0) +
+      Number(row.TDSAmount ?? 0),
   netSalary:
-    normalizeHrmsOptionalDecimal(row.NetSalary) ??
-    Number(row.RevisedSalary ?? 0) -
+    calculateHrmsMonthlyGross(row.RevisedSalary) +
+      Number(row.Allowances ?? 0) -
       (Number(row.SalaryDeduction ?? 0) +
         (normalizeHrmsOptionalDecimal(row.ProvidentFund) ??
           calculateHrmsPfAmount(row.RevisedSalary)) +
         (normalizeHrmsOptionalDecimal(row.ESIAmount) ??
-          calculateHrmsEsiAmount(row.RevisedSalary))),
+          calculateHrmsEsiAmount(row.RevisedSalary)) +
+        Number(row.ProfessionalTax ?? 0) +
+        Number(row.TDSAmount ?? 0)),
   currentRole: row.CurrentRole ?? "",
   proposedRole: row.ProposedRole ?? "",
   effectiveDate: formatHrmsDate(row.PromotionEffectiveDate),
@@ -13274,7 +13290,7 @@ const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
       ? calculateHrmsEsiAmount(basicSalary)
       : normalizeHrmsDecimal(providedEsiAmount);
   const netSalary =
-    basicSalary + allowances - deductions - pfAmount - esiAmount - professionalTax - tdsAmount;
+    calculateHrmsMonthlyGross(basicSalary) + allowances - deductions - pfAmount - esiAmount - professionalTax - tdsAmount;
 
   return {
     employeeId: trimToLength(
@@ -13312,6 +13328,7 @@ const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
 
 const normalizeHrmsSalaryRow = (row = {}) => {
   const basicSalary = Number(row.BasicSalary ?? 0);
+  const monthlySalary = calculateHrmsMonthlyGross(basicSalary);
   const allowances = Number(row.Allowances ?? 0);
   const deductions = Number(row.Deductions ?? 0);
   const pfAmount =
@@ -13322,7 +13339,7 @@ const normalizeHrmsSalaryRow = (row = {}) => {
   const tdsAmount = Number(row.TDSAmount ?? 0);
   const totalDeductions =
     deductions + pfAmount + esiAmount + professionalTax + tdsAmount;
-  const netSalary = basicSalary + allowances - totalDeductions;
+  const netSalary = monthlySalary + allowances - totalDeductions;
 
   return {
     id: String(row.Id ?? ""),
@@ -13335,7 +13352,7 @@ const normalizeHrmsSalaryRow = (row = {}) => {
     salary: basicSalary,
     basicSalary,
     grossSalary: basicSalary,
-    monthlySalary: Math.round(basicSalary / 12),
+    monthlySalary,
     allowance: allowances,
     allowances,
     deduction: deductions,
@@ -13350,7 +13367,7 @@ const normalizeHrmsSalaryRow = (row = {}) => {
     pt: professionalTax,
     tdsAmount,
     tds: tdsAmount,
-    totalEarnings: basicSalary + allowances,
+    totalEarnings: monthlySalary + allowances,
     totalDeductions,
     status: row.Status ?? "Processed",
     savedAt: row.SavedDate ?? null,

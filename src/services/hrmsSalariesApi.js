@@ -20,11 +20,24 @@ const toOptionalNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const calculatePfAmount = (grossSalary) =>
-  Math.round(toNumber(grossSalary) * 0.12);
+const calculateMonthlySalary = (annualGrossSalary) =>
+  Math.round(toNumber(annualGrossSalary) / 12);
 
-const calculateEsiAmount = (grossSalary) =>
-  Math.round(toNumber(grossSalary) * 0.015);
+const calculatePfAmount = (annualGrossSalary) =>
+  Math.round(calculateMonthlySalary(annualGrossSalary) * 0.12);
+
+const normalizeMonthlyPfAmount = (pfAmount, annualGrossSalary) => {
+  const monthlyPfAmount = calculatePfAmount(annualGrossSalary);
+  const storedPfAmount = toOptionalNumber(pfAmount);
+  if (storedPfAmount === null) return monthlyPfAmount;
+
+  const legacyAnnualPfAmount = Math.round(toNumber(annualGrossSalary) * 0.12);
+  return Math.abs(storedPfAmount - legacyAnnualPfAmount) <= 1
+    ? monthlyPfAmount
+    : storedPfAmount;
+};
+
+const calculateEsiAmount = () => 0;
 
 const getTime = (value) => {
   const date = parseDateValue(value);
@@ -48,18 +61,19 @@ export const normalizeHrmsSalary = (record = {}) => {
   const tdsAmount = toNumber(
     record.tdsAmount ?? record.tds ?? record.TDSAmount
   );
-  const pfAmount =
-    toOptionalNumber(
-      record.pfAmount ??
-        record.providentFund ??
-        record.PFAmount ??
-        record.ProvidentFund
-    ) ?? calculatePfAmount(salary);
+  const pfAmount = normalizeMonthlyPfAmount(
+    record.pfAmount ??
+      record.providentFund ??
+      record.PFAmount ??
+      record.ProvidentFund,
+    salary
+  );
   const esiAmount =
     toOptionalNumber(record.esiAmount ?? record.esi ?? record.ESIAmount) ??
     calculateEsiAmount(salary);
+  const monthlySalary = calculateMonthlySalary(salary);
   const totalDeductions = deduction + pfAmount + esiAmount + professionalTax + tdsAmount;
-  const totalEarnings = salary + allowance;
+  const totalEarnings = monthlySalary + allowance;
   return {
     ...record,
     id: String(record.id ?? record.Id ?? ""),
@@ -79,7 +93,7 @@ export const normalizeHrmsSalary = (record = {}) => {
     deduction,
     deductions: deduction,
     grossSalary: salary,
-    monthlySalary: Math.round(salary / 12),
+    monthlySalary,
     esi: esiAmount,
     esiAmount,
     net: totalEarnings - totalDeductions,

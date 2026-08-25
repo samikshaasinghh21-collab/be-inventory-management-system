@@ -45,6 +45,11 @@ import {
   verifyClosedPoAdminPassword,
 } from "../utils/closedPoAuth";
 import { parseDateValue } from "../utils/dateFormat";
+import {
+  defaultBrandLogoUrl,
+  resolveBrandLogo,
+  resolveBrandName,
+} from "../utils/branding";
 
 const seedEmployees = [];
 
@@ -879,6 +884,12 @@ const displayValue = (value) => {
 
 const maritalStatusOptions = ["Single", "Married", "Divorced", "Widowed"];
 const bloodGroupOptions = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+const departmentOptions = [
+  "Engineering",
+  "Sales & Marketing",
+  "Procurement",
+  "Finance",
+];
 
 const buildEmployeeForm = (employee) => {
   const source = employee ?? {};
@@ -984,7 +995,7 @@ const readProfilePhoto = (file) =>
 
 const employeeDocumentFields = [
   { key: "pan", label: "PAN", multiple: false },
-  { key: "aadhaar", label: "Aadhar", multiple: false },
+  { key: "aadhaar", label: "Aadhaar", multiple: false },
   { key: "offerLetter", label: "Offer Letter", multiple: false },
   { key: "uan", label: "UAN Number", multiple: false },
   { key: "esi", label: "ESI", multiple: false },
@@ -1046,7 +1057,49 @@ const readEmployeeDocumentFile = (file) =>
     reader.readAsDataURL(file);
   });
 
-const validateEmployeeDocuments = ({ documents, panNumber, documentNumber }) => {
+const viewEmployeeDocumentAsPdf = (document, onError) => {
+  if (typeof window === "undefined" || !document?.dataUrl) {
+    onError?.("The selected document is not available for viewing.");
+    return;
+  }
+
+  const type = String(document.type || "").toLowerCase();
+  if (type === "application/pdf" || document.dataUrl.startsWith("data:application/pdf")) {
+    window.open(document.dataUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  if (!type.startsWith("image/") && !document.dataUrl.startsWith("data:image/")) {
+    onError?.("Only PDF and image documents can be previewed as PDF. Upload a PDF copy to view this document.");
+    return;
+  }
+
+  const previewWindow = window.open("", "_blank", "width=900,height=700");
+  if (!previewWindow) {
+    onError?.("Allow pop-ups to view this document in PDF format.");
+    return;
+  }
+
+  previewWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>${escapeHtml(document.name || "Employee document")}</title>
+        <style>
+          @page { size: A4; margin: 12mm; }
+          body { margin: 0; text-align: center; font-family: Arial, sans-serif; }
+          img { max-width: 100%; max-height: 270mm; object-fit: contain; }
+        </style>
+      </head>
+      <body><img src="${document.dataUrl}" alt="${escapeHtml(document.name || "Employee document")}" /></body>
+    </html>
+  `);
+  previewWindow.document.close();
+  previewWindow.focus();
+  window.setTimeout(() => previewWindow.print(), 250);
+};
+
+const validateEmployeeDocuments = ({ documents, panNumber, aadhaarNumber }) => {
   const normalizedDocuments = normalizeEmployeeDocuments(documents);
   const allDocuments = Object.values(normalizedDocuments).flat();
   const invalidDocument = allDocuments.find(
@@ -1066,8 +1119,8 @@ const validateEmployeeDocuments = ({ documents, panNumber, documentNumber }) => 
     return "Upload PAN document before saving employee details.";
   }
 
-  if (documentNumber && !allDocuments.length) {
-    return "Upload at least one document for the entered document number.";
+  if (aadhaarNumber && !normalizedDocuments.aadhaar.length) {
+    return "Upload the Aadhaar document before saving employee details.";
   }
 
   return "";
@@ -1081,8 +1134,14 @@ const escapeHtml = (value = "") =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 
-const printEmployeeProfile = (employee) => {
+const printEmployeeProfile = (employee, company = {}) => {
   if (typeof window === "undefined" || !employee) return;
+  const salaryBreakup = getSalaryBreakup(employee);
+  const printableDocuments = employeeDocumentFields.flatMap((field) =>
+    normalizeEmployeeDocuments(employee.documents)[field.key].map((document) =>
+      `${field.label}: ${document.name}`
+    )
+  );
 
   const printableRows = [
     ["Employee ID", displayValue(employee.id)],
@@ -1106,15 +1165,25 @@ const printEmployeeProfile = (employee) => {
     ["Nationality", displayValue(employee.nationality)],
     ["Blood Group", displayValue(employee.bloodGroup)],
     ["PAN Number", displayValue(employee.panNumber)],
-    ["Document Number", displayValue(employee.documentNumber)],
+    ["Aadhaar Number", displayValue(employee.documentNumber)],
     ["UAN Number", displayValue(employee.uanNumber)],
     ["ESI Number", displayValue(employee.esiNumber)],
-    ["Gross Salary", money(employee.salary)],
-    ["Monthly Salary", money(getSalaryBreakup(employee).monthlySalary)],
+    ["Annual Gross Salary", money(employee.salary)],
+    ["Monthly Gross Salary", money(salaryBreakup.monthlySalary)],
+    ["Monthly Allowances", money(salaryBreakup.allowances)],
+    ["Monthly PF", money(salaryBreakup.pfAmount)],
+    ["Monthly ESI", money(salaryBreakup.esiAmount)],
+    ["Other Monthly Deductions", money(salaryBreakup.deduction)],
+    ["TDS", money(salaryBreakup.tdsAmount)],
+    ["Professional Tax", money(salaryBreakup.professionalTax)],
+    ["Monthly Net Salary", money(salaryBreakup.netSalary)],
     ["Permanent Address", displayValue(employee.permanentAddress)],
     ["Present Address", displayValue(employee.presentAddress || employee.address)],
+    ["Documents", printableDocuments.length ? printableDocuments.join("; ") : "No documents uploaded"],
   ];
   const printWindow = window.open("", "_blank", "width=900,height=700");
+  const logoUrl = resolveBrandLogo(company.logo || "");
+  const companyName = resolveBrandName(company.name || "");
 
   if (!printWindow) {
     window.print();
@@ -1143,6 +1212,8 @@ const printEmployeeProfile = (employee) => {
             border-bottom: 2px solid #1d4ed8;
             padding-bottom: 18px;
           }
+          .brand { display: flex; align-items: center; gap: 12px; }
+          .brand-logo { width: 72px; height: 72px; object-fit: contain; }
           h1 { margin: 0; font-size: 26px; }
           .muted { margin: 6px 0 0; color: #64748b; font-size: 13px; }
           .photo {
@@ -1196,9 +1267,12 @@ const printEmployeeProfile = (employee) => {
       </head>
       <body>
         <section class="header">
-          <div>
-            <h1>Employee Profile</h1>
-            <p class="muted">Generated from HRMS database data</p>
+          <div class="brand">
+            <img class="brand-logo" src="${logoUrl}" alt="${escapeHtml(companyName)} logo" onerror="this.onerror=null;this.src='${defaultBrandLogoUrl}'" />
+            <div>
+              <h1>Employee Profile</h1>
+              <p class="muted">${escapeHtml(companyName)} · Generated from HRMS database data</p>
+            </div>
           </div>
           ${
             employee.photo
@@ -1492,14 +1566,23 @@ const toSalaryNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const calculatePfAmount = (grossSalary) =>
-  Math.round(toSalaryNumber(grossSalary) * 0.12);
-
-const calculateEsiAmount = (grossSalary) =>
-  Math.round(toSalaryNumber(grossSalary) * 0.015);
+const calculatePfAmount = (annualGrossSalary) =>
+  Math.round(calculateMonthlySalary(annualGrossSalary) * 0.12);
 
 const calculateMonthlySalary = (grossSalary) =>
   Math.round(toSalaryNumber(grossSalary) / 12);
+
+const normalizeMonthlyPfAmount = (pfAmount, annualGrossSalary) => {
+  const monthlyPfAmount = calculatePfAmount(annualGrossSalary);
+  const storedPfAmount = toSalaryNumber(pfAmount, monthlyPfAmount);
+  const legacyAnnualPfAmount = Math.round(
+    toSalaryNumber(annualGrossSalary) * 0.12
+  );
+
+  return Math.abs(storedPfAmount - legacyAnnualPfAmount) <= 1
+    ? monthlyPfAmount
+    : storedPfAmount;
+};
 
 const getSalaryBreakup = (source = {}, grossOverride) => {
   const grossSalary = toSalaryNumber(
@@ -1517,18 +1600,19 @@ const getSalaryBreakup = (source = {}, grossOverride) => {
   const professionalTax = toSalaryNumber(
     source.professionalTax ?? source.pt ?? source.ProfessionalTax
   );
-  const pfAmount = toSalaryNumber(
+  const pfAmount = normalizeMonthlyPfAmount(
     source.pfAmount ??
       source.providentFund ??
       source.PFAmount ??
       source.ProvidentFund,
-    calculatePfAmount(grossSalary)
+    grossSalary
   );
   const esiAmount = toSalaryNumber(
     source.esiAmount ?? source.esi ?? source.ESIAmount,
-    calculateEsiAmount(grossSalary)
+    0
   );
-  const totalEarnings = grossSalary + allowances;
+  const monthlySalary = calculateMonthlySalary(grossSalary);
+  const totalEarnings = monthlySalary + allowances;
   const totalDeductions =
     deduction + pfAmount + esiAmount + tdsAmount + professionalTax;
 
@@ -1537,7 +1621,7 @@ const getSalaryBreakup = (source = {}, grossOverride) => {
     deduction,
     esiAmount,
     grossSalary,
-    monthlySalary: calculateMonthlySalary(grossSalary),
+    monthlySalary,
     netSalary: totalEarnings - totalDeductions,
     pfAmount,
     professionalTax,
@@ -1554,8 +1638,9 @@ const getFormSalaryBreakup = (form = {}) => {
   const tdsAmount = toSalaryNumber(form.tdsAmount);
   const professionalTax = toSalaryNumber(form.professionalTax);
   const pfAmount = toSalaryNumber(form.pfAmount, calculatePfAmount(grossSalary));
-  const esiAmount = toSalaryNumber(form.esiAmount, calculateEsiAmount(grossSalary));
-  const totalEarnings = grossSalary + allowances;
+  const esiAmount = toSalaryNumber(form.esiAmount, 0);
+  const monthlySalary = calculateMonthlySalary(grossSalary);
+  const totalEarnings = monthlySalary + allowances;
   const totalDeductions =
     deduction + pfAmount + esiAmount + tdsAmount + professionalTax;
 
@@ -1564,7 +1649,7 @@ const getFormSalaryBreakup = (form = {}) => {
     deduction,
     esiAmount,
     grossSalary,
-    monthlySalary: calculateMonthlySalary(grossSalary),
+    monthlySalary,
     netSalary: totalEarnings - totalDeductions,
     pfAmount,
     professionalTax,
@@ -1589,18 +1674,6 @@ const scoreGrade = (score) => {
   if (score >= 70) return "B";
   if (score >= 60) return "C";
   return "D";
-};
-
-const downloadTextFile = (filename, content, type = "text/plain") => {
-  if (typeof window === "undefined") return;
-
-  const blob = new Blob([content], { type });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  window.URL.revokeObjectURL(url);
 };
 
 const Field = ({ label, children }) => (
@@ -1646,6 +1719,51 @@ const Button = ({ children, variant = "primary", className = "", ...props }) => 
     </button>
   );
 };
+
+const EmergencyContactDetailsSection = ({ form, onChange }) => (
+  <section className="grid gap-4 rounded-xl border border-amber-200 bg-amber-50/70 p-5 sm:grid-cols-2">
+    <div className="border-b border-amber-200 pb-4 sm:col-span-2">
+      <h2 className="text-base font-bold text-amber-950">
+        Emergency Contact Details
+      </h2>
+      <p className="mt-1 text-xs text-amber-700">
+        Contact to use in case of an emergency
+      </p>
+    </div>
+    <Field label="Contact Name">
+      <Input
+        value={form.emergencyContactName}
+        onChange={(event) => onChange("emergencyContactName", event.target.value)}
+        placeholder="Enter emergency contact name"
+      />
+    </Field>
+    <Field label="Contact Number">
+      <Input
+        value={form.emergencyContactNumber}
+        onChange={(event) => onChange("emergencyContactNumber", event.target.value)}
+        placeholder="Enter emergency contact number"
+      />
+    </Field>
+    <Field label="Relation">
+      <Input
+        value={form.relation}
+        onChange={(event) => onChange("relation", event.target.value)}
+        placeholder="Enter relation"
+      />
+    </Field>
+    <Field label="Contact Address">
+      <Input
+        as="textarea"
+        rows={3}
+        value={form.emergencyContactAddress}
+        onChange={(event) =>
+          onChange("emergencyContactAddress", event.target.value)
+        }
+        placeholder="Enter emergency contact address"
+      />
+    </Field>
+  </section>
+);
 
 const EmployeeDocumentsSection = ({ documents, onChange, onError }) => {
   const normalizedDocuments = normalizeEmployeeDocuments(documents);
@@ -1722,7 +1840,7 @@ const EmployeeDocumentsSection = ({ documents, onChange, onError }) => {
             <Input
               type="file"
               multiple={field.multiple}
-              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx"
+              accept=".pdf,.png,.jpg,.jpeg"
               className="cursor-pointer bg-slate-50 px-2 py-2 text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-blue-700 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-blue-800"
               onChange={(event) => {
                 handleUpload(field, event.target.files);
@@ -1746,6 +1864,13 @@ const EmployeeDocumentsSection = ({ documents, onChange, onError }) => {
                     </div>
                     <div className="flex shrink-0 items-center gap-2 text-slate-500">
                       <span>{Math.ceil(Number(document.size || 0) / 1024)} KB</span>
+                      <Button
+                        variant="ghost"
+                        className="min-h-7 px-2 text-xs text-blue-700 hover:bg-blue-50"
+                        onClick={() => viewEmployeeDocumentAsPdf(document, onError)}
+                      >
+                        View PDF
+                      </Button>
                       <Button
                         variant="ghost"
                         className="min-h-7 px-2 text-xs text-rose-600 hover:bg-rose-50"
@@ -2100,6 +2225,34 @@ const getHrmsAdminAuthError = (settings, password, actionLabel) => {
     return "Incorrect admin password.";
   }
   return "";
+};
+
+const EmployeeDocumentsViewer = ({ documents, onError }) => {
+  const normalizedDocuments = normalizeEmployeeDocuments(documents);
+  const rows = employeeDocumentFields.flatMap((field) =>
+    normalizedDocuments[field.key].map((document) => ({ ...document, category: field.label }))
+  );
+
+  return (
+    <Panel>
+      <h2 className="text-base font-bold">Employee Documents</h2>
+      <p className="mt-1 text-sm text-slate-500">Open saved PDF and image documents in a printable PDF view.</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {rows.map((document) => (
+          <div key={`${document.category}-${document.id || document.name}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-800">{document.name}</p>
+              <p className="text-xs text-slate-500">{document.category}</p>
+            </div>
+            <Button variant="secondary" className="min-h-8 px-3 text-xs" onClick={() => viewEmployeeDocumentAsPdf(document, onError)}>
+              View PDF
+            </Button>
+          </div>
+        ))}
+        {!rows.length ? <p className="text-sm text-slate-500">No employee documents uploaded.</p> : null}
+      </div>
+    </Panel>
+  );
 };
 
 const HrmsShell = ({ children }) => {
@@ -2549,6 +2702,15 @@ const EmployeeListPage = () => {
                           View
                         </Button>
                       </Link>
+                      <Button
+                        className="min-h-8 px-2 text-xs"
+                        variant="secondary"
+                        onClick={() => printEmployeeProfile(employee, settings.company)}
+                        aria-label={`Print ${employee.name}`}
+                      >
+                        <AppIcon name="file" className="h-4 w-4" />
+                        Print
+                      </Button>
                       {isAdmin ? (
                         <>
                           <Button
@@ -2679,7 +2841,13 @@ const AddEmployeePage = () => {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => buildEmployeeForm());
-  const tabs = ["Personal Details", "Employment Details", "Salary Details", "Documents"];
+  const tabs = [
+    "Personal Details",
+    "Emergency Contact Details",
+    "Employment Details",
+    "Salary Details",
+    "Documents",
+  ];
   const employeeId = useMemo(() => createEmployeeId(employees), [employees]);
   const updateForm = (field, value) => {
     setForm((current) => {
@@ -2738,9 +2906,15 @@ const AddEmployeePage = () => {
       return;
     }
 
+    const normalizedAadhaar = form.documentNumber.replace(/\s/g, "");
+    if (normalizedAadhaar && !/^\d{12}$/.test(normalizedAadhaar)) {
+      setError("Aadhaar number must contain exactly 12 digits.");
+      return;
+    }
+
     const documentError = validateEmployeeDocuments({
       documents: form.documents,
-      documentNumber: form.documentNumber.trim(),
+      aadhaarNumber: normalizedAadhaar,
       panNumber: normalizedPan,
     });
     if (documentError) {
@@ -2760,7 +2934,7 @@ const AddEmployeePage = () => {
       emergencyContactRelation: form.relation.trim(),
       relation: form.relation.trim(),
       panNumber: normalizedPan,
-      documentNumber: form.documentNumber.trim(),
+      documentNumber: normalizedAadhaar,
       esiNumber: form.esiNumber.trim(),
       uanNumber: form.uanNumber.trim(),
       phone: form.phone.trim(),
@@ -2888,60 +3062,18 @@ const AddEmployeePage = () => {
                   ))}
                 </Input>
               </Field>
-              <Field label="Phone Number">
-                <Input
-                  value={form.phone}
-                  onChange={(event) => updateForm("phone", event.target.value)}
-                  placeholder="Enter phone number"
-                />
-              </Field>
-              <Field label="Emergency Contact Name">
-                <Input
-                  value={form.emergencyContactName}
-                  onChange={(event) =>
-                    updateForm("emergencyContactName", event.target.value)
-                  }
-                  placeholder="Enter emergency contact name"
-                />
-              </Field>
-              <Field label="Emergency Contact Number">
-                <Input
-                  value={form.emergencyContactNumber}
-                  onChange={(event) =>
-                    updateForm("emergencyContactNumber", event.target.value)
-                  }
-                  placeholder="Enter emergency contact number"
-                />
-              </Field>
-              <Field label="Relation">
-                <Input
-                  value={form.relation}
-                  onChange={(event) =>
-                    updateForm("relation", event.target.value)
-                  }
-                  placeholder="Enter relation"
-                />
-              </Field>
-              <Field label="Email">
-                <Input
-                  type="email"
-                  value={form.email}
-                  onChange={(event) => updateForm("email", event.target.value)}
-                  placeholder="Enter email"
-                />
-              </Field>
-              <Field label="Emergency Contact Address">
-                <Input
-                  as="textarea"
-                  rows={3}
-                  value={form.emergencyContactAddress}
-                  onChange={(event) =>
-                    updateForm("emergencyContactAddress", event.target.value)
-                  }
-                  placeholder="Enter emergency contact address"
-                  className="sm:col-span-2"
-                />
-              </Field>
+              <section className="grid gap-4 rounded-lg border border-blue-200 bg-blue-50/60 p-4 sm:col-span-2 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <h2 className="text-sm font-bold text-blue-950">Contact Details</h2>
+                  <p className="mt-1 text-xs text-blue-700">Primary phone and email details</p>
+                </div>
+                <Field label="Phone Number">
+                  <Input value={form.phone} onChange={(event) => updateForm("phone", event.target.value)} placeholder="Enter phone number" />
+                </Field>
+                <Field label="Email">
+                  <Input type="email" value={form.email} onChange={(event) => updateForm("email", event.target.value)} placeholder="Enter email" />
+                </Field>
+              </section>
               <Field label="Permanent Address">
                 <Input
                   as="textarea"
@@ -2994,6 +3126,10 @@ const AddEmployeePage = () => {
           </div>
         )}
 
+        {tab === "Emergency Contact Details" && (
+          <EmergencyContactDetailsSection form={form} onChange={updateForm} />
+        )}
+
         {tab === "Employment Details" && (
           <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2">
             <Field label="Date of Joining">
@@ -3017,10 +3153,9 @@ const AddEmployeePage = () => {
                 onChange={(event) => updateForm("department", event.target.value)}
               >
                 <option value="">Select Department</option>
-                <option>IT</option>
-                <option>HR</option>
-                <option>Finance</option>
-                <option>Marketing</option>
+                {departmentOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
               </Input>
             </Field>
             <Field label="Designation">
@@ -3038,11 +3173,13 @@ const AddEmployeePage = () => {
                 maxLength={10}
               />
             </Field>
-            <Field label="Document Number">
+            <Field label="Aadhaar Number">
               <Input
+                inputMode="numeric"
+                maxLength={12}
                 value={form.documentNumber}
                 onChange={(event) => updateForm("documentNumber", event.target.value)}
-                placeholder="Enter document number"
+                placeholder="Enter 12-digit Aadhaar number"
               />
             </Field>
             <Field label="UAN Number">
@@ -3074,16 +3211,16 @@ const AddEmployeePage = () => {
 
         {tab === "Salary Details" && (
           <div className="grid gap-4 rounded-lg border border-blue-100 bg-blue-50/40 p-4 sm:grid-cols-2">
-            <Field label="Gross Salary">
+            <Field label="Annual Gross Salary">
               <Input
                 type="number"
                 min="0"
                 value={form.salary}
                 onChange={(event) => updateForm("salary", event.target.value)}
-                placeholder="Enter gross salary"
+                placeholder="Enter annual gross salary"
               />
             </Field>
-            <Field label="Monthly Salary">
+            <Field label="Monthly Gross Salary">
               <Input value={money(getFormSalaryBreakup(form).monthlySalary)} disabled />
             </Field>
             <Field label="Allowances">
@@ -3106,7 +3243,7 @@ const AddEmployeePage = () => {
                 placeholder="Enter deduction"
               />
             </Field>
-            <Field label="PF">
+            <Field label="Monthly PF">
               <Input
                 type="number"
                 min="0"
@@ -3136,14 +3273,13 @@ const AddEmployeePage = () => {
                 placeholder="Enter PT"
               />
             </Field>
-            <Field label="ESI Amount">
+            <Field label="Monthly ESI (Optional)">
               <Input
-                value={
-                  form.esiAmount === ""
-                    ? calculateEsiAmount(form.salary)
-                    : form.esiAmount
-                }
-                disabled
+                type="number"
+                min="0"
+                value={form.esiAmount}
+                onChange={(event) => updateForm("esiAmount", event.target.value)}
+                placeholder="Leave blank when ESI is not applicable"
               />
             </Field>
             <div className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-blue-900 sm:col-span-2">
@@ -3186,7 +3322,13 @@ const EmployeeEditor = ({
   const [saving, setSaving] = useState(false);
   const [, setEmployees] = useHrmsEmployees();
   const [form, setForm] = useState(() => buildEmployeeForm(employee));
-  const tabs = ["Personal Details", "Employment Details", "Salary Details", "Documents"];
+  const tabs = [
+    "Personal Details",
+    "Emergency Contact Details",
+    "Employment Details",
+    "Salary Details",
+    "Documents",
+  ];
 
   useEffect(() => {
     setForm(buildEmployeeForm(employee));
@@ -3256,9 +3398,15 @@ const EmployeeEditor = ({
       return;
     }
 
+    const normalizedAadhaar = form.documentNumber.replace(/\s/g, "");
+    if (normalizedAadhaar && !/^\d{12}$/.test(normalizedAadhaar)) {
+      setError("Aadhaar number must contain exactly 12 digits.");
+      return;
+    }
+
     const documentError = validateEmployeeDocuments({
       documents: form.documents,
-      documentNumber: form.documentNumber.trim(),
+      aadhaarNumber: normalizedAadhaar,
       panNumber: normalizedPan,
     });
     if (documentError) {
@@ -3279,7 +3427,7 @@ const EmployeeEditor = ({
       emergencyContactRelation: form.relation.trim(),
       relation: form.relation.trim(),
       panNumber: normalizedPan,
-      documentNumber: form.documentNumber.trim(),
+      documentNumber: normalizedAadhaar,
       esiNumber: form.esiNumber.trim(),
       uanNumber: form.uanNumber.trim(),
       phone: form.phone.trim(),
@@ -3445,60 +3593,18 @@ const EmployeeEditor = ({
                   ))}
                 </Input>
               </Field>
-              <Field label="Phone Number">
-                <Input
-                  value={form.phone}
-                  onChange={(event) => updateForm("phone", event.target.value)}
-                  placeholder="Enter phone number"
-                />
-              </Field>
-              <Field label="Emergency Contact Name">
-                <Input
-                  value={form.emergencyContactName}
-                  onChange={(event) =>
-                    updateForm("emergencyContactName", event.target.value)
-                  }
-                  placeholder="Enter emergency contact name"
-                />
-              </Field>
-              <Field label="Emergency Contact Number">
-                <Input
-                  value={form.emergencyContactNumber}
-                  onChange={(event) =>
-                    updateForm("emergencyContactNumber", event.target.value)
-                  }
-                  placeholder="Enter emergency contact number"
-                />
-              </Field>
-              <Field label="Relation">
-                <Input
-                  value={form.relation}
-                  onChange={(event) =>
-                    updateForm("relation", event.target.value)
-                  }
-                  placeholder="Enter relation"
-                />
-              </Field>
-              <Field label="Email">
-                <Input
-                  type="email"
-                  value={form.email}
-                  onChange={(event) => updateForm("email", event.target.value)}
-                  placeholder="Enter email"
-                />
-              </Field>
-              <Field label="Emergency Contact Address">
-                <Input
-                  as="textarea"
-                  rows={3}
-                  value={form.emergencyContactAddress}
-                  onChange={(event) =>
-                    updateForm("emergencyContactAddress", event.target.value)
-                  }
-                  placeholder="Enter emergency contact address"
-                  className="sm:col-span-2"
-                />
-              </Field>
+              <section className="grid gap-4 rounded-lg border border-blue-200 bg-blue-50/60 p-4 sm:col-span-2 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <h2 className="text-sm font-bold text-blue-950">Contact Details</h2>
+                  <p className="mt-1 text-xs text-blue-700">Primary phone and email details</p>
+                </div>
+                <Field label="Phone Number">
+                  <Input value={form.phone} onChange={(event) => updateForm("phone", event.target.value)} placeholder="Enter phone number" />
+                </Field>
+                <Field label="Email">
+                  <Input type="email" value={form.email} onChange={(event) => updateForm("email", event.target.value)} placeholder="Enter email" />
+                </Field>
+              </section>
               <Field label="Permanent Address">
                 <Input
                   as="textarea"
@@ -3574,10 +3680,9 @@ const EmployeeEditor = ({
                 onChange={(event) => updateForm("department", event.target.value)}
               >
                 <option value="">Select Department</option>
-                <option>IT</option>
-                <option>HR</option>
-                <option>Finance</option>
-                <option>Marketing</option>
+                {departmentOptions.map((option) => (
+                  <option key={option}>{option}</option>
+                ))}
               </Input>
             </Field>
             <Field label="Designation">
@@ -3595,11 +3700,13 @@ const EmployeeEditor = ({
                 maxLength={10}
               />
             </Field>
-            <Field label="Document Number">
+            <Field label="Aadhaar Number">
               <Input
+                inputMode="numeric"
+                maxLength={12}
                 value={form.documentNumber}
                 onChange={(event) => updateForm("documentNumber", event.target.value)}
-                placeholder="Enter document number"
+                placeholder="Enter 12-digit Aadhaar number"
               />
             </Field>
             <Field label="UAN Number">
@@ -3632,16 +3739,16 @@ const EmployeeEditor = ({
 
         {tab === "Salary Details" && (
           <div className="grid gap-4 rounded-lg border border-blue-100 bg-blue-50/40 p-4 sm:grid-cols-2">
-            <Field label="Gross Salary">
+            <Field label="Annual Gross Salary">
               <Input
                 type="number"
                 min="0"
                 value={form.salary}
                 onChange={(event) => updateForm("salary", event.target.value)}
-                placeholder="Enter gross salary"
+                placeholder="Enter annual gross salary"
               />
             </Field>
-            <Field label="Monthly Salary">
+            <Field label="Monthly Gross Salary">
               <Input value={money(getFormSalaryBreakup(form).monthlySalary)} disabled />
             </Field>
             <Field label="Allowances">
@@ -3664,7 +3771,7 @@ const EmployeeEditor = ({
                 placeholder="Enter deduction"
               />
             </Field>
-            <Field label="PF">
+            <Field label="Monthly PF">
               <Input
                 type="number"
                 min="0"
@@ -3694,14 +3801,13 @@ const EmployeeEditor = ({
                 placeholder="Enter PT"
               />
             </Field>
-            <Field label="ESI Amount">
+            <Field label="Monthly ESI (Optional)">
               <Input
-                value={
-                  form.esiAmount === ""
-                    ? calculateEsiAmount(form.salary)
-                    : form.esiAmount
-                }
-                disabled
+                type="number"
+                min="0"
+                value={form.esiAmount}
+                onChange={(event) => updateForm("esiAmount", event.target.value)}
+                placeholder="Leave blank when ESI is not applicable"
               />
             </Field>
             <div className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-blue-900 sm:col-span-2">
@@ -3717,6 +3823,10 @@ const EmployeeEditor = ({
             onChange={(documents) => updateForm("documents", documents)}
             onError={setError}
           />
+        )}
+
+        {tab === "Emergency Contact Details" && (
+          <EmergencyContactDetailsSection form={form} onChange={updateForm} />
         )}
 
         <div className="flex justify-end gap-2 lg:col-span-2">
@@ -4030,7 +4140,7 @@ const EmployeeProfilePage = () => {
               </>
             ) : (
               <span className="text-sm text-slate-500">
-                Employee updates, delete actions, and print access are restricted to Admin.
+                Employee updates and delete actions are restricted to Admin.
               </span>
             )}
           </div>
@@ -4038,12 +4148,10 @@ const EmployeeProfilePage = () => {
       </Panel>
 
       <div className="flex justify-end">
-        {isAdmin ? (
-          <Button onClick={() => printEmployeeProfile(employee)}>
-            <AppIcon name="file" className="h-4 w-4" />
-            Print
-          </Button>
-        ) : null}
+        <Button onClick={() => printEmployeeProfile(employee, settings.company)}>
+          <AppIcon name="file" className="h-4 w-4" />
+          Print Complete Details
+        </Button>
       </div>
 
       <RegisterDocumentView
@@ -4069,10 +4177,10 @@ const EmployeeProfilePage = () => {
           ],
           ["Reporting To", displayValue(employee.manager)],
           ["Joining Date", displayValue(employee.joined)],
-          ["Gross Salary", money(employee.salary)],
-          ["Monthly Salary", money(getSalaryBreakup(employee).monthlySalary)],
+          ["Annual Gross Salary", money(employee.salary)],
+          ["Monthly Gross Salary", money(getSalaryBreakup(employee).monthlySalary)],
           ["PAN Number", displayValue(employee.panNumber)],
-          ["Document Number", displayValue(employee.documentNumber)],
+          ["Aadhaar Number", displayValue(employee.documentNumber)],
           ["UAN Number", displayValue(employee.uanNumber)],
           ["ESI Number", displayValue(employee.esiNumber)],
         ]}
@@ -4103,6 +4211,8 @@ const EmployeeProfilePage = () => {
         bottomLeftValue="Registered employee details from HRMS database records."
       />
 
+      <EmployeeDocumentsViewer documents={employee.documents} onError={setError} />
+
       <PasswordPromptModal
         isOpen={deletePromptOpen}
         title="Admin Approval Required"
@@ -4131,7 +4241,7 @@ const ReviewsPage = () => {
   const location = useLocation();
   const settings = useSettings();
   const role = String(settings?.profile?.role || "").toLowerCase();
-  const canAddReview = ["admin", "hr manager", "manager"].includes(role);
+  const canAddReview = ["super admin", "admin", "hr manager", "manager"].includes(role);
   const [employees] = useHrmsEmployees();
   const [reviews, setReviews, reviewsState] = useHrmsReviews();
   const [salaryAssessments, , salaryAssessmentsState] =
@@ -4277,7 +4387,7 @@ const ReviewsPage = () => {
     event.preventDefault();
 
     if (!canAddReview) {
-      setError("Only Admin, HR Manager, or Manager roles can add reviews.");
+      setError("Only Super Admin, Admin, HR Manager, or Manager roles can add reviews.");
       return;
     }
 
@@ -4345,7 +4455,7 @@ const ReviewsPage = () => {
           <Notice tone={canAddReview ? "success" : "warning"}>
             {canAddReview
               ? ""
-              : "Add Review access is restricted to Admin, HR Manager, and Manager roles."}
+              : "Add Review access is restricted to Super Admin, Admin, HR Manager, and Manager roles."}
           </Notice>
           <Notice>
             {previousReviewCycle
@@ -4691,6 +4801,10 @@ const approvalStatuses = [
 ];
 
 const SalaryReassessmentPage = () => {
+  const navigate = useNavigate();
+  const settings = useSettings();
+  const companyLogo = resolveBrandLogo(settings.company?.logo || "");
+  const companyName = resolveBrandName(settings.company?.name || "");
   const [employees, setEmployees] = useHrmsEmployees();
   const [salaryHistory, setSalaryHistory, salaryReassessmentsState] =
     useHrmsSalaryReassessments();
@@ -4816,9 +4930,7 @@ const SalaryReassessmentPage = () => {
     [salaryHistory]
   );
   const activeRegisterRecord =
-    registerRows.find((record) => record.id === activeRegisterId) ||
-    registerRows[0] ||
-    null;
+    registerRows.find((record) => record.id === activeRegisterId) || null;
   const lastIncrement = employeeHistory.find(
     (record) => Number(record.incrementAmount || 0) > 0
   );
@@ -4838,12 +4950,12 @@ const SalaryReassessmentPage = () => {
         : "Not Ready";
   const compensationBreakup = getSalaryBreakup(selectedEmployee || {}, revisedSalary);
   const compensationRows = [
-    ["Gross Salary", compensationBreakup.grossSalary],
-    ["Monthly Salary", compensationBreakup.monthlySalary],
+    ["Annual Gross Salary", compensationBreakup.grossSalary],
+    ["Monthly Gross Salary", compensationBreakup.monthlySalary],
     ["Allowances", compensationBreakup.allowances],
     ["Deduction", compensationBreakup.deduction],
-    ["PF", compensationBreakup.pfAmount],
-    ["ESI", compensationBreakup.esiAmount],
+    ["Monthly PF", compensationBreakup.pfAmount],
+    ["Monthly ESI", compensationBreakup.esiAmount],
     ["TDS", compensationBreakup.tdsAmount],
     ["Professional Tax", compensationBreakup.professionalTax],
     ["Net Salary", compensationBreakup.netSalary],
@@ -5183,12 +5295,7 @@ const SalaryReassessmentPage = () => {
 
   const downloadRegisterRecord = (record) => {
     if (!record) return;
-
-    downloadTextFile(
-      `${record.employeeId}-${record.id}-salary-reassessment.json`,
-      JSON.stringify(record, null, 2),
-      "application/json"
-    );
+    printAppraisalPdf(record);
   };
 
   const handleDocumentUpload = (event) => {
@@ -5213,11 +5320,7 @@ const SalaryReassessmentPage = () => {
       return;
     }
 
-    downloadTextFile(
-      `${selectedEmployee.id}-salary-reassessment.json`,
-      JSON.stringify(buildRecord("Report Generated"), null, 2),
-      "application/json"
-    );
+    printAppraisalPdf(buildRecord("Report Generated"));
   };
 
   const printRevisionLetter = () => {
@@ -5238,6 +5341,8 @@ const SalaryReassessmentPage = () => {
           <title>${escapeHtml(selectedEmployee.name)} Salary Revision</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 40px; color: #0f172a; }
+            .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+            .brand img { width: 70px; height: 70px; object-fit: contain; }
             h1 { font-size: 22px; margin-bottom: 8px; }
             p { line-height: 1.6; }
             table { width: 100%; border-collapse: collapse; margin: 24px 0; }
@@ -5247,14 +5352,19 @@ const SalaryReassessmentPage = () => {
           </style>
         </head>
         <body>
+          <div class="brand"><img src="${companyLogo}" alt="${escapeHtml(companyName)} logo" onerror="this.onerror=null;this.src='${defaultBrandLogoUrl}'" /><strong>${escapeHtml(companyName)}</strong></div>
           <h1>Salary Revision Letter</h1>
           <p>Dear ${escapeHtml(selectedEmployee.name)},</p>
           <p>Based on the completed performance review for ${escapeHtml(form.reviewPeriod)}, your revised salary details are listed below.</p>
           <table>
             <tr><td class="label">Employee ID</td><td>${escapeHtml(selectedEmployee.id)}</td></tr>
-            <tr><td class="label">Current Salary</td><td>${escapeHtml(money(currentSalary))}</td></tr>
+            <tr><td class="label">Current Annual Gross</td><td>${escapeHtml(money(currentSalary))}</td></tr>
             <tr><td class="label">Increment</td><td>${incrementPercent}% (${escapeHtml(money(incrementAmount))})</td></tr>
-            <tr><td class="label">Revised Salary</td><td>${escapeHtml(money(revisedSalary))}</td></tr>
+            <tr><td class="label">Revised Annual Gross</td><td>${escapeHtml(money(revisedSalary))}</td></tr>
+            <tr><td class="label">Monthly Gross</td><td>${escapeHtml(money(compensationBreakup.monthlySalary))}</td></tr>
+            <tr><td class="label">Monthly PF</td><td>${escapeHtml(money(compensationBreakup.pfAmount))}</td></tr>
+            <tr><td class="label">Monthly ESI</td><td>${escapeHtml(money(compensationBreakup.esiAmount))}</td></tr>
+            <tr><td class="label">Monthly Net Salary</td><td>${escapeHtml(money(compensationBreakup.netSalary))}</td></tr>
             <tr><td class="label">Effective Date</td><td>${escapeHtml(formatDate(form.effectiveDate))}</td></tr>
             <tr><td class="label">Grade</td><td>${escapeHtml(grade)}</td></tr>
           </table>
@@ -5341,9 +5451,12 @@ const SalaryReassessmentPage = () => {
             .grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin-top: 18px; }
             .box { border: 1px solid #dbe3ef; padding: 12px; }
             .label { color: #64748b; font-weight: 700; width: 34%; }
+            .brand { align-items: center; display: flex; gap: 12px; margin-bottom: 20px; }
+            .brand img { height: 72px; object-fit: contain; width: 72px; }
           </style>
         </head>
         <body>
+          <div class="brand"><img src="${companyLogo}" alt="${escapeHtml(companyName)} logo" onerror="this.onerror=null;this.src='${defaultBrandLogoUrl}'" /><strong>${escapeHtml(companyName)}</strong></div>
           <h1>Employee Appraisal PDF</h1>
           <p class="muted">Generated on ${escapeHtml(formatDateTime(new Date().toISOString()))}</p>
 
@@ -5358,11 +5471,11 @@ const SalaryReassessmentPage = () => {
               <tr><td class="label">Review Date</td><td>${escapeHtml(formatDate(sourceRecord.reviewDate))}</td></tr>
             </table>
             <table>
-              <tr><td class="label">Current Salary</td><td>${escapeHtml(money(sourceRecord.currentSalary))}</td></tr>
+              <tr><td class="label">Current Annual Gross</td><td>${escapeHtml(money(sourceRecord.currentSalary))}</td></tr>
               <tr><td class="label">Increment</td><td>${escapeHtml(String(sourceRecord.incrementPercent || 0))}% (${escapeHtml(money(sourceRecord.incrementAmount))})</td></tr>
               <tr><td class="label">Bonus</td><td>${escapeHtml(money(sourceRecord.bonus))}</td></tr>
-              <tr><td class="label">Revised Salary</td><td>${escapeHtml(money(sourceRecord.revisedSalary))}</td></tr>
-              <tr><td class="label">Net Salary</td><td>${escapeHtml(money(sourceRecord.netSalary))}</td></tr>
+              <tr><td class="label">Revised Annual Gross</td><td>${escapeHtml(money(sourceRecord.revisedSalary))}</td></tr>
+              <tr><td class="label">Monthly Net Salary</td><td>${escapeHtml(money(sourceRecord.netSalary))}</td></tr>
               <tr><td class="label">Grade</td><td>${escapeHtml(sourceRecord.grade || "Not provided")}</td></tr>
               <tr><td class="label">Status</td><td>${escapeHtml(sourceRecord.salaryStatus || sourceRecord.status || "Pending")}</td></tr>
             </table>
@@ -5417,6 +5530,15 @@ const SalaryReassessmentPage = () => {
 
   return (
     <div className="grid gap-4">
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button variant="secondary" onClick={() => navigate(-1)}>
+          <AppIcon name="chevron-left" className="h-4 w-4" />
+          Back
+        </Button>
+        <Button variant="secondary" onClick={() => navigate("/reviews")}>
+          Close Reassessment
+        </Button>
+      </div>
       <Panel>
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto]">
           <div className="grid gap-3 md:grid-cols-2">
@@ -5991,9 +6113,9 @@ const SalaryReassessmentPage = () => {
                   "Employee",
                   "Review Period",
                   "Score",
-                  "Current Salary",
+                  "Current Annual Gross",
                   "Increment",
-                  "Revised Salary",
+                  "Revised Annual Gross",
                   "Status",
                   "Action",
                 ].map((heading) => (
@@ -6124,7 +6246,7 @@ const SalaryReassessmentPage = () => {
           tableRows={[
             {
               id: "currentSalary",
-              values: ["1", "Current Salary", money(activeRegisterRecord.currentSalary)],
+              values: ["1", "Current Annual Gross", money(activeRegisterRecord.currentSalary)],
             },
             {
               id: "increment",
@@ -6138,7 +6260,7 @@ const SalaryReassessmentPage = () => {
             },
             {
               id: "revisedSalary",
-              values: ["3", "Revised Salary", money(activeRegisterRecord.revisedSalary)],
+              values: ["3", "Revised Annual Gross", money(activeRegisterRecord.revisedSalary)],
             },
             {
               id: "approval",
@@ -6737,14 +6859,15 @@ const PayrollPage = () => {
     );
     const totalDeductions =
       rowDeduction + rowPfAmount + rowEsiAmount + rowProfessionalTax + rowTdsAmount;
-    const totalEarnings = salary + rowAllowances;
+    const monthlySalary = calculateMonthlySalary(salary);
+    const totalEarnings = monthlySalary + rowAllowances;
 
     return {
       ...employee,
       salary,
       basicSalary: salary,
       grossSalary: salary,
-      monthlySalary: calculateMonthlySalary(salary),
+      monthlySalary,
       allowance: rowAllowances,
       allowances: rowAllowances,
       deduction: rowDeduction,
@@ -6987,10 +7110,9 @@ const PayrollPage = () => {
               }}
             >
               <option>All</option>
-              <option>IT</option>
-              <option>HR</option>
-              <option>Finance</option>
-              <option>Marketing</option>
+              {departmentOptions.map((option) => (
+                <option key={option}>{option}</option>
+              ))}
             </Input>
           </Field>
           <Button
@@ -7020,7 +7142,7 @@ const PayrollPage = () => {
                 ))}
               </Input>
             </Field>
-            <Field label="Gross Salary">
+            <Field label="Annual Gross Salary">
               <Input
                 type="number"
                 min="0"
@@ -7028,7 +7150,7 @@ const PayrollPage = () => {
                 onChange={(event) => updatePayrollEdit("salary", event.target.value)}
               />
             </Field>
-            <Field label="Monthly Salary">
+            <Field label="Monthly Gross Salary">
               <Input value={money(selectedPayrollRow.monthlySalary)} disabled />
             </Field>
             <Field label="Allowances">
@@ -7047,7 +7169,7 @@ const PayrollPage = () => {
                 onChange={(event) => updatePayrollEdit("deduction", event.target.value)}
               />
             </Field>
-            <Field label="PF">
+            <Field label="Monthly PF">
               <Input
                 type="number"
                 min="0"
@@ -7055,7 +7177,7 @@ const PayrollPage = () => {
                 onChange={(event) => updatePayrollEdit("pfAmount", event.target.value)}
               />
             </Field>
-            <Field label="ESI">
+            <Field label="Monthly ESI">
               <Input
                 type="number"
                 min="0"
@@ -7103,7 +7225,7 @@ const PayrollPage = () => {
           <table className="min-w-[1280px] w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
               <tr>
-                {["ID", "Employee", "Gross Salary", "Monthly Salary", "Allowances", "Deduction", "PF", "ESI", "TDS", "PT", "Net Salary", "Status", "Action"].map((heading) => (
+                {["ID", "Employee", "Annual Gross", "Monthly Gross", "Allowances", "Deduction", "Monthly PF", "Monthly ESI", "TDS", "PT", "Net Salary", "Status", "Action"].map((heading) => (
                   <th key={heading} className="px-3 py-3 font-bold">
                     {heading}
                   </th>
@@ -7259,10 +7381,11 @@ const PayrollPage = () => {
                 : "Not updated",
             ],
             [
-              "Total Gross",
+              "Total Monthly Gross",
               money(
                 (selectedPayrollBatch.rows || []).reduce(
-                  (sum, row) => sum + Number(row.salary || 0),
+                  (sum, row) =>
+                    sum + Number(row.monthlySalary ?? calculateMonthlySalary(row.salary)),
                   0
                 )
               ),
@@ -7307,12 +7430,12 @@ const PayrollPage = () => {
           tableColumns={[
             "Employee ID",
             "Employee",
-            "Gross Salary",
-            "Monthly Salary",
+            "Annual Gross Salary",
+            "Monthly Gross Salary",
             "Allowances",
             "Deduction",
-            "PF",
-            "ESI",
+            "Monthly PF",
+            "Monthly ESI",
             "TDS",
             "PT",
             "Net Pay",
@@ -7344,6 +7467,9 @@ const PayrollPage = () => {
 };
 
 const PayslipPage = () => {
+  const settings = useSettings();
+  const companyLogo = resolveBrandLogo(settings.company?.logo || "");
+  const companyName = resolveBrandName(settings.company?.name || "");
   const [employees] = useHrmsEmployees();
   const [payrollBatches, , payrollState] = useHrmsSalaries();
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
@@ -7360,16 +7486,15 @@ const PayslipPage = () => {
     : null;
   const earnings = payslip
     ? [
-        ["Gross Salary", payrollBreakup.grossSalary],
-        ["Monthly Salary", payrollBreakup.monthlySalary],
+        ["Monthly Gross Salary", payrollBreakup.monthlySalary],
         ["Allowances", payrollBreakup.allowances],
       ]
     : [];
   const deductions = payslip
     ? [
         ["Deduction", payrollBreakup.deduction],
-        ["PF", payrollBreakup.pfAmount],
-        ["ESI", payrollBreakup.esiAmount],
+        ["Monthly PF", payrollBreakup.pfAmount],
+        ["Monthly ESI", payrollBreakup.esiAmount],
         ["TDS", payrollBreakup.tdsAmount],
         ["Professional Tax", payrollBreakup.professionalTax],
       ]
@@ -7519,6 +7644,21 @@ const PayslipPage = () => {
           </div>
         ) : (
           <>
+            <div className="mt-4 flex items-center gap-3 border-b border-slate-200 pb-4">
+              <img
+                src={companyLogo}
+                alt={`${companyName} logo`}
+                className="h-16 w-16 object-contain"
+                onError={(event) => {
+                  event.currentTarget.onerror = null;
+                  event.currentTarget.src = defaultBrandLogoUrl;
+                }}
+              />
+              <div>
+                <p className="text-base font-bold text-slate-900">{companyName}</p>
+                <p className="text-sm text-slate-500">Monthly Salary Payslip</p>
+              </div>
+            </div>
             <div className="mt-4 grid gap-4 border-b border-slate-200 pb-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <div className="flex gap-4">
                 <Avatar
@@ -7544,7 +7684,7 @@ const PayslipPage = () => {
                   ["Month", payslip.month],
                   ["Date of Joining", displayValue(employee?.joined)],
                   ["Days Worked", "26"],
-                  ["Document Number", displayValue(employee?.documentNumber)],
+                  ["Aadhaar Number", displayValue(employee?.documentNumber)],
                   ["Payment Date", getPayrollPaymentDate(payslip.month)],
                   ["Payroll Status", payrollRow?.status || "Pending"],
                   ["Payroll Ref", payslip.batch?.id || "Not saved"],
@@ -8208,10 +8348,131 @@ const SearchPage = () => {
 };
 
 const HrmsReportsPage = () => {
+  const settings = useSettings();
+  const [employees, , employeesState] = useHrmsEmployees();
+  const [payrollBatches, , payrollState] = useHrmsSalaries();
   const [, setGeneratedReports] = useStoredList(HRMS_STORAGE_KEYS.reports, []);
   const [message, setMessage] = useState("");
+  const [showEmployeeFinalReport, setShowEmployeeFinalReport] = useState(true);
+  const [employeeReportSearch, setEmployeeReportSearch] = useState("");
+  const [employeeReportDepartment, setEmployeeReportDepartment] = useState("all");
+  const [employeeReportLocation, setEmployeeReportLocation] = useState("all");
+  const [employeeReportEmployee, setEmployeeReportEmployee] = useState("all");
+  const [employeeReportPage, setEmployeeReportPage] = useState(1);
+  const employeeReportRows = useMemo(() => {
+    const payrollRows = payrollBatches.flatMap((batch) => batch.rows || []);
+    return employees.map((employee) => {
+      const latestPayrollRow = payrollRows.find(
+        (row) => String(row.employeeId || row.id) === String(employee.id)
+      );
+      const salary = getSalaryBreakup(latestPayrollRow || employee);
+      const addressLocation = String(
+        employee.location ||
+          employee.workLocation ||
+          employee.city ||
+          employee.presentAddress ||
+          employee.address ||
+          ""
+      ).trim();
+      const location = addressLocation.includes(",")
+        ? addressLocation.split(",")[0].trim()
+        : addressLocation;
+      return {
+        employee,
+        salary,
+        location: location || "Not provided",
+      };
+    });
+  }, [employees, payrollBatches]);
+  const employeeReportDepartments = useMemo(
+    () =>
+      Array.from(
+        new Set(employeeReportRows.map(({ employee }) => employee.department).filter(Boolean))
+      ).sort(),
+    [employeeReportRows]
+  );
+  const employeeReportLocations = useMemo(
+    () =>
+      Array.from(
+        new Set(employeeReportRows.map((row) => row.location).filter(Boolean))
+      ).sort(),
+    [employeeReportRows]
+  );
+  const filteredEmployeeReportRows = useMemo(() => {
+    const query = employeeReportSearch.trim().toLowerCase();
+    return employeeReportRows.filter(({ employee, location }) => {
+      const matchesSearch =
+        !query ||
+        [
+          employee.id,
+          employee.name,
+          employee.department,
+          employee.designation,
+          employee.phone,
+          employee.email,
+          employee.documentNumber,
+          location,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      return (
+        matchesSearch &&
+        (employeeReportDepartment === "all" ||
+          employee.department === employeeReportDepartment) &&
+        (employeeReportLocation === "all" || location === employeeReportLocation) &&
+        (employeeReportEmployee === "all" || employee.id === employeeReportEmployee)
+      );
+    });
+  }, [
+    employeeReportDepartment,
+    employeeReportEmployee,
+    employeeReportLocation,
+    employeeReportRows,
+    employeeReportSearch,
+  ]);
+  const employeeReportStats = useMemo(
+    () =>
+      filteredEmployeeReportRows.reduce(
+        (totals, row) => ({
+          employees: totals.employees + 1,
+          active:
+            totals.active +
+            (String(row.employee.status).toLowerCase() === "active" ? 1 : 0),
+          monthlyGross: totals.monthlyGross + row.salary.monthlySalary,
+          pf: totals.pf + row.salary.pfAmount,
+          esi: totals.esi + row.salary.esiAmount,
+          monthlyNet: totals.monthlyNet + row.salary.netSalary,
+        }),
+        { employees: 0, active: 0, monthlyGross: 0, pf: 0, esi: 0, monthlyNet: 0 }
+      ),
+    [filteredEmployeeReportRows]
+  );
+  const employeeDepartmentSummary = useMemo(
+    () =>
+      employeeReportDepartments.map((department) => ({
+        department,
+        count: employeeReportRows.filter(
+          ({ employee }) => employee.department === department
+        ).length,
+      })),
+    [employeeReportDepartments, employeeReportRows]
+  );
+  const employeeReportPageSize = 10;
+  const employeeReportPageCount = Math.max(
+    1,
+    Math.ceil(filteredEmployeeReportRows.length / employeeReportPageSize)
+  );
+  const safeEmployeeReportPage = Math.min(
+    employeeReportPage,
+    employeeReportPageCount
+  );
+  const pagedEmployeeReportRows = filteredEmployeeReportRows.slice(
+    (safeEmployeeReportPage - 1) * employeeReportPageSize,
+    safeEmployeeReportPage * employeeReportPageSize
+  );
   const reports = [
-    ["Employee Report", "View Employee Details", "file"],
+    ["All Employee Report", "Complete employee and latest salary details", "file"],
     ["Attendance Report", "View Attendance Details", "clock"],
     ["Payroll Report", "View Payroll Details", "receipt"],
     ["Review Report", "View Review Details", "clipboard"],
@@ -8230,10 +8491,201 @@ const HrmsReportsPage = () => {
     setMessage(`${title} generated and saved locally.`);
   };
 
+  const generateAllEmployeeFinalReport = (exportType = "pdf") => {
+    if (!filteredEmployeeReportRows.length) {
+      setMessage("No employees match the selected report filters.");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+    if (!printWindow) {
+      setMessage("Allow pop-ups to generate the all-employee final report PDF.");
+      return;
+    }
+
+    const company = settings.company || {};
+    const companyName = resolveBrandName(company.name || "");
+    const companyLogo = resolveBrandLogo(company.logo || "");
+    const generatedAt = formatDateTime(new Date().toISOString());
+    const activeCount = filteredEmployeeReportRows.filter(
+      ({ employee }) => employee.status === "Active"
+    ).length;
+    const totalMonthlyGross = filteredEmployeeReportRows.reduce(
+      (sum, row) => sum + row.salary.monthlySalary,
+      0
+    );
+    const totalMonthlyNet = filteredEmployeeReportRows.reduce(
+      (sum, row) => sum + row.salary.netSalary,
+      0
+    );
+    const summaryRows = filteredEmployeeReportRows
+      .map(({ employee, salary, location }) => {
+        return `
+          <tr>
+            <td>${escapeHtml(employee.id)}</td>
+            <td>${escapeHtml(employee.name)}</td>
+            <td>${escapeHtml(displayValue(employee.department))}</td>
+            <td>${escapeHtml(displayValue(employee.designation))}</td>
+            <td>${escapeHtml(displayValue(employee.phone))}</td>
+            <td>${escapeHtml(displayValue(employee.email))}</td>
+            <td>${escapeHtml(displayValue(employee.documentNumber))}</td>
+            <td>${escapeHtml(displayValue(employee.joined))}</td>
+            <td>${escapeHtml(location)}</td>
+            <td class="amount">${escapeHtml(money(salary.monthlySalary))}</td>
+            <td class="amount">${escapeHtml(money(salary.pfAmount))}</td>
+            <td class="amount">${escapeHtml(money(salary.esiAmount))}</td>
+            <td class="amount">${escapeHtml(money(salary.totalDeductions))}</td>
+            <td class="amount">${escapeHtml(money(salary.netSalary))}</td>
+          </tr>`;
+      })
+      .join("");
+    const _employeeSections = employees
+      .map((employee, index) => {
+        const salary = getSalaryBreakup(employee);
+        const documents = employeeDocumentFields.flatMap((field) =>
+          normalizeEmployeeDocuments(employee.documents)[field.key].map(
+            (document) => `${field.label}: ${document.name}`
+          )
+        );
+        const rows = [
+          ["Employee ID", employee.id],
+          ["Full Name", employee.name],
+          ["Date of Birth", employee.dateOfBirth],
+          ["Gender", employee.gender],
+          ["Nationality", employee.nationality],
+          ["Marital Status", employee.maritalStatus],
+          ["Blood Group", employee.bloodGroup],
+          ["Phone", employee.phone],
+          ["Email", employee.email],
+          ["Permanent Address", employee.permanentAddress],
+          ["Present Address", employee.presentAddress || employee.address],
+          ["Emergency Contact Name", employee.emergencyContactName],
+          ["Emergency Contact Number", employee.emergencyContactNumber],
+          ["Emergency Contact Relation", employee.relation || employee.emergencyContactRelation],
+          ["Emergency Contact Address", employee.emergencyContactAddress],
+          ["Department", employee.department],
+          ["Designation", employee.designation],
+          ["Reporting Manager", employee.manager],
+          ["Date of Joining", employee.joined],
+          ["Employment Status", employee.status],
+          ["PAN Number", employee.panNumber],
+          ["Aadhaar Number", employee.documentNumber],
+          ["UAN Number", employee.uanNumber],
+          ["ESI Number", employee.esiNumber],
+          ["Annual Gross Salary", money(salary.grossSalary)],
+          ["Monthly Gross Salary", money(salary.monthlySalary)],
+          ["Monthly Allowances", money(salary.allowances)],
+          ["Monthly PF", money(salary.pfAmount)],
+          ["Monthly ESI", money(salary.esiAmount)],
+          ["Other Monthly Deduction", money(salary.deduction)],
+          ["TDS", money(salary.tdsAmount)],
+          ["Professional Tax", money(salary.professionalTax)],
+          ["Total Monthly Deductions", money(salary.totalDeductions)],
+          ["Monthly Net Salary", money(salary.netSalary)],
+          ["Employee Documents", documents.length ? documents.join("; ") : "No documents uploaded"],
+        ];
+
+        return `
+          <section class="employee-page">
+            <div class="employee-heading">
+              <div>
+                <p class="record-number">Employee ${index + 1} of ${employees.length}</p>
+                <h2>${escapeHtml(employee.name)} <span>${escapeHtml(employee.id)}</span></h2>
+              </div>
+              <strong class="status">${escapeHtml(displayValue(employee.status))}</strong>
+            </div>
+            <table class="details"><tbody>${rows
+              .map(
+                ([label, value]) =>
+                  `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(displayValue(value))}</td></tr>`
+              )
+              .join("")}</tbody></table>
+            <div class="signatures"><span>Prepared By: HR Department</span><span>Authorised Signature: __________________</span></div>
+          </section>`;
+      })
+      .join("");
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>All Employee Report</title>
+          <style>
+            @page { size: A3 landscape; margin: 8mm; }
+            * { box-sizing: border-box; }
+            body { color: #0f172a; font-family: Arial, sans-serif; margin: 0; }
+            .cover { padding: 4mm 2mm; }
+            .brand { align-items: center; border-bottom: 3px solid #1d4ed8; display: flex; gap: 16px; padding-bottom: 18px; }
+            .brand img { height: 76px; object-fit: contain; width: 76px; }
+            h1 { font-size: 24px; margin: 20px 0 8px; }
+            .muted { color: #64748b; font-size: 13px; }
+            .summary-cards { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); margin: 18px 0; }
+            .card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; }
+            .card span { color: #64748b; display: block; font-size: 11px; text-transform: uppercase; }
+            .card strong { display: block; font-size: 20px; margin-top: 6px; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #dbe3ef; font-size: 8px; padding: 6px; text-align: left; vertical-align: top; }
+            th { background: #f1f5f9; color: #475569; }
+            .amount { text-align: right; white-space: nowrap; }
+            .employee-page { page-break-after: always; padding: 4mm 0; }
+            .employee-page:last-child { page-break-after: auto; }
+            .employee-heading { align-items: center; border-bottom: 2px solid #1d4ed8; display: flex; justify-content: space-between; margin-bottom: 12px; padding-bottom: 10px; }
+            .employee-heading h2 { font-size: 19px; margin: 3px 0 0; }
+            .employee-heading h2 span { color: #64748b; font-size: 12px; }
+            .record-number { color: #64748b; font-size: 10px; margin: 0; text-transform: uppercase; }
+            .status { background: #eff6ff; border-radius: 999px; color: #1d4ed8; font-size: 10px; padding: 6px 10px; }
+            .details th { width: 34%; }
+            .signatures { display: flex; font-size: 10px; justify-content: space-between; margin-top: 24px; }
+          </style>
+        </head>
+        <body>
+          <section class="cover">
+            <div class="brand">
+              <img src="${companyLogo}" alt="${escapeHtml(companyName)} logo" onerror="this.onerror=null;this.src='${defaultBrandLogoUrl}'" />
+              <div><strong>${escapeHtml(companyName)}</strong><p class="muted">${escapeHtml(company.address || "Human Resources Department")}</p></div>
+            </div>
+            <h1>All Employee Report</h1>
+            <p class="muted">Complete HRMS employee register generated on ${escapeHtml(generatedAt)}</p>
+            <div class="summary-cards">
+              <div class="card"><span>Total Employees</span><strong>${filteredEmployeeReportRows.length}</strong></div>
+              <div class="card"><span>Active Employees</span><strong>${activeCount}</strong></div>
+              <div class="card"><span>Total Monthly Gross</span><strong>${escapeHtml(money(totalMonthlyGross))}</strong></div>
+              <div class="card"><span>Total Monthly Net</span><strong>${escapeHtml(money(totalMonthlyNet))}</strong></div>
+            </div>
+            <table>
+              <thead><tr><th>Employee ID</th><th>Employee Name</th><th>Department</th><th>Designation</th><th>Contact Number</th><th>Email</th><th>Aadhaar Number</th><th>Joining Date</th><th>Location</th><th>Monthly Gross</th><th>PF</th><th>ESI</th><th>Total Deduction</th><th>Net Salary</th></tr></thead>
+              <tbody>${summaryRows}</tbody>
+            </table>
+          </section>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => printWindow.print(), 300);
+
+    setGeneratedReports((current) => [
+      {
+        id: `RPT-${Date.now()}`,
+        title: "All Employee Report",
+        employeeCount: filteredEmployeeReportRows.length,
+        generatedAt: new Date().toISOString(),
+      },
+      ...current,
+    ]);
+    setMessage(
+      `${exportType === "print" ? "Print view" : "PDF export"} opened for ${
+        filteredEmployeeReportRows.length
+      } employees.`
+    );
+  };
+
   return (
     <div className="grid gap-4">
       <Notice>{message}</Notice>
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <Notice tone="warning">{employeesState.error}</Notice>
+      <Notice tone="warning">{payrollState.error}</Notice>
+      {!showEmployeeFinalReport ? <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {reports.map(([title, description, icon]) => (
           <Panel key={title} className="min-h-36">
             <div className="flex gap-4">
@@ -8243,17 +8695,272 @@ const HrmsReportsPage = () => {
               <div>
                 <h2 className="text-sm font-bold">{title}</h2>
                 <p className="mt-1 text-sm text-slate-500">{description}</p>
-                <Button
-                  className="mt-4 min-h-8 px-3 text-xs"
-                  onClick={() => generateReport(title)}
-                >
-                  Generate
-                </Button>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {title === "All Employee Report" ? (
+                    <Button
+                      variant="secondary"
+                      className="min-h-8 px-3 text-xs"
+                      onClick={() => {
+                        setShowEmployeeFinalReport(true);
+                        setMessage("All Employee Report opened for viewing.");
+                      }}
+                      disabled={employeesState.loading || !employees.length}
+                    >
+                      <AppIcon name="user" className="h-4 w-4" />
+                      View Report
+                    </Button>
+                  ) : null}
+                  <Button
+                    className="min-h-8 px-3 text-xs"
+                    onClick={() =>
+                      title === "All Employee Report"
+                        ? generateAllEmployeeFinalReport("pdf")
+                        : generateReport(title)
+                    }
+                    disabled={
+                      title === "All Employee Report" &&
+                      (employeesState.loading || !employees.length)
+                    }
+                  >
+                    {title === "All Employee Report" ? "PDF Export" : "Generate"}
+                  </Button>
+                </div>
               </div>
             </div>
           </Panel>
         ))}
-      </section>
+      </section> : null}
+
+      {showEmployeeFinalReport ? <Panel>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <img
+              src={resolveBrandLogo(settings.company?.logo || "")}
+              alt="Bangalore Electronics logo"
+              className="h-12 w-12 object-contain"
+              onError={(event) => {
+                event.currentTarget.onerror = null;
+                event.currentTarget.src = defaultBrandLogoUrl;
+              }}
+            />
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-blue-700">HRMS · Live Data</p>
+              <h2 className="text-lg font-bold">All Employee Detail Report</h2>
+              <p className="mt-1 text-sm text-slate-500">Bangalore Electronics employee and latest payroll summary.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+              {employees.length} employees
+            </span>
+            <Button variant="secondary" className="min-h-8 px-3 text-xs" onClick={() => setShowEmployeeFinalReport(false)}>
+              Close View
+            </Button>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 xl:grid-cols-5">
+          <Field label="Search">
+            <Input
+              value={employeeReportSearch}
+              onChange={(event) => {
+                setEmployeeReportSearch(event.target.value);
+                setEmployeeReportPage(1);
+              }}
+              placeholder="Search ID, name, phone, email, Aadhaar..."
+            />
+          </Field>
+          <Field label="Department">
+            <Input as="select" value={employeeReportDepartment} onChange={(event) => {
+              setEmployeeReportDepartment(event.target.value);
+              setEmployeeReportPage(1);
+            }}>
+              <option value="all">All Departments</option>
+              {employeeReportDepartments.map((department) => <option key={department}>{department}</option>)}
+            </Input>
+          </Field>
+          <Field label="Location">
+            <Input as="select" value={employeeReportLocation} onChange={(event) => {
+              setEmployeeReportLocation(event.target.value);
+              setEmployeeReportPage(1);
+            }}>
+              <option value="all">All Locations</option>
+              {employeeReportLocations.map((location) => <option key={location}>{location}</option>)}
+            </Input>
+          </Field>
+          <Field label="Employee">
+            <Input as="select" value={employeeReportEmployee} onChange={(event) => {
+              setEmployeeReportEmployee(event.target.value);
+              setEmployeeReportPage(1);
+            }}>
+              <option value="all">All Employees</option>
+              {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.id} - {employee.name}</option>)}
+            </Input>
+          </Field>
+          <div className="flex items-end gap-2">
+            <Button variant="secondary" className="min-h-10 px-3" onClick={() => generateAllEmployeeFinalReport("print")} disabled={!filteredEmployeeReportRows.length}>
+              Print
+            </Button>
+            <Button className="min-h-10 px-3" onClick={() => generateAllEmployeeFinalReport("pdf")} disabled={!filteredEmployeeReportRows.length}>
+              PDF Export
+            </Button>
+          </div>
+        </div>
+        <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {[
+            ["Total Employees", employeeReportStats.employees, "Employees in current view"],
+            ["Active Employees", employeeReportStats.active, "Currently active"],
+            ["Monthly Gross", money(employeeReportStats.monthlyGross), "Combined gross salary"],
+            ["Monthly PF", money(employeeReportStats.pf), "Combined PF deduction"],
+            ["Monthly ESI", money(employeeReportStats.esi), "Combined ESI deduction"],
+            ["Monthly Net", money(employeeReportStats.monthlyNet), "Combined net salary"],
+          ].map(([label, value, description]) => (
+            <div key={label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-bold text-emerald-700">Live</span>
+              </div>
+              <p className="mt-2 text-xl font-bold text-slate-950">{value}</p>
+              <p className="mt-1 text-[11px] text-slate-500">{description}</p>
+            </div>
+          ))}
+        </section>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+          <span>Showing {filteredEmployeeReportRows.length} of {employeeReportRows.length} employees</span>
+          <Button
+            variant="ghost"
+            className="min-h-8 px-2 text-xs"
+            onClick={() => {
+              setEmployeeReportSearch("");
+              setEmployeeReportDepartment("all");
+              setEmployeeReportLocation("all");
+              setEmployeeReportEmployee("all");
+              setEmployeeReportPage(1);
+            }}
+          >
+            Clear Filters
+          </Button>
+        </div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
+          <aside className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Workforce Summary</p>
+                <h3 className="mt-1 text-sm font-bold text-slate-900">Departments</h3>
+              </div>
+              <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">{employeeReportRows.length}</span>
+            </div>
+            <div className="space-y-2">
+              {employeeDepartmentSummary.map(({ department, count }, index) => (
+                <button
+                  key={department}
+                  type="button"
+                  onClick={() => {
+                    setEmployeeReportDepartment(department);
+                    setEmployeeReportPage(1);
+                  }}
+                  className={`w-full rounded-xl border p-3 text-left transition ${employeeReportDepartment === department ? "border-blue-300 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-blue-200"}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-2 text-xs font-bold text-slate-700">
+                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${["bg-emerald-500", "bg-sky-500", "bg-violet-500", "bg-amber-500"][index % 4]}`} />
+                      <span className="truncate">{department}</span>
+                    </span>
+                    <span className="text-xs font-bold text-slate-950">{count}</span>
+                  </div>
+                  <p className="mt-2 text-[10px] text-slate-500">View employee and payroll details</p>
+                </button>
+              ))}
+              {!employeeDepartmentSummary.length ? (
+                <p className="rounded-xl border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-500">No departments available.</p>
+              ) : null}
+            </div>
+          </aside>
+
+          <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-950">Employee Detail Report</h3>
+                <p className="mt-0.5 text-[11px] text-slate-500">Latest employee profile and monthly salary data</p>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-700">Live Data</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-[2200px] w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    {["Employee ID", "Employee Name", "Department", "Designation", "Contact Number", "Email", "Aadhaar Number", "Joining Date", "Location", "Monthly Gross Salary", "PF", "ESI", "Total Deduction", "Net Salary", "Action"].map((heading) => (
+                      <th key={heading} className="whitespace-nowrap px-3 py-3 font-bold">{heading}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pagedEmployeeReportRows.map(({ employee, salary, location }) => (
+                    <tr key={employee.id} className="hover:bg-slate-50/80">
+                      <td className="whitespace-nowrap px-3 py-3 font-semibold text-blue-700">{employee.id}</td>
+                      <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-900">{employee.name}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.department)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.designation)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.phone)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.email)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.documentNumber)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.joined)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{location}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{money(salary.monthlySalary)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{money(salary.pfAmount)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{money(salary.esiAmount)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{money(salary.totalDeductions)}</td>
+                      <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-950">{money(salary.netSalary)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">
+                        <Link to={`/employees/profile/${employee.id}`}>
+                          <Button variant="secondary" className="min-h-8 px-3 text-xs">View Employee</Button>
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                  {!filteredEmployeeReportRows.length ? (
+                    <tr><td colSpan={15} className="px-3 py-10 text-center text-slate-500">No employees match the selected filters.</td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            {filteredEmployeeReportRows.length ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
+                <p className="text-xs text-slate-500">
+                  Showing {(safeEmployeeReportPage - 1) * employeeReportPageSize + 1}-{Math.min(safeEmployeeReportPage * employeeReportPageSize, filteredEmployeeReportRows.length)} of {filteredEmployeeReportRows.length} employees
+                </p>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="secondary"
+                    className="min-h-8 px-3 text-xs"
+                    disabled={safeEmployeeReportPage === 1}
+                    onClick={() => setEmployeeReportPage((page) => Math.max(1, page - 1))}
+                  >
+                    Previous
+                  </Button>
+                  {Array.from({ length: employeeReportPageCount }, (_, index) => index + 1).slice(Math.max(0, safeEmployeeReportPage - 3), Math.max(5, safeEmployeeReportPage + 2)).map((page) => (
+                    <button
+                      key={page}
+                      type="button"
+                      onClick={() => setEmployeeReportPage(page)}
+                      className={`h-8 min-w-8 rounded-lg px-2 text-xs font-bold ${safeEmployeeReportPage === page ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                  <Button
+                    variant="secondary"
+                    className="min-h-8 px-3 text-xs"
+                    disabled={safeEmployeeReportPage === employeeReportPageCount}
+                    onClick={() => setEmployeeReportPage((page) => Math.min(employeeReportPageCount, page + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      </Panel> : null}
     </div>
   );
 };

@@ -38,16 +38,16 @@ export const validateUAN = (uan) => {
 };
 
 /**
- * Aadhar validation - 12 digits
+ * Aadhaar validation - 12 digits
  */
 export const validateAadhar = (aadhar) => {
-  if (!aadhar) return { valid: false, error: 'Aadhar is required' };
+  if (!aadhar) return { valid: false, error: 'Aadhaar is required' };
   
   const aadharString = String(aadhar).trim().replace(/\s/g, '');
   if (!/^\d{12}$/.test(aadharString)) {
     return { 
       valid: false, 
-      error: 'Aadhar must be 12 numeric digits' 
+      error: 'Aadhaar must be 12 numeric digits'
     };
   }
   
@@ -55,10 +55,10 @@ export const validateAadhar = (aadhar) => {
 };
 
 /**
- * ESI validation - 17 digits (for backward compatibility)
+ * Optional ESI validation - when supplied it must contain 17 digits.
  */
 export const validateESI = (esi) => {
-  if (!esi) return { valid: false, error: 'ESI Number is required' };
+  if (!esi) return { valid: true };
   
   const esiString = String(esi).trim().replace(/\s|-/g, '');
   if (!/^\d{17}$/.test(esiString)) {

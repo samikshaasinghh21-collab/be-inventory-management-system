@@ -10,11 +10,16 @@ export const setStepUpFallbackHandler = (handler) => {
   };
 };
 
-export const getProfile = async () => (await api.get("/settings/profile")).data.profile;
-export const getNotifications = async () => (await api.get("/settings/notifications")).data.notifications;
-export const getAppearance = async () => (await api.get("/settings/appearance")).data.appearance;
-export const getWorkspaceSetting = async (key) => (await api.get(`/settings/workspace/${key}`)).data[key];
-export const getMigrationState = async () => (await api.get("/settings/migration-state")).data.persistence;
+export const getProfile = async () =>
+  (await api.get("/settings/profile")).data?.profile ?? {};
+export const getNotifications = async () =>
+  (await api.get("/settings/notifications")).data?.notifications ?? {};
+export const getAppearance = async () =>
+  (await api.get("/settings/appearance")).data?.appearance ?? {};
+export const getWorkspaceSetting = async (key) =>
+  (await api.get(`/settings/workspace/${key}`)).data?.[key] ?? {};
+export const getMigrationState = async () =>
+  (await api.get("/settings/migration-state")).data?.persistence ?? {};
 
 const can = (user, permission) =>
   user?.permissions?.includes("*") || user?.permissions?.includes(permission);
@@ -65,7 +70,8 @@ export const saveAppearance = async (value) => (await api.put("/settings/appeara
 export const saveWorkspaceSetting = async (key, value) =>
   withPasskeyStepUp(key === "security" ? "settings.security" : `settings.${key}`,
     async () => (await api.put(`/settings/workspace/${key}`, value)).data[key]);
-export const getUsers = async (params = {}) => (await api.get("/settings/users", { params })).data.users;
+export const getUsers = async (params = {}) =>
+  (await api.get("/settings/users", { params })).data?.users ?? [];
 export const inviteUser = async (value) => withPasskeyStepUp("users.manage",
   async () => (await api.post("/settings/users/invite", value)).data.user);
 export const updateUser = async (id, value) => withPasskeyStepUp("users.manage",
@@ -74,10 +80,13 @@ export const revokeUserSessions = async (id) => withPasskeyStepUp("users.manage"
   () => api.post(`/settings/users/${id}/revoke-sessions`));
 export const sendUserPasswordReset = async (id, reason) => withPasskeyStepUp("users.manage",
   () => api.post(`/settings/users/${id}/password-reset`, { reason }));
-export const getRoles = async () => (await api.get("/settings/roles")).data.roles;
+export const getRoles = async () =>
+  (await api.get("/settings/roles")).data?.roles ?? [];
 export const getAuditEvents = async (params = {}) => (await api.get("/settings/audit", { params })).data;
-export const getLoginHistory = async () => (await api.get("/settings/login-history")).data.history;
-export const getSessions = async () => (await api.get("/auth/sessions")).data.sessions;
+export const getLoginHistory = async () =>
+  (await api.get("/settings/login-history")).data?.history ?? [];
+export const getSessions = async () =>
+  (await api.get("/auth/sessions")).data?.sessions ?? [];
 export const revokeSession = async (id) => withPasskeyStepUp("security.sessions", () => api.delete(`/auth/sessions/${id}`));
 export const revokeAllSessions = async () => withPasskeyStepUp("security.sessions", () => api.post("/auth/sessions/revoke-all"));
 export const changePassword = async (value) => withPasskeyStepUp("security.password", () => api.post("/auth/password", value));

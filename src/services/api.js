@@ -197,11 +197,10 @@ const isPublicAuthPage = () =>
     .includes(window.location.pathname);
 
 api.interceptors.request.use(
-  async (config) => {
-    if (!config.skipApiHealthCheck) {
-      await ensureApiAvailable();
-    }
-
+  (config) => {
+    // Normal requests go directly to their endpoint. A separate database
+    // health preflight made transient health failures block otherwise valid
+    // operations and multiplied one 503 across every active feature.
     config.baseURL = activeApiBaseUrl;
     if (["post", "put", "patch", "delete"].includes(String(config.method).toLowerCase())) {
       config.headers = config.headers ?? {};
@@ -214,7 +213,10 @@ api.interceptors.request.use(
 );
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    markApiAvailable();
+    return response;
+  },
   async (error) => {
     if (error.response?.status === 401 && !isPublicAuthPage()) {
       if (typeof window !== "undefined") window.dispatchEvent(new Event("auth:expired"));

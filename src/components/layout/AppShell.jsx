@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { getSettings, hydrateSettings } from "../../services/settingsStore";
 import { loadCurrentUser } from "../../services/authService";
+import { isApiUnavailableError } from "../../services/api";
 import AppHeader from "./AppHeader";
 import Sidebar from "./Sidebar";
 import { getRouteMeta } from "./navigation";
@@ -89,6 +90,7 @@ const AppShell = ({ children }) => {
   }, [location.pathname]);
 
   useEffect(() => {
+    let active = true;
     const syncSettings = () => {
       setSettings(safeReadSettings());
     };
@@ -96,16 +98,31 @@ const AppShell = ({ children }) => {
 
     window.addEventListener("settings:changed", syncSettings);
     window.addEventListener("auth:expired", handleExpiredSession);
-    loadCurrentUser()
-      .then((user) => {
+    const initializeShell = async () => {
+      try {
+        const user = await loadCurrentUser();
+        if (!active) return;
         if (!user) {
           window.location.assign("/login");
-          return null;
+          return;
         }
-        return hydrateSettings();
-      })
-      .catch(() => window.location.assign("/login"));
+        try {
+          await hydrateSettings();
+        } catch (error) {
+          // Settings hydration is optional for rendering the shell. Cached/default
+          // settings remain available when the API or database is offline.
+          console.warn("Settings hydration was skipped:", error?.message || error);
+        }
+      } catch (error) {
+        if (!active || isApiUnavailableError(error)) {
+          return;
+        }
+        window.location.assign("/login");
+      }
+    };
+    void initializeShell();
     return () => {
+      active = false;
       window.removeEventListener("settings:changed", syncSettings);
       window.removeEventListener("auth:expired", handleExpiredSession);
     };
