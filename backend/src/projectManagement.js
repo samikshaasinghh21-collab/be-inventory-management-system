@@ -73,6 +73,8 @@ const textValue = (value) => {
   const next = String(value ?? "").trim();
   return next || null;
 };
+export const projectIdentityValue = (value) =>
+  textValue(value)?.toUpperCase() || null;
 const jsonValue = (value, fallback = []) => {
   if (Array.isArray(value) || (value && typeof value === "object")) return value;
   try {
@@ -1474,7 +1476,8 @@ export const createProjectManagementRouter = () => {
   router.post("/projects", requirePermission("tasks.manage"), async (req, res, next) => {
     let transaction;
     try {
-      const name = textValue(req.body?.name);
+      const name = projectIdentityValue(req.body?.name);
+      const code = projectIdentityValue(req.body?.code);
       const customerId = idValue(req.body?.customerId ?? req.body?.clientId);
       if (!name || !customerId) return res.status(400).json({ ok: false, error: "Project name and customer are required" });
       const pool = await getPool();
@@ -1482,7 +1485,7 @@ export const createProjectManagementRouter = () => {
       await transaction.begin();
       const created = await new sql.Request(transaction)
         .input("ProjectName", sql.NVarChar(255), name)
-        .input("ProjectCode", sql.NVarChar(100), textValue(req.body?.code))
+        .input("ProjectCode", sql.NVarChar(100), code)
         .input("CustomerId", sql.Int, customerId)
         .input("Client", sql.NVarChar(255), textValue(req.body?.client))
         .input("ClientCompany", sql.NVarChar(255), textValue(req.body?.companyName ?? req.body?.client))
@@ -1491,7 +1494,7 @@ export const createProjectManagementRouter = () => {
         .input("StartDate", sql.Date, dateValue(req.body?.startDate))
         .input("EndDate", sql.Date, dateValue(req.body?.endDate))
         .input("Notes", sql.NVarChar(sql.MAX), textValue(req.body?.notes ?? req.body?.description))
-        .input("ManagementDataJson", sql.NVarChar(sql.MAX), serialize(req.body))
+        .input("ManagementDataJson", sql.NVarChar(sql.MAX), serialize({ ...req.body, name, code }))
         .query(`
           INSERT dbo.Projects (ProjectName,ProjectCode,CustomerId,Client,ClientCompany,Department,Status,StartDate,EndDate,Notes,ManagementDataJson)
           OUTPUT INSERTED.ProjectId VALUES (@ProjectName,@ProjectCode,@CustomerId,@Client,@ClientCompany,@Department,@Status,@StartDate,@EndDate,@Notes,@ManagementDataJson)
@@ -1503,7 +1506,7 @@ export const createProjectManagementRouter = () => {
         milestoneSequence += 1;
         const inserted = await new sql.Request(transaction)
           .input("ProjectId", sql.Int, projectId)
-          .input("Number", sql.NVarChar(120), buildMilestoneNumber(req.body?.code, projectId, milestoneSequence))
+          .input("Number", sql.NVarChar(120), buildMilestoneNumber(code, projectId, milestoneSequence))
           .input("Name", sql.NVarChar(255), textValue(milestone.name))
           .input("Stage", sql.NVarChar(20), projectStage(milestone.stage))
           .input("Description", sql.NVarChar(sql.MAX), textValue(milestone.description))
@@ -1552,10 +1555,17 @@ export const createProjectManagementRouter = () => {
       if (!customerId) {
         fail(400, "A customer is required");
       }
+      const name =
+        projectIdentityValue(req.body?.name) ||
+        projectIdentityValue(row.ProjectName ?? row.projectName);
+      const code =
+        req.body?.code === undefined
+          ? projectIdentityValue(row.ProjectCode)
+          : projectIdentityValue(req.body.code);
       const result = await new sql.Request(transaction)
         .input("ProjectId", sql.Int, projectId)
-        .input("ProjectName", sql.NVarChar(255), textValue(req.body?.name) || row.ProjectName || row.projectName)
-        .input("ProjectCode", sql.NVarChar(100), req.body?.code === undefined ? row.ProjectCode : textValue(req.body.code))
+        .input("ProjectName", sql.NVarChar(255), name)
+        .input("ProjectCode", sql.NVarChar(100), code)
         .input(
           "CustomerId",
           sql.Int,
@@ -1588,7 +1598,7 @@ export const createProjectManagementRouter = () => {
             ? row.Notes
             : textValue(req.body?.notes ?? req.body?.description)
         )
-        .input("ManagementDataJson", sql.NVarChar(sql.MAX), serialize(req.body))
+        .input("ManagementDataJson", sql.NVarChar(sql.MAX), serialize({ ...req.body, name, code }))
         .query(`
           UPDATE dbo.Projects SET ProjectName=@ProjectName,ProjectCode=@ProjectCode,
             CustomerId=@CustomerId,Client=@Client,ClientCompany=@ClientCompany,Department=@Department,Status=@Status,

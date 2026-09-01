@@ -156,6 +156,36 @@ const RowList = ({ title, rows = [], render }) => (
   </div>
 );
 
+const LabourReportRow = ({ row }) => (
+  <div className="rounded-xl bg-slate-50 p-3">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div>
+        <p className="font-semibold text-slate-900">
+          {row.employee || row.employeeName || row.member || "Employee not recorded"}
+        </p>
+        <p className="text-xs text-slate-500">{row.role || "Role not recorded"}</p>
+      </div>
+      <Badge>{row.attendance || "Not recorded"}</Badge>
+    </div>
+    <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+      <div>
+        <dt className="text-xs text-slate-400">Regular hours</dt>
+        <dd className="font-medium text-slate-700">{row.regularHours ?? "-"}</dd>
+      </div>
+      <div>
+        <dt className="text-xs text-slate-400">Overtime</dt>
+        <dd className="font-medium text-slate-700">{row.overtime ?? "-"}</dd>
+      </div>
+      {row.remarks ? (
+        <div className="col-span-2">
+          <dt className="text-xs text-slate-400">Remarks</dt>
+          <dd className="text-slate-700">{row.remarks}</dd>
+        </div>
+      ) : null}
+    </dl>
+  </div>
+);
+
 const ProjectManagementMilestones = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
@@ -595,7 +625,7 @@ const ProjectManagementMilestones = () => {
                             </div>
                           )} />
                         </div>
-                        <RowList title="Labour" rows={report.manpowerRows} render={(row, index) => <pre key={row.id || index} className="overflow-x-auto rounded-lg bg-slate-50 p-2 text-xs">{JSON.stringify(row, null, 2)}</pre>} />
+                        <RowList title="Labour" rows={report.manpowerRows} render={(row, index) => <LabourReportRow key={row.id || index} row={row} />} />
                         <RowList title="Materials" rows={report.materialRows} render={(row, index) => <pre key={row.id || index} className="overflow-x-auto rounded-lg bg-slate-50 p-2 text-xs">{JSON.stringify(row, null, 2)}</pre>} />
                         <RowList title="Equipment" rows={report.equipmentRows} render={(row, index) => <pre key={row.id || index} className="overflow-x-auto rounded-lg bg-slate-50 p-2 text-xs">{JSON.stringify(row, null, 2)}</pre>} />
                         <RowList title="Issues" rows={report.issueRows} render={(row, index) => <pre key={row.id || index} className="overflow-x-auto rounded-lg bg-slate-50 p-2 text-xs">{JSON.stringify(row, null, 2)}</pre>} />

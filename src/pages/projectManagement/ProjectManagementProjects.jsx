@@ -80,6 +80,7 @@ const PROJECT_CATEGORIES = [
   "Supply & Commissioning",
   "Infrastructure",
   "Service Contract",
+  "Engineer",
 ];
 const DEPARTMENTS = [
   "Projects",
@@ -88,6 +89,7 @@ const DEPARTMENTS = [
   "Maintenance",
   "Procurement",
   "Service",
+  "Engineer",
 ];
 const MILESTONE_TEMPLATES = [
   "Standard execution",
@@ -774,8 +776,8 @@ const buildProjectPayload = (form, existingProject = null) => {
   return {
     ...(existingProject || {}),
     id: existingProject?.id ?? makeId("pm"),
-    name: form.name.trim(),
-    code: form.code.trim(),
+    name: form.name.trim().toUpperCase(),
+    code: form.code.trim().toUpperCase(),
     customerId: form.customerId || null,
     clientId: form.clientId || form.customerId || null,
     client: form.client.trim(),
@@ -1185,7 +1187,9 @@ const ProjectFormModal = ({
                   <Field label="Project Name" required error={errors.name}>
                     <input
                       value={form.name}
-                      onChange={(event) => updateField("name", event.target.value)}
+                      onChange={(event) =>
+                        updateField("name", event.target.value.toUpperCase())
+                      }
                       className={inputClass}
                       placeholder="Ex: Metro control panel upgrade"
                     />
@@ -1193,7 +1197,9 @@ const ProjectFormModal = ({
                   <Field label="Project Code" required error={errors.code}>
                     <input
                       value={form.code}
-                      onChange={(event) => updateField("code", event.target.value)}
+                      onChange={(event) =>
+                        updateField("code", event.target.value.toUpperCase())
+                      }
                       className={inputClass}
                       placeholder="Ex: PRJ-2026-001"
                     />

@@ -14901,6 +14901,8 @@ app.get("/api/available-inventory", async (req, res) => {
   );
   const includeConsumptionLeftover =
     String(req.query.includeConsumptionLeftover ?? "").trim().toLowerCase() === "true";
+  const includeZero =
+    String(req.query.includeZero ?? "").trim().toLowerCase() === "true";
 
   if (!locationId) {
     return res.status(400).json({
@@ -14919,6 +14921,7 @@ app.get("/api/available-inventory", async (req, res) => {
       excludeReallocateInventoryId,
       includeConsumptionLeftover:
         includeConsumptionLeftover && destinationLocationId === null,
+      includeZero,
     });
     const routeConsumptionItems =
       includeConsumptionLeftover && destinationLocationId !== null
@@ -14930,12 +14933,14 @@ app.get("/api/available-inventory", async (req, res) => {
           })
         : [];
     const items = [...standardItems, ...routeConsumptionItems];
-    const eligibleItems = items.filter(
-      (item) =>
-        toAvailabilityQuantity(
-          item.remainingAvailableQty ?? item.availableQty
-        ) > 0
-    );
+    const eligibleItems = includeZero
+      ? items
+      : items.filter(
+          (item) =>
+            toAvailabilityQuantity(
+              item.remainingAvailableQty ?? item.availableQty
+            ) > 0
+        );
     console.debug("[Consumption lookup] available-inventory API", {
       projectId,
       sourceLocationId: locationId,

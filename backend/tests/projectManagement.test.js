@@ -13,6 +13,7 @@ import {
   milestoneStatus,
   normalizeReportTaskStatus,
   normalizeTaskUpdate,
+  projectIdentityValue,
   PROJECT_STAGES,
 } from "../src/projectManagement.js";
 import { hasPermission, requirePermission } from "../src/auth.js";
@@ -75,6 +76,12 @@ test("a collection containing only cancelled tasks has zero derived progress", (
 test("milestone numbering sanitizes the project code and pads its sequence", () => {
   assert.equal(buildMilestoneNumber("KSP/IT-02", 9, 7), "MS-KSPIT02-0007");
   assert.equal(buildMilestoneNumber("", 42, 1), "MS-42-0001");
+});
+
+test("project names and codes are normalized to uppercase before persistence", () => {
+  assert.equal(projectIdentityValue("  Project-management  "), "PROJECT-MANAGEMENT");
+  assert.equal(projectIdentityValue(" prj-2026-001 "), "PRJ-2026-001");
+  assert.equal(projectIdentityValue("   "), null);
 });
 
 test("project workflow exposes the four controlled stages", () => {

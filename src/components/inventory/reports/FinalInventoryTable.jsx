@@ -74,7 +74,7 @@ const FinalInventoryTable = ({ rows = [], loading = false, error = "" }) => (
     </div>
 
     <div className="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">
-      {rows.length} stock source row{rows.length === 1 ? "" : "s"}; fully depleted rows are excluded.
+      {rows.length} stock source row{rows.length === 1 ? "" : "s"}; fully depleted rows are included so consumed quantities remain visible.
     </div>
   </section>
 );

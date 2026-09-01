@@ -1,4 +1,5 @@
 import api from "./api";
+import { calculateFinalAvailableQty } from "../utils/inventoryBalance";
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -77,6 +78,7 @@ export const fetchAvailableInventory = async ({
   excludeConsumptionId,
   excludeReallocateInventoryId,
   includeConsumptionLeftover,
+  includeZero,
 } = {}) => {
   if (import.meta.env.DEV) {
     console.debug("[Consumption lookup] requesting available inventory", {
@@ -94,6 +96,7 @@ export const fetchAvailableInventory = async ({
       excludeConsumptionId,
       excludeReallocateInventoryId,
       includeConsumptionLeftover,
+      includeZero,
       _: Date.now(),
     },
     headers: {
@@ -137,15 +140,21 @@ export const fetchProjectAvailableInventory = async ({
       const rows = await fetchAvailableInventory({
         projectId,
         locationId: location.id,
+        includeZero: true,
       });
-      return rows.map((row) => ({
-        ...row,
-        locationId: row.locationId ?? location.id,
-        locationName: location.name || "",
-        locationCode: location.code || "",
-        locationType: location.type || "",
-        locationTag: locationTag(location),
-      }));
+      return rows.map((row) => {
+        const availableQty = calculateFinalAvailableQty(row);
+        return {
+          ...row,
+          availableQty,
+          remainingAvailableQty: availableQty,
+          locationId: row.locationId ?? location.id,
+          locationName: location.name || "",
+          locationCode: location.code || "",
+          locationType: location.type || "",
+          locationTag: locationTag(location),
+        };
+      });
     })
   );
 
