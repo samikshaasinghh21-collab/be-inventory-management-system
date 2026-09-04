@@ -98,6 +98,9 @@ export const fetchDocuments = async (params = {}) => {
   return data;
 };
 
+export const fetchDocumentReport = async (params = {}) =>
+  (await api.get("/project-management/documents/report", { params })).data;
+
 export const uploadDocument = async (projectId, payload) => {
   const form = new FormData();
   form.append("file", payload.file);

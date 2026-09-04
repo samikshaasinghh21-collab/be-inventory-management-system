@@ -186,6 +186,117 @@ const LabourReportRow = ({ row }) => (
   </div>
 );
 
+const MaterialReportRow = ({ row }) => (
+  <div className="rounded-xl bg-slate-50 p-3">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <p className="font-semibold text-slate-900">
+        {row.item || row.material || "Material not recorded"}
+      </p>
+      <Badge>{row.unit || "Unit not recorded"}</Badge>
+    </div>
+    <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+      {[
+        ["Received", row.received],
+        ["Used", row.used],
+        ["Returned", row.returned],
+        ["Balance", row.balance],
+      ].map(([label, value]) => (
+        <div key={label}>
+          <dt className="text-xs text-slate-400">{label}</dt>
+          <dd className="font-medium text-slate-700">{value || "0"}</dd>
+        </div>
+      ))}
+    </dl>
+    {row.reference ? (
+      <p className="mt-3 text-xs text-slate-500">Reference: {row.reference}</p>
+    ) : null}
+  </div>
+);
+
+const EquipmentReportRow = ({ row }) => (
+  <div className="rounded-xl bg-slate-50 p-3">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <p className="font-semibold text-slate-900">
+        {row.equipment || row.name || "Equipment not recorded"}
+      </p>
+      <Badge>{row.condition || "Condition not recorded"}</Badge>
+    </div>
+    <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+      <div>
+        <dt className="text-xs text-slate-400">Operating hours</dt>
+        <dd className="font-medium text-slate-700">{row.hours || "0"}</dd>
+      </div>
+      <div>
+        <dt className="text-xs text-slate-400">Remarks</dt>
+        <dd className="text-slate-700">{row.remarks || "No remarks"}</dd>
+      </div>
+    </dl>
+  </div>
+);
+
+const IssueReportRow = ({ row }) => (
+  <div className="rounded-xl bg-slate-50 p-3">
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <p className="font-semibold text-slate-900">
+        {row.issue || row.title || "Issue not recorded"}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Badge>{row.severity || "Severity not recorded"}</Badge>
+        <Badge>{row.status || "Status not recorded"}</Badge>
+      </div>
+    </div>
+    <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+      <div>
+        <dt className="text-xs text-slate-400">Owner</dt>
+        <dd className="text-slate-700">{row.owner || "Unassigned"}</dd>
+      </div>
+      <div>
+        <dt className="text-xs text-slate-400">Target date</dt>
+        <dd className="text-slate-700">
+          {row.targetDate ? formatDate(row.targetDate) : "Not set"}
+        </dd>
+      </div>
+    </dl>
+  </div>
+);
+
+const activityActionLabel = (action) => ({
+  "milestone.create": "Milestone created",
+  "milestone.update": "Milestone updated",
+  "milestone.risk.create": "Risk or issue added",
+  "milestone.risk.update": "Risk or issue updated",
+  "milestone.risk.delete": "Risk or issue removed",
+  "milestone.health.override": "Health override applied",
+  "milestone.health.clear": "Health override cleared",
+  "milestone.cancel": "Milestone cancelled",
+  "milestone.restore": "Milestone restored",
+  "milestone.delete": "Milestone archived",
+}[action] || String(action || "Milestone activity").replaceAll(".", " "));
+
+const activityDescription = (event = {}) => {
+  const data = event.after || {};
+  if (event.action === "milestone.create") {
+    return [
+      data.milestoneNumber,
+      data.name,
+      data.stage ? `${data.stage} stage` : "",
+      data.priority ? `${data.priority} priority` : "",
+    ].filter(Boolean).join(" · ");
+  }
+  if (event.action?.startsWith("milestone.risk.")) {
+    return [data.type, data.title, data.severity, data.status]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (event.action === "milestone.health.override") {
+    return [data.override, data.reason].filter(Boolean).join(" · ");
+  }
+  if (data.reason) return data.reason;
+  return [data.name, data.stage, data.priority, data.status]
+    .filter(Boolean)
+    .join(" · ");
+};
+
 const ProjectManagementMilestones = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
@@ -212,6 +323,9 @@ const ProjectManagementMilestones = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [formError, setFormError] = useState("");
+  const [taskError, setTaskError] = useState("");
+  const [riskError, setRiskError] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -270,6 +384,7 @@ const ProjectManagementMilestones = () => {
   const openDetail = async (item) => {
     setBusy(true);
     setError("");
+    setMessage("");
     try {
       setDetail(await fetchMilestoneDetails(item.id));
       setActiveTab("Overview");
@@ -290,6 +405,54 @@ const ProjectManagementMilestones = () => {
       dependencyIds: (source.dependencies || []).map((dependency) => dependency.id),
       reportIds: (source.reports || []).filter((report) => report.associationSources?.includes("Explicit")).map((report) => report.id),
     });
+    setFormError("");
+  };
+
+  const applyMilestoneDetail = (updated) => {
+    if (!updated?.id) return;
+    const previous = milestones.find(
+      (item) => Number(item.id) === Number(updated.id)
+    );
+    setDetail(updated);
+    setMilestones((current) =>
+      current.map((item) =>
+        Number(item.id) === Number(updated.id) ? { ...item, ...updated } : item
+      )
+    );
+    if (previous) {
+      setSummary((current) => ({
+        ...current,
+        completed:
+          Number(current.completed || 0) -
+          (previous.status === "Completed" ? 1 : 0) +
+          (updated.status === "Completed" ? 1 : 0),
+        atRisk:
+          Number(current.atRisk || 0) -
+          (previous.health === "At Risk" ? 1 : 0) +
+          (updated.health === "At Risk" ? 1 : 0),
+        overdue:
+          Number(current.overdue || 0) -
+          (previous.health === "Overdue" ? 1 : 0) +
+          (updated.health === "Overdue" ? 1 : 0),
+      }));
+    }
+  };
+
+  const runDetailAction = async (callback, success) => {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const updated = await callback();
+      applyMilestoneDetail(updated);
+      setMessage(success);
+      return true;
+    } catch (actionError) {
+      setError(actionError?.response?.data?.error || actionError.message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
   };
 
   const run = async (callback, success, refreshId = detail?.id) => {
@@ -308,40 +471,89 @@ const ProjectManagementMilestones = () => {
   };
 
   const saveMilestone = async () => {
-    if (!form.projectId || !String(form.name || "").trim()) return setError("Project and milestone name are required.");
-    if (form.startDate && form.targetDate && form.targetDate < form.startDate) return setError("Target date cannot be before start date.");
+    if (!form.projectId || !String(form.name || "").trim()) {
+      setFormError("Select a project and enter the milestone name.");
+      return;
+    }
+    if (form.startDate && form.targetDate && form.targetDate < form.startDate) {
+      setFormError("Target date cannot be before start date.");
+      return;
+    }
     setBusy(true);
+    setFormError("");
+    setError("");
     try {
+      const isNew = !form.id;
       const response = form.id
         ? await updateMilestone(form.id, form)
         : await createMilestone(form.projectId, form);
+      const updated = response.milestone;
       setForm(null);
-      setMessage(form.id ? "Milestone updated." : "Milestone created.");
-      await load();
-      if (detail?.id === response.milestone?.id) setDetail(response.milestone);
+      setMessage(isNew ? "Milestone created." : "Milestone updated.");
+      if (updated?.id) {
+        setMilestones((current) =>
+          isNew
+            ? [updated, ...current]
+            : current.map((item) =>
+                Number(item.id) === Number(updated.id)
+                  ? { ...item, ...updated }
+                  : item
+              )
+        );
+        if (!isNew && Number(detail?.id) === Number(updated.id)) {
+          setDetail(updated);
+        }
+        if (isNew) {
+          setSummary((current) => ({
+            ...current,
+            total: Number(current.total || 0) + 1,
+          }));
+        }
+      }
     } catch (saveError) {
-      setError(saveError?.response?.data?.error || saveError.message);
+      setFormError(saveError?.response?.data?.error || saveError.message);
     } finally {
       setBusy(false);
     }
   };
 
   const saveRisk = async () => {
-    if (!riskForm?.title?.trim()) return setError("Risk or issue title is required.");
-    await run(
-      () => riskForm.id
+    if (!riskForm?.title?.trim()) {
+      setRiskError("Risk or issue title is required.");
+      return;
+    }
+    setBusy(true);
+    setRiskError("");
+    setError("");
+    try {
+      const updated = await (riskForm.id
         ? updateMilestoneRisk(detail.id, riskForm.id, riskForm)
-        : createMilestoneRisk(detail.id, riskForm),
-      riskForm.id ? "Risk or issue updated." : "Risk or issue added.",
-    );
-    setRiskForm(null);
+        : createMilestoneRisk(detail.id, riskForm));
+      applyMilestoneDetail(updated);
+      setMessage(riskForm.id ? "Risk or issue updated." : "Risk or issue added.");
+      setRiskForm(null);
+    } catch (saveError) {
+      setRiskError(saveError?.response?.data?.error || saveError.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const saveTask = async () => {
-    if (!taskForm?.taskName?.trim()) return setError("Task name is required.");
-    if (!taskForm?.dueDate) return setError("Task due date is required.");
-    if (taskForm.startDate && taskForm.dueDate < taskForm.startDate) return setError("Task due date cannot be before its start date.");
+    if (!taskForm?.taskName?.trim()) {
+      setTaskError("Task name is required.");
+      return;
+    }
+    if (
+      taskForm.startDate &&
+      taskForm.dueDate &&
+      taskForm.dueDate < taskForm.startDate
+    ) {
+      setTaskError("Task due date cannot be before its start date.");
+      return;
+    }
     setBusy(true);
+    setTaskError("");
     setError("");
     try {
       await createProjectTask(detail.projectId, {
@@ -351,11 +563,11 @@ const ProjectManagementMilestones = () => {
       });
       setTaskForm(null);
       setMessage(`Task created under ${detail.name}.`);
-      await load();
-      await refreshDetail(detail.id);
+      const updated = await refreshDetail(detail.id);
+      if (updated) applyMilestoneDetail(updated);
       setActiveTab("Linked Tasks");
     } catch (saveError) {
-      setError(saveError?.response?.data?.error || saveError.message);
+      setTaskError(saveError?.response?.data?.error || saveError.message);
     } finally {
       setBusy(false);
     }
@@ -390,7 +602,7 @@ const ProjectManagementMilestones = () => {
           <button onClick={() => void load()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">
             <RefreshCw className="h-4 w-4" /> Refresh
           </button>
-          <button onClick={() => setForm({ ...emptyForm })} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white">
+          <button type="button" onClick={() => { setFormError(""); setForm({ ...emptyForm }); }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white">
             <Plus className="h-4 w-4" /> Add Milestone
           </button>
         </div>
@@ -515,6 +727,11 @@ const ProjectManagementMilestones = () => {
                   </button>
                 ))}
               </nav>
+              {(error || message) && (
+                <p className={`mt-4 rounded-xl border px-4 py-3 text-sm ${error ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                  {error || message}
+                </p>
+              )}
             </header>
 
             <div className="flex-1 overflow-y-auto p-5">
@@ -552,12 +769,12 @@ const ProjectManagementMilestones = () => {
                           if (!health) return;
                           const reason = window.prompt("Reason for override:");
                           if (!reason) return;
-                          void run(() => setMilestoneHealthOverride(detail.id, health, reason), "Health override saved.");
+                          void runDetailAction(() => setMilestoneHealthOverride(detail.id, health, reason), "Health override saved.");
                         }} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold">Override health</button>
-                        {detail.healthOverride && <button onClick={() => void run(() => setMilestoneHealthOverride(detail.id, null, null), "Health override cleared.")} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold">Clear override</button>}
+                        {detail.healthOverride && <button type="button" onClick={() => void runDetailAction(() => setMilestoneHealthOverride(detail.id, null, null), "Health override cleared.")} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold">Clear override</button>}
                         {detail.status !== "Cancelled" && <button onClick={() => {
                           const reason = window.prompt("Cancellation reason:");
-                          if (reason) void run(() => cancelMilestone(detail.id, reason), "Milestone cancelled.");
+                          if (reason) void runDetailAction(() => cancelMilestone(detail.id, reason), "Milestone cancelled.");
                         }} className="w-full rounded-xl border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700">Cancel milestone</button>}
                       </>
                     )}
@@ -569,7 +786,7 @@ const ProjectManagementMilestones = () => {
                 <div className="space-y-3">
                   {detail.permissions?.canManage && detail.status !== "Cancelled" && (
                     <div className="flex justify-end">
-                      <button onClick={() => setTaskForm({ ...emptyTask, startDate: String(detail.startDate || "").slice(0, 10), dueDate: String(detail.targetDate || "").slice(0, 10) })} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white">
+                      <button type="button" onClick={() => { setTaskError(""); setTaskForm({ ...emptyTask, startDate: String(detail.startDate || "").slice(0, 10), dueDate: String(detail.targetDate || "").slice(0, 10) }); }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white">
                         <Plus className="h-4 w-4" /> Create Task under Milestone
                       </button>
                     </div>
@@ -626,9 +843,9 @@ const ProjectManagementMilestones = () => {
                           )} />
                         </div>
                         <RowList title="Labour" rows={report.manpowerRows} render={(row, index) => <LabourReportRow key={row.id || index} row={row} />} />
-                        <RowList title="Materials" rows={report.materialRows} render={(row, index) => <pre key={row.id || index} className="overflow-x-auto rounded-lg bg-slate-50 p-2 text-xs">{JSON.stringify(row, null, 2)}</pre>} />
-                        <RowList title="Equipment" rows={report.equipmentRows} render={(row, index) => <pre key={row.id || index} className="overflow-x-auto rounded-lg bg-slate-50 p-2 text-xs">{JSON.stringify(row, null, 2)}</pre>} />
-                        <RowList title="Issues" rows={report.issueRows} render={(row, index) => <pre key={row.id || index} className="overflow-x-auto rounded-lg bg-slate-50 p-2 text-xs">{JSON.stringify(row, null, 2)}</pre>} />
+                        <RowList title="Materials" rows={report.materialRows} render={(row, index) => <MaterialReportRow key={row.id || index} row={row} />} />
+                        <RowList title="Equipment" rows={report.equipmentRows} render={(row, index) => <EquipmentReportRow key={row.id || index} row={row} />} />
+                        <RowList title="Issues" rows={report.issueRows} render={(row, index) => <IssueReportRow key={row.id || index} row={row} />} />
                         <div className="lg:col-span-2">
                           <h4 className="mb-2 text-sm font-bold">Photos and attachments</h4>
                           <div className="flex flex-wrap gap-2">
@@ -667,18 +884,18 @@ const ProjectManagementMilestones = () => {
 
               {activeTab === "Risks & Issues" && (
                 <div className="space-y-4">
-                  {detail.permissions?.canManage && <button onClick={() => setRiskForm({ ...emptyRisk })} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" /> Add risk or issue</button>}
+                  {detail.permissions?.canManage && <button type="button" onClick={() => { setRiskError(""); setRiskForm({ ...emptyRisk }); }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" /> Add risk or issue</button>}
                   <div className="grid gap-3 lg:grid-cols-2">
                     {(detail.risks || []).map((risk) => (
                       <section key={risk.id} className={`${cardClass} p-4`}>
                         <div className="flex items-start justify-between gap-3">
                           <div><div className="flex gap-2"><Badge>{risk.type}</Badge><Badge>{risk.severity}</Badge><Badge>{risk.status}</Badge></div><h3 className="mt-3 font-bold">{risk.title}</h3></div>
-                          {detail.permissions?.canManage && <div className="flex gap-1"><button onClick={() => setRiskForm({ ...emptyRisk, ...risk })} className="rounded-lg border p-2"><Pencil className="h-4 w-4" /></button><button onClick={() => void run(() => deleteMilestoneRisk(detail.id, risk.id), "Risk or issue removed.")} className="rounded-lg border border-rose-200 p-2 text-rose-600"><Trash2 className="h-4 w-4" /></button></div>}
+                          {detail.permissions?.canManage && <div className="flex gap-1"><button type="button" onClick={() => { setRiskError(""); setRiskForm({ ...emptyRisk, ...risk }); }} className="rounded-lg border p-2"><Pencil className="h-4 w-4" /></button><button type="button" onClick={() => void runDetailAction(() => deleteMilestoneRisk(detail.id, risk.id), "Risk or issue removed.")} className="rounded-lg border border-rose-200 p-2 text-rose-600"><Trash2 className="h-4 w-4" /></button></div>}
                         </div>
                         <p className="mt-3 text-sm text-slate-600">{risk.description || "No description"}</p>
                         <div className="mt-4 grid grid-cols-2 gap-3"><DetailField label="Owner">{risk.owner}</DetailField><DetailField label="Due">{formatDate(risk.dueDate)}</DetailField></div>
                         {risk.mitigationResolution && <p className="mt-3 rounded-xl bg-slate-50 p-3 text-sm"><strong>Mitigation:</strong> {risk.mitigationResolution}</p>}
-                        {detail.permissions?.canManage && !["Resolved", "Closed"].includes(risk.status) && <button onClick={() => void run(() => updateMilestoneRisk(detail.id, risk.id, { status: "Resolved" }), "Risk or issue resolved.")} className="mt-3 rounded-lg border px-3 py-2 text-xs font-semibold">Mark resolved</button>}
+                        {detail.permissions?.canManage && !["Resolved", "Closed"].includes(risk.status) && <button type="button" onClick={() => void runDetailAction(() => updateMilestoneRisk(detail.id, risk.id, { status: "Resolved" }), "Risk or issue resolved.")} className="mt-3 rounded-lg border px-3 py-2 text-xs font-semibold">Mark resolved</button>}
                       </section>
                     ))}
                   </div>
@@ -691,7 +908,7 @@ const ProjectManagementMilestones = () => {
                   {(detail.activity || []).map((event) => (
                     <section key={event.id} className={`${cardClass} flex gap-3 p-4`}>
                       <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-indigo-50 text-indigo-600"><Activity className="h-4 w-4" /></div>
-                      <div><p className="font-semibold">{event.action}</p><p className="text-xs text-slate-500">{event.actor || "System"} · {formatDate(event.createdAt)}</p>{event.after && <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-slate-50 p-2 text-xs">{JSON.stringify(event.after, null, 2)}</pre>}</div>
+                      <div className="min-w-0"><p className="font-semibold capitalize">{activityActionLabel(event.action)}</p><p className="text-xs text-slate-500">{event.actor || "System"} · {formatDate(event.createdAt)}</p>{activityDescription(event) && <p className="mt-2 text-sm text-slate-600">{activityDescription(event)}</p>}</div>
                     </section>
                   ))}
                   {!detail.activity?.length && <p className={`${cardClass} p-12 text-center text-slate-500`}>No milestone activity has been recorded yet.</p>}
@@ -705,8 +922,9 @@ const ProjectManagementMilestones = () => {
       {form && (
         <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/50 p-4">
           <div className="max-h-[94vh] w-full max-w-4xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-            <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-white p-5"><div><p className="text-xs font-bold text-indigo-600">{form.id ? form.milestoneNumber : "NEW CHECKPOINT"}</p><h2 className="text-xl font-bold">{form.id ? "Update" : "Create"} Milestone</h2></div><button onClick={() => setForm(null)}><X /></button></header>
+            <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-white p-5"><div><p className="text-xs font-bold text-indigo-600">{form.id ? form.milestoneNumber : "NEW CHECKPOINT"}</p><h2 className="text-xl font-bold">{form.id ? "Update" : "Create"} Milestone</h2></div><button type="button" onClick={() => setForm(null)}><X /></button></header>
             <div className="grid gap-4 p-5 md:grid-cols-2">
+              {formError && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 md:col-span-2">{formError}</p>}
               <label className="text-sm font-medium">Project *<select disabled={Boolean(form.id)} className={`${inputClass} mt-1`} value={form.projectId} onChange={(event) => setForm({ ...form, projectId: event.target.value, taskIds: [], dependencyIds: [], reportIds: [] })}><option value="">Select project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
               <label className="text-sm font-medium">Milestone name *<input className={`${inputClass} mt-1`} value={form.name || ""} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
               <label className="text-sm font-medium">Project stage *<select className={`${inputClass} mt-1`} value={form.stage || "Design"} onChange={(event) => setForm({ ...form, stage: event.target.value })}>{stageOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
@@ -723,7 +941,7 @@ const ProjectManagementMilestones = () => {
               <label className="text-sm font-medium md:col-span-2">Explicit report links<select multiple className={`${inputClass} mt-1 min-h-28`} value={(form.reportIds || []).map(String)} onChange={(event) => setForm({ ...form, reportIds: Array.from(event.target.selectedOptions).map((option) => Number(option.value)) })}>{projectReports.map((report) => <option key={report.id} value={report.id}>{report.reportNumber} — {formatDate(report.reportDate)}</option>)}</select></label>
               <label className="text-sm font-medium md:col-span-2">Notes<textarea rows="2" className={`${inputClass} mt-1`} value={form.notes || ""} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
             </div>
-            <footer className="sticky bottom-0 flex justify-end gap-2 border-t bg-white p-5"><button onClick={() => setForm(null)} className="rounded-xl border px-4 py-2.5">Cancel</button><button disabled={busy} onClick={() => void saveMilestone()} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Save Milestone</button></footer>
+            <footer className="sticky bottom-0 flex justify-end gap-2 border-t bg-white p-5"><button type="button" onClick={() => setForm(null)} className="rounded-xl border px-4 py-2.5">Cancel</button><button type="button" disabled={busy} onClick={() => void saveMilestone()} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Save Milestone</button></footer>
           </div>
         </div>
       )}
@@ -737,22 +955,23 @@ const ProjectManagementMilestones = () => {
                 <h2 className="mt-1 text-xl font-bold">Create Task under {detail.name}</h2>
                 <p className="mt-1 text-sm text-slate-500">This task will stay linked to this milestone and contribute to its progress.</p>
               </div>
-              <button onClick={() => setTaskForm(null)}><X /></button>
+              <button type="button" onClick={() => setTaskForm(null)}><X /></button>
             </header>
             <div className="grid gap-4 p-5 md:grid-cols-2">
+              {taskError && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 md:col-span-2">{taskError}</p>}
               <label className="text-sm font-medium md:col-span-2">Task name *<input className={`${inputClass} mt-1`} value={taskForm.taskName} onChange={(event) => setTaskForm({ ...taskForm, taskName: event.target.value })} /></label>
               <label className="text-sm font-medium md:col-span-2">Description<textarea rows="3" className={`${inputClass} mt-1`} value={taskForm.description} onChange={(event) => setTaskForm({ ...taskForm, description: event.target.value })} /></label>
               <label className="text-sm font-medium">Assigned employee<input className={`${inputClass} mt-1`} value={taskForm.assignedEmployeeName} onChange={(event) => setTaskForm({ ...taskForm, assignedEmployeeName: event.target.value })} /></label>
               <label className="text-sm font-medium">Priority<select className={`${inputClass} mt-1`} value={taskForm.priority} onChange={(event) => setTaskForm({ ...taskForm, priority: event.target.value })}>{priorities.slice(1).map((value) => <option key={value}>{value}</option>)}</select></label>
               <label className="text-sm font-medium">Start date<DateInput value={taskForm.startDate} onChange={(value) => setTaskForm({ ...taskForm, startDate: value || "" })} /></label>
-              <label className="text-sm font-medium">Due date *<DateInput value={taskForm.dueDate} onChange={(value) => setTaskForm({ ...taskForm, dueDate: value || "" })} /></label>
+              <label className="text-sm font-medium">Due date<DateInput value={taskForm.dueDate} onChange={(value) => setTaskForm({ ...taskForm, dueDate: value || "" })} /></label>
               <label className="text-sm font-medium">Estimated hours<input type="number" min="0" className={`${inputClass} mt-1`} value={taskForm.estimatedHours} onChange={(event) => setTaskForm({ ...taskForm, estimatedHours: event.target.value })} /></label>
               <label className="text-sm font-medium">Dependencies<input className={`${inputClass} mt-1`} value={taskForm.dependencies} onChange={(event) => setTaskForm({ ...taskForm, dependencies: event.target.value })} /></label>
               <label className="text-sm font-medium md:col-span-2">Remarks<textarea rows="2" className={`${inputClass} mt-1`} value={taskForm.remarks} onChange={(event) => setTaskForm({ ...taskForm, remarks: event.target.value })} /></label>
             </div>
             <footer className="flex justify-end gap-2 border-t p-5">
-              <button onClick={() => setTaskForm(null)} className="rounded-xl border px-4 py-2.5">Cancel</button>
-              <button disabled={busy} onClick={() => void saveTask()} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Create Task</button>
+              <button type="button" onClick={() => setTaskForm(null)} className="rounded-xl border px-4 py-2.5">Cancel</button>
+              <button type="button" disabled={busy} onClick={() => void saveTask()} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Create Task</button>
             </footer>
           </div>
         </div>
@@ -760,9 +979,10 @@ const ProjectManagementMilestones = () => {
 
       {riskForm && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/50 p-4">
-          <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl">
-            <header className="flex items-center justify-between border-b p-5"><h2 className="text-xl font-bold">{riskForm.id ? "Update" : "Add"} Risk or Issue</h2><button onClick={() => setRiskForm(null)}><X /></button></header>
+          <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+            <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-white p-5"><h2 className="text-xl font-bold">{riskForm.id ? "Update" : "Add"} Risk or Issue</h2><button type="button" onClick={() => setRiskForm(null)}><X /></button></header>
             <div className="grid gap-4 p-5 md:grid-cols-2">
+              {riskError && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 md:col-span-2">{riskError}</p>}
               <label className="text-sm font-medium">Type<select className={`${inputClass} mt-1`} value={riskForm.type} onChange={(event) => setRiskForm({ ...riskForm, type: event.target.value })}>{["Risk", "Issue", "Blocker"].map((value) => <option key={value}>{value}</option>)}</select></label>
               <label className="text-sm font-medium">Severity<select className={`${inputClass} mt-1`} value={riskForm.severity} onChange={(event) => setRiskForm({ ...riskForm, severity: event.target.value })}>{priorities.slice(1).map((value) => <option key={value}>{value}</option>)}</select></label>
               <label className="text-sm font-medium md:col-span-2">Title *<input className={`${inputClass} mt-1`} value={riskForm.title} onChange={(event) => setRiskForm({ ...riskForm, title: event.target.value })} /></label>
@@ -772,7 +992,7 @@ const ProjectManagementMilestones = () => {
               <label className="text-sm font-medium">Status<select className={`${inputClass} mt-1`} value={riskForm.status} onChange={(event) => setRiskForm({ ...riskForm, status: event.target.value })}>{["Open", "In Progress", "Resolved", "Closed"].map((value) => <option key={value}>{value}</option>)}</select></label>
               <label className="text-sm font-medium md:col-span-2">Mitigation / resolution<textarea className={`${inputClass} mt-1`} rows="3" value={riskForm.mitigationResolution || ""} onChange={(event) => setRiskForm({ ...riskForm, mitigationResolution: event.target.value })} /></label>
             </div>
-            <footer className="flex justify-end gap-2 border-t p-5"><button onClick={() => setRiskForm(null)} className="rounded-xl border px-4 py-2">Cancel</button><button onClick={() => void saveRisk()} className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white">Save</button></footer>
+            <footer className="sticky bottom-0 flex justify-end gap-2 border-t bg-white p-5"><button type="button" onClick={() => setRiskForm(null)} className="rounded-xl border px-4 py-2">Cancel</button><button type="button" disabled={busy} onClick={() => void saveRisk()} className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white disabled:opacity-60">Save</button></footer>
           </div>
         </div>
       )}

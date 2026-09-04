@@ -214,7 +214,6 @@ const validate = (form, project) => {
   if (!form.reportDate) return "Report date is required.";
   if (!form.shift) return "Shift is required.";
   if (!form.preparedBy.trim()) return "Prepared by is required.";
-  if (!form.workCompleted.trim()) return "Work performed today is required.";
   if (
     form.taskRows.length > 0 &&
     !form.taskRows.some((row) => row.workCompleted.trim())
@@ -1205,7 +1204,7 @@ const ProjectManagementSiteReports = () => {
                 <div className="grid gap-3 md:grid-cols-2">
                   {[
                     ["summary", "Executive Summary"],
-                    ["workCompleted", "Work Performed Today *"],
+                    ["workCompleted", "Work Performed Today"],
                     ["tomorrowPlan", "Tomorrow's Plan"],
                     ["delays", "Delays / Constraints"],
                     ["observations", "General Observations"],

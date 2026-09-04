@@ -797,22 +797,41 @@ const reportFromRow = (row = {}) => {
   };
 };
 
-const loadReports = async (reportId = null) => {
+const loadReports = async (reportId = null, projectId = null) => {
   const pool = await getPool();
-  const result = await pool.request().input("ReportId", sql.Int, reportId).query(`
+  const result = await pool.request()
+    .input("ReportId", sql.Int, reportId)
+    .input("ReportProjectId", sql.Int, projectId)
+    .query(`
     SELECT r.*,p.ProjectName AS ResolvedProjectName,s.FullName AS SubmittedByName,a.FullName AS ApprovedByName
     FROM dbo.DailySiteReports r JOIN dbo.Projects p ON p.ProjectId=r.ProjectId
     JOIN dbo.AppUsers s ON s.UserId=r.SubmittedBy
     LEFT JOIN dbo.AppUsers a ON a.UserId=r.ApprovedBy
-    WHERE @ReportId IS NULL OR r.ReportId=@ReportId ORDER BY r.ReportDate DESC,r.ReportId DESC;
+    WHERE (@ReportId IS NULL OR r.ReportId=@ReportId)
+      AND (@ReportProjectId IS NULL OR r.ProjectId=@ReportProjectId)
+    ORDER BY r.ReportDate DESC,r.ReportId DESC;
     SELECT rt.*,t.TaskName,t.AssignedEmployeeName FROM dbo.DailySiteReportTasks rt
     JOIN dbo.ProjectTasks t ON t.TaskId=rt.TaskId
-    WHERE @ReportId IS NULL OR rt.ReportId=@ReportId;
-    SELECT * FROM dbo.DailySiteReportDetails WHERE @ReportId IS NULL OR ReportId=@ReportId;
+    JOIN dbo.DailySiteReports r ON r.ReportId=rt.ReportId
+    WHERE (@ReportId IS NULL OR rt.ReportId=@ReportId)
+      AND (@ReportProjectId IS NULL OR r.ProjectId=@ReportProjectId);
+    SELECT d.* FROM dbo.DailySiteReportDetails d
+    JOIN dbo.DailySiteReports r ON r.ReportId=d.ReportId
+    WHERE (@ReportId IS NULL OR d.ReportId=@ReportId)
+      AND (@ReportProjectId IS NULL OR r.ProjectId=@ReportProjectId);
     SELECT AttachmentId,ReportId,FileName,ContentType,FileSize,Category,Caption,UploadedAt
-    FROM dbo.DailySiteReportAttachments WHERE @ReportId IS NULL OR ReportId=@ReportId;
-    SELECT MilestoneReportLinkId,MilestoneId,ReportId FROM dbo.MilestoneReportLinks
-    WHERE @ReportId IS NULL OR ReportId=@ReportId;
+    FROM dbo.DailySiteReportAttachments a
+    WHERE (@ReportId IS NULL OR a.ReportId=@ReportId)
+      AND (@ReportProjectId IS NULL OR EXISTS(
+        SELECT 1 FROM dbo.DailySiteReports r
+        WHERE r.ReportId=a.ReportId AND r.ProjectId=@ReportProjectId
+      ));
+    SELECT l.MilestoneReportLinkId,l.MilestoneId,l.ReportId FROM dbo.MilestoneReportLinks l
+    WHERE (@ReportId IS NULL OR l.ReportId=@ReportId)
+      AND (@ReportProjectId IS NULL OR EXISTS(
+        SELECT 1 FROM dbo.DailySiteReports r
+        WHERE r.ReportId=l.ReportId AND r.ProjectId=@ReportProjectId
+      ));
   `);
   const reports = (result.recordsets[0] || []).map(reportFromRow);
   const byId = new Map(reports.map((report) => [report.id, report]));
@@ -1056,14 +1075,17 @@ const loadDocumentDetail = async (documentId, user) => {
 };
 
 const loadMilestoneDetail = async (milestoneId, user, activityPage = 1) => {
-  const projects = await loadProjectGraphs();
-  const project = projects.find((item) =>
-    item.milestones.some((milestone) => Number(milestone.id) === Number(milestoneId))
-  );
+  const pool = await getPool();
+  const milestoneProject = await pool.request()
+    .input("MilestoneLookupId", sql.Int, milestoneId)
+    .query(`SELECT ProjectId FROM dbo.ProjectMilestones
+      WHERE MilestoneId=@MilestoneLookupId AND IsDeleted=0`);
+  const projectId = milestoneProject.recordset[0]?.ProjectId;
+  if (!projectId) return null;
+  const [project] = await loadProjectGraphs(projectId);
   const milestone = project?.milestones.find((item) => Number(item.id) === Number(milestoneId));
   if (!project || !milestone) return null;
   const page = Math.max(idValue(activityPage) || 1, 1);
-  const pool = await getPool();
   const result = await pool.request()
     .input("MilestoneId", sql.Int, milestoneId)
     .input("Offset", sql.Int, (page - 1) * 25)
@@ -1120,7 +1142,7 @@ const loadMilestoneDetail = async (milestoneId, user, activityPage = 1) => {
         AND ae.TargetId=CONVERT(NVARCHAR(100),@MilestoneId);
     `);
   const reportLinks = new Map((result.recordsets[2] || []).map((row) => [row.ReportId, row]));
-  const reports = (await loadReports()).filter((report) => reportLinks.has(report.id)).map((report) => {
+  const reports = (await loadReports(null, projectId)).filter((report) => reportLinks.has(report.id)).map((report) => {
     const link = reportLinks.get(report.id);
     const associationSources = [
       link.IsTaskDerived ? "Task derived" : null,
@@ -2179,7 +2201,14 @@ export const createProjectManagementRouter = () => {
         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
         SELECT COUNT(*) AS Total FROM dbo.ProjectDocuments d WHERE ${where};
         SELECT d.Status,COUNT(*) AS Total FROM dbo.ProjectDocuments d
-        WHERE d.IsDeleted=0 GROUP BY d.Status;
+        WHERE ${where} GROUP BY d.Status;
+        SELECT d.Category,d.CustomCategory,COUNT(*) AS Total
+        FROM dbo.ProjectDocuments d WHERE ${where}
+        GROUP BY d.Category,d.CustomCategory ORDER BY Total DESC,d.Category;
+        SELECT d.ProjectId AS id,p.projectName AS name,p.ProjectCode AS code,COUNT(*) AS Total
+        FROM dbo.ProjectDocuments d JOIN dbo.Projects p ON p.ProjectId=d.ProjectId
+        WHERE ${where} GROUP BY d.ProjectId,p.projectName,p.ProjectCode
+        ORDER BY Total DESC,p.projectName;
       `);
       return res.json({
         ok: true,
@@ -2194,6 +2223,96 @@ export const createProjectManagementRouter = () => {
         documents: (result.recordsets[0] || []).map((row) => documentFromRow(row, req.user)),
         pagination: { page, pageSize, total: Number(result.recordsets[1]?.[0]?.Total || 0) },
         statusCounts: Object.fromEntries((result.recordsets[2] || []).map((row) => [row.Status, Number(row.Total)])),
+        overview: {
+          categories: (result.recordsets[3] || []).map((row) => ({
+            name: row.Category === "Other" ? row.CustomCategory || "Other" : row.Category,
+            total: Number(row.Total || 0),
+          })),
+          projects: (result.recordsets[4] || []).map((row) => ({
+            id: row.id,
+            name: row.name,
+            code: row.code || "",
+            total: Number(row.Total || 0),
+          })),
+        },
+      });
+    } catch (error) { return next(error); }
+  });
+
+  router.get("/documents/report", async (req, res, next) => {
+    try {
+      const pool = await getPool();
+      const request = pool.request()
+        .input("ProjectId", sql.Int, idValue(req.query.projectId))
+        .input("Category", sql.NVarChar(100), textValue(req.query.category))
+        .input("Status", sql.NVarChar(20), textValue(req.query.status))
+        .input("Discipline", sql.NVarChar(100), textValue(req.query.discipline))
+        .input("DateFrom", sql.Date, dateValue(req.query.dateFrom))
+        .input("DateTo", sql.Date, dateValue(req.query.dateTo))
+        .input("Search", sql.NVarChar(300), textValue(req.query.search));
+      const where = `
+        d.IsDeleted=0
+        AND (@ProjectId IS NULL OR d.ProjectId=@ProjectId)
+        AND (@Category IS NULL OR d.Category=@Category)
+        AND (@Status IS NULL OR d.Status=@Status)
+        AND (@Discipline IS NULL OR d.Discipline=@Discipline)
+        AND (@DateFrom IS NULL OR d.DocumentDate>=@DateFrom)
+        AND (@DateTo IS NULL OR d.DocumentDate<=@DateTo)
+        AND (@Search IS NULL OR d.DocumentName LIKE N'%'+@Search+N'%'
+          OR d.DocumentNumber LIKE N'%'+@Search+N'%'
+          OR d.ExternalReference LIKE N'%'+@Search+N'%'
+          OR EXISTS(SELECT 1 FROM dbo.DocumentLinks dl
+            WHERE dl.DocumentId=d.DocumentId AND dl.LinkType=N'Milestone'
+              AND dl.LinkLabel LIKE N'%'+@Search+N'%'))`;
+      const result = await request.query(`
+        ${documentSelectSql} WHERE ${where}
+        ORDER BY d.ProjectId,d.DocumentNumber;
+
+        SELECT l.DocumentId,l.DocumentLinkId AS id,l.LinkType AS type,
+          l.LinkId AS linkId,l.LinkLabel AS label,l.CreatedAt AS createdAt,
+          u.FullName AS createdBy
+        FROM dbo.DocumentLinks l
+        JOIN dbo.ProjectDocuments d ON d.DocumentId=l.DocumentId
+        LEFT JOIN dbo.AppUsers u ON u.UserId=l.CreatedBy
+        WHERE ${where} ORDER BY l.DocumentId,l.LinkType,l.LinkLabel;
+
+        SELECT rv.DocumentId,rv.DocumentRevisionId AS id,
+          rv.RevisionNumber AS revision,rv.RevisionLabel AS revisionLabel,
+          rv.FileName AS fileName,rv.ContentType AS contentType,
+          rv.FileSize AS fileSize,rv.ClientRevisionReference AS clientRevisionReference,
+          rv.ChangeSummary AS changeSummary,rv.Remarks AS remarks,rv.Status AS status,
+          u.FullName AS uploadedBy,rv.UploadedAt AS uploadedAt,
+          a.FullName AS approvedBy,rv.ApprovedAt AS approvedAt,
+          r.FullName AS rejectedBy,rv.RejectedAt AS rejectedAt,
+          rv.RejectionReason AS rejectionReason
+        FROM dbo.DocumentRevisions rv
+        JOIN dbo.ProjectDocuments d ON d.DocumentId=rv.DocumentId
+        JOIN dbo.AppUsers u ON u.UserId=rv.UploadedBy
+        LEFT JOIN dbo.AppUsers a ON a.UserId=rv.ApprovedBy
+        LEFT JOIN dbo.AppUsers r ON r.UserId=rv.RejectedBy
+        WHERE ${where} ORDER BY rv.DocumentId,rv.RevisionNumber DESC;
+      `);
+      const linksByDocument = new Map();
+      for (const link of result.recordsets[1] || []) {
+        const links = linksByDocument.get(link.DocumentId) || [];
+        links.push(link);
+        linksByDocument.set(link.DocumentId, links);
+      }
+      const revisionsByDocument = new Map();
+      for (const revision of result.recordsets[2] || []) {
+        const revisions = revisionsByDocument.get(revision.DocumentId) || [];
+        revisions.push(revision);
+        revisionsByDocument.set(revision.DocumentId, revisions);
+      }
+      const documents = (result.recordsets[0] || []).map((row) => ({
+        ...documentFromRow(row, req.user),
+        links: linksByDocument.get(row.DocumentId) || [],
+        revisions: revisionsByDocument.get(row.DocumentId) || [],
+      }));
+      return res.json({
+        ok: true,
+        generatedAt: new Date().toISOString(),
+        documents,
       });
     } catch (error) { return next(error); }
   });
@@ -2499,8 +2618,8 @@ export const createProjectManagementRouter = () => {
       const input = req.body || {};
       const projectId = idValue(input.projectId);
       const work = textValue(input.workCompleted) || textValue(input.summary);
-      if (!projectId || !input.reportDate || !work) {
-        return res.status(400).json({ ok: false, error: "Project, report date, and work performed are required" });
+      if (!projectId || !input.reportDate) {
+        return res.status(400).json({ ok: false, error: "Project and report date are required" });
       }
       const pool = await getPool(); transaction = pool.transaction(); await transaction.begin();
       let reportId = idValue(req.params.reportId);

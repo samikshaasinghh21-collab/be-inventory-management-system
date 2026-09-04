@@ -1,7 +1,7 @@
 import { createElement, useEffect, useMemo, useState } from "react";
 import {
   Archive, CheckCircle2, ChevronLeft, ChevronRight, Download, Eye, FileText,
-  History, Link2, Pencil, Plus, RefreshCw, Search, Send, ShieldCheck, Tags,
+  FileSpreadsheet, History, Link2, Pencil, Plus, RefreshCw, Search, Send, ShieldCheck, Tags,
   Trash2, Upload, X, XCircle,
 } from "lucide-react";
 import { hydrateProjectManagementProjects } from "../../services/projectManagementProjectsStore";
@@ -11,6 +11,7 @@ import {
   downloadAuthenticatedFile,
   fetchDocumentDetails,
   fetchDocumentLinkOptions,
+  fetchDocumentReport,
   fetchDocumentRevisionBlob,
   fetchDocuments,
   rejectDocument,
@@ -78,6 +79,28 @@ const bytes = (value) => {
 
 const errorText = (error, fallback) =>
   error?.response?.data?.error || error?.message || fallback;
+
+const reportDate = (value, includeTime = false) => {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return includeTime ? parsed.toLocaleString("en-IN") : parsed.toLocaleDateString("en-IN");
+};
+
+const appendReportSheet = (XLSX, workbook, name, rows, emptyHeaders) => {
+  const worksheet = rows.length
+    ? XLSX.utils.json_to_sheet(rows)
+    : XLSX.utils.aoa_to_sheet([emptyHeaders]);
+  const columnNames = rows.length ? Object.keys(rows[0]) : emptyHeaders;
+  worksheet["!cols"] = columnNames.map((columnName) => ({
+    wch: Math.min(60, Math.max(
+      String(columnName).length + 2,
+      ...rows.slice(0, 250).map((row) => String(row[columnName] ?? "").length + 2)
+    )),
+  }));
+  if (worksheet["!ref"]) worksheet["!autofilter"] = { ref: worksheet["!ref"] };
+  XLSX.utils.book_append_sheet(workbook, worksheet, name);
+};
 
 const Badge = ({ status }) => (
   <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone[status] || statusTone.Draft}`}>
@@ -220,6 +243,7 @@ const ProjectManagementDocuments = () => {
   const [permissions, setPermissions] = useState({});
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
   const [statusCounts, setStatusCounts] = useState({});
+  const [reportOverview, setReportOverview] = useState({ projects: [], categories: [] });
   const [filters, setFilters] = useState({ search: "", projectId: "", category: "", status: "", discipline: "" });
   const [sort, setSort] = useState({ field: "updatedAt", direction: "desc" });
   const [form, setForm] = useState(null);
@@ -230,6 +254,7 @@ const ProjectManagementDocuments = () => {
   const [preview, setPreview] = useState({ url: "", type: "", loading: false });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -246,6 +271,7 @@ const ProjectManagementDocuments = () => {
       setPermissions(result.permissions || {});
       setPagination(result.pagination || { page, pageSize: 50, total: 0 });
       setStatusCounts(result.statusCounts || {});
+      setReportOverview(result.overview || { projects: [], categories: [] });
     } catch (loadError) {
       setError(errorText(loadError, "Documents could not be loaded."));
     } finally { setLoading(false); }
@@ -273,6 +299,149 @@ const ProjectManagementDocuments = () => {
     draft: statusCounts.Draft || 0,
     review: statusCounts.Submitted || 0,
     approved: statusCounts.Approved || 0,
+    rejected: statusCounts.Rejected || 0,
+    superseded: statusCounts.Superseded || 0,
+  };
+
+  const exportReport = async () => {
+    if (!pagination.total || exporting) return;
+    setExporting(true); setError(""); setMessage("");
+    try {
+      const [report, xlsxModule] = await Promise.all([
+        fetchDocumentReport(filters),
+        import("xlsx"),
+      ]);
+      const XLSX = xlsxModule.default ?? xlsxModule;
+      const reportDocuments = report.documents || [];
+      const workbook = XLSX.utils.book_new();
+      const statusSummary = statuses.map((status) => [status, reportDocuments.filter((document) => document.status === status).length]);
+      const projectSummary = [...reportDocuments.reduce((summary, document) => {
+        const key = String(document.projectId);
+        const current = summary.get(key) || { name: document.projectName, code: document.projectCode, total: 0 };
+        current.total += 1;
+        summary.set(key, current);
+        return summary;
+      }, new Map()).values()].sort((left, right) => right.total - left.total || left.name.localeCompare(right.name));
+      const categorySummary = [...reportDocuments.reduce((summary, document) => {
+        const category = document.category === "Other" ? document.customCategory || "Other" : document.category;
+        summary.set(category, (summary.get(category) || 0) + 1);
+        return summary;
+      }, new Map()).entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+      const summaryRows = [
+        ["Project Management - Document Report"],
+        ["Generated at", reportDate(report.generatedAt, true)],
+        ["Total documents", reportDocuments.length],
+        ["Project filter", projects.find((project) => String(project.id) === String(filters.projectId))?.name || "All projects"],
+        ["Category filter", filters.category || "All categories"],
+        ["Status filter", filters.status || "All statuses"],
+        ["Search", filters.search || "None"],
+        [],
+        ["Workflow Status", "Documents"],
+        ...statusSummary,
+        [],
+        ["Project", "Code", "Documents"],
+        ...projectSummary.map((project) => [project.name, project.code, project.total]),
+        [],
+        ["Category", "Documents"],
+        ...categorySummary,
+      ];
+      const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
+      summarySheet["!cols"] = [{ wch: 34 }, { wch: 28 }, { wch: 14 }];
+      XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+
+      const documentRows = reportDocuments.map((document) => {
+        const currentRevision = document.revisions?.find(
+          (revision) => Number(revision.revision) === Number(document.revision)
+        ) || document.revisions?.[0] || {};
+        return {
+          "Document Number": document.documentNumber,
+          "Project Code": document.projectCode,
+          Project: document.projectName,
+          "Document Title": document.name,
+          Description: document.description,
+          Category: document.category === "Other" ? document.customCategory || "Other" : document.category,
+          Discipline: document.discipline,
+          "Document Date": reportDate(document.documentDate),
+          Status: document.status,
+          "Current Revision": document.revisionLabel,
+          "Issue Purpose": document.issuePurpose,
+          "External / Client Reference": document.externalReference,
+          "Responsible Person": document.responsiblePersonName,
+          Confidentiality: document.confidentiality,
+          Tags: (document.tags || []).join(", "),
+          "Linked Records": (document.links || []).map((link) => `${linkLabels[link.type] || link.type}: ${link.label}`).join("; "),
+          "Revision Count": document.revisions?.length || 0,
+          "Current File": currentRevision.fileName || "",
+          "Current File Type": currentRevision.contentType || "",
+          "Current File Size (Bytes)": Number(currentRevision.fileSize || 0),
+          "Client Revision Reference": currentRevision.clientRevisionReference || "",
+          "Current Change Summary": currentRevision.changeSummary || "",
+          "Current Revision Remarks": currentRevision.remarks || "",
+          "Uploaded By": document.uploadedBy,
+          "Uploaded At": reportDate(document.uploadedAt, true),
+          "Updated By": document.updatedBy,
+          "Updated At": reportDate(document.updatedAt, true),
+          "Submitted By": document.submittedBy,
+          "Submitted At": reportDate(document.submittedAt, true),
+          "Approved By": document.approvedBy,
+          "Approved At": reportDate(document.approvedAt, true),
+          "Rejected By": document.rejectedBy,
+          "Rejected At": reportDate(document.rejectedAt, true),
+          "Rejection Reason": document.rejectionReason,
+          "Superseded By": document.supersededBy,
+          "Superseded At": reportDate(document.supersededAt, true),
+          "Superseded Reason": document.supersededReason,
+        };
+      });
+      appendReportSheet(XLSX, workbook, "Document Register", documentRows, ["Document Number"]);
+
+      const revisionRows = reportDocuments.flatMap((document) => (document.revisions || []).map((revision) => ({
+        "Document Number": document.documentNumber,
+        "Project Code": document.projectCode,
+        Project: document.projectName,
+        "Document Title": document.name,
+        Revision: revision.revisionLabel,
+        Status: revision.status,
+        "File Name": revision.fileName,
+        "Content Type": revision.contentType,
+        "File Size (Bytes)": Number(revision.fileSize || 0),
+        "Client Revision Reference": revision.clientRevisionReference || "",
+        "Change Summary": revision.changeSummary || "",
+        Remarks: revision.remarks || "",
+        "Uploaded By": revision.uploadedBy || "",
+        "Uploaded At": reportDate(revision.uploadedAt, true),
+        "Approved By": revision.approvedBy || "",
+        "Approved At": reportDate(revision.approvedAt, true),
+        "Rejected By": revision.rejectedBy || "",
+        "Rejected At": reportDate(revision.rejectedAt, true),
+        "Rejection Reason": revision.rejectionReason || "",
+      })));
+      appendReportSheet(XLSX, workbook, "Revision History", revisionRows, ["Document Number", "Revision"]);
+
+      const linkRows = reportDocuments.flatMap((document) => (document.links || []).map((link) => ({
+        "Document Number": document.documentNumber,
+        "Project Code": document.projectCode,
+        Project: document.projectName,
+        "Document Title": document.name,
+        "Link Type": linkLabels[link.type] || link.type,
+        "Linked Record ID": link.linkId,
+        "Linked Record": link.label,
+        "Linked By": link.createdBy || "",
+        "Linked At": reportDate(link.createdAt, true),
+      })));
+      appendReportSheet(XLSX, workbook, "Linked Records", linkRows, ["Document Number", "Link Type", "Linked Record"]);
+
+      const projectCode = filters.projectId
+        ? projects.find((project) => String(project.id) === String(filters.projectId))?.code
+        : "all-projects";
+      const safeProject = String(projectCode || "all-projects").replace(/[^a-z0-9_-]+/gi, "-");
+      XLSX.writeFile(workbook, `document-report-${safeProject}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      setMessage(`Complete document report exported with ${reportDocuments.length} document(s).`);
+    } catch (exportError) {
+      setError(errorText(exportError, "The document report could not be exported."));
+    } finally {
+      setExporting(false);
+    }
   };
 
   const loadOptions = async (projectId) => {
@@ -412,6 +581,7 @@ const ProjectManagementDocuments = () => {
           <p className="mt-1 text-sm text-slate-500">Controlled files, immutable revisions, approvals, and links to project execution records.</p>
         </div>
         <div className="flex gap-2">
+          <button disabled={!pagination.total || exporting} onClick={exportReport} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="h-4 w-4" /> {exporting ? "Exporting..." : "Export Excel"}</button>
           <button onClick={() => load()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700"><RefreshCw className="h-4 w-4" /> Refresh</button>
           {permissions.canCreateSupporting && <button onClick={openCreate} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" /> Create Document</button>}
         </div>
@@ -420,11 +590,25 @@ const ProjectManagementDocuments = () => {
       {error && <div className="flex justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{error}</span><button onClick={() => setError("")}><X className="h-4 w-4" /></button></div>}
       {message && <div className="flex justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"><span>{message}</span><button onClick={() => setMessage("")}><X className="h-4 w-4" /></button></div>}
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         <Metric label="Active documents" value={metrics.total} icon={FileText} tone="bg-indigo-50 text-indigo-600" />
         <Metric label="Draft" value={metrics.draft} icon={Pencil} tone="bg-slate-100 text-slate-600" />
         <Metric label="Awaiting approval" value={metrics.review} icon={Send} tone="bg-blue-50 text-blue-600" />
         <Metric label="Approved" value={metrics.approved} icon={ShieldCheck} tone="bg-emerald-50 text-emerald-600" />
+        <Metric label="Rejected" value={metrics.rejected} icon={XCircle} tone="bg-rose-50 text-rose-600" />
+        <Metric label="Superseded" value={metrics.superseded} icon={Archive} tone="bg-amber-50 text-amber-600" />
+      </section>
+
+      <section className={`${cardClass} p-5`}>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div><p className="text-xs font-semibold uppercase tracking-widest text-indigo-500">Document report</p><h2 className="mt-1 text-lg font-bold text-slate-950">Overview</h2></div>
+          <p className="text-xs text-slate-500">All figures reflect the current filters, not only the visible page.</p>
+        </div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          <div className="rounded-xl bg-slate-50 p-4"><h3 className="text-sm font-semibold text-slate-800">Workflow status</h3><div className="mt-3 space-y-2">{statuses.map((status) => <div key={status} className="flex items-center justify-between gap-3 text-sm"><Badge status={status} /><span className="font-bold text-slate-800">{statusCounts[status] || 0}</span></div>)}</div></div>
+          <div className="rounded-xl bg-slate-50 p-4"><h3 className="text-sm font-semibold text-slate-800">Documents by project</h3><div className="mt-3 max-h-52 space-y-2 overflow-y-auto">{reportOverview.projects.map((project) => <div key={project.id} className="flex items-start justify-between gap-3 text-sm"><div><p className="font-medium text-slate-700">{project.name}</p><p className="text-xs text-slate-400">{project.code}</p></div><span className="font-bold text-slate-800">{project.total}</span></div>)}{!reportOverview.projects.length && <p className="text-sm text-slate-400">No project documents.</p>}</div></div>
+          <div className="rounded-xl bg-slate-50 p-4"><h3 className="text-sm font-semibold text-slate-800">Documents by category</h3><div className="mt-3 max-h-52 space-y-2 overflow-y-auto">{reportOverview.categories.map((category) => <div key={category.name} className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-slate-700">{category.name}</span><span className="font-bold text-slate-800">{category.total}</span></div>)}{!reportOverview.categories.length && <p className="text-sm text-slate-400">No document categories.</p>}</div></div>
+        </div>
       </section>
 
       <section className={`${cardClass} p-4`}>
@@ -501,11 +685,20 @@ const ProjectManagementDocuments = () => {
         <nav className="flex gap-1 overflow-x-auto border-b px-5">{[["overview", "Overview", FileText], ["links", "Linked Records", Link2], ["revisions", "Revisions", History], ["preview", "Preview", Eye], ["activity", "Activity", RefreshCw]].map(([key, label, Icon]) => <button key={key} onClick={() => { setDetailTab(key); if (key === "preview") void showPreview(); }} className={`inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold ${detailTab === key ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500"}`}>{createElement(Icon, { className: "h-4 w-4" })}{label}</button>)}</nav>
         <div className="flex-1 overflow-y-auto p-5">
           {detailTab === "overview" && <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[
-            ["Document number", selected.documentNumber], ["Category", selected.category === "Other" ? selected.customCategory : selected.category],
+            ["Document number", selected.documentNumber], ["Project", `${selected.projectName}${selected.projectCode ? ` (${selected.projectCode})` : ""}`],
+            ["Status", selected.status], ["Current revision", selected.revisionLabel],
+            ["Category", selected.category === "Other" ? selected.customCategory : selected.category],
             ["Discipline", selected.discipline || "—"], ["Document date", formatDate(selected.documentDate)], ["Issue purpose", selected.issuePurpose || "—"],
             ["External reference", selected.externalReference || "—"], ["Responsible person", selected.responsiblePersonName || "—"],
-            ["Confidentiality", selected.confidentiality], ["Uploaded by", `${selected.uploadedBy} · ${formatDate(selected.uploadedAt)}`],
+            ["Confidentiality", selected.confidentiality], ["Last updated", `${selected.updatedBy || "System"} · ${formatDate(selected.updatedAt)}`],
           ].map(([label, value]) => <div key={label} className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-medium text-slate-400">{label}</p><p className="mt-1 font-semibold text-slate-800">{value}</p></div>)}</div>
+            <section className="rounded-xl border p-4"><h3 className="font-semibold">Workflow history</h3><div className="mt-3 grid gap-3 sm:grid-cols-2">{[
+              ["Uploaded", selected.uploadedBy, selected.uploadedAt],
+              ["Submitted", selected.submittedBy, selected.submittedAt],
+              ["Approved", selected.approvedBy, selected.approvedAt],
+              ["Rejected", selected.rejectedBy, selected.rejectedAt],
+              ["Superseded", selected.supersededBy, selected.supersededAt],
+            ].filter(([, actor, occurredAt]) => actor || occurredAt).map(([label, actor, occurredAt]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-medium text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold text-slate-800">{actor || "System"}</p><p className="text-xs text-slate-500">{formatDate(occurredAt)}</p></div>)}</div></section>
             <section className="rounded-xl border p-4"><h3 className="font-semibold">Description</h3><p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{selected.description || "No description."}</p></section>
             <section className="rounded-xl border p-4"><div className="flex items-center gap-2"><Tags className="h-4 w-4" /><h3 className="font-semibold">Tags</h3></div><div className="mt-3 flex flex-wrap gap-2">{selected.tags?.map((tag) => <span key={tag} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{tag}</span>)}{!selected.tags?.length && <span className="text-sm text-slate-400">No tags</span>}</div></section>
             {selected.rejectionReason && <section className="rounded-xl border border-rose-200 bg-rose-50 p-4"><h3 className="font-semibold text-rose-800">Rejection reason</h3><p className="mt-1 text-sm text-rose-700">{selected.rejectionReason}</p></section>}

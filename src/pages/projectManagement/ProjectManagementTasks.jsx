@@ -35,6 +35,11 @@ const TASK_STATUS_OPTIONS = [
 ];
 
 const PRIORITY_OPTIONS = ["All", "Critical", "High", "Medium", "Low"];
+const TASK_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+const TASK_ATTACHMENT_EXTENSIONS = new Set([
+  "pdf", "jpg", "jpeg", "png", "webp", "dwg", "dxf", "docx", "xlsx",
+  "pptx", "txt", "csv", "zip",
+]);
 
 const inputClass =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100";
@@ -101,6 +106,31 @@ const getTaskProgress = (task = {}) => {
   return 0;
 };
 
+const validateTaskUpdate = (form, attachments = []) => {
+  const completion = Number(form.completionPercentage);
+  if (form.status === "Partial") {
+    if (!Number.isFinite(completion) || completion < 1 || completion > 99) {
+      return "Partial progress must be between 1% and 99%.";
+    }
+    if (!form.remainingWorkRemarks.trim()) {
+      return "Enter the remaining work before saving Partial progress.";
+    }
+  }
+  if (attachments.length > 8) {
+    return "Attach no more than 8 files to one task update.";
+  }
+  for (const file of attachments) {
+    const extension = String(file.name || "").split(".").pop()?.toLowerCase();
+    if (!TASK_ATTACHMENT_EXTENSIONS.has(extension)) {
+      return `${file.name} is not a supported attachment type.`;
+    }
+    if (file.size > TASK_ATTACHMENT_MAX_BYTES) {
+      return `${file.name} exceeds the 25 MB attachment limit.`;
+    }
+  }
+  return "";
+};
+
 const TaskUpdateModal = ({ task, onClose, onSaved }) => {
   const [form, setForm] = useState({
     status: getTaskStatus(task),
@@ -120,20 +150,49 @@ const TaskUpdateModal = ({ task, onClose, onSaved }) => {
     void fetchTaskHistory(task.id).then((result) => setHistory(result.history || [])).catch(() => {});
   }, [task.id]);
 
-  const setField = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const setField = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setError("");
+  };
   const changeStatus = (status) => {
     setForm((current) => ({
       ...current,
       status,
       completionPercentage:
-        status === "Completed" ? 100 : status === "Pending" ? 0 : current.completionPercentage,
+        status === "Completed"
+          ? 100
+          : status === "Pending"
+            ? 0
+            : status === "Partial" &&
+                (Number(current.completionPercentage) < 1 ||
+                  Number(current.completionPercentage) > 99)
+              ? 1
+              : current.completionPercentage,
     }));
+    setError("");
   };
   const save = async () => {
+    const validationError = validateTaskUpdate(form, attachments);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     setSaving(true);
     setError("");
     try {
-      await updateProjectTask(task.id, form, attachments);
+      await updateProjectTask(
+        task.id,
+        {
+          ...form,
+          completionPercentage:
+            form.status === "Completed"
+              ? 100
+              : form.status === "Pending"
+                ? 0
+                : percentValue(form.completionPercentage),
+        },
+        attachments
+      );
       await onSaved();
       onClose();
     } catch (saveError) {
@@ -174,6 +233,9 @@ const TaskUpdateModal = ({ task, onClose, onSaved }) => {
               Remaining-work remarks *
               <textarea className={`${inputClass} mt-1`} rows="3" value={form.remainingWorkRemarks}
                 onChange={(event) => setField("remainingWorkRemarks", event.target.value)} />
+              <span className="mt-1 block text-xs font-normal text-slate-500">
+                Required for Partial status; record what work is still pending.
+              </span>
             </label>
           )}
           <label className="text-sm font-medium text-slate-700">
@@ -199,7 +261,14 @@ const TaskUpdateModal = ({ task, onClose, onSaved }) => {
           <label className="text-sm font-medium text-slate-700 md:col-span-2">
             Attachments
             <input className={`${inputClass} mt-1`} type="file" multiple
-              onChange={(event) => setAttachments(Array.from(event.target.files || []))} />
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.dwg,.dxf,.docx,.xlsx,.pptx,.txt,.csv,.zip"
+              onChange={(event) => {
+                setAttachments(Array.from(event.target.files || []));
+                setError("");
+              }} />
+            <span className="mt-1 block text-xs font-normal text-slate-500">
+              PDF, image, drawing, Office, text, CSV, or ZIP files up to 25 MB each.
+            </span>
           </label>
           {error && <p className="md:col-span-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
           <section className="md:col-span-2">

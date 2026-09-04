@@ -34,6 +34,7 @@ import DateInput from "../../components/common/DateInput";
 import { fetchCustomers } from "../../services/customersApi";
 import { fetchHrmsEmployees } from "../../services/hrmsEmployeesApi";
 import { fetchLocations } from "../../services/locationsApi";
+import { fetchProjects as fetchInventoryProjects } from "../../services/projectsApi";
 import {
   PROJECT_MANAGEMENT_PROJECTS_EVENT,
   hydrateProjectManagementProjects,
@@ -124,6 +125,7 @@ const priorityStyles = {
 };
 
 const emptyProjectForm = {
+  inventoryProjectId: "",
   name: "",
   code: "",
   client: "",
@@ -708,6 +710,7 @@ const buildActivity = (form, existing = [], mode = "created") => [
 
 const mapProjectToForm = (project = {}) => ({
   ...emptyProjectForm,
+  inventoryProjectId: project.inventoryProjectId || project.id || "",
   name: project.name || "",
   code: project.code || "",
   client: project.client || project.companyName || "",
@@ -776,6 +779,8 @@ const buildProjectPayload = (form, existingProject = null) => {
   return {
     ...(existingProject || {}),
     id: existingProject?.id ?? makeId("pm"),
+    inventoryProjectId:
+      form.inventoryProjectId || existingProject?.inventoryProjectId || null,
     name: form.name.trim().toUpperCase(),
     code: form.code.trim().toUpperCase(),
     customerId: form.customerId || null,
@@ -970,6 +975,8 @@ const ProjectFormModal = ({
   isOpen,
   mode,
   project,
+  inventoryProjects,
+  inventoryProjectsError,
   customers,
   employees,
   locations,
@@ -1006,6 +1013,16 @@ const ProjectFormModal = ({
           "Unnamed location",
       })),
     [locations]
+  );
+  const inventoryProjectSelectOptions = useMemo(
+    () =>
+      inventoryProjects.map((inventoryProject) => ({
+        value: String(inventoryProject.id),
+        label: [inventoryProject.name, inventoryProject.code]
+          .filter(Boolean)
+          .join(" - ") || "Unnamed project",
+      })),
+    [inventoryProjects]
   );
 
   if (!isOpen) return null;
@@ -1059,6 +1076,63 @@ const ProjectFormModal = ({
     if (errors.client) {
       setErrors((prev) => ({ ...prev, client: undefined }));
     }
+  };
+
+  const updateInventoryProject = (inventoryProjectId) => {
+    const selectedProject =
+      inventoryProjects.find(
+        (inventoryProject) =>
+          String(inventoryProject.id) === String(inventoryProjectId)
+      ) || null;
+    const selectedCustomer = selectedProject
+      ? customers.find(
+          (customer) =>
+            String(customer.id) === String(selectedProject.customerId)
+        ) || null
+      : null;
+
+    setForm((prev) => ({
+      ...prev,
+      inventoryProjectId: selectedProject ? String(selectedProject.id) : "",
+      name: selectedProject?.name || "",
+      code: selectedProject?.code || "",
+      customerId: selectedProject?.customerId
+        ? String(selectedProject.customerId)
+        : "",
+      clientId: selectedProject?.customerId
+        ? String(selectedProject.customerId)
+        : "",
+      client:
+        getCustomerPrimaryName(selectedCustomer) || selectedProject?.client || "",
+      companyName:
+        selectedCustomer?.companyName || selectedProject?.companyName || "",
+      customerAddress: selectedCustomer?.address || selectedProject?.address || "",
+      customerGstNumber:
+        selectedCustomer?.gstNumber || selectedProject?.gstNumber || "",
+      customerPhone: selectedCustomer?.phone || selectedProject?.phone || "",
+      customerEmail: selectedCustomer?.email || selectedProject?.email || "",
+      customerContactPerson:
+        selectedCustomer?.contactPerson || selectedProject?.contactPerson || "",
+      customerDesignation:
+        selectedCustomer?.designation || selectedProject?.designation || "",
+      description: selectedProject?.description || selectedProject?.notes || "",
+      startDate: selectedProject?.startDate || "",
+      endDate: selectedProject?.endDate || "",
+      status: CREATE_STATUS_OPTIONS.includes(
+        normalizeProjectStatus(selectedProject?.status)
+      )
+        ? normalizeProjectStatus(selectedProject.status)
+        : prev.status,
+    }));
+    setErrors((prev) => ({
+      ...prev,
+      name: undefined,
+      code: selectedProject?.code ? undefined : prev.code,
+      client:
+        selectedProject?.customerId || selectedProject?.client
+          ? undefined
+          : prev.client,
+    }));
   };
 
   const updateEmployee = (field, idField, employeeId) => {
@@ -1185,14 +1259,39 @@ const ProjectFormModal = ({
                 />
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field label="Project Name" required error={errors.name}>
-                    <input
-                      value={form.name}
-                      onChange={(event) =>
-                        updateField("name", event.target.value.toUpperCase())
-                      }
-                      className={inputClass}
-                      placeholder="Ex: Metro control panel upgrade"
-                    />
+                    {mode === "create" ? (
+                      <>
+                        <SelectField
+                          value={form.inventoryProjectId}
+                          onChange={updateInventoryProject}
+                        >
+                          <option value="">
+                            {inventoryProjects.length
+                              ? "Select inventory project"
+                              : "No inventory projects available"}
+                          </option>
+                          {inventoryProjectSelectOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </SelectField>
+                        {inventoryProjectsError ? (
+                          <p className="mt-1 text-xs font-medium text-amber-700">
+                            {inventoryProjectsError}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <input
+                        value={form.name}
+                        onChange={(event) =>
+                          updateField("name", event.target.value.toUpperCase())
+                        }
+                        className={inputClass}
+                        placeholder="Ex: Metro control panel upgrade"
+                      />
+                    )}
                   </Field>
                   <Field label="Project Code" required error={errors.code}>
                     <input
@@ -1504,20 +1603,72 @@ const ProjectFormModal = ({
                   subtitle="Site address, city, state, and contact ownership."
                 />
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="Project Locations">
-                    <select
-                      multiple
-                      value={(form.locationIds || []).map(String)}
-                      onChange={(event) => updateLocations(Array.from(event.target.selectedOptions).map((option) => option.value))}
-                      className={`${inputClass} min-h-32`}
-                    >
-                      {locationSelectOptions.map((location) => (
-                        <option key={location.value} value={location.value}>
-                          {location.label}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-xs text-slate-500">Use Ctrl/Command to select multiple sites. The first selected site is the primary location.</p>
+                  <Field label="Project Locations" className="md:col-span-2">
+                    <details className="group rounded-lg border border-slate-200 bg-white">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-100">
+                        <span>
+                          {form.locationIds?.length
+                            ? `${form.locationIds.length} location${form.locationIds.length === 1 ? "" : "s"} selected`
+                            : "Select project locations"}
+                        </span>
+                        <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-180" />
+                      </summary>
+                      <div className="max-h-52 space-y-1 overflow-y-auto border-t border-slate-200 p-2">
+                        {locationSelectOptions.map((location) => {
+                          const selected = (form.locationIds || [])
+                            .map(String)
+                            .includes(location.value);
+                          return (
+                            <label
+                              key={location.value}
+                              className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={(event) =>
+                                  updateLocations(
+                                    event.target.checked
+                                      ? [...(form.locationIds || []), location.value]
+                                      : (form.locationIds || []).filter(
+                                          (value) => String(value) !== location.value
+                                        )
+                                  )
+                                }
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <span>{location.label}</span>
+                            </label>
+                          );
+                        })}
+                        {!locationSelectOptions.length ? (
+                          <p className="px-2 py-3 text-sm text-slate-500">
+                            No locations are available.
+                          </p>
+                        ) : null}
+                      </div>
+                    </details>
+                    {form.locationIds?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {form.locationIds.map((locationId, index) => {
+                          const location = locationSelectOptions.find(
+                            (option) => option.value === String(locationId)
+                          );
+                          return location ? (
+                            <span
+                              key={location.value}
+                              className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
+                            >
+                              {location.label}
+                              {index === 0 ? " · Primary" : ""}
+                            </span>
+                          ) : null;
+                        })}
+                      </div>
+                    ) : null}
+                    <p className="mt-1 text-xs text-slate-500">
+                      The first selected site is used as the primary location.
+                    </p>
                   </Field>
                   <Field label="Site Address">
                     <input
@@ -3589,6 +3740,8 @@ const ProjectDetailDrawer = ({
 const ProjectManagementProjects = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState(() => getInitialProjects());
+  const [inventoryProjects, setInventoryProjects] = useState([]);
+  const [inventoryProjectsError, setInventoryProjectsError] = useState("");
   const [customers, setCustomers] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -3621,6 +3774,20 @@ const ProjectManagementProjects = () => {
         setLocations([]);
       }
     };
+    const loadInventoryProjects = async () => {
+      try {
+        setInventoryProjects(await fetchInventoryProjects());
+        setInventoryProjectsError("");
+      } catch (error) {
+        console.error("Failed to load inventory projects", error);
+        setInventoryProjects([]);
+        setInventoryProjectsError(
+          error?.response?.data?.error ||
+            error?.message ||
+            "Inventory projects could not be loaded."
+        );
+      }
+    };
 
     if (typeof window !== "undefined") {
       window.addEventListener(
@@ -3644,6 +3811,7 @@ const ProjectManagementProjects = () => {
         );
       });
     void loadMasterData();
+    void loadInventoryProjects();
 
     return () => {
       if (typeof window !== "undefined") {
@@ -3751,6 +3919,14 @@ const ProjectManagementProjects = () => {
             await updateMilestone(milestone.id, milestone);
           } else {
             await createMilestone(editingProject.id, milestone);
+          }
+        }
+      } else if (project.inventoryProjectId) {
+        const inventoryProjectId = Number(project.inventoryProjectId);
+        await updateProjectManagementProject(inventoryProjectId, project);
+        for (const milestone of project.milestones || []) {
+          if (!Number.isFinite(Number(milestone.id))) {
+            await createMilestone(inventoryProjectId, milestone);
           }
         }
       } else {
@@ -4082,6 +4258,8 @@ const ProjectManagementProjects = () => {
           isOpen={projectModalOpen}
           mode={editingProject ? "edit" : "create"}
           project={editingProject}
+          inventoryProjects={inventoryProjects}
+          inventoryProjectsError={inventoryProjectsError}
           customers={customers}
           employees={employees}
           locations={locations}
