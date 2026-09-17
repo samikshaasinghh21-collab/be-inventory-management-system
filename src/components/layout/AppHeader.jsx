@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import AppIcon from "./AppIcon";
-import { FLAT_NAVIGATION_ITEMS, HEADER_QUICK_ACTIONS } from "./navigation";
+import { FLAT_NAVIGATION_ITEMS } from "./navigation";
 import NotificationBell from "../notifications/NotificationBell";
-import { logout } from "../../services/authService";
+import { getCurrentUser, logout } from "../../services/authService";
 
 const buildInitials = (name = "Workspace") =>
   String(name)
@@ -79,9 +79,9 @@ const AppHeader = ({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-  const profile = settings?.profile || {};
+  const profile = { ...(settings?.profile || {}), ...(getCurrentUser() || {}) };
   const company = settings?.company || {};
-  const workspaceName = company.name || "Inventory Workspace";
+  const workspaceName = company.name || "Bangalore Electronics";
   const searchableItems = useMemo(() => buildSearchableItems(), []);
   const searchResults = useMemo(
     () => searchNavigation(searchableItems, query),
@@ -97,6 +97,22 @@ const AppHeader = ({
 
     return () => window.clearTimeout(timeoutId);
   }, [location.pathname]);
+
+  useEffect(() => {
+    const handleShortcut = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.querySelector("input")?.focus();
+        setIsSearchOpen(true);
+      }
+      if (event.key === "Escape") {
+        setIsSearchOpen(false);
+        setIsProfileOpen(false);
+      }
+    };
+    document.addEventListener("keydown", handleShortcut);
+    return () => document.removeEventListener("keydown", handleShortcut);
+  }, []);
 
   useEffect(() => {
     const handleClickAway = (event) => {
@@ -137,7 +153,7 @@ const AppHeader = ({
 
   const pageCategory =
     routeMeta?.sectionLabel || routeMeta?.parentLabel || "Workspace";
-  const displayName = profile.fullName || "Demo Account";
+  const displayName = profile.fullName || profile.name || "My account";
   const initials = buildInitials(displayName);
 
   return (
@@ -169,7 +185,7 @@ const AppHeader = ({
             <div className="app-header-title-block">
               <span className="app-breadcrumb">{pageCategory}</span>
               <div className="app-header-title-row">
-                <h1>{routeMeta?.label || "Dashboard"}</h1>
+                <span className="header-current-page">{routeMeta?.label || "Dashboard"}</span>
                 <span className="app-badge">{workspaceName}</span>
               </div>
               <p>{routeMeta?.subtitle || "Shared workspace view"}</p>
@@ -191,11 +207,11 @@ const AppHeader = ({
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   onFocus={() => setIsSearchOpen(true)}
-                  placeholder="Search pages, modules, and quick links"
+                  placeholder="Search workspace…"
                   aria-label="Search workspace navigation"
                 />
                 <button type="submit" className="header-search-submit">
-                  Go
+                  ⌘ K
                 </button>
               </div>
 
@@ -233,22 +249,6 @@ const AppHeader = ({
               )}
             </form>
 
-            {location.pathname !== "/settings" && (
-              <div className="header-quick-actions">
-                {HEADER_QUICK_ACTIONS.slice(0, 2).map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  className="app-btn app-btn-outline header-quick-action"
-                  onClick={() => handleNavigate(action.to)}
-                >
-                  <AppIcon name={action.icon} className="h-4 w-4" />
-                  <span>{action.label}</span>
-                </button>
-                ))}
-              </div>
-            )}
-
             <NotificationBell />
 
             <div ref={profileRef} className="header-menu-container">
@@ -257,6 +257,7 @@ const AppHeader = ({
                 className="header-profile-button"
                 onClick={() => setIsProfileOpen((current) => !current)}
                 aria-label="Open user menu"
+                aria-expanded={isProfileOpen}
               >
                 {profile.avatar ? (
                   <img
@@ -271,7 +272,7 @@ const AppHeader = ({
                 )}
                 <span className="header-profile-copy">
                   <strong>{displayName}</strong>
-                  <small>{profile.role || "Administrator"}</small>
+                  <small>{profile.role || "Team member"}</small>
                 </span>
                 <AppIcon name="chevron-down" className="h-4 w-4" />
               </button>

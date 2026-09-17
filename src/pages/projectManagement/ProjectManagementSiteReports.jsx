@@ -1,3 +1,5 @@
+import { PageHeader, MetricCard as SharedMetricCard } from "../../components/ui";
+import "../../styles/projects.css";
 import { createElement, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -34,7 +36,7 @@ import { printSection } from "../../utils/printUtils";
 import { getCurrentUser, isManager } from "../../services/authService";
 
 const inputClass =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-100";
 const sectionClass =
   "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const shifts = ["General", "Morning", "Evening", "Night"];
@@ -269,20 +271,9 @@ const validate = (form, project) => {
     : "";
 };
 
-const Kpi = ({ label, value, icon, tone }) => (
-  <article className={sectionClass}>
-    <div className="flex items-center gap-3">
-      <span className={`grid h-10 w-10 place-items-center rounded-lg ${tone}`}>
-        {createElement(icon, { className: "h-5 w-5" })}
-      </span>
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          {label}
-        </p>
-        <p className="text-xl font-bold text-slate-950">{value}</p>
-      </div>
-    </div>
-  </article>
+const Kpi = ({ icon, label, value, helper, tone = "", style = "" }) => (
+  <SharedMetricCard icon={icon} label={label} value={value} hint={helper}
+    tone={/rose|red/.test(tone || style) ? "danger" : /amber|orange/.test(tone || style) ? "warning" : "neutral"} />
 );
 
 const RowSection = ({
@@ -300,7 +291,7 @@ const RowSection = ({
       <button
         type="button"
         onClick={onAdd}
-        className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700"
+        className="inline-flex items-center gap-1 rounded-lg border border-teal-200 px-3 py-1.5 text-xs font-semibold text-teal-700"
       >
         <Plus className="h-3.5 w-3.5" /> Add
       </button>
@@ -738,21 +729,9 @@ const ProjectManagementSiteReports = () => {
   };
 
   return (
-    <div className="space-y-5">
-      <section className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[.28em] text-indigo-500">
-            Project Management
-          </p>
-          <h1 className="mt-2 text-3xl font-bold text-slate-950">
-            Daily Site Reports
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Daily progress, manpower, materials, safety, quality, issues,
-            photos, and approvals.
-          </p>
-        </div>
-        <div className="flex gap-2">
+    <div className="pm-workspace space-y-5">
+      <PageHeader eyebrow="Project management" title="Daily Site Reports" description="Daily progress, manpower, materials, safety, quality, issues, photos, and approvals." actions={<>
+<div className="flex gap-2">
           <button
             onClick={exportCsv}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700"
@@ -762,13 +741,13 @@ const ProjectManagementSiteReports = () => {
           </button>
           <button
             onClick={openCreate}
-            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white"
+            className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white"
           >
             <Plus className="h-4 w-4" />
             Create Daily Site Report
           </button>
         </div>
-      </section>
+        </>} />
       {(message || error) && (
         <div
           className={`rounded-lg border px-4 py-3 text-sm ${error ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}
@@ -781,7 +760,7 @@ const ProjectManagementSiteReports = () => {
           label="Reports"
           value={reports.length}
           icon={FileText}
-          tone="bg-indigo-50 text-indigo-600"
+          tone="bg-teal-50 text-teal-600"
         />
         <Kpi
           label="Drafts"
@@ -902,7 +881,7 @@ const ProjectManagementSiteReports = () => {
             <tbody className="divide-y divide-slate-100">
               {filtered.map((report) => (
                 <tr key={report.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-4 font-semibold text-indigo-700">
+                  <td className="px-4 py-4 font-semibold text-teal-700">
                     {report.reportNumber}
                   </td>
                   <td className="px-4 py-4">
@@ -961,7 +940,7 @@ const ProjectManagementSiteReports = () => {
                           <button
                             title="Edit"
                             onClick={() => openEdit(report)}
-                            className="rounded p-2 text-indigo-600 hover:bg-indigo-50"
+                            className="rounded p-2 text-teal-600 hover:bg-teal-50"
                           >
                             <Pencil className="h-4 w-4" />
                           </button>
@@ -1185,7 +1164,7 @@ const ProjectManagementSiteReports = () => {
                     <h3 className="font-semibold">Report Attachments</h3>
                     <p className="text-xs text-slate-500">PDFs, drawings, and supporting files are stored with the report.</p>
                   </div>
-                  <label className="cursor-pointer rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700">
+                  <label className="cursor-pointer rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-700">
                     <FileText className="mr-1 inline h-4 w-4" /> Add Attachments
                     <input hidden type="file" multiple onChange={(event) => addAttachments(event.target.files)} />
                   </label>
@@ -1567,7 +1546,7 @@ const ProjectManagementSiteReports = () => {
                       Maximum 4 compressed photos, approximately 350 KB each.
                     </p>
                   </div>
-                  <label className="cursor-pointer rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700">
+                  <label className="cursor-pointer rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-700">
                     <Camera className="mr-1 inline h-4 w-4" />
                     Add Photos
                     <input
@@ -1641,7 +1620,7 @@ const ProjectManagementSiteReports = () => {
                 </button>
                 <button
                   onClick={save}
-                  className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white"
+                  className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white"
                 >
                   Save Draft
                 </button>
@@ -1659,7 +1638,7 @@ const ProjectManagementSiteReports = () => {
           >
             <header className="flex items-start justify-between border-b p-5">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">
+                <p className="text-xs font-semibold uppercase tracking-widest text-teal-600">
                   Daily Site Report
                 </p>
                 <h2 className="text-2xl font-bold">{view.reportNumber}</h2>
@@ -1768,7 +1747,7 @@ const ProjectManagementSiteReports = () => {
                           <button
                             type="button"
                             onClick={() => downloadAuthenticatedFile(photo.downloadUrl, photo.name)}
-                            className="grid h-44 w-full place-items-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-semibold text-indigo-700"
+                            className="grid h-44 w-full place-items-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-semibold text-teal-700"
                           >
                             Download {photo.name}
                           </button>
@@ -1790,7 +1769,7 @@ const ProjectManagementSiteReports = () => {
                         key={file.id}
                         type="button"
                         onClick={() => downloadAuthenticatedFile(file.downloadUrl, file.name)}
-                        className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700"
+                        className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-700"
                       >
                         {file.name}
                       </button>

@@ -11,7 +11,7 @@ const createNavItem = (item, extra = {}) => ({
   ...extra,
 });
 
-export const NAVIGATION_SECTIONS = [
+const NAVIGATION_CATALOG = [
   {
     id: "workspace",
     label: "Workspace",
@@ -618,6 +618,22 @@ export const NAVIGATION_SECTIONS = [
       }),
     ],
   },
+];
+
+const findSection = (id) => NAVIGATION_CATALOG.find((section) => section.id === id);
+const hrItems = findSection("hrm").items[0].children;
+export const NAVIGATION_SECTIONS = [
+  { id: "workspace", label: "Workspace", items: findSection("workspace").items.filter((item) => item.id === "dashboard") },
+  { id: "workflow", label: "Inventory", items: [
+    { ...findSection("workspace").items.find((item) => item.id === "inventory-home"), label: "Overview" },
+    ...findSection("workflow").items,
+    { ...findSection("workspace").items.find((item) => item.id === "reports"), label: "Registers & reports" },
+    createNavItem({ id: "master-data", label: "Master data", icon: "database", children: findSection("masters").items }),
+    ...findSection("tools").items,
+  ] },
+  { id: "project-management", label: "Project management", items: findSection("project-management").items[0].children },
+  { id: "hrm", label: "People & HR", items: hrItems.filter((item) => item.id !== "hrms-permissions").map((item) => item.id === "hrms-employees" ? { ...item, children: [] } : item) },
+  { id: "account", label: "Administration", items: [hrItems.find((item) => item.id === "hrms-permissions"), ...findSection("account").items] },
 ];
 
 const ROUTE_ALIASES = [

@@ -380,7 +380,7 @@ const LineItemsEditor = ({
             <button
               type="button"
               onClick={handleAdd}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--primary)] text-white text-xs font-medium hover:bg-[var(--primary-hover)]"
             >
               <AppIcon name="plus" className="h-4 w-4" />
               Add Item

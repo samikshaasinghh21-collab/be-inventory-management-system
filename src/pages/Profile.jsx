@@ -6,6 +6,8 @@ import {
 } from "../services/settingsStore";
 import { getCurrentUser } from "../services/authService";
 import DateInput from "../components/common/DateInput";
+import { PageHeader, Tabs } from "../components/ui";
+import "../styles/people.css";
 
 const inputClass =
   "w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none";
@@ -20,6 +22,7 @@ const ACCEPTED_IMAGE_TYPES = [
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2MB
 
 const Profile = () => {
+  const [profileTab, setProfileTab] = useState("contact");
   const [settings, setSettings] = useState(() => getSettings());
   const [baseline, setBaseline] = useState(() =>
     JSON.stringify(getSettings())
@@ -51,7 +54,7 @@ const Profile = () => {
 
   const initials = useMemo(() => {
     if (profile.avatar) return "";
-    const base = profile.fullName || "Demo Account";
+    const base = profile.fullName || "My account";
     const letters = base
       .trim()
       .split(/\s+/)
@@ -134,39 +137,8 @@ const Profile = () => {
   );
 
   return (
-    <div className="p-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.35em] text-slate-500">
-            Account
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-900">Profile</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Manage workspace admin details, photo, and contact information.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={handleReset}
-            className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 hover:border-slate-300 hover:text-slate-900 bg-white"
-          >
-            Reset Profile
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!isDirty}
-            className={`px-5 py-2 rounded-lg text-sm font-medium text-white transition ${
-              isDirty
-                ? "bg-indigo-600 hover:bg-indigo-700"
-                : "bg-indigo-300 cursor-not-allowed"
-            }`}
-          >
-            Save Changes
-          </button>
-        </div>
-      </div>
+    <div className="people-account">
+      <PageHeader eyebrow="My account" title="Profile" description="Your identity, contact details and personal preferences." actions={<><button type="button" className="app-btn app-btn-secondary" onClick={handleReset}>Reset profile</button><button type="button" className="app-btn app-btn-primary" onClick={handleSave} disabled={!isDirty}>Save changes</button></>} />
 
       {status && (
         <div
@@ -182,19 +154,19 @@ const Profile = () => {
         </div>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[340px_1fr]">
+      <div className="people-account-grid">
         <div className="space-y-4">
-          <div className="rounded-2xl bg-gradient-to-br from-indigo-600 via-indigo-500 to-blue-500 text-white p-5 shadow-lg">
-            <p className="text-xs uppercase tracking-[0.3em] text-white/80">
+          <div className="people-account-identity">
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
               Workspace
             </p>
             <p className="text-2xl font-semibold mt-2">
-              {profile.fullName || "Demo Account"}
+              {profile.fullName || "My account"}
             </p>
-            <p className="text-sm text-white/80">
-              {profile.email || "demo@mybillbook.in"}
+            <p className="text-sm text-slate-500">
+              {profile.email || "Add your contact details"}
             </p>
-            <p className="text-xs text-white/70 mt-3">
+            <p className="text-xs text-slate-500 mt-3">
               Role · {profile.role || "Admin"}
             </p>
           </div>
@@ -259,7 +231,8 @@ const Profile = () => {
         </div>
 
         <div className="space-y-5">
-          <section className={cardClass}>
+          <Tabs items={[{ id: "contact", label: "Contact & access" }, { id: "personal", label: "Personal details" }]} value={profileTab} onChange={setProfileTab} />
+          <section className={cardClass} hidden={profileTab !== "contact"}>
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
@@ -335,7 +308,7 @@ const Profile = () => {
             </div>
           </section>
 
-          <section className={cardClass}>
+          <section className={cardClass} hidden={profileTab !== "personal"}>
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">

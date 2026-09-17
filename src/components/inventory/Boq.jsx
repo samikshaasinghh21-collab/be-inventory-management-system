@@ -1,3 +1,4 @@
+import InventoryPageHeader, { InventoryWorkflowContext } from "./InventoryPageHeader";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import LineItemsEditor from "./LineItemsEditor";
@@ -645,22 +646,10 @@ const Boq = () => {
 
   return (
     <div className="p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Inventory Management
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">
-            Bill of Quantity (BOQ)
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Define baseline materials and quantities for each project.
-          </p>
-          {errorMessage && (
-            <p className="text-sm text-red-600 mt-2">{errorMessage}</p>
-          )}
-        </div>
-        <div className="flex gap-2">
+      <InventoryPageHeader
+        title={<>Bill of Quantity (BOQ)</>}
+        description={<>Define baseline materials and quantities for each project.</>}
+        actions={<><div className="flex gap-2">
           <button
             type="button"
             onClick={resetForm}
@@ -668,8 +657,11 @@ const Boq = () => {
           >
             Clear Form
           </button>
-        </div>
-      </div>
+        </div></>}
+      >{errorMessage && (
+            <p className="text-sm text-red-600 mt-2">{errorMessage}</p>
+          )}</InventoryPageHeader>
+      <InventoryWorkflowContext steps={["Project & scope", "Material quantities", "Pricing & approval"]} current={0} detail="Define the project baseline, then review quantities and tax before saving." />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
@@ -853,7 +845,7 @@ const Boq = () => {
           </button>
           <button
             type="submit"
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)]"
             disabled={saving}
           >
             {saving ? "Saving..." : editingId ? "Update BOQ" : "Save BOQ"}
@@ -933,7 +925,7 @@ const Boq = () => {
                 <Fragment key={record.id}>
                   <tr
                     className={`cursor-pointer border-t transition hover:bg-slate-50 ${
-                      isExpanded ? "bg-indigo-50/60" : ""
+                      isExpanded ? "bg-[var(--bg-subtle)]/60" : ""
                     }`}
                     onClick={() =>
                       setExpandedId((current) =>
@@ -995,7 +987,7 @@ const Boq = () => {
                             event.stopPropagation();
                             handleEdit(record);
                           }}
-                          className="text-indigo-600 text-sm"
+                          className="text-[var(--primary)] text-sm"
                         >
                           Edit
                         </button>
@@ -1027,11 +1019,11 @@ const Boq = () => {
                                 {movementSummary.boqQty}
                               </p>
                             </div>
-                            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
                                 Moved to PO
                               </p>
-                              <p className="mt-2 text-xl font-bold text-blue-800">
+                              <p className="mt-2 text-xl font-bold text-[var(--primary)]">
                                 {movementSummary.movedQty}
                               </p>
                             </div>
@@ -1103,7 +1095,7 @@ const Boq = () => {
                                     </td>
                                     <td className="p-3">{item.unit || "-"}</td>
                                     <td className="p-3 text-right font-semibold">{item.boqQty}</td>
-                                    <td className="p-3 text-right font-semibold text-blue-700">{item.movedQty}</td>
+                                    <td className="p-3 text-right font-semibold text-[var(--primary)]">{item.movedQty}</td>
                                     <td className="p-3 text-right font-semibold text-amber-700">{item.remainingQty}</td>
                                     <td className="p-3 text-right">{formatCurrency(item.rate)}</td>
                                     <td className="p-3 text-right font-medium">

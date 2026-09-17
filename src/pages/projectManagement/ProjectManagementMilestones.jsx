@@ -1,3 +1,6 @@
+import StatusBadge from "../../components/common/StatusBadge";
+import { PageHeader, MetricCard as SharedMetricCard } from "../../components/ui";
+import "../../styles/projects.css";
 import { createElement, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -44,7 +47,7 @@ import {
 import { formatDate } from "../../utils/dateFormat";
 
 const inputClass =
-  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-100";
 const cardClass = "rounded-2xl border border-slate-200 bg-white shadow-sm";
 const priorities = ["All", "Low", "Medium", "High", "Critical"];
 const statuses = ["All", "Pending", "Partial", "Completed", "Cancelled"];
@@ -109,30 +112,19 @@ const tone = (value) => ({
   High: "bg-orange-100 text-orange-800",
   Cancelled: "bg-slate-200 text-slate-700",
   Draft: "bg-slate-100 text-slate-700",
-}[value] || "bg-indigo-50 text-indigo-700");
+}[value] || "bg-teal-50 text-teal-700");
 
-const Badge = ({ children }) => (
-  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tone(children)}`}>
-    {children}
-  </span>
-);
+const Badge = ({ label, status, children }) => <StatusBadge status={status || label || children} />;
 
-const Kpi = ({ label, value, icon, style }) => (
-  <div className={`${cardClass} flex items-center gap-3 p-4`}>
-    <div className={`grid h-10 w-10 place-items-center rounded-xl ${style}`}>
-      {createElement(icon, { className: "h-5 w-5" })}
-    </div>
-    <div>
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="text-2xl font-bold text-slate-950">{value}</p>
-    </div>
-  </div>
+const Kpi = ({ icon, label, value, helper, tone = "", style = "" }) => (
+  <SharedMetricCard icon={icon} label={label} value={value} hint={helper}
+    tone={/rose|red/.test(tone || style) ? "danger" : /amber|orange/.test(tone || style) ? "warning" : "neutral"} />
 );
 
 const Progress = ({ value }) => (
   <div className="flex min-w-32 items-center gap-2">
     <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
-      <div className="h-full rounded-full bg-indigo-600" style={{ width: `${Math.min(100, Number(value) || 0)}%` }} />
+      <div className="h-full rounded-full bg-teal-600" style={{ width: `${Math.min(100, Number(value) || 0)}%` }} />
     </div>
     <span className="text-xs font-semibold text-slate-700">{Number(value) || 0}%</span>
   </div>
@@ -588,25 +580,20 @@ const ProjectManagementMilestones = () => {
   };
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[.28em] text-indigo-500">Project Management</p>
-          <h1 className="mt-2 text-3xl font-bold text-slate-950">Milestone Control Center</h1>
-          <p className="mt-1 text-sm text-slate-500">Project checkpoints with task-derived progress and actual site-report evidence.</p>
-        </div>
-        <div className="flex gap-2">
+    <div className="pm-workspace space-y-5">
+      <PageHeader eyebrow="Project management" title="Milestone Control Center" description="Project checkpoints with task-derived progress and actual site-report evidence." actions={<>
+<div className="flex gap-2">
           <button onClick={() => setShowArchive(true)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">
             <Trash2 className="h-4 w-4" /> Archived ({archived.length})
           </button>
           <button onClick={() => void load()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">
             <RefreshCw className="h-4 w-4" /> Refresh
           </button>
-          <button type="button" onClick={() => { setFormError(""); setForm({ ...emptyForm }); }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white">
+          <button type="button" onClick={() => { setFormError(""); setForm({ ...emptyForm }); }} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white">
             <Plus className="h-4 w-4" /> Add Milestone
           </button>
         </div>
-      </header>
+        </>} />
 
       {(error || message) && (
         <div className={`rounded-xl border px-4 py-3 text-sm ${error ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
@@ -615,7 +602,7 @@ const ProjectManagementMilestones = () => {
       )}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <Kpi label="Milestones" value={summary.total || 0} icon={Flag} style="bg-indigo-50 text-indigo-600" />
+        <Kpi label="Milestones" value={summary.total || 0} icon={Flag} style="bg-teal-50 text-teal-600" />
         <Kpi label="Completed" value={summary.completed || 0} icon={CheckCircle2} style="bg-emerald-50 text-emerald-600" />
         <Kpi label="At Risk" value={summary.atRisk || 0} icon={ShieldAlert} style="bg-amber-50 text-amber-600" />
         <Kpi label="Overdue" value={summary.overdue || 0} icon={AlertTriangle} style="bg-rose-50 text-rose-600" />
@@ -668,7 +655,7 @@ const ProjectManagementMilestones = () => {
                 <tr key={item.id} className="hover:bg-slate-50/70">
                   <td className="p-4">
                     <button onClick={() => void openDetail(item)} className="text-left">
-                      <p className="text-xs font-semibold text-indigo-600">{item.milestoneNumber}</p>
+                      <p className="text-xs font-semibold text-teal-600">{item.milestoneNumber}</p>
                       <p className="font-bold text-slate-900">{item.name}</p>
                       <p className="max-w-64 truncate text-xs text-slate-500">{item.deliverable || item.description}</p>
                     </button>
@@ -705,7 +692,7 @@ const ProjectManagementMilestones = () => {
             <header className="border-b border-slate-200 bg-white p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs font-bold text-indigo-600">{detail.milestoneNumber} · {detail.projectName}</p>
+                  <p className="text-xs font-bold text-teal-600">{detail.milestoneNumber} · {detail.projectName}</p>
                   <h2 className="mt-1 text-2xl font-bold text-slate-950">{detail.name}</h2>
                   <div className="mt-2 flex flex-wrap gap-2"><Badge>{detail.stage || "Implement"}</Badge><Badge>{detail.status}</Badge><Badge>{detail.health}</Badge><Badge>{detail.priority}</Badge></div>
                 </div>
@@ -722,7 +709,7 @@ const ProjectManagementMilestones = () => {
               </div>
               <nav className="mt-5 flex gap-1 overflow-x-auto">
                 {tabs.map((tab) => (
-                  <button key={tab} onClick={() => setActiveTab(tab)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${activeTab === tab ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+                  <button key={tab} onClick={() => setActiveTab(tab)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${activeTab === tab ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
                     {tab}
                   </button>
                 ))}
@@ -751,7 +738,7 @@ const ProjectManagementMilestones = () => {
                     </div>
                     <RowList title="Dependencies" rows={detail.dependencies} render={(dependency) => (
                       <div key={dependency.id} className="flex items-center gap-2 rounded-xl border p-3 text-sm">
-                        <Link2 className="h-4 w-4 text-indigo-500" /> {dependency.milestoneNumber} — {dependency.name}
+                        <Link2 className="h-4 w-4 text-teal-500" /> {dependency.milestoneNumber} — {dependency.name}
                       </div>
                     )} />
                   </section>
@@ -786,7 +773,7 @@ const ProjectManagementMilestones = () => {
                 <div className="space-y-3">
                   {detail.permissions?.canManage && detail.status !== "Cancelled" && (
                     <div className="flex justify-end">
-                      <button type="button" onClick={() => { setTaskError(""); setTaskForm({ ...emptyTask, startDate: String(detail.startDate || "").slice(0, 10), dueDate: String(detail.targetDate || "").slice(0, 10) }); }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white">
+                      <button type="button" onClick={() => { setTaskError(""); setTaskForm({ ...emptyTask, startDate: String(detail.startDate || "").slice(0, 10), dueDate: String(detail.targetDate || "").slice(0, 10) }); }} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white">
                         <Plus className="h-4 w-4" /> Create Task under Milestone
                       </button>
                     </div>
@@ -814,7 +801,7 @@ const ProjectManagementMilestones = () => {
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-bold">{report.reportNumber}</p><Badge>{report.status}</Badge>
                             {report.officialEvidence && <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white">Official evidence</span>}
-                            {(report.associationSources || []).map((source) => <span key={source} className="rounded-full bg-indigo-50 px-2 py-1 text-xs text-indigo-700">{source}</span>)}
+                            {(report.associationSources || []).map((source) => <span key={source} className="rounded-full bg-teal-50 px-2 py-1 text-xs text-teal-700">{source}</span>)}
                           </div>
                           <p className="mt-1 text-sm text-slate-500">{formatDate(report.reportDate)} · {report.siteName} · {report.preparedBy}</p>
                         </div>
@@ -868,7 +855,7 @@ const ProjectManagementMilestones = () => {
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {(detail.documents || []).map((document) => (
                     <section key={document.id} className={`${cardClass} p-4`}>
-                      <p className="text-xs font-bold text-indigo-600">{document.documentNumber}</p>
+                      <p className="text-xs font-bold text-teal-600">{document.documentNumber}</p>
                       <h3 className="mt-1 font-bold">{document.name}</h3>
                       <div className="mt-2 flex gap-2"><Badge>{document.status}</Badge><Badge>{document.category}</Badge></div>
                       <p className="mt-3 text-sm text-slate-500">{document.revisionLabel} · Updated {formatDate(document.updatedAt)}</p>
@@ -884,7 +871,7 @@ const ProjectManagementMilestones = () => {
 
               {activeTab === "Risks & Issues" && (
                 <div className="space-y-4">
-                  {detail.permissions?.canManage && <button type="button" onClick={() => { setRiskError(""); setRiskForm({ ...emptyRisk }); }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" /> Add risk or issue</button>}
+                  {detail.permissions?.canManage && <button type="button" onClick={() => { setRiskError(""); setRiskForm({ ...emptyRisk }); }} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" /> Add risk or issue</button>}
                   <div className="grid gap-3 lg:grid-cols-2">
                     {(detail.risks || []).map((risk) => (
                       <section key={risk.id} className={`${cardClass} p-4`}>
@@ -907,7 +894,7 @@ const ProjectManagementMilestones = () => {
                 <div className="space-y-3">
                   {(detail.activity || []).map((event) => (
                     <section key={event.id} className={`${cardClass} flex gap-3 p-4`}>
-                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-indigo-50 text-indigo-600"><Activity className="h-4 w-4" /></div>
+                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-teal-50 text-teal-600"><Activity className="h-4 w-4" /></div>
                       <div className="min-w-0"><p className="font-semibold capitalize">{activityActionLabel(event.action)}</p><p className="text-xs text-slate-500">{event.actor || "System"} · {formatDate(event.createdAt)}</p>{activityDescription(event) && <p className="mt-2 text-sm text-slate-600">{activityDescription(event)}</p>}</div>
                     </section>
                   ))}
@@ -922,7 +909,7 @@ const ProjectManagementMilestones = () => {
       {form && (
         <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/50 p-4">
           <div className="max-h-[94vh] w-full max-w-4xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-            <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-white p-5"><div><p className="text-xs font-bold text-indigo-600">{form.id ? form.milestoneNumber : "NEW CHECKPOINT"}</p><h2 className="text-xl font-bold">{form.id ? "Update" : "Create"} Milestone</h2></div><button type="button" onClick={() => setForm(null)}><X /></button></header>
+            <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-white p-5"><div><p className="text-xs font-bold text-teal-600">{form.id ? form.milestoneNumber : "NEW CHECKPOINT"}</p><h2 className="text-xl font-bold">{form.id ? "Update" : "Create"} Milestone</h2></div><button type="button" onClick={() => setForm(null)}><X /></button></header>
             <div className="grid gap-4 p-5 md:grid-cols-2">
               {formError && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 md:col-span-2">{formError}</p>}
               <label className="text-sm font-medium">Project *<select disabled={Boolean(form.id)} className={`${inputClass} mt-1`} value={form.projectId} onChange={(event) => setForm({ ...form, projectId: event.target.value, taskIds: [], dependencyIds: [], reportIds: [] })}><option value="">Select project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
@@ -941,7 +928,7 @@ const ProjectManagementMilestones = () => {
               <label className="text-sm font-medium md:col-span-2">Explicit report links<select multiple className={`${inputClass} mt-1 min-h-28`} value={(form.reportIds || []).map(String)} onChange={(event) => setForm({ ...form, reportIds: Array.from(event.target.selectedOptions).map((option) => Number(option.value)) })}>{projectReports.map((report) => <option key={report.id} value={report.id}>{report.reportNumber} — {formatDate(report.reportDate)}</option>)}</select></label>
               <label className="text-sm font-medium md:col-span-2">Notes<textarea rows="2" className={`${inputClass} mt-1`} value={form.notes || ""} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
             </div>
-            <footer className="sticky bottom-0 flex justify-end gap-2 border-t bg-white p-5"><button type="button" onClick={() => setForm(null)} className="rounded-xl border px-4 py-2.5">Cancel</button><button type="button" disabled={busy} onClick={() => void saveMilestone()} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Save Milestone</button></footer>
+            <footer className="sticky bottom-0 flex justify-end gap-2 border-t bg-white p-5"><button type="button" onClick={() => setForm(null)} className="rounded-xl border px-4 py-2.5">Cancel</button><button type="button" disabled={busy} onClick={() => void saveMilestone()} className="rounded-xl bg-teal-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Save Milestone</button></footer>
           </div>
         </div>
       )}
@@ -951,7 +938,7 @@ const ProjectManagementMilestones = () => {
           <div className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
             <header className="flex items-start justify-between border-b p-5">
               <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">{detail.stage || "Implement"} · {detail.milestoneNumber}</p>
+                <p className="text-xs font-bold uppercase tracking-wide text-teal-600">{detail.stage || "Implement"} · {detail.milestoneNumber}</p>
                 <h2 className="mt-1 text-xl font-bold">Create Task under {detail.name}</h2>
                 <p className="mt-1 text-sm text-slate-500">This task will stay linked to this milestone and contribute to its progress.</p>
               </div>
@@ -971,7 +958,7 @@ const ProjectManagementMilestones = () => {
             </div>
             <footer className="flex justify-end gap-2 border-t p-5">
               <button type="button" onClick={() => setTaskForm(null)} className="rounded-xl border px-4 py-2.5">Cancel</button>
-              <button type="button" disabled={busy} onClick={() => void saveTask()} className="rounded-xl bg-indigo-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Create Task</button>
+              <button type="button" disabled={busy} onClick={() => void saveTask()} className="rounded-xl bg-teal-600 px-4 py-2.5 font-semibold text-white disabled:opacity-60">Create Task</button>
             </footer>
           </div>
         </div>
@@ -992,7 +979,7 @@ const ProjectManagementMilestones = () => {
               <label className="text-sm font-medium">Status<select className={`${inputClass} mt-1`} value={riskForm.status} onChange={(event) => setRiskForm({ ...riskForm, status: event.target.value })}>{["Open", "In Progress", "Resolved", "Closed"].map((value) => <option key={value}>{value}</option>)}</select></label>
               <label className="text-sm font-medium md:col-span-2">Mitigation / resolution<textarea className={`${inputClass} mt-1`} rows="3" value={riskForm.mitigationResolution || ""} onChange={(event) => setRiskForm({ ...riskForm, mitigationResolution: event.target.value })} /></label>
             </div>
-            <footer className="sticky bottom-0 flex justify-end gap-2 border-t bg-white p-5"><button type="button" onClick={() => setRiskForm(null)} className="rounded-xl border px-4 py-2">Cancel</button><button type="button" disabled={busy} onClick={() => void saveRisk()} className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white disabled:opacity-60">Save</button></footer>
+            <footer className="sticky bottom-0 flex justify-end gap-2 border-t bg-white p-5"><button type="button" onClick={() => setRiskForm(null)} className="rounded-xl border px-4 py-2">Cancel</button><button type="button" disabled={busy} onClick={() => void saveRisk()} className="rounded-xl bg-teal-600 px-4 py-2 font-semibold text-white disabled:opacity-60">Save</button></footer>
           </div>
         </div>
       )}
@@ -1007,7 +994,7 @@ const ProjectManagementMilestones = () => {
             <div className="space-y-3 p-5">
               {archived.map((item) => (
                 <div key={item.id} className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-200 p-4 sm:flex-row sm:items-center">
-                  <div><p className="text-xs font-bold text-indigo-600">{item.milestoneNumber}</p><p className="font-bold">{item.name}</p><p className="text-sm text-slate-500">{item.projectName}</p></div>
+                  <div><p className="text-xs font-bold text-teal-600">{item.milestoneNumber}</p><p className="font-bold">{item.name}</p><p className="text-sm text-slate-500">{item.projectName}</p></div>
                   <button onClick={() => void run(async () => {
                     await restoreMilestone(item.id);
                     setShowArchive(false);

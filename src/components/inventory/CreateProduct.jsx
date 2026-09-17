@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import useSettings from "../../hooks/useSettings";
@@ -399,28 +400,15 @@ const CreateProduct = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 backdrop-blur-[1px]">
-      <div className="flex max-h-[92vh] w-[1140px] max-w-[96vw] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
-        <div className="border-b border-slate-200 bg-[linear-gradient(135deg,#0f172a_0%,#1d4ed8_100%)] px-6 py-5 text-white">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-[0.35em] text-sky-100/80">
-                Product Master
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold">Create Product</h2>
-              <p className="mt-2 max-w-2xl text-sm text-sky-50/90">
-                Set up the product definition once with grouping, units, stock,
-                and audit details for the rest of the inventory flow.
-              </p>
-            </div>
-            <button
-              type="button"
+    <div className="inventory-full-page-form">
+      <div className="flex max-h-[92vh] w-[1140px] max-w-[96vw] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+        <div className="border-b border-slate-200 bg-white px-6 py-5 text-white">
+          <div className="p-5"><InventoryPageHeader title={<>Create Product</>} description={<>Set up the product definition once with grouping, units, stock,
+                and audit details for the rest of the inventory flow.</>} actions={<><button
+              type="button" aria-label="Back to previous page"
               onClick={() => navigate(-1)}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/25 text-white transition hover:bg-white/10"
-            >
-              X
-            </button>
-          </div>
+              className="app-btn app-btn-secondary"
+            >Back</button></>} navigation={false} /></div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/60 p-6">
@@ -441,7 +429,7 @@ const CreateProduct = () => {
                     key={section.id}
                     type="button"
                     onClick={() => scrollToSection(section.ref)}
-                    className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-[var(--border-default)] hover:bg-[var(--bg-subtle)] hover:text-[var(--primary)] focus:outline-none focus:ring-2 focus:ring-[var(--border-default)]"
                   >
                     {section.label}
                   </button>
@@ -466,7 +454,7 @@ const CreateProduct = () => {
                     value={form.sku}
                     onChange={(event) => updateField("sku", event.target.value)}
                     placeholder="ITM-0001"
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                 </label>
 
@@ -478,7 +466,7 @@ const CreateProduct = () => {
                     value={form.name}
                     onChange={(event) => updateField("name", event.target.value)}
                     placeholder="Laptop Dell"
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                   {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
                 </label>
@@ -488,7 +476,7 @@ const CreateProduct = () => {
                   <select
                     value={form.brand}
                     onChange={(event) => updateField("brand", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   >
                     <option value="">Select brand</option>
                     {resolvedBrandOptions.map((option) => (
@@ -511,7 +499,7 @@ const CreateProduct = () => {
                       value={form.customBrand}
                       onChange={(event) => updateField("customBrand", event.target.value)}
                       placeholder="Enter brand name"
-                      className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                   </label>
                 )}
@@ -523,7 +511,7 @@ const CreateProduct = () => {
                   <select
                     value={form.category}
                     onChange={(event) => updateField("category", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   >
                     <option value="">Select grouping</option>
                     {resolvedCategoryOptions.map((option) => (
@@ -546,7 +534,7 @@ const CreateProduct = () => {
                       value={form.customCategory}
                       onChange={(event) => updateField("customCategory", event.target.value)}
                       placeholder="Networking"
-                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                     <button
                       type="button"
@@ -567,7 +555,7 @@ const CreateProduct = () => {
                     value={form.description}
                     onChange={(event) => updateField("description", event.target.value)}
                     placeholder="Optional product notes, specs, or procurement guidance."
-                    className="mt-1 min-h-[120px] w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 min-h-[120px] w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                 </label>
               </div>
@@ -585,7 +573,7 @@ const CreateProduct = () => {
                   <select
                     value={form.salesUnit}
                     onChange={(event) => updateField("salesUnit", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   >
                     {UNIT_OPTIONS.map((option) => (
                       <option key={option} value={option}>
@@ -600,7 +588,7 @@ const CreateProduct = () => {
                   <select
                     value={form.purchaseUnit}
                     onChange={(event) => updateField("purchaseUnit", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   >
                     {UNIT_OPTIONS.map((option) => (
                       <option key={option} value={option}>
@@ -619,7 +607,7 @@ const CreateProduct = () => {
                     value={form.reOrderLevel}
                     onChange={(event) => updateField("reOrderLevel", event.target.value)}
                     placeholder="0"
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                   {errors.reOrderLevel && (
                     <p className="mt-1 text-sm text-red-600">{errors.reOrderLevel}</p>
@@ -631,7 +619,7 @@ const CreateProduct = () => {
                   <select
                     value={form.locationId}
                     onChange={(event) => updateField("locationId", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   >
                     <option value="">
                       {locations.length ? "Select location" : "No locations available"}
@@ -655,7 +643,7 @@ const CreateProduct = () => {
                     value={form.hsn}
                     onChange={(event) => updateField("hsn", event.target.value)}
                     placeholder="8471"
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                 </label>
 
@@ -670,7 +658,7 @@ const CreateProduct = () => {
                     value={form.price}
                     onChange={(event) => updateField("price", event.target.value)}
                     placeholder="0.00"
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                   {errors.price && <p className="mt-1 text-sm text-red-600">{errors.price}</p>}
                 </label>
@@ -689,7 +677,7 @@ const CreateProduct = () => {
                   <select
                     value={form.itemStatus}
                     onChange={(event) => updateField("itemStatus", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   >
                     {STATUS_OPTIONS.map((option) => (
                       <option key={option} value={option}>
@@ -734,7 +722,7 @@ const CreateProduct = () => {
                   <select
                     value={form.taxPercentage}
                     onChange={(event) => updateField("taxPercentage", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   >
                     {TAX_OPTIONS.map((option) => (
                       <option key={option} value={option}>
@@ -763,7 +751,7 @@ const CreateProduct = () => {
                     onChange={(event) => updateField("openStock", event.target.value)}
                     disabled={form.serviceItem}
                     placeholder="0"
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] disabled:cursor-not-allowed disabled:bg-slate-50"
                   />
                   {errors.openStock && (
                     <p className="mt-1 text-sm text-red-600">{errors.openStock}</p>
@@ -799,7 +787,7 @@ const CreateProduct = () => {
                     value={form.remarks}
                     onChange={(event) => updateField("remarks", event.target.value)}
                     placeholder="Extra notes, sourcing guidance, or handling details."
-                    className="mt-1 min-h-[120px] w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 min-h-[120px] w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                 </label>
 
@@ -809,7 +797,7 @@ const CreateProduct = () => {
                     value={form.prepBy}
                     onChange={(event) => updateField("prepBy", event.target.value)}
                     placeholder="Prepared by"
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                 </label>
 
@@ -865,7 +853,7 @@ const CreateProduct = () => {
               form="create-product-form"
               type="submit"
               disabled={isSubmitting}
-              className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-xl bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSubmitting ? "Saving..." : "Save Product"}
             </button>

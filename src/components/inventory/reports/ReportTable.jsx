@@ -43,7 +43,7 @@ const ReportTable = ({
               : "No activity rows match the current filters"}
           </p>
         </div>
-        <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">
+        <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--primary)]">
           Live Data
         </span>
       </div>
@@ -156,7 +156,7 @@ const ReportTable = ({
               onClick={() => onPageChange(pageNumber)}
               className={`grid h-10 w-10 place-items-center rounded-lg border text-sm font-medium transition ${
                 pageNumber === safePage
-                  ? "border-blue-600 bg-blue-600 text-white"
+                  ? "border-[var(--border-default)] bg-[var(--primary)] text-white"
                   : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
               }`}
             >

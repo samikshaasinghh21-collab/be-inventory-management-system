@@ -2,7 +2,7 @@ import DateInput from "../../common/DateInput";
 import { REPORT_ACTIVITY_TYPES } from "./reportUtils";
 
 const inputClass =
-  "mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
+  "mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]";
 
 const ReportFilters = ({
   projects = [],
@@ -107,7 +107,7 @@ const ReportFilters = ({
                   key={activity.key}
                   className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm leading-5 transition ${
                     isSelected
-                      ? "border-blue-200 bg-blue-50 text-blue-700"
+                      ? "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]"
                       : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300"
                   }`}
                 >
@@ -115,7 +115,7 @@ const ReportFilters = ({
                     type="checkbox"
                     checked={isSelected}
                     onChange={() => onToggleType(activity.key)}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    className="h-4 w-4 rounded border-slate-300 text-[var(--primary)] focus:ring-blue-500"
                     disabled={disabled}
                   />
                   <span>{activity.label}</span>

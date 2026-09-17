@@ -1,5 +1,9 @@
+import StatusBadge from "../../components/common/StatusBadge";
+import { toast } from "../../utils/toast";
+import { PageHeader, MetricCard as SharedMetricCard } from "../../components/ui";
+import "../../styles/projects.css";
 import { createElement, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Activity,
   AlertTriangle,
@@ -101,28 +105,11 @@ const MILESTONE_TEMPLATES = [
 ];
 
 const inputClass =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-100";
 const selectClass = `${inputClass} appearance-none`;
 const sectionClass = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm";
 
-const statusStyles = {
-  Draft: "border-slate-200 bg-slate-100 text-slate-700",
-  Planning: "border-blue-200 bg-blue-50 text-blue-700",
-  Active: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  "On Hold": "border-amber-200 bg-amber-50 text-amber-700",
-  Delayed: "border-rose-200 bg-rose-50 text-rose-700",
-  Pending: "border-slate-200 bg-slate-50 text-slate-700",
-  Partial: "border-amber-200 bg-amber-50 text-amber-700",
-  Completed: "border-violet-200 bg-violet-50 text-violet-700",
-  Cancelled: "border-slate-300 bg-slate-200 text-slate-700",
-};
 
-const priorityStyles = {
-  Critical: "border-red-200 bg-red-50 text-red-700",
-  High: "border-orange-200 bg-orange-50 text-orange-700",
-  Medium: "border-indigo-200 bg-indigo-50 text-indigo-700",
-  Low: "border-slate-200 bg-slate-50 text-slate-700",
-};
 
 const emptyProjectForm = {
   inventoryProjectId: "",
@@ -848,51 +835,12 @@ const buildProjectPayload = (form, existingProject = null) => {
   };
 };
 
-const KpiCard = ({ icon, label, value, helper, tone = "indigo" }) => {
-  const toneClasses = {
-    indigo: "bg-indigo-50 text-indigo-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    rose: "bg-rose-50 text-rose-600",
-    violet: "bg-violet-50 text-violet-600",
-    amber: "bg-amber-50 text-amber-600",
-    blue: "bg-blue-50 text-blue-600",
-    slate: "bg-slate-100 text-slate-600",
-  };
+const KpiCard = ({ icon, label, value, helper, tone = "", style = "" }) => (
+  <SharedMetricCard icon={icon} label={label} value={value} hint={helper}
+    tone={/rose|red/.test(tone || style) ? "danger" : /amber|orange/.test(tone || style) ? "warning" : "neutral"} />
+);
 
-  return (
-    <article className="rounded-xl border border-slate-200 bg-white/95 p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <span
-          className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${
-            toneClasses[tone] || toneClasses.indigo
-          }`}
-        >
-          {createElement(icon, { className: "h-5 w-5" })}
-        </span>
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {label}
-          </p>
-          <p className="mt-1 text-xl font-bold text-slate-950">{value}</p>
-          <p className="mt-1 truncate text-xs text-slate-500">{helper}</p>
-        </div>
-      </div>
-    </article>
-  );
-};
-
-const Badge = ({ label, type = "status" }) => {
-  const styles = type === "priority" ? priorityStyles : statusStyles;
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
-        styles[label] || styles.Draft
-      }`}
-    >
-      {label || "Draft"}
-    </span>
-  );
-};
+const Badge = ({ label, status, children }) => <StatusBadge status={status || label || children} />;
 
 const StatusPill = ({ label }) => (
   <span
@@ -908,7 +856,7 @@ const TableActionButton = ({ children, onClick }) => (
   <button
     type="button"
     onClick={onClick}
-    className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+    className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
   >
     {children}
   </button>
@@ -918,7 +866,7 @@ const ProgressMeter = ({ value }) => (
   <div className="flex min-w-[132px] items-center gap-3">
     <div className="h-2.5 w-20 overflow-hidden rounded-full bg-slate-200">
       <div
-        className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-emerald-500"
+        className="h-full rounded-full bg-teal-600"
         style={{ width: `${percentValue(value)}%` }}
       />
     </div>
@@ -961,7 +909,7 @@ const MetricPill = ({ label, value }) => (
 
 const SectionTitle = ({ icon, title, subtitle }) => (
   <div className="mb-4 flex items-start gap-3">
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-indigo-50 text-indigo-600">
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-600">
       {createElement(icon, { className: "h-4 w-4" })}
     </span>
     <div>
@@ -1204,11 +1152,11 @@ const ProjectFormModal = ({
   const legacyTeamLeadOption = makeLegacySelectOption(form.teamLead, employeeSelectOptions);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-5 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-5 ">
       <div className="flex max-h-[94vh] w-[1180px] max-w-[98vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-indigo-500">
+            <p className="text-xs font-semibold uppercase tracking-wider text-teal-500">
               Project Management
             </p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">{title}</h2>
@@ -1241,7 +1189,7 @@ const ProjectFormModal = ({
                   key={item}
                   className={`mb-2 rounded-lg px-3 py-2 text-sm font-medium ${
                     index === 0
-                      ? "border border-indigo-100 bg-white text-indigo-700 shadow-sm"
+                      ? "border border-teal-100 bg-white text-teal-700 shadow-sm"
                       : "text-slate-600"
                   }`}
                 >
@@ -1386,7 +1334,7 @@ const ProjectFormModal = ({
                   <button
                     type="button"
                     onClick={addMilestone}
-                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700"
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-700"
                   >
                     <Plus className="h-4 w-4" /> Add Milestone
                   </button>
@@ -1605,7 +1553,7 @@ const ProjectFormModal = ({
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field label="Project Locations" className="md:col-span-2">
                     <details className="group rounded-lg border border-slate-200 bg-white">
-                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-100">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-teal-100">
                         <span>
                           {form.locationIds?.length
                             ? `${form.locationIds.length} location${form.locationIds.length === 1 ? "" : "s"} selected`
@@ -1635,7 +1583,7 @@ const ProjectFormModal = ({
                                         )
                                   )
                                 }
-                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
                               />
                               <span>{location.label}</span>
                             </label>
@@ -1657,7 +1605,7 @@ const ProjectFormModal = ({
                           return location ? (
                             <span
                               key={location.value}
-                              className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
+                              className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-700"
                             >
                               {location.label}
                               {index === 0 ? " · Primary" : ""}
@@ -1737,7 +1685,7 @@ const ProjectFormModal = ({
             <button
               type="button"
               onClick={() => submitForm("Draft")}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-teal-200 bg-white px-4 py-2.5 text-sm font-semibold text-teal-700 transition hover:bg-teal-50"
             >
               <ClipboardCheck className="h-4 w-4" />
               Save as Draft
@@ -1745,7 +1693,7 @@ const ProjectFormModal = ({
             <button
               type="button"
               onClick={() => submitForm()}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
             >
               <Plus className="h-4 w-4" />
               {mode === "edit" ? "Save Changes" : "Create Project"}
@@ -1833,11 +1781,11 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-5 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-5 ">
       <div className="flex max-h-[94vh] w-[920px] max-w-[96vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-500">
               Task Assignment
             </p>
           </div>
@@ -1969,7 +1917,7 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
                   Array.from(event.target.files || []).map((file) => file.name)
                 )
               }
-              className={`${inputClass} file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-indigo-700`}
+              className={`${inputClass} file:mr-3 file:rounded-md file:border-0 file:bg-teal-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-teal-700`}
             />
           </Field>
           <Field label="Comments" className="md:col-span-2">
@@ -1992,7 +1940,7 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
           <button
             type="button"
             onClick={assignTask}
-            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+            className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
           >
             <UserPlus className="h-4 w-4" />
             Assign Task
@@ -2005,7 +1953,7 @@ const TaskAssignmentModal = ({ project, onClose, onSave }) => {
 
 const EmptyState = ({ onCreate }) => (
   <div className="flex min-h-[340px] flex-col items-center justify-center px-6 py-12 text-center">
-    <span className="grid h-16 w-16 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+    <span className="grid h-16 w-16 place-items-center rounded-xl bg-teal-50 text-teal-600">
       <FolderKanban className="h-8 w-8" />
     </span>
     <h3 className="mt-5 text-lg font-semibold text-slate-950">
@@ -2017,7 +1965,7 @@ const EmptyState = ({ onCreate }) => (
     <button
       type="button"
       onClick={onCreate}
-      className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+      className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
     >
       <Plus className="h-4 w-4" />
       Create Project
@@ -2041,8 +1989,8 @@ const DetailTabButton = ({ tab, active, onClick }) => {
       onClick={onClick}
       className={`inline-flex min-w-max items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
         active
-          ? "bg-indigo-600 text-white shadow-sm"
-          : "border border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+          ? "bg-teal-600 text-white shadow-sm"
+          : "border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
       }`}
     >
       {createElement(tab.icon, { className: "h-4 w-4" })}
@@ -2329,15 +2277,15 @@ const RecordDetailModal = ({ detail, project, onClose }) => {
         aria-label={config.title}
         className="my-auto w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.24)]"
       >
-        <div className="h-1 bg-indigo-600" />
+        <div className="h-1 bg-teal-600" />
         <header className="border-b border-slate-200 bg-white px-6 py-5 sm:px-7">
           <div className="flex items-start justify-between gap-5">
             <div className="flex min-w-0 items-start gap-3.5">
-              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-600 ring-1 ring-inset ring-teal-100">
                 {createElement(config.icon, { className: "h-5 w-5" })}
               </span>
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-600">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-teal-600">
                   {config.eyebrow}
                 </p>
                 <h2 className="mt-1 break-words text-xl font-semibold text-slate-950">
@@ -2431,7 +2379,7 @@ const RecordDetailModal = ({ detail, project, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="ml-auto rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+            className="ml-auto rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
           >
             Close
           </button>
@@ -2719,7 +2667,7 @@ const ProjectDetailDrawer = ({
   });
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 bg-slate-950/45 ">
       <div className="ml-auto flex h-full w-[1180px] max-w-full flex-col bg-white shadow-2xl">
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -2755,7 +2703,7 @@ const ProjectDetailDrawer = ({
                   </div>
                   <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-200">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-emerald-500"
+                      className="h-full rounded-full bg-teal-600"
                       style={{ width: `${progress}%` }}
                     />
                   </div>
@@ -2795,7 +2743,7 @@ const ProjectDetailDrawer = ({
                     ],
                   })
                 }
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
               >
                 <Printer className="h-4 w-4" />
                 Print Complete File
@@ -2803,7 +2751,7 @@ const ProjectDetailDrawer = ({
               <button
                 type="button"
                 onClick={() => onAssignTask(project)}
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-teal-200 bg-white px-4 py-2.5 text-sm font-semibold text-teal-700 transition hover:bg-teal-50"
               >
                 <UserPlus className="h-4 w-4" />
                 Assign Task
@@ -2811,7 +2759,7 @@ const ProjectDetailDrawer = ({
               <button
                 type="button"
                 onClick={() => onEdit(project)}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-700"
               >
                 <Pencil className="h-4 w-4" />
                 Edit
@@ -2943,7 +2891,7 @@ const ProjectDetailDrawer = ({
                 <button
                   type="button"
                   onClick={() => onAssignTask(project)}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
                 >
                   <UserPlus className="h-4 w-4" />
                   Assign Task
@@ -3103,7 +3051,7 @@ const ProjectDetailDrawer = ({
                 />
                 <button
                   type="button"
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
                 >
                   <Plus className="h-4 w-4" />
                   Add Resource
@@ -3291,7 +3239,7 @@ const ProjectDetailDrawer = ({
                 />
                 <button
                   type="button"
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
                 >
                   <PackageCheck className="h-4 w-4" />
                   Allocate Material
@@ -3569,7 +3517,7 @@ const ProjectDetailDrawer = ({
                 />
                 <button
                   type="button"
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700"
                 >
                   <Upload className="h-4 w-4" />
                   Upload Document
@@ -3579,10 +3527,10 @@ const ProjectDetailDrawer = ({
                 {documentFolderCounts.map((folder) => (
                   <article
                     key={folder.folder}
-                    className="rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:border-indigo-200 hover:bg-indigo-50"
+                    className="rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:border-teal-200 hover:bg-teal-50"
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <span className="grid h-10 w-10 place-items-center rounded-lg bg-white text-indigo-600 shadow-sm">
+                      <span className="grid h-10 w-10 place-items-center rounded-lg bg-white text-teal-600 shadow-sm">
                         <FolderOpen className="h-5 w-5" />
                       </span>
                       <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
@@ -3625,7 +3573,7 @@ const ProjectDetailDrawer = ({
                             {document.name || document.fileName || "-"}
                           </td>
                           <td className="px-4 py-3">
-                            <span className="rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                            <span className="rounded-full border border-teal-100 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-700">
                               {document.category || "Reports"}
                             </span>
                           </td>
@@ -3678,13 +3626,13 @@ const ProjectDetailDrawer = ({
                       <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                         {formatDateValue(dateKey)}
                       </p>
-                      <div className="space-y-3 border-l-2 border-indigo-100 pl-4">
+                      <div className="space-y-3 border-l-2 border-teal-100 pl-4">
                         {activityGroups[dateKey].map((activity) => (
                           <div
                             key={activity.id}
                             className="relative rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm"
                           >
-                            <span className="absolute -left-[25px] top-5 grid h-5 w-5 place-items-center rounded-full border-4 border-white bg-indigo-600" />
+                            <span className="absolute -left-[25px] top-5 grid h-5 w-5 place-items-center rounded-full border-4 border-white bg-teal-600" />
                             <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                               <div>
                                 <p className="text-sm font-semibold text-slate-950">
@@ -3739,6 +3687,7 @@ const ProjectDetailDrawer = ({
 
 const ProjectManagementProjects = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [projects, setProjects] = useState(() => getInitialProjects());
   const [inventoryProjects, setInventoryProjects] = useState([]);
   const [inventoryProjectsError, setInventoryProjectsError] = useState("");
@@ -3749,7 +3698,19 @@ const ProjectManagementProjects = () => {
   const [activeFilter, setActiveFilter] = useState("All");
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
-  const [selectedProject, setSelectedProject] = useState(null);
+  const [localSelectedProject, setSelectedProject] = useState(null);
+  const linkedProjectId = searchParams.get("project");
+  const selectedProject = linkedProjectId
+    ? projects.find((project) => String(project.id) === linkedProjectId) || null
+    : localSelectedProject;
+  const closeProjectDetails = () => {
+    setSelectedProject(null);
+    if (linkedProjectId) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("project");
+      setSearchParams(nextParams, { replace: true });
+    }
+  };
   const [selectedDetailTab, setSelectedDetailTab] = useState("overview");
   const [taskProject, setTaskProject] = useState(null);
   const [openMenuId, setOpenMenuId] = useState(null);
@@ -3893,7 +3854,7 @@ const ProjectManagementProjects = () => {
 
   const openTaskAssignment = (project) => {
     if (!(project.milestones || []).length) {
-      window.alert("Create a milestone under Design, Procure, Implement, or Allocate before creating tasks.");
+      toast("Create a milestone under Design, Procure, Implement, or Allocate before creating tasks.", "warning");
       navigate("/project-management/milestones");
       return;
     }
@@ -3937,7 +3898,8 @@ const ProjectManagementProjects = () => {
       setProjectModalOpen(false);
       setEditingProject(null);
     } catch (error) {
-      window.alert(error?.response?.data?.error || error?.message || "Project could not be saved.");
+      console.error("Project save failed", error);
+      toast("Unable to save the project. Review the required fields and try again.", "error");
     }
   };
 
@@ -3963,7 +3925,8 @@ const ProjectManagementProjects = () => {
       setSelectedDetailTab("tasks");
       navigate("/project-management/tasks");
     } catch (error) {
-      window.alert(error?.response?.data?.error || error?.message || "Task could not be assigned.");
+      console.error("Task assignment failed", error);
+      toast("Unable to assign the task. Check the assignee and try again.", "error");
     }
   };
 
@@ -3973,7 +3936,7 @@ const ProjectManagementProjects = () => {
       value: metrics.total.toLocaleString("en-IN"),
       helper: "All records",
       icon: FolderKanban,
-      tone: "indigo",
+      tone: "teal",
     },
     {
       label: "Active Projects",
@@ -3994,7 +3957,7 @@ const ProjectManagementProjects = () => {
       value: metrics.completed.toLocaleString("en-IN"),
       helper: "Closed records",
       icon: CheckCircle2,
-      tone: "violet",
+      tone: "teal",
     },
     {
       label: "Total Budget",
@@ -4027,28 +3990,17 @@ const ProjectManagementProjects = () => {
   ];
 
   return (
-    <div className="space-y-5">
-      <section className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-indigo-500">
-            Project Management
-          </p>
-          <h1 className="mt-2 text-2xl font-bold text-slate-950 md:text-3xl">
-            Projects
-          </h1>
-          <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Manage project records, tasks, team allocation, inventory, purchases, costs, documents, and activity.
-          </p>
-        </div>
-        <button
+    <div className="pm-workspace space-y-5">
+      <PageHeader eyebrow="Project management" title="Projects" description="Manage project records, tasks, team allocation, inventory, purchases, costs, documents, and activity." actions={<>
+<button
           type="button"
           onClick={openCreateModal}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
         >
           <Plus className="h-4 w-4" />
           Create Project
         </button>
-      </section>
+        </>} />
 
       {loadError ? (
         <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -4073,8 +4025,8 @@ const ProjectManagementProjects = () => {
                   onClick={() => setActiveFilter(filter)}
                   className={`min-w-max rounded-lg px-3 py-2 text-sm font-semibold transition ${
                     activeFilter === filter
-                      ? "bg-indigo-600 text-white shadow-sm"
-                      : "border border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                      ? "bg-teal-600 text-white shadow-sm"
+                      : "border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
                   }`}
                 >
                   {filter}
@@ -4087,7 +4039,7 @@ const ProjectManagementProjects = () => {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search projects..."
-                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
               />
             </label>
           </div>
@@ -4178,7 +4130,7 @@ const ProjectManagementProjects = () => {
                             <button
                               type="button"
                               onClick={() => openDetails(project)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
                               aria-label={`View ${project.name}`}
                               title="View"
                             >
@@ -4187,7 +4139,7 @@ const ProjectManagementProjects = () => {
                             <button
                               type="button"
                               onClick={() => openEditModal(project)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
                               aria-label={`Edit ${project.name}`}
                               title="Edit"
                             >
@@ -4196,7 +4148,7 @@ const ProjectManagementProjects = () => {
                             <button
                               type="button"
                               onClick={() => openTaskAssignment(project)}
-                              className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                              className="inline-flex items-center justify-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-700 transition hover:bg-teal-100"
                             >
                               <UserPlus className="h-4 w-4" />
                               Assign Task
@@ -4210,7 +4162,7 @@ const ProjectManagementProjects = () => {
                                     : project.id
                                 )
                               }
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
                               aria-label={`More actions for ${project.name}`}
                               title="More"
                             >
@@ -4230,7 +4182,7 @@ const ProjectManagementProjects = () => {
                                     key={tab}
                                     type="button"
                                     onClick={() => openDetails(project, tab)}
-                                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-indigo-700"
+                                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-teal-700"
                                   >
                                     {createElement(IconComponent, {
                                       className: "h-4 w-4",
@@ -4285,9 +4237,9 @@ const ProjectManagementProjects = () => {
           key={`${selectedProject.id}-${selectedDetailTab}`}
           project={selectedProject}
           initialTab={selectedDetailTab}
-          onClose={() => setSelectedProject(null)}
+          onClose={closeProjectDetails}
           onEdit={(project) => {
-            setSelectedProject(null);
+            closeProjectDetails();
             openEditModal(project);
           }}
           onAssignTask={openTaskAssignment}

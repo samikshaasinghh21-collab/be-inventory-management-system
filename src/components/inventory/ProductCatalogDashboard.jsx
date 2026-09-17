@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import React, {
   useDeferredValue,
   useEffect,
@@ -594,27 +595,18 @@ export default function ProductCatalogDashboard() {
       <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
         <div className="space-y-6">
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-col gap-5 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 px-6 py-7 text-white sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-300">
-                  Inventory
-                </p>
-                <h1 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">
-                  Product Catalog
-                </h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                  Find products quickly, maintain product details, and keep available stock accurate.
-                </p>
-              </div>
-              <button
+            <InventoryPageHeader
+        title={<>Product Catalog</>}
+        description={<>Find products quickly, maintain product details, and keep available stock accurate.</>}
+        actions={<><button
                 type="button"
                 onClick={goToCreateProduct}
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-400"
               >
                 <AppIcon name="plus" className="h-4 w-4" />
                 Create Product
-              </button>
-            </div>
+              </button></>}
+      ></InventoryPageHeader>
           </section>
 
           <div className="flex flex-wrap gap-2">

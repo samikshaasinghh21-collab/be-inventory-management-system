@@ -4,10 +4,15 @@ import DateInput from "../components/common/DateInput";
 import PasswordPromptModal from "../components/common/PasswordPromptModal";
 import useSettings from "../hooks/useSettings";
 import AppIcon from "../components/layout/AppIcon";
+import Button from "../components/common/Button";
+import StatusBadge from "../components/common/StatusBadge";
+import { EmptyState, MetricCard, PageHeader, SectionHeader, Skeleton, Tabs } from "../components/ui";
+import { ArrowUpRight, CalendarDays, ClipboardCheck, FileWarning, UsersRound, UserPlus, Wallet } from "lucide-react";
+import "../styles/people.css";
 import {
   createHrmsEmployee,
   deleteHrmsEmployee,
-  fetchHrmsEmployees,
+  fetchAllHrmsEmployees as fetchHrmsEmployees,
   getHrmsEmployeeErrorMessage,
   updateHrmsEmployee,
 } from "../services/hrmsEmployeesApi";
@@ -1540,19 +1545,6 @@ const DEFAULT_ATTENDANCE_STATUSES = [
   "P",
 ];
 
-const statusClasses = {
-  Active: "bg-emerald-50 text-emerald-700",
-  Approved: "bg-emerald-50 text-emerald-700",
-  Draft: "bg-slate-100 text-slate-700",
-  "On Leave": "bg-rose-50 text-rose-700",
-  Pending: "bg-amber-50 text-amber-700",
-  Processed: "bg-emerald-50 text-emerald-700",
-  Rejected: "bg-rose-50 text-rose-700",
-  Relieved: "bg-slate-100 text-slate-700",
-  "Revision Requested": "bg-amber-50 text-amber-700",
-  "Salary Activated": "bg-blue-50 text-blue-700",
-};
-
 const money = (value) =>
   `Rs. ${Number(value || 0).toLocaleString("en-IN", {
     maximumFractionDigits: 0,
@@ -1686,7 +1678,7 @@ const Field = ({ label, children }) => (
 const Input = ({ as: Component = "input", className = "", ...props }) => (
   <Component
     className={[
-      "min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-50",
+      "people-input",
       className,
     ]
       .filter(Boolean)
@@ -1694,31 +1686,6 @@ const Input = ({ as: Component = "input", className = "", ...props }) => (
     {...props}
   />
 );
-
-const Button = ({ children, variant = "primary", className = "", ...props }) => {
-  const variants = {
-    primary: "border-blue-700 bg-blue-700 text-white hover:bg-blue-800",
-    danger: "border-rose-600 bg-rose-600 text-white hover:bg-rose-700",
-    secondary: "border-slate-200 bg-white text-slate-700 hover:border-slate-300",
-    ghost: "border-transparent bg-transparent text-slate-600 hover:bg-slate-100",
-  };
-
-  return (
-    <button
-      type="button"
-      className={[
-        "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60",
-        variants[variant],
-        className,
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-};
 
 const EmergencyContactDetailsSection = ({ form, onChange }) => (
   <section className="grid gap-4 rounded-xl border border-amber-200 bg-amber-50/70 p-5 sm:grid-cols-2">
@@ -1895,32 +1862,13 @@ const EmployeeDocumentsSection = ({ documents, onChange, onError }) => {
 };
 
 const EmployeeFormTabs = ({ tabs, activeTab, onChange, trailing }) => (
-  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
-    <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1">
-      {tabs.map((item) => (
-        <button
-          key={item}
-          type="button"
-          onClick={() => onChange(item)}
-          className={[
-            "min-h-9 rounded-md px-4 text-sm font-bold transition",
-            activeTab === item
-              ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-100"
-              : "text-slate-500 hover:bg-white/70 hover:text-slate-800",
-          ].join(" ")}
-        >
-          {item}
-        </button>
-      ))}
-    </div>
-    {trailing}
-  </div>
+  <div className="people-tabbar"><Tabs items={tabs.map((label) => ({ id: label, label }))} value={activeTab} onChange={onChange} />{trailing}</div>
 );
 
 const Panel = ({ children, className = "", ...props }) => (
   <section
     className={[
-      "rounded-lg border border-slate-200 bg-white p-4 shadow-sm",
+      "people-panel",
       className,
     ]
       .filter(Boolean)
@@ -2052,17 +2000,6 @@ const Avatar = ({ initials, size = "md", src }) => {
     </span>
   );
 };
-
-const StatusBadge = ({ status }) => (
-  <span
-    className={[
-      "inline-flex rounded-full px-2.5 py-1 text-xs font-semibold",
-      statusClasses[status] || "bg-slate-100 text-slate-600",
-    ].join(" ")}
-  >
-    {status}
-  </span>
-);
 
 const ScoreBar = ({ label, value, tone = "blue" }) => {
   const tones = {
@@ -2255,12 +2192,26 @@ const EmployeeDocumentsViewer = ({ documents, onError }) => {
   );
 };
 
-const HrmsShell = ({ children }) => {
-  return (
-    <div className="min-h-[calc(100vh-7rem)] rounded-lg border border-slate-200 bg-slate-50 p-4 text-slate-900 shadow-sm">
-      {children}
-    </div>
-  );
+const HRMS_PAGE_META = {
+  dashboard: ["People overview", "Workforce availability, upcoming priorities, and HR operations at a glance."],
+  employees: ["Employee directory", "Find the right people and keep every employee record up to date."],
+  "add-employee": ["Add employee", "Create a complete employee record, from employment details to documentation."],
+  "employee-profile": ["Employee workspace", "Employment, compensation, and documents in one connected profile."],
+  "edit-employee": ["Edit employee", "Keep employment and personal information accurate."],
+  reviews: ["Performance reviews", "Capture feedback, evaluate progress, and support employee development."],
+  "salary-reassessment": ["Salary reviews", "Review compensation recommendations and track their approval status."],
+  attendance: ["Attendance", "Review the month, update daily attendance, and prepare accurate payroll inputs."],
+  payroll: ["Salary processing", "Prepare monthly salaries and review deductions before processing."],
+  payslip: ["Payslips", "Review and print clear, complete employee salary statements."],
+  relieving: ["Employee exits", "Coordinate exit requests, final settlement, and relieving documents."],
+  search: ["People search", "Find employees by name, team, role, or contact information."],
+  reports: ["HR reports", "Review workforce registers and export the information your team needs."],
+  permissions: ["Access permissions", "Understand the roles and permissions available in your workspace."],
+};
+
+const HrmsShell = ({ children, page }) => {
+  const [title, description] = HRMS_PAGE_META[page] || HRMS_PAGE_META.dashboard;
+  return <div className="people-workspace" data-people-page={page}><PageHeader eyebrow="People & HR" title={title} description={description} />{children}</div>;
 };
 
 const HrmsLoginPage = () => {
@@ -2364,127 +2315,71 @@ const HrmsLoginPage = () => {
 };
 
 const DashboardPage = () => {
-  const [storedEmployees] = useHrmsEmployees();
-  const [reviews] = useStoredList(HRMS_STORAGE_KEYS.reviews, []);
-  const [payroll] = useHrmsSalaries();
-  const [relieving] = useHrmsRelieving();
-  const totalEmployees = storedEmployees.length;
-  const activeEmployees = storedEmployees.filter(
-    (employee) => employee.status === "Active"
-  ).length;
-  const onLeaveEmployees = storedEmployees.filter(
-    (employee) => employee.status === "On Leave"
-  ).length;
-  const relievedEmployees = storedEmployees.filter(
-    (employee) => employee.status === "Relieved"
-  ).length;
-  const latestPayroll = payroll[0];
-  const recentEmployee = storedEmployees[0];
-
-  const stats = [
-    { label: "Total Employees", value: totalEmployees, delta: "HRMS database" },
-    { label: "Active Employees", value: activeEmployees, delta: "Live count" },
-    { label: "On Leave", value: onLeaveEmployees, delta: "Live count" },
-    { label: "Relieved", value: relievedEmployees, delta: "Live count" },
+  const [employees, , employeesState] = useHrmsEmployees();
+  const [attendance, , attendanceState] = useHrmsAttendance();
+  const [reviews, , reviewsState] = useHrmsReviews();
+  const [payroll, , payrollState] = useHrmsSalaries();
+  const [salaryReviews] = useHrmsSalaryReassessments();
+  const currentMonth = getCurrentAttendanceMonth();
+  const now = new Date();
+  const activeEmployees = employees.filter((employee) => employee.status !== "Relieved");
+  const monthlyAttendance = [...attendance].filter((record) => areAttendanceMonthsEqual(record.month, currentMonth)).sort((a, b) => String(b.savedAt || "").localeCompare(String(a.savedAt || ""))).filter((record, index, records) => records.findIndex((item) => item.employeeId === record.employeeId) === index);
+  const todayCounts = monthlyAttendance.reduce((counts, record) => {
+    if (activeEmployees.some((employee) => employee.id === record.employeeId)) {
+      const status = record.statuses?.[now.getDate() - 1];
+      if (status) counts[status] = (counts[status] || 0) + 1;
+    }
+    return counts;
+  }, {});
+  const recordedToday = Object.values(todayCounts).reduce((sum, count) => sum + count, 0);
+  const unrecorded = Math.max(0, activeEmployees.length - recordedToday);
+  const newJoiners = employees.filter((employee) => {
+    const joined = parseDateValue(employee.joined);
+    return joined && joined.getMonth() === now.getMonth() && joined.getFullYear() === now.getFullYear();
+  });
+  const pendingReviews = salaryReviews.filter((review) => ["Pending", "Draft", "Revision Requested"].includes(review.status));
+  const missingDocuments = activeEmployees.filter((employee) => !Object.values(normalizeEmployeeDocuments(employee.documents)).some((documents) => documents.length > 0));
+  const departments = Object.entries(activeEmployees.reduce((groups, employee) => {
+    const department = employee.department || "Unassigned"; groups[department] = (groups[department] || 0) + 1; return groups;
+  }, {})).sort((a, b) => b[1] - a[1]);
+  const latestPayroll = [...payroll].sort((a, b) => getAttendanceMonthIndex(b.month) - getAttendanceMonthIndex(a.month))[0];
+  const recentEmployees = [...employees].sort((a, b) => (parseDateValue(b.joined)?.getTime() || 0) - (parseDateValue(a.joined)?.getTime() || 0)).slice(0, 5);
+  const attendanceTrend = Array.from({ length: 7 }, (_, index) => {
+    const day = Math.max(1, now.getDate() - 6) + index;
+    if (day > now.getDate()) return null;
+    const count = monthlyAttendance.filter((record) => record.statuses?.[day - 1] === "P" && activeEmployees.some((employee) => employee.id === record.employeeId)).length;
+    return { day, count };
+  }).filter(Boolean);
+  const loading = employeesState.loading && !employees.length;
+  const error = employeesState.error || attendanceState.error || payrollState.error || reviewsState.error;
+  const actions = [
+    { title: "Attendance to complete", description: "Active employees without a saved status for today", count: unrecorded, path: "/attendance", icon: CalendarDays },
+    { title: "Salary reviews to action", description: "Pending, draft, or returned for revision", count: pendingReviews.length, path: "/reviews/salary-reassessment", icon: ClipboardCheck },
+    { title: "Employee documents missing", description: "Employees without any uploaded documents", count: missingDocuments.length, path: "/employees", icon: FileWarning },
   ];
-
-  return (
-    <div className="grid gap-4">
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {stats.map((item) => (
-          <Panel key={item.label}>
-            <p className="text-xs font-semibold text-slate-500">{item.label}</p>
-            <p className="mt-2 text-3xl font-bold text-slate-900">{item.value}</p>
-            <p className="mt-1 text-xs font-semibold text-blue-600">{item.delta}</p>
-          </Panel>
-        ))}
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-3">
-        <Panel>
-          <h2 className="text-sm font-bold">Monthly Attendance</h2>
-          <div className="mt-4 flex items-center gap-5">
-            <div
-              className="grid h-28 w-28 place-items-center rounded-full"
-              style={{
-                background:
-                  "conic-gradient(#2563eb 0 85%, #ef4444 85% 95%, #f59e0b 95% 100%)",
-              }}
-            >
-              <div className="grid h-20 w-20 place-items-center rounded-full bg-white text-xl font-bold">
-                85%
-              </div>
-            </div>
-            <div className="grid gap-2 text-xs">
-              {[
-                ["Present", "85%", "bg-blue-600"],
-                ["Absent", "10%", "bg-red-500"],
-                ["Leave", "5%", "bg-amber-500"],
-              ].map(([label, value, color]) => (
-                <div key={label} className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${color}`} />
-                  <span className="w-16 text-slate-600">{label}</span>
-                  <strong>{value}</strong>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Panel>
-
-        <Panel className="grid place-items-center text-center">
-          <div>
-            <h2 className="text-sm font-bold">Pending Reviews</h2>
-            <p className="mt-7 text-4xl font-bold">
-              {Math.max(0, totalEmployees - reviews.length)}
-            </p>
-            <p className="mt-1 text-sm text-slate-500">
-              {reviews.length} reviews saved locally
-            </p>
-            <Link to="/reviews">
-              <Button className="mt-4">View Reviews</Button>
-            </Link>
-          </div>
-        </Panel>
-
-        <Panel className="grid place-items-center text-center">
-          <div>
-            <h2 className="text-sm font-bold">Payroll Status</h2>
-            <p className="mt-7 text-sm text-slate-500">
-              {latestPayroll?.month || "May 2024"}
-            </p>
-            <p className="mt-1 text-2xl font-bold text-emerald-600">Completed</p>
-            <Link to="/payroll">
-              <Button className="mt-4">View Payroll</Button>
-            </Link>
-          </div>
-        </Panel>
-      </section>
-
-      <Panel>
-        <h2 className="text-sm font-bold">Recent Activities</h2>
-        <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-4 text-sm">
-          <Avatar
-            initials={recentEmployee?.avatar || "HR"}
-            size="sm"
-            src={recentEmployee?.photo}
-          />
-          <strong>{recentEmployee?.name || "No employees yet"}</strong>
-          <span className="text-slate-500">
-            {recentEmployee
-              ? relieving.length
-                ? "Relieving data saved"
-                : reviews.length
-                  ? "Review saved"
-                  : "Employee data saved to HRMS database"
-              : "Add employee details to start"}
-          </span>
-          <span className="ml-auto text-xs text-slate-400">
-            {recentEmployee ? "HRMS DB" : ""}
-          </span>
-        </div>
+  return <div className="people-dashboard">
+    {error && <Notice tone="warning">Some workforce information could not be refreshed. Available records are shown. <button type="button" className="people-text-action" onClick={() => { employeesState.refresh(); attendanceState.refresh(); payrollState.refresh(); reviewsState.refresh(); }}>Try again</button></Notice>}
+    {loading ? <Skeleton rows={3} /> : <section className="people-metrics">
+      <MetricCard label="Total employees" value={employees.length} hint={`${activeEmployees.length} in the current workforce`} icon={UsersRound} />
+      <MetricCard label="Present today" value={attendanceState.loading ? "?" : todayCounts.P || 0} hint={`${recordedToday} attendance records for today`} icon={CalendarDays} />
+      <MetricCard label="Absent / on leave" value={attendanceState.loading ? "?" : `${todayCounts.A || 0} / ${todayCounts.L || 0}`} hint="Based on saved attendance" icon={ClipboardCheck} />
+      <MetricCard label="New joiners" value={newJoiners.length} hint={`Joined in ${currentMonth}`} icon={UserPlus} />
+    </section>}
+    <div className="people-dashboard-main">
+      <Panel><SectionHeader title="Workforce attendance" description={`Recorded presence · ${currentMonth}`} action={<Link className="people-text-action" to="/attendance">Manage attendance <ArrowUpRight size={14} /></Link>} />
+        {!monthlyAttendance.length ? <EmptyState title="Attendance has not been recorded" description="Saved monthly attendance will bring today's availability and the daily trend into view." action={<Link className="people-text-action" to="/attendance">Record attendance <ArrowUpRight size={14} /></Link>} /> : <>
+          <div className="people-attendance-headline"><strong>{recordedToday ? Math.round((todayCounts.P || 0) / recordedToday * 100) : 0}%</strong><span>of recorded employees present today<br /><small>{unrecorded} employees still need a status</small></span></div>
+          <div className="people-attendance-chart" aria-label="Present employees by date">{attendanceTrend.map(({ day, count }) => <div key={day}><span>{count}</span><div><i style={{ height: `${Math.max(count ? 4 : 0, count / Math.max(1, activeEmployees.length) * 100)}%` }} /></div><small>{day} {now.toLocaleDateString("en-IN", { month: "short" })}</small></div>)}</div>
+        </>}
       </Panel>
+      <Panel><SectionHeader title="HR action centre" description="The next things to move forward" /><div className="people-action-list">{actions.map(({ title, description, count, path, icon: Icon }) => <Link key={title} to={path}><span className="people-action-icon"><Icon size={18} /></span><span><strong>{title}</strong><small>{description}</small></span><b data-attention={count > 0}>{count}</b><ArrowUpRight size={15} /></Link>)}</div><div className="people-payroll-summary"><Wallet size={18} /><span><strong>Latest payroll</strong><small>{latestPayroll ? `${latestPayroll.month} ? ${latestPayroll.rows?.length || 0} employees` : "No salary batches processed yet"}</small></span>{latestPayroll && <StatusBadge status={latestPayroll.status || "Draft"} />}<Link className="people-text-action" to="/payroll">View</Link></div></Panel>
     </div>
-  );
+    <div className="people-dashboard-main">
+      <Panel><SectionHeader title="Department distribution" description={`${activeEmployees.length} employees across ${departments.length} departments`} />{departments.length ? <div className="people-departments">{departments.map(([department, count]) => <div key={department}><span>{department}</span><div><i style={{ width: `${count / Math.max(1, activeEmployees.length) * 100}%` }} /></div><strong>{count}</strong></div>)}</div> : <EmptyState title="Your team structure starts here" description="Departments will appear as you add employee records." />}</Panel>
+      <Panel><SectionHeader title="Recent joiners" description="Latest employees by joining date" action={<Link className="people-text-action" to="/employees">Directory <ArrowUpRight size={14} /></Link>} />{recentEmployees.length ? <div className="people-recent-list">{recentEmployees.map((employee) => <Link to={`/employees/profile/${employee.id}`} key={employee.id}><Avatar initials={employee.avatar || getInitials(employee.name)} src={employee.photo} size="sm" /><span><strong>{employee.name}</strong><small>{employee.designation || employee.department || employee.id}</small></span><time>{formatDate(employee.joined)}</time></Link>)}</div> : <EmptyState title="Build your employee directory" description="Add your first employee to bring your workforce into one place." action={<Link className="people-text-action" to="/employees/add">Add employee <ArrowUpRight size={14} /></Link>} />}</Panel>
+    </div>
+    <p className="people-source-note">Workforce counts use employee records. Attendance reflects saved entries; unrecorded employees are never counted as absent. {reviews.length} performance reviews on record.</p>
+  </div>;
 };
 
 const EmployeeListPage = () => {
@@ -2492,6 +2387,8 @@ const EmployeeListPage = () => {
   const isAdmin = String(settings?.profile?.role || "").toLowerCase() === "admin";
   const [employees, setEmployees, employeesState] = useHrmsEmployees();
   const [query, setQuery] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -2502,8 +2399,9 @@ const EmployeeListPage = () => {
 
   const filteredEmployees = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return employees;
     return employees.filter((employee) =>
+      (!departmentFilter || employee.department === departmentFilter) &&
+      (!statusFilter || employee.status === statusFilter) &&
       [
         employee.id,
         employee.name,
@@ -2516,7 +2414,7 @@ const EmployeeListPage = () => {
         .toLowerCase()
         .includes(needle)
     );
-  }, [query, employees]);
+  }, [query, employees, departmentFilter, statusFilter]);
 
   const pageSize = 10;
   const pageCount = Math.max(1, Math.ceil(filteredEmployees.length / pageSize));
@@ -2531,7 +2429,7 @@ const EmployeeListPage = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [query]);
+  }, [query, departmentFilter, statusFilter]);
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(Math.max(page, 1), pageCount));
@@ -2644,14 +2542,17 @@ const EmployeeListPage = () => {
             : ""}
         </Notice>
       </div>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search employee..."
+          aria-label="Search employees"
+          placeholder="Search name, employee ID, or contact"
           className="sm:max-w-xs"
         />
-        <Link to="/employees/add">
+        <Input as="select" aria-label="Filter by department" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} className="sm:max-w-[190px]"><option value="">All departments</option>{[...new Set(employees.map((employee) => employee.department).filter(Boolean))].sort().map((department) => <option key={department}>{department}</option>)}</Input>
+        <Input as="select" aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="sm:max-w-[150px]"><option value="">All statuses</option>{[...new Set(employees.map((employee) => employee.status).filter(Boolean))].sort().map((status) => <option key={status}>{status}</option>)}</Input>
+        <Link to="/employees/add" className="shrink-0">
           <Button>
             <AppIcon name="plus" className="h-4 w-4" />
             Add Employee
@@ -2663,7 +2564,7 @@ const EmployeeListPage = () => {
         <table className="min-w-[820px] w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
-              {["ID", "Photo", "Name", "Department", "Designation", "Email", "Status", "Action"].map(
+              {["Employee", "Department", "Job title", "Manager", "Contact", "Joined", "Status", "Actions"].map(
                 (heading) => (
                   <th key={heading} className="px-3 py-3 font-bold">
                     {heading}
@@ -2676,23 +2577,17 @@ const EmployeeListPage = () => {
             {pagedEmployees.length ? (
               pagedEmployees.map((employee) => (
                 <tr key={employee.id} className="hover:bg-slate-50">
-                  <td className="px-3 py-3 font-semibold">{employee.id}</td>
-                  <td className="px-3 py-3">
-                    <Avatar
-                      initials={employee.avatar}
-                      size="sm"
-                      src={employee.photo}
-                    />
-                  </td>
-                  <td className="px-3 py-3">{employee.name}</td>
-                  <td className="px-3 py-3">{employee.department}</td>
-                  <td className="px-3 py-3">{employee.designation}</td>
-                  <td className="px-3 py-3">{employee.email}</td>
+                  <td className="px-3 py-3"><Link to={`/employees/profile/${employee.id}`} className="people-employee-cell"><Avatar initials={employee.avatar || getInitials(employee.name)} size="sm" src={employee.photo} /><span><strong>{employee.name}</strong><small>{employee.id}</small></span></Link></td>
+                  <td className="px-3 py-3">{employee.department || "?"}</td>
+                  <td className="px-3 py-3">{employee.designation || "?"}</td>
+                  <td className="px-3 py-3">{employee.manager || "?"}</td>
+                  <td className="px-3 py-3"><span>{employee.email || "?"}</span><small className="block text-slate-500">{employee.phone}</small></td>
+                  <td className="px-3 py-3 whitespace-nowrap">{formatDate(employee.joined)}</td>
                   <td className="px-3 py-3">
                     <StatusBadge status={employee.status} />
                   </td>
                   <td className="px-3 py-3">
-                    <div className="flex flex-wrap gap-2">
+                    <details className="people-row-menu"><summary aria-label={`Actions for ${employee.name}`}>Actions <span aria-hidden="true">?</span></summary><div>
                       <Link
                         to={`/employees/profile/${employee.id}`}
                         aria-label={`View ${employee.name}`}
@@ -2733,14 +2628,14 @@ const EmployeeListPage = () => {
                           </Button>
                         </>
                       ) : null}
-                    </div>
+                    </div></details>
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
                 <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
-                  No employees match your search.
+                  <EmptyState title={employees.length ? "No employees match these filters" : "Your employee directory is ready"} description={employees.length ? "Try another name or adjust the department and status filters." : "Add your first employee to organize employment details, attendance, and documents."} action={employees.length ? <Button variant="secondary" onClick={() => { setQuery(""); setDepartmentFilter(""); setStatusFilter(""); }}>Clear filters</Button> : <Link className="people-text-action" to="/employees/add">Add employee</Link>} />
                 </td>
               </tr>
             )}
@@ -3896,6 +3791,7 @@ const EmployeeProfilePage = () => {
     employeeId || employees[0]?.id || ""
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [profileTab, setProfileTab] = useState("Overview");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [deletePromptOpen, setDeletePromptOpen] = useState(false);
@@ -4147,71 +4043,14 @@ const EmployeeProfilePage = () => {
         </div>
       </Panel>
 
-      <div className="flex justify-end">
-        <Button onClick={() => printEmployeeProfile(employee, settings.company)}>
-          <AppIcon name="file" className="h-4 w-4" />
-          Print Complete Details
-        </Button>
-      </div>
-
-      <RegisterDocumentView
-        title="EMPLOYEE PROFILE"
-        subtitle={`${employee.name} | ${employee.id}`}
-        onClose={() => navigate("/employees")}
-        leftRows={[
-          ["Employee", employee.name],
-          ["Employee ID", employee.id],
-          ["Department", displayValue(employee.department)],
-          ["Designation", displayValue(employee.designation)],
-          ["Status", displayValue(employee.status)],
-        ]}
-        rightRows={[
-          ["Email", displayValue(employee.email)],
-          ["Phone", displayValue(employee.phone)],
-          ["Emergency Contact Name", displayValue(employee.emergencyContactName)],
-          ["Emergency Contact", displayValue(employee.emergencyContactNumber)],
-          ["Relation", displayValue(employee.relation || employee.emergencyContactRelation)],
-          [
-            "Emergency Contact Address",
-            displayValue(employee.emergencyContactAddress),
-          ],
-          ["Reporting To", displayValue(employee.manager)],
-          ["Joining Date", displayValue(employee.joined)],
-          ["Annual Gross Salary", money(employee.salary)],
-          ["Monthly Gross Salary", money(getSalaryBreakup(employee).monthlySalary)],
-          ["PAN Number", displayValue(employee.panNumber)],
-          ["Aadhaar Number", displayValue(employee.documentNumber)],
-          ["UAN Number", displayValue(employee.uanNumber)],
-          ["ESI Number", displayValue(employee.esiNumber)],
-        ]}
-        tableColumns={["Sl No", "Particulars", "Details"]}
-        tableRows={[
-          {
-            id: "permanent-address",
-            values: ["1", "Permanent Address", displayValue(employee.permanentAddress)],
-          },
-          {
-            id: "present-address",
-            values: [
-              "2",
-              "Present Address",
-              displayValue(employee.presentAddress || employee.address),
-            ],
-          },
-          { id: "dob", values: ["3", "Date of Birth", displayValue(employee.dateOfBirth)] },
-          { id: "gender", values: ["4", "Gender", displayValue(employee.gender)] },
-          {
-            id: "marital",
-            values: ["5", "Marital Status", displayValue(employee.maritalStatus)],
-          },
-          { id: "nationality", values: ["6", "Nationality", displayValue(employee.nationality)] },
-          { id: "blood", values: ["7", "Blood Group", displayValue(employee.bloodGroup)] },
-        ]}
-        bottomLeftTitle="Employee Notes"
-        bottomLeftValue="Registered employee details from HRMS database records."
-      />
-
-      <EmployeeDocumentsViewer documents={employee.documents} onError={setError} />
+      <Panel className="people-profile-hero"><Avatar initials={employee.avatar || getInitials(employee.name)} src={employee.photo} size="lg" /><div><span className="people-eyebrow">{employee.id}</span><h2>{employee.name}</h2><p>{employee.designation || "Employee"} ? {employee.department || "Department not assigned"}</p><span className="people-profile-meta">{employee.email || "No email added"} ? Joined {formatDate(employee.joined)}</span></div><div className="people-profile-hero-actions"><StatusBadge status={employee.status} /><Button variant="secondary" onClick={() => printEmployeeProfile(employee, settings.company)}><AppIcon name="file" className="h-4 w-4" />Print profile</Button></div></Panel>
+      <Tabs items={["Overview", "Employment", "Salary", "Documents", "Emergency contact", "Reviews"].map((label) => ({ id: label, label }))} value={profileTab} onChange={setProfileTab} />
+      {profileTab === "Overview" && <div className="people-profile-grid"><Panel><SectionHeader title="Personal details" description="Employee identity and contact information" /><dl className="people-detail-list">{[["Full name", employee.name], ["Email", employee.email], ["Phone", employee.phone], ["Date of birth", formatDate(employee.dateOfBirth)], ["Gender", employee.gender], ["Marital status", employee.maritalStatus], ["Nationality", employee.nationality], ["Blood group", employee.bloodGroup]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl></Panel><Panel><SectionHeader title="Addresses" description="Residential contact details" /><dl className="people-detail-list"><div><dt>Permanent address</dt><dd>{displayValue(employee.permanentAddress)}</dd></div><div><dt>Current address</dt><dd>{displayValue(employee.presentAddress || employee.address)}</dd></div></dl><SectionHeader title="Employment summary" /><dl className="people-detail-list"><div><dt>Reporting manager</dt><dd>{displayValue(employee.manager)}</dd></div><div><dt>Joined</dt><dd>{formatDate(employee.joined)}</dd></div><div><dt>Status</dt><dd><StatusBadge status={employee.status} /></dd></div></dl></Panel></div>}
+      {profileTab === "Employment" && <Panel><SectionHeader title="Employment details" description="Role, reporting line, and statutory identifiers" /><dl className="people-detail-list people-detail-columns">{[["Employee ID", employee.id], ["Department", employee.department], ["Job title", employee.designation], ["Reporting manager", employee.manager], ["Joining date", formatDate(employee.joined)], ["PAN number", employee.panNumber], ["Aadhaar number", employee.documentNumber], ["UAN number", employee.uanNumber], ["ESI number", employee.esiNumber]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl></Panel>}
+      {profileTab === "Salary" && <Panel><SectionHeader title="Compensation" description="Current salary information from the employee record" /><div className="people-metrics"><MetricCard label="Annual gross salary" value={money(employee.salary)} /><MetricCard label="Monthly gross salary" value={money(getSalaryBreakup(employee).monthlySalary)} /></div><SalaryGrowthChart records={salaryHistory.filter((record) => record.employeeId === employee.id)} currentSalary={employee.salary} /><Link className="people-text-action" to="/reviews/salary-reassessment">Open salary reviews <ArrowUpRight size={14} /></Link></Panel>}
+      {profileTab === "Documents" && <EmployeeDocumentsViewer documents={employee.documents} onError={setError} />}
+      {profileTab === "Emergency contact" && <Panel><SectionHeader title="Emergency contact" description="Who to contact when urgent support is needed" /><dl className="people-detail-list">{[["Contact name", employee.emergencyContactName], ["Relationship", employee.relation || employee.emergencyContactRelation], ["Phone", employee.emergencyContactNumber], ["Address", employee.emergencyContactAddress]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl></Panel>}
+      {profileTab === "Reviews" && <Panel><SectionHeader title="Salary review history" description="Compensation reviews associated with this employee" />{salaryHistory.filter((record) => record.employeeId === employee.id).length ? <div className="people-recent-list">{salaryHistory.filter((record) => record.employeeId === employee.id).map((record) => <div key={record.id}><span><strong>{formatDate(record.reviewDate || record.effectiveDate)}</strong><small>Revised salary: {money(record.revisedSalary)}</small></span><StatusBadge status={record.status || "Draft"} /></div>)}</div> : <EmptyState title="No salary reviews yet" description="Saved compensation reviews for this employee will appear here." />}<Link className="people-text-action" to="/reviews">Open performance reviews <ArrowUpRight size={14} /></Link></Panel>}
 
       <PasswordPromptModal
         isOpen={deletePromptOpen}
@@ -9042,7 +8881,7 @@ const HrmsPlaceholder = ({ page }) => {
     return <HrmsLoginPage />;
   }
 
-  return <HrmsShell>{renderPage(page)}</HrmsShell>;
+  return <HrmsShell page={page}>{renderPage(page)}</HrmsShell>;
 };
 
 export default HrmsPlaceholder;

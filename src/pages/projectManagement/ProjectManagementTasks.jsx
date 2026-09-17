@@ -1,5 +1,8 @@
+import StatusBadge from "../../components/common/StatusBadge";
+import { PageHeader, MetricCard as SharedMetricCard, DataTable, Avatar } from "../../components/ui";
+import "../../styles/projects.css";
 import { createElement, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   CalendarDays,
@@ -42,21 +45,9 @@ const TASK_ATTACHMENT_EXTENSIONS = new Set([
 ]);
 
 const inputClass =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-100";
 
-const statusStyles = {
-  Pending: "border-slate-200 bg-slate-50 text-slate-700",
-  Partial: "border-amber-200 bg-amber-50 text-amber-700",
-  Completed: "border-violet-200 bg-violet-50 text-violet-700",
-  Cancelled: "border-slate-300 bg-slate-200 text-slate-700",
-};
 
-const priorityStyles = {
-  Critical: "border-red-200 bg-red-50 text-red-700",
-  High: "border-orange-200 bg-orange-50 text-orange-700",
-  Medium: "border-indigo-200 bg-indigo-50 text-indigo-700",
-  Low: "border-slate-200 bg-slate-50 text-slate-700",
-};
 
 const numberValue = (value) => {
   const parsed = Number(value);
@@ -203,11 +194,11 @@ const TaskUpdateModal = ({ task, onClose, onSaved }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/45 p-4 ">
       <div className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-500">Update Task</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-teal-500">Update Task</p>
             <h2 className="mt-1 text-xl font-bold text-slate-950">{getTaskName(task)}</h2>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100">
@@ -286,7 +277,7 @@ const TaskUpdateModal = ({ task, onClose, onSaved }) => {
                           key={file.id}
                           type="button"
                           onClick={() => downloadAuthenticatedFile(file.downloadUrl, file.name)}
-                          className="rounded-md bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700"
+                          className="rounded-md bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700"
                         >
                           {file.name}
                         </button>
@@ -300,7 +291,7 @@ const TaskUpdateModal = ({ task, onClose, onSaved }) => {
         </div>
         <div className="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
           <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold">Cancel</button>
-          <button type="button" disabled={saving} onClick={save} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
+          <button type="button" disabled={saving} onClick={save} className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
             {saving ? "Saving..." : "Save Update"}
           </button>
         </div>
@@ -338,18 +329,7 @@ const sortTaskRows = (rows = []) =>
     return String(a.taskId || "").localeCompare(String(b.taskId || ""));
   });
 
-const Badge = ({ label, type = "status" }) => {
-  const styles = type === "priority" ? priorityStyles : statusStyles;
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
-        styles[label] || "border-slate-200 bg-slate-100 text-slate-700"
-      }`}
-    >
-      {label || "-"}
-    </span>
-  );
-};
+const Badge = ({ label, status, children }) => <StatusBadge status={status || label || children} />;
 
 const ProgressMeter = ({ value }) => (
   <div className="flex min-w-[130px] items-center gap-3">
@@ -365,37 +345,10 @@ const ProgressMeter = ({ value }) => (
   </div>
 );
 
-const KpiCard = ({ icon: IconComponent, label, value, helper, tone = "indigo" }) => {
-  const toneClasses = {
-    indigo: "bg-indigo-50 text-indigo-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    rose: "bg-rose-50 text-rose-600",
-    violet: "bg-violet-50 text-violet-600",
-    amber: "bg-amber-50 text-amber-600",
-    slate: "bg-slate-100 text-slate-600",
-  };
-
-  return (
-    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <span
-          className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${
-            toneClasses[tone] || toneClasses.indigo
-          }`}
-        >
-          {createElement(IconComponent, { className: "h-5 w-5" })}
-        </span>
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {label}
-          </p>
-          <p className="mt-1 text-xl font-bold text-slate-950">{value}</p>
-          <p className="mt-1 truncate text-xs text-slate-500">{helper}</p>
-        </div>
-      </div>
-    </article>
-  );
-};
+const KpiCard = ({ icon, label, value, helper, tone = "", style = "" }) => (
+  <SharedMetricCard icon={icon} label={label} value={value} hint={helper}
+    tone={/rose|red/.test(tone || style) ? "danger" : /amber|orange/.test(tone || style) ? "warning" : "neutral"} />
+);
 
 const DetailItem = ({ label, value }) => (
   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -410,11 +363,11 @@ const TaskDetailDrawer = ({ task, onClose, onViewProject }) => {
   if (!task) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/40 ">
       <div className="flex h-full w-full max-w-2xl flex-col overflow-hidden bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-teal-500">
               Task Details
             </p>
             <h2 className="mt-2 text-2xl font-bold text-slate-950">
@@ -427,7 +380,7 @@ const TaskDetailDrawer = ({ task, onClose, onViewProject }) => {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
           >
             Close
           </button>
@@ -499,7 +452,7 @@ const TaskDetailDrawer = ({ task, onClose, onViewProject }) => {
           <button
             type="button"
             onClick={onViewProject}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-700"
           >
             <FolderKanban className="h-4 w-4" />
             View Project
@@ -507,7 +460,7 @@ const TaskDetailDrawer = ({ task, onClose, onViewProject }) => {
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
           >
             Done
           </button>
@@ -519,6 +472,9 @@ const TaskDetailDrawer = ({ task, onClose, onViewProject }) => {
 
 const ProjectManagementTasks = () => {
   const navigate = useNavigate();
+  const [query] = useSearchParams();
+  const [viewMode, setViewMode] = useState("table");
+  const [onlyOverdue, setOnlyOverdue] = useState(() => query.get("view") === "overdue");
   const [projects, setProjects] = useState(() => getProjectManagementProjects());
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -579,6 +535,7 @@ const ProjectManagementTasks = () => {
     const term = search.trim().toLowerCase();
     return taskRows.filter((task) => {
       const status = getTaskStatus(task);
+      if (onlyOverdue && (["Completed", "Cancelled"].includes(status) || !isPastDate(task.dueDate))) return false;
       if (statusFilter !== "All" && status !== statusFilter) return false;
       if (priorityFilter !== "All" && task.priority !== priorityFilter) {
         return false;
@@ -604,7 +561,7 @@ const ProjectManagementTasks = () => {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(term));
     });
-  }, [ownerFilter, priorityFilter, search, statusFilter, taskRows]);
+  }, [onlyOverdue, ownerFilter, priorityFilter, search, statusFilter, taskRows]);
 
   const metrics = useMemo(() => {
     const total = taskRows.length;
@@ -618,7 +575,7 @@ const ProjectManagementTasks = () => {
       ["Cancelled"].includes(getTaskStatus(task))
     ).length;
     const overdue = taskRows.filter(
-      (task) => getTaskStatus(task) !== "Completed" && isPastDate(task.dueDate)
+      (task) => !["Completed", "Cancelled"].includes(getTaskStatus(task)) && isPastDate(task.dueDate)
     ).length;
 
     return { total, completed, inProgress, blocked, overdue };
@@ -630,7 +587,7 @@ const ProjectManagementTasks = () => {
       value: metrics.total.toLocaleString("en-IN"),
       helper: "Across all projects",
       icon: ListChecks,
-      tone: "indigo",
+      tone: "teal",
     },
     {
       label: "Active Tasks",
@@ -651,7 +608,7 @@ const ProjectManagementTasks = () => {
       value: metrics.completed.toLocaleString("en-IN"),
       helper: "Closed tasks",
       icon: CheckCircle2,
-      tone: "violet",
+      tone: "teal",
     },
     {
       label: "Cancelled",
@@ -663,28 +620,17 @@ const ProjectManagementTasks = () => {
   ];
 
   return (
-    <div className="space-y-5">
-      <section className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-indigo-500">
-            Project Management
-          </p>
-          <h1 className="mt-2 text-2xl font-bold text-slate-950 md:text-3xl">
-            Tasks
-          </h1>
-          <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Tasks are organized by project stage and always remain under their milestone.
-          </p>
-        </div>
-        <button
+    <div className="pm-workspace space-y-5">
+      <PageHeader eyebrow="Project management" title="Tasks" description="Tasks are organized by project stage and always remain under their milestone." actions={<>
+<button
           type="button"
           onClick={() => navigate("/project-management/milestones")}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
         >
           <UserPlus className="h-4 w-4" />
           Open Milestones
         </button>
-      </section>
+        </>} />
 
       {loadError ? (
         <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -747,175 +693,42 @@ const ProjectManagementTasks = () => {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-[1760px] w-full text-sm">
-            <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold">Task ID</th>
-                <th className="px-4 py-3 text-left font-semibold">Task Name</th>
-                <th className="px-4 py-3 text-left font-semibold">Project</th>
-                <th className="px-4 py-3 text-left font-semibold">Stage</th>
-                <th className="px-4 py-3 text-left font-semibold">Milestone</th>
-                <th className="px-4 py-3 text-left font-semibold">Client</th>
-                <th className="px-4 py-3 text-left font-semibold">Assigned To</th>
-                <th className="px-4 py-3 text-left font-semibold">Assigned By</th>
-                <th className="px-4 py-3 text-left font-semibold">Start Date</th>
-                <th className="px-4 py-3 text-left font-semibold">Due Date</th>
-                <th className="px-4 py-3 text-left font-semibold">Priority</th>
-                <th className="px-4 py-3 text-left font-semibold">Status</th>
-                <th className="px-4 py-3 text-left font-semibold">Progress</th>
-                <th className="px-4 py-3 text-right font-semibold">
-                  Estimated Hours
-                </th>
-                <th className="px-4 py-3 text-left font-semibold">Dependencies</th>
-                <th className="px-4 py-3 text-left font-semibold">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
-              {filteredTasks.length === 0 ? (
-                <tr>
-                  <td colSpan="16" className="px-4 py-14 text-center">
-                    <div className="flex flex-col items-center">
-                      <span className="grid h-14 w-14 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
-                        <ListChecks className="h-6 w-6" />
-                      </span>
-                      <h3 className="mt-4 text-base font-semibold text-slate-900">
-                        {taskRows.length
-                          ? "No matching tasks found"
-                          : "No tasks assigned yet"}
-                      </h3>
-                      <p className="mt-2 max-w-md text-sm text-slate-500">
-                        Create a milestone first, then create tasks inside that milestone.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => navigate("/project-management/milestones")}
-                        className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
-                      >
-                        <UserPlus className="h-4 w-4" />
-                        Go to Milestones
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filteredTasks.map((task) => (
-                  <tr key={`${task.projectId}-${task.id}`} className="hover:bg-slate-50">
-                    <td className="px-4 py-4 font-semibold text-slate-700">
-                      {task.taskId || "-"}
-                    </td>
-                    <td className="px-4 py-4">
-                      <p className="font-semibold text-slate-950">
-                        {getTaskName(task) || "-"}
-                      </p>
-                      <p className="mt-1 line-clamp-1 text-xs text-slate-500">
-                        {getTaskDescription(task) || "No description"}
-                      </p>
-                    </td>
-                    <td className="px-4 py-4">
-                      <p className="font-semibold text-slate-800">
-                        {task.projectName || "-"}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {task.projectCode || "No project code"}
-                      </p>
-                    </td>
-                    <td className="px-4 py-4"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">{task.stage}</span></td>
-                    <td className="px-4 py-4"><p className="font-semibold text-slate-800">{task.milestoneName}</p><p className="mt-1 text-xs text-slate-500">{task.milestoneNumber}</p></td>
-                    <td className="px-4 py-4 text-slate-600">
-                      {task.client || "-"}
-                    </td>
-                    <td className="px-4 py-4 text-slate-600">
-                      <span className="inline-flex items-center gap-2">
-                        <Users className="h-4 w-4 text-slate-400" />
-                        {task.assignedTo || "-"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-slate-600">
-                      {task.assignedBy || "-"}
-                    </td>
-                    <td className="px-4 py-4 text-slate-600">
-                      {formatDateValue(task.startDate)}
-                    </td>
-                    <td className="px-4 py-4 text-slate-600">
-                      {formatDateValue(task.dueDate)}
-                    </td>
-                    <td className="px-4 py-4">
-                      <Badge label={task.priority || "Medium"} type="priority" />
-                    </td>
-                    <td className="px-4 py-4">
-                      <Badge label={getTaskStatus(task)} />
-                    </td>
-                    <td className="px-4 py-4">
-                      <ProgressMeter value={getTaskProgress(task)} />
-                    </td>
-                    <td className="px-4 py-4 text-right font-semibold text-slate-900">
-                      {numberValue(task.estimatedHours).toLocaleString("en-IN")}
-                    </td>
-                    <td className="px-4 py-4 text-slate-600">
-                      {task.dependencies || "-"}
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedTask(task)}
-                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
-                        >
-                          <Eye className="h-4 w-4" />
-                          View
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setTaskToUpdate(task)}
-                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
-                        >
-                          <Pencil className="h-4 w-4" />
-                          Update
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => navigate("/project-management/milestones")}
-                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                        >
-                          <FolderKanban className="h-4 w-4" />
-                          Milestone
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600">
-              <FolderKanban className="h-5 w-5" />
-            </span>
-            <div>
-              <h2 className="text-base font-semibold text-slate-950">
-                Task assignments come from milestones
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Open a milestone, use “Create Task under Milestone,” and this register updates from SQL Server.
-              </p>
+        <div className="pm-table-toolbar">
+          <p><strong>{filteredTasks.length}</strong> tasks in view ? Open a task for dependencies and full assignment details.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="pm-inline-button" aria-pressed={onlyOverdue} onClick={() => setOnlyOverdue(!onlyOverdue)}><AlertTriangle size={14} />{onlyOverdue ? "Showing overdue" : "Overdue only"}</button>
+            <div className="pm-segmented" aria-label="Task display">
+              <button type="button" aria-pressed={viewMode === "table"} onClick={() => setViewMode("table")}>List</button>
+              <button type="button" aria-pressed={viewMode === "board"} onClick={() => setViewMode("board")}>Board</button>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => navigate("/project-management/milestones")}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
-          >
-            <UserPlus className="h-4 w-4" />
-            Open Milestones
-          </button>
         </div>
+        {viewMode === "table" ? <DataTable rows={filteredTasks} rowKey="id" pageSize={15} emptyTitle={taskRows.length ? "No tasks match your filters" : "No tasks assigned yet"} emptyDescription="Create tasks within a milestone to connect assignments with project delivery." columns={[
+          { key: "taskName", label: "Task", sortable: true, render: (task) => <div className="pm-task-summary"><button type="button" className="pm-link" onClick={() => setSelectedTask(task)}>{getTaskName(task) || "Untitled task"}</button><p>{task.taskId} ? {task.stage} ? {task.milestoneName || "No milestone"}</p></div> },
+          { key: "projectName", label: "Project", sortable: true, render: (task) => <div><p className="font-medium">{task.projectName || "Unlinked project"}</p><p className="mt-1 text-xs text-slate-500">{task.client || task.projectCode}</p></div> },
+          { key: "assignedTo", label: "Assignee", sortable: true, render: (task) => <span className="flex items-center gap-2"><Avatar name={task.assignedTo || "Unassigned"} size="sm" /><span>{task.assignedTo || "Unassigned"}</span></span> },
+          { key: "dueDate", label: "Due date", sortable: true, render: (task) => <div className={!['Completed','Cancelled'].includes(getTaskStatus(task)) && isPastDate(task.dueDate) ? "pm-task-due--overdue" : "whitespace-nowrap"}>{formatDateValue(task.dueDate)}{!['Completed','Cancelled'].includes(getTaskStatus(task)) && isPastDate(task.dueDate) && <p className="mt-1 text-xs">Overdue</p>}</div> },
+          { key: "priority", label: "Priority", render: (task) => <Badge label={task.priority || "Medium"} /> },
+          { key: "status", label: "Status", render: (task) => <Badge label={getTaskStatus(task)} /> },
+          { key: "progress", label: "Progress", render: (task) => <ProgressMeter value={getTaskProgress(task)} /> },
+          { key: "actions", label: "", render: (task) => <div className="pm-row-actions"><button type="button" aria-label={`View ${getTaskName(task)}`} title="View task" onClick={() => setSelectedTask(task)}><Eye size={15} /></button><button type="button" aria-label={`Update ${getTaskName(task)}`} title="Update progress" onClick={() => setTaskToUpdate(task)}><Pencil size={15} /></button></div> },
+        ]} /> : <div className="pm-task-board">
+          {TASK_STATUS_OPTIONS.filter((status) => status !== "All").map((status) => {
+            const tasks = filteredTasks.filter((task) => getTaskStatus(task) === status);
+            return <section className="pm-task-column" key={status}><header><Badge label={status} /><span>{tasks.length}</span></header>
+              {tasks.map((task) => <article key={`${task.projectId}-${task.id}`} className={`pm-task-card ${!['Completed','Cancelled'].includes(status) && isPastDate(task.dueDate) ? "pm-task-card--overdue" : ""}`}>
+                <button type="button" onClick={() => setSelectedTask(task)}>{getTaskName(task)}</button><p>{task.projectName} ? {task.milestoneName}</p>
+                <div className="mt-3"><ProgressMeter value={getTaskProgress(task)} /></div>
+                <p>{task.assignedTo || "Unassigned"} ? Due {formatDateValue(task.dueDate)}</p>
+                <footer><Badge label={task.priority || "Medium"} /><button type="button" className="pm-link text-xs" onClick={() => setTaskToUpdate(task)}>Update</button></footer>
+              </article>)}
+              {!tasks.length && <p className="py-5 text-center text-xs text-slate-500">No {status.toLowerCase()} tasks</p>}
+            </section>;
+          })}
+        </div>}
       </section>
+
+      <p className="text-xs text-slate-500">Tasks stay connected to their milestone. Use Update to record progress, remarks and supporting documents.</p>
 
       {selectedTask && (
         <TaskDetailDrawer

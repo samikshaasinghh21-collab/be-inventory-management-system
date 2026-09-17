@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -30,14 +31,14 @@ import {
 import { formatInrCurrency, roundCurrencyValue } from "../../utils/formatters";
 
 const inputClass =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]";
 const inputDisabledClass =
   "disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500";
 const tableInputClass = `${inputClass} ${inputDisabledClass} min-w-[88px] px-2 py-1.5 text-xs`;
 const inputBaseClass = `${inputClass} ${inputDisabledClass}`;
 
 const statusStyles = {
-  Draft: "border-blue-200 bg-blue-50 text-blue-700",
+  Draft: "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]",
   Submitted: "border-amber-200 bg-amber-50 text-amber-700",
   Approved: "border-green-200 bg-green-50 text-green-700",
   Rejected: "border-red-200 bg-red-50 text-red-700",
@@ -549,7 +550,7 @@ const SummaryStat = ({ label, value, tone = "default" }) => (
   <div
     className={`rounded-xl border px-4 py-3 shadow-sm ${
       tone === "accent"
-        ? "border-blue-200 bg-blue-50"
+        ? "border-[var(--border-default)] bg-[var(--bg-subtle)]"
         : tone === "success"
         ? "border-green-200 bg-green-50"
         : "border-slate-200 bg-white"
@@ -1231,15 +1232,10 @@ const Invoice = () => {
 
   return (
     <div className="mx-auto max-w-[1560px] space-y-6 p-4 pb-32 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Inventory</p>
-          <h1 className="mt-1 text-2xl font-semibold text-slate-900">Invoice Workspace</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Create, review, approve, and track invoice payment in one place.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+      <InventoryPageHeader
+        title={<>Invoice Workspace</>}
+        description={<>Create, review, approve, and track invoice payment in one place.</>}
+        actions={<><div className="flex flex-wrap items-center gap-2">
           <Link
             to="/inventory/invoices"
             className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
@@ -1254,8 +1250,8 @@ const Invoice = () => {
           >
             {timelineLabel}
           </span>
-        </div>
-      </div>
+        </div></>}
+      ></InventoryPageHeader>
 
       {loadError ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -1263,7 +1259,7 @@ const Invoice = () => {
         </div>
       ) : null}
       {saveMessage ? (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3 text-sm text-[var(--primary)]">
           {saveMessage}
         </div>
       ) : null}
@@ -1275,8 +1271,8 @@ const Invoice = () => {
         <SummaryStat label="Grand Total" value={formatInrCurrency(totals.grandTotal)} tone="accent" />
       </div>
 
-      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-6">
           <Card
             title="Source Receipt"
             action={
@@ -1966,7 +1962,7 @@ const Invoice = () => {
                     key={step.key}
                     className={`rounded-lg border px-4 py-3 text-sm ${
                       step.active
-                        ? "border-blue-300 bg-blue-50 text-blue-700"
+                        ? "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]"
                         : step.complete
                         ? "border-green-200 bg-green-50 text-green-700"
                         : "border-slate-200 bg-slate-50 text-slate-500"
@@ -2140,7 +2136,7 @@ const Invoice = () => {
               type="button"
               disabled={!canSubmit}
               onClick={() => void persistInvoice("Submitted")}
-              className={`${actionButtonClass} border border-blue-600 bg-blue-600 text-white`}
+              className={`${actionButtonClass} border border-[var(--border-default)] bg-[var(--primary)] text-white`}
               title={canSubmit ? "Submit this invoice for review." : actionHint}
             >
               {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

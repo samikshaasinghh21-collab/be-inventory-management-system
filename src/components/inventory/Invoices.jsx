@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, FilePlus2, RefreshCw, Search, Trash2 } from "lucide-react";
@@ -26,7 +27,7 @@ const statusClassName = (status) => {
   if (status === "Rejected") {
     return "border-red-200 bg-red-50 text-red-700";
   }
-  return "border-blue-200 bg-blue-50 text-blue-700";
+  return "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]";
 };
 
 
@@ -118,15 +119,10 @@ const Invoices = () => {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Billing</p>
-          <h1 className="mt-2 text-3xl font-semibold text-slate-900">Invoice Register</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            Review saved invoices, reopen drafts, and track approval progress.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+      <InventoryPageHeader
+        title={<>Invoice Register</>}
+        description={<>Review saved invoices, reopen drafts, and track approval progress.</>}
+        actions={<><div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => void loadInvoices()}
@@ -137,13 +133,13 @@ const Invoices = () => {
           </button>
           <Link
             to="/inventory/invoice"
-            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-blue-600 bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm"
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--primary)] px-3.5 py-2 text-sm font-semibold text-white shadow-sm"
           >
             <FilePlus2 className="h-4 w-4" />
             New Invoice
           </Link>
-        </div>
-      </div>
+        </div></>}
+      ></InventoryPageHeader>
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -177,7 +173,7 @@ const Invoices = () => {
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
-            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
             placeholder="Search invoice, vendor, buyer, or PO"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}

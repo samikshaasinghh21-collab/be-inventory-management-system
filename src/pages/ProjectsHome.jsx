@@ -1,3 +1,4 @@
+import InventoryPageHeader from "../components/inventory/InventoryPageHeader";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useNotifications } from "../context/NotificationContext";
@@ -322,18 +323,11 @@ const ProjectsHome = () => {
   return (
     <>
       <div className="p-6">
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-              Inventory Management
-            </p>
-            <h1 className="text-3xl font-semibold text-slate-800">Projects</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Create projects with client details fetched from the customer
-              register.
-            </p>
-          </div>
-          <div className="flex gap-3">
+        <InventoryPageHeader
+        title={<>Projects</>}
+        description={<>Create projects with client details fetched from the customer
+              register.</>}
+        actions={<><div className="flex gap-3">
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -343,12 +337,12 @@ const ProjectsHome = () => {
             <button
               type="button"
               onClick={() => navigate("/inventory/create-project")}
-              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
             >
               + Create Project
             </button>
-          </div>
-        </div>
+          </div></>}
+      ></InventoryPageHeader>
 
         {apiError && (
           <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -453,7 +447,7 @@ const ProjectsHome = () => {
                             <button
                               type="button"
                               onClick={() => beginEdit(project)}
-                              className="text-indigo-600 hover:text-indigo-800"
+                              className="text-[var(--primary)] hover:text-[var(--primary)]"
                             >
                               Edit
                             </button>
@@ -848,7 +842,7 @@ const ProjectsHome = () => {
                 <button
                   type="button"
                   onClick={saveEdit}
-                  className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+                  className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)] disabled:opacity-60"
                   disabled={isSaving}
                 >
                   {isSaving ? "Saving..." : "Save Changes"}

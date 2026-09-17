@@ -288,7 +288,7 @@ const ReallocationRegister = () => {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search ref, DC, location, requester..."
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:w-80"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] sm:w-80"
             />
             <button
               type="button"
@@ -432,7 +432,7 @@ const ReallocationRegister = () => {
                               <button
                                 type="button"
                                 onClick={() => handleOpenDeliveryChallanHistory(record)}
-                                className="inline-flex items-center gap-1 text-sm font-medium text-indigo-700"
+                                className="inline-flex items-center gap-1 text-sm font-medium text-[var(--primary)]"
                               >
                                 <ExternalLink className="h-4 w-4" />
                                 View DC History
@@ -456,7 +456,7 @@ const ReallocationRegister = () => {
               <button
                 type="button"
                 onClick={() => handleOpenDeliveryChallanHistory(viewRecord)}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-indigo-700 shadow-sm"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-[var(--primary)] shadow-sm"
               >
                 <ExternalLink className="h-4 w-4" />
                 View DC History

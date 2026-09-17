@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -241,25 +242,13 @@ const CreateVendors = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+    <div className="inventory-full-page-form">
       <div className="flex max-h-[92vh] w-[980px] max-w-[96vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b bg-slate-50 px-6 py-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-              Vendors
-            </p>
-            <h2 className="text-xl font-semibold text-slate-900">
-              Create Vendor
-            </h2>
-          </div>
-          <button
-            type="button"
+        <div className="p-5"><InventoryPageHeader title={<>Create Vendor</>} description={<>Complete the details below. Fields marked with an asterisk are required.</>} actions={<><button
+            type="button" aria-label="Back to previous page"
             onClick={() => navigate(-1)}
-            className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-900"
-          >
-            X
-          </button>
-        </div>
+            className="app-btn app-btn-secondary"
+          >Back</button></>} navigation={false} /></div>
 
         <div className="flex-1 overflow-y-auto p-6">
           <form
@@ -624,7 +613,7 @@ const CreateVendors = () => {
             <button
               form="create-vendor-form"
               type="submit"
-              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+              className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)] disabled:opacity-60"
               disabled={isSubmitting}
             >
               {isSubmitting ? "Saving..." : "Save Vendor"}

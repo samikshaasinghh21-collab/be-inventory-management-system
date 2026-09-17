@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { getProjects } from "../../services/projectsStore";
 import {
@@ -168,26 +169,17 @@ const Locations = () => {
 
   return (
     <div className="p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Projects
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">
-            Location Management
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Manage warehouses, yards, and project sites.
-          </p>
-        </div>
-        <button
+      <InventoryPageHeader
+        title={<>Location Management</>}
+        description={<>Manage warehouses, yards, and project sites.</>}
+        actions={<><button
           type="button"
           onClick={resetForm}
           className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
         >
           Clear Form
-        </button>
-      </div>
+        </button></>}
+      ></InventoryPageHeader>
 
       <form onSubmit={handleSubmit} className="space-y-4 mb-6">
         <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
@@ -326,7 +318,7 @@ const Locations = () => {
           </button>
           <button
             type="submit"
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)]"
           >
             {editingId ? "Update Location" : "Save Location"}
           </button>
@@ -413,7 +405,7 @@ const Locations = () => {
                   <button
                     type="button"
                     onClick={() => handleEdit(record)}
-                    className="text-indigo-600 text-sm"
+                    className="text-[var(--primary)] text-sm"
                   >
                     Edit
                   </button>

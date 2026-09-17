@@ -1,3 +1,7 @@
+import { AlertTriangle, ArrowUpRight, Boxes, Building2, IndianRupee, PackageCheck } from "lucide-react";
+import { MetricCard, EmptyState, Skeleton } from "../components/ui";
+import StatusBadge from "../components/common/StatusBadge";
+import InventoryPageHeader from "../components/inventory/InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useNotifications } from "../context/NotificationContext";
@@ -16,8 +20,8 @@ const PAGE_SIZE = 12;
 const STATUS_META = {
   inStock: {
     label: "In Stock",
-    badgeClass: "bg-blue-50 text-blue-700 border-blue-200",
-    dotClass: "bg-blue-500",
+    badgeClass: "bg-[var(--bg-subtle)] text-[var(--primary)] border-[var(--border-default)]",
+    dotClass: "bg-[var(--primary)]",
   },
   lowStock: {
     label: "Low Stock",
@@ -293,8 +297,8 @@ const InventoryHome = () => {
       label: "Total Materials",
       value: formatNumber(rows.length),
       hint: `${formatNumber(categories.length)} categories`,
-      iconClass: "bg-blue-100 text-blue-700",
-      icon: "TM",
+      iconClass: "bg-[var(--bg-subtle)] text-[var(--primary)]",
+      icon: <Boxes size={18} />,
     },
     {
       id: "low-stock",
@@ -302,7 +306,7 @@ const InventoryHome = () => {
       value: formatNumber(statusCounts.lowStock),
       hint: `Threshold ${lowStockThreshold} ${unitLabel}`,
       iconClass: "bg-amber-100 text-amber-700",
-      icon: "LS",
+      icon: <AlertTriangle size={18} />,
     },
     {
       id: "value",
@@ -310,34 +314,24 @@ const InventoryHome = () => {
       value: formatCurrency(stockValue),
       hint: "INR valuation",
       iconClass: "bg-emerald-100 text-emerald-700",
-      icon: "IV",
+      icon: <IndianRupee size={18} />,
     },
     {
       id: "vendors",
       label: "Active Vendors",
       value: formatNumber(vendors.length),
       hint: "Synced vendor directory",
-      iconClass: "bg-indigo-100 text-indigo-700",
-      icon: "VN",
+      iconClass: "bg-[var(--bg-subtle)] text-[var(--primary)]",
+      icon: <Building2 size={18} />,
     },
   ];
 
   return (
     <div className="p-4 md:p-6 space-y-5">
-      <section className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-500">
-            Inventory
-          </p>
-          <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
-            Inventory Management System
-          </h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Track materials, monitor stock levels, and move inventory faster.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
+      <InventoryPageHeader
+        title={<>Inventory overview</>}
+        description={<>Track materials, monitor stock levels, and move inventory faster.</>}
+        actions={<><div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => navigate("/inventory/receive-goods")}
@@ -355,13 +349,13 @@ const InventoryHome = () => {
           <button
             type="button"
             onClick={() => navigate("/inventory/create-product")}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+            className="inline-flex items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2.5 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
           >
             <AppIcon name="plus" className="h-4 w-4" />
             Create Product
           </button>
-        </div>
-      </section>
+        </div></>}
+      ></InventoryPageHeader>
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -369,30 +363,28 @@ const InventoryHome = () => {
         </div>
       )}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {topCards.map((card) => (
-          <article
-            key={card.id}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                  {card.label}
-                </p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">
-                  {card.value}
-                </p>
-                <p className="mt-1 text-sm text-slate-500">{card.hint}</p>
-              </div>
-              <span
-                className={`grid h-10 w-10 place-items-center rounded-lg text-xs font-semibold ${card.iconClass}`}
-              >
-                {card.icon}
-              </span>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Inventory metrics">
+        {topCards.map((card) => <MetricCard key={card.id} label={card.label} value={isLoading ? "?" : card.value} hint={card.hint} icon={card.icon} />)}
+      </section>
+
+      <section className="inventory-attention-grid" aria-label="Stock health and priorities">
+        <article className="inventory-attention-panel">
+          <header><div><h2>Inventory attention</h2><p>Stock issues to resolve before the next dispatch</p></div><span className="inventory-register-count">{statusCounts.lowStock + statusCounts.outOfStock} items</span></header>
+          {isLoading ? <Skeleton rows={3} /> : rows.filter((item) => item.stockStatus !== "inStock").length === 0 ? <EmptyState title="Stock levels are healthy" description="Materials below your reorder threshold will appear here." icon={<PackageCheck size={22} />} /> :
+            [...rows].filter((item) => item.stockStatus !== "inStock").sort((a, b) => a.stock - b.stock).slice(0, 4).map((item) => <button type="button" className="inventory-attention-row" key={item.id} onClick={() => { setSearchQuery(item.name || ""); setStatusFilter("all"); setCurrentPage(1); setShowLowStockOnly(false); }}>
+              <span className="inventory-attention-icon"><AlertTriangle size={16} /></span><div><strong>{item.name || "Unnamed material"}</strong><p>{formatNumber(item.stock)} {item.unit || unitLabel} available ? {item.category || "Uncategorized"}</p></div><StatusBadge status={STATUS_META[item.stockStatus].label} />
+            </button>)}
+        </article>
+        <article className="inventory-attention-panel">
+          <header><div><h2>Stock availability</h2><p>Current material coverage across the inventory</p></div><Boxes size={18} className="text-slate-400" /></header>
+          <div className="inventory-summary-chart">
+            <div className="inventory-health-bar" aria-label={`${statusCounts.inStock} in stock, ${statusCounts.lowStock} low stock, ${statusCounts.outOfStock} out of stock`}>
+              {[["inStock", "var(--primary)"], ["lowStock", "var(--warning)"], ["outOfStock", "var(--danger)"]].map(([key, color]) => <span key={key} style={{ width: `${rows.length ? statusCounts[key] / rows.length * 100 : 0}%`, background: color }} />)}
             </div>
-          </article>
-        ))}
+            <div className="inventory-summary-legend">{Object.entries(STATUS_META).map(([key, meta]) => <button key={key} type="button" onClick={() => setFiltersAndResetPage(() => setStatusFilter(key))}><span>{meta.label}</span><strong>{isLoading ? "?" : formatNumber(statusCounts[key])}</strong></button>)}</div>
+          </div>
+          <button type="button" className="inventory-attention-row" onClick={() => navigate("/inventory/receive-goods")}><span className="inventory-attention-icon"><PackageCheck size={16} /></span><div><strong>Review incoming inventory</strong><p>Open purchase orders and pending receipts</p></div><ArrowUpRight size={16} /></button>
+        </article>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -402,22 +394,24 @@ const InventoryHome = () => {
               <AppIcon name="search" className="h-4 w-4" />
             </span>
             <input
+              aria-label="Search inventory"
               type="search"
               value={searchQuery}
               onChange={(event) =>
                 setFiltersAndResetPage(() => setSearchQuery(event.target.value))
               }
               placeholder="Search material, category, GST, HSN..."
-              className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
             />
           </label>
 
           <select
+            aria-label="Filter by category"
             value={categoryFilter}
             onChange={(event) =>
               setFiltersAndResetPage(() => setCategoryFilter(event.target.value))
             }
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
           >
             <option value="all">All Categories</option>
             {categories.map((category) => (
@@ -428,11 +422,12 @@ const InventoryHome = () => {
           </select>
 
           <select
+            aria-label="Filter by stock status"
             value={statusFilter}
             onChange={(event) =>
               setFiltersAndResetPage(() => setStatusFilter(event.target.value))
             }
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
           >
             <option value="all">All Stock Status</option>
             <option value="inStock">In Stock</option>
@@ -479,7 +474,7 @@ const InventoryHome = () => {
               }
               className={`rounded-xl border bg-white px-4 py-3 text-left shadow-sm transition ${
                 isActive
-                  ? "border-blue-300 ring-2 ring-blue-100"
+                  ? "border-[var(--border-default)] ring-2 ring-[var(--border-default)]"
                   : "border-slate-200 hover:border-slate-300"
               }`}
             >
@@ -603,7 +598,7 @@ const InventoryHome = () => {
                             type="button"
                             onClick={() => handleIncreaseQty(item)}
                             disabled={!item.id || isBusy}
-                            className="rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="rounded-md border border-[var(--border-default)] bg-[var(--bg-subtle)] px-2.5 py-1 text-xs font-medium text-[var(--primary)] hover:bg-[var(--bg-subtle)] disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             +1 Receive
                           </button>
@@ -671,7 +666,7 @@ const InventoryHome = () => {
           <button
             type="button"
             onClick={() => navigate("/inventory/create-vendors")}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="inline-flex items-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
           >
             <AppIcon name="plus" className="h-4 w-4" />
             Create Vendor
@@ -721,14 +716,14 @@ const InventoryHome = () => {
         </div>
       </section>
 
-      <section className="rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 md:p-5">
+      <section className="rounded-xl border border-slate-200 bg-white p-4 md:p-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h3 className="text-base font-semibold text-slate-900">
-              Add multiple items at once
+              Continue the inventory workflow
             </h3>
             <p className="text-sm text-slate-600">
-              Bulk upload items from product library or continue the purchase workflow.
+              Review your product library or raise an order for materials you need.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

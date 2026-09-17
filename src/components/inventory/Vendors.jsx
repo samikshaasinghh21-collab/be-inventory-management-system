@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -385,17 +386,10 @@ const Vendors = () => {
 
   return (
     <div className="p-6">
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Inventory Management
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">Vendors</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Manage vendors and multiple contact persons in one register.
-          </p>
-        </div>
-        <div className="flex gap-2">
+      <InventoryPageHeader
+        title={<>Vendors</>}
+        description={<>Manage vendors and multiple contact persons in one register.</>}
+        actions={<><div className="flex gap-2">
           <button
             type="button"
             onClick={loadVendors}
@@ -406,12 +400,12 @@ const Vendors = () => {
           <button
             type="button"
             onClick={() => navigate("/inventory/create-vendors")}
-            className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
           >
             + Add Vendor
           </button>
-        </div>
-      </div>
+        </div></>}
+      ></InventoryPageHeader>
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -513,7 +507,7 @@ const Vendors = () => {
                       <button
                         type="button"
                         onClick={() => openEdit(vendor)}
-                        className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                        className="rounded-md bg-[var(--primary)] px-3 py-1 text-xs font-medium text-white hover:bg-[var(--primary-hover)]"
                       >
                         Edit
                       </button>
@@ -946,7 +940,7 @@ const Vendors = () => {
                 <button
                   form="edit-vendor-form"
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+                  className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)] disabled:opacity-60"
                   disabled={isSaving}
                 >
                   {isSaving ? "Saving..." : "Save Changes"}

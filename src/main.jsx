@@ -12,6 +12,7 @@ import "./styles/forms.css";
 import "./styles/buttons.css";
 import "./styles/cards.css";
 import "./styles/utilities.css";
+import "./styles/enterprise.css";
 import App from './App.jsx'
 import { InventoryProvider } from './context/InventoryContext'
 import { NotificationProvider } from './context/NotificationContext'

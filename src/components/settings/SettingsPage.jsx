@@ -16,6 +16,8 @@ import {
   getSettings,
   saveSettings as updateSettingsContext,
 } from "../../services/settingsStore";
+import { PageHeader } from "../ui";
+import "../../styles/people.css";
 
 const NAV = [
   ["profile", "My Profile", "Your identity and sessions", UserRound, "personal"],
@@ -386,14 +388,12 @@ const SettingsPage = () => {
   };
   const activeMeta = nav.find(([id]) => id === active) || nav[0];
   const saveable = ["profile", "organization", "security", "inventory", "notifications", "appearance"].includes(active);
-  return <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
-    <header className="mb-6 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
-      <div><p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">{data.workspace?.organization?.name || "Workspace"}</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Settings</h1><p className="mt-1 text-sm text-slate-500">Manage your account, workspace, users, and security.</p>{loadingSettings && <span className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading latest settings...</span>}</div>
-      {saveable && <div className="flex items-center gap-3">{dirty && <span className="text-sm font-medium text-amber-700">Unsaved changes</span>}<button className={buttonSecondary} type="button" disabled={!dirty} onClick={() => setForm(JSON.parse(baseline))}>Discard Changes</button><button className={buttonPrimary} type="button" disabled={!dirty || saving} onClick={save}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save Changes</button></div>}
-    </header>
+  return <div className="people-settings">
+    <PageHeader eyebrow="Administration" title="Settings" description="Manage your account, organization and workspace preferences." actions={saveable && <div className="flex items-center gap-3">{dirty && <span className="text-xs font-medium text-amber-700">Unsaved changes</span>}<button className="app-btn app-btn-secondary" type="button" disabled={!dirty} onClick={() => setForm(JSON.parse(baseline))}>Discard changes</button><button className="app-btn app-btn-primary" type="button" disabled={!dirty || saving} onClick={save}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save changes</button></div>} />
+    {loadingSettings && <p role="status" className="mb-4 text-xs text-slate-500">Loading latest settings…</p>}
     <div className="mb-5 lg:hidden"><label className="text-sm font-medium text-slate-700">Settings category<div className="relative"><select className={`${inputClass} appearance-none pr-10`} value={active} onChange={(e) => choose(e.target.value)}>{nav.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-4 h-4 w-4 text-slate-400" /></div></label></div>
-    <div className="grid gap-6 lg:grid-cols-[270px_minmax(0,1fr)]">
-      <aside className="hidden self-start rounded-[20px] border border-slate-200 bg-white p-2 shadow-sm lg:block">{nav.map(([id, label, description, icon]) => <button key={id} onClick={() => choose(id)} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition focus:outline-none focus:ring-4 focus:ring-blue-100 ${active === id ? "bg-blue-50 text-blue-800" : "text-slate-600 hover:bg-slate-50"}`}><span className={`grid h-9 w-9 place-items-center rounded-xl ${active === id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>{createElement(icon, { className: "h-4 w-4" })}</span><span><span className="block text-sm font-semibold">{label}</span><span className="block text-xs opacity-70">{description}</span></span></button>)}</aside>
+    <div className="people-settings-grid">
+      <aside className="people-settings-nav">{[["Personal", ["profile", "appearance", "notifications"]], ["Organization", ["organization", "inventory"]], ["Users & security", ["users", "security", "audit"]]].map(([group, ids]) => { const entries = nav.filter(([id]) => ids.includes(id)); return entries.length ? <div key={group}><h3>{group}</h3>{entries.map(([id, label, description, icon]) => <button type="button" key={id} onClick={() => choose(id)} aria-current={active === id ? "page" : undefined} title={description}>{createElement(icon, { size: 16 })}<span>{label}</span></button>)}</div> : null; })}</aside>
       <main className="min-w-0 space-y-4"><div><h2 className="text-2xl font-bold text-slate-950">{activeMeta[1]}</h2><p className="mt-1 text-sm text-slate-500">{activeMeta[2]}</p></div><Status state={status} />
         {active === "profile" && <ProfilePanel value={form} setValue={setForm} sessions={sessions} reloadSessions={loadSessions} />}
         {active === "organization" && <OrganizationPanel value={form} setValue={setForm} />}

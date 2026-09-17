@@ -1,3 +1,4 @@
+import InventoryPageHeader, { InventoryWorkflowContext } from "./InventoryPageHeader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
@@ -80,9 +81,9 @@ const createPodFormState = () => ({
 const podStatusTone = (status) => {
   switch (normalizePodStatus(status)) {
     case POD_STATUS.UPLOADED:
-      return "border-blue-200 bg-blue-50 text-blue-700";
+      return "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]";
     case POD_STATUS.UNDER_VERIFICATION:
-      return "border-indigo-200 bg-indigo-50 text-indigo-700";
+      return "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]";
     case POD_STATUS.VERIFIED:
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
     case POD_STATUS.REJECTED:
@@ -2942,26 +2943,18 @@ const DeliveryChallan = () => {
 
   return (
     <div className="p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Projects
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">
-            Delivery Challan
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Create and track material dispatch to project locations.
-          </p>
-        </div>
-        <button
+      <InventoryPageHeader
+        title={<>Delivery Challan</>}
+        description={<>Create and track material dispatch to project locations.</>}
+        actions={<><button
           type="button"
           onClick={resetForm}
           className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white"
         >
           Clear Form
-        </button>
-      </div>
+        </button></>}
+      ></InventoryPageHeader>
+      <InventoryWorkflowContext steps={["Source & destination", "Select materials", "Dispatch & proof"]} current={0} detail="Verify the source location and destination before issuing materials. Track subsequent moves in the register." />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
@@ -3178,7 +3171,7 @@ const DeliveryChallan = () => {
         <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-indigo-800">
+              <h2 className="text-lg font-semibold text-[var(--primary)]">
                 Select Receive Receipts (All under selected Project)
               </h2>
               <p className="mt-1 text-sm text-slate-500">
@@ -3192,7 +3185,7 @@ const DeliveryChallan = () => {
                       type="checkbox"
                       checked={stockSources.receipts}
                       onChange={() => handleStockSourceToggle("receipts")}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                      className="h-4 w-4 rounded border-slate-300 text-[var(--primary)] focus:ring-indigo-500"
                     />
                     Receive Receipt Stock
                   </label>
@@ -3201,7 +3194,7 @@ const DeliveryChallan = () => {
                       type="checkbox"
                       checked={stockSources.consumptionLeftover}
                       onChange={() => handleStockSourceToggle("consumptionLeftover")}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                      className="h-4 w-4 rounded border-slate-300 text-[var(--primary)] focus:ring-indigo-500"
                     />
                     Consumed Stock
                   </label>
@@ -3216,7 +3209,7 @@ const DeliveryChallan = () => {
               onClick={() => {
                 void loadReceipts(form.projectId || null);
               }}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-indigo-300"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-[var(--border-default)]"
             >
               Refresh
             </button>
@@ -3227,7 +3220,7 @@ const DeliveryChallan = () => {
               <div className="overflow-hidden rounded-lg border border-slate-200">
                 <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-indigo-900">
+                    <p className="text-sm font-semibold text-[var(--primary)]">
                       Receive Receipt Stock
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
@@ -3240,12 +3233,12 @@ const DeliveryChallan = () => {
                       value={receiptFilters.search}
                       onChange={(event) => handleReceiptFilterChange(event.target.value)}
                       placeholder="Search receipts or PO..."
-                      className="w-full min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                      className="w-full min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                     <button
                       type="button"
                       onClick={() => loadReceipts(form.projectId || null)}
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-indigo-300"
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-[var(--border-default)]"
                     >
                       Refresh
                     </button>
@@ -3261,7 +3254,7 @@ const DeliveryChallan = () => {
                             checked={allFilteredReceiptsSelected}
                             onChange={toggleAllFilteredReceipts}
                             disabled={!filteredReceiptsForSelection.length}
-                            className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                            className="h-4 w-4 rounded border-slate-300 text-[var(--primary)] focus:ring-indigo-500"
                           />
                         </th>
                         <th className="px-3 py-3 text-left">Receive Receipt Reference</th>
@@ -3294,13 +3287,13 @@ const DeliveryChallan = () => {
                         filteredReceiptsForSelection.map((receipt) => {
                           const isSelected = selectedReceiptIds.includes(String(receipt.id));
                           return (
-                            <tr key={receipt.id} className="border-t border-slate-200 bg-white hover:bg-indigo-50/30">
+                            <tr key={receipt.id} className="border-t border-slate-200 bg-white hover:bg-[var(--bg-subtle)]/30">
                               <td className="px-3 py-3">
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
                                   onChange={() => toggleReceiptSelection(receipt.id)}
-                                  className="h-4 w-4 rounded border-slate-300 text-indigo-700 focus:ring-indigo-500"
+                                  className="h-4 w-4 rounded border-slate-300 text-[var(--primary)] focus:ring-indigo-500"
                                 />
                               </td>
                               <td className="px-3 py-3 font-semibold text-slate-800">
@@ -3330,14 +3323,14 @@ const DeliveryChallan = () => {
                     Showing {filteredReceiptsForSelection.length} of {receiptsForSelection.length} receipts
                   </p>
                   <div className="flex items-center gap-4">
-                    <span className="font-medium text-indigo-800">
+                    <span className="font-medium text-[var(--primary)]">
                       {selectedReceiptIds.length} selected
                     </span>
                     <button
                       type="button"
                       onClick={() => setSelectedReceiptIds([])}
                       disabled={!selectedReceiptIds.length}
-                      className="text-sm font-semibold text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                      className="text-sm font-semibold text-[var(--primary)] disabled:cursor-not-allowed disabled:text-slate-400"
                     >
                       Clear Selection
                     </button>
@@ -3345,8 +3338,8 @@ const DeliveryChallan = () => {
                 </div>
               </div>
 
-              <aside className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
-                <p className="text-sm font-semibold text-indigo-900">Selection Summary</p>
+              <aside className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4">
+                <p className="text-sm font-semibold text-[var(--primary)]">Selection Summary</p>
                 <div className="mt-4 space-y-3 text-sm">
                   <div className="flex justify-between">
                     <span className="text-slate-600">Total Receipts Selected</span>
@@ -3365,7 +3358,7 @@ const DeliveryChallan = () => {
                   type="button"
                   onClick={handleLoadSelectedReceipts}
                   disabled={!selectedReceiptIds.length}
-                  className="mt-5 w-full rounded-lg bg-indigo-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  className="mt-5 w-full rounded-lg bg-[var(--primary-hover)] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
                   Load Selected Receipts
                 </button>
@@ -3380,7 +3373,7 @@ const DeliveryChallan = () => {
                         !form.toLocationId ||
                         leftoverLoading
                       }
-                      className="mt-3 w-full rounded-lg border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:border-indigo-300 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                      className="mt-3 w-full rounded-lg border border-[var(--border-default)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--primary)] hover:border-[var(--border-default)] disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
                     >
                       {leftoverLoading ? "Loading Consumed Data..." : "Load Consumed Data"}
                     </button>
@@ -3403,7 +3396,7 @@ const DeliveryChallan = () => {
                   !form.toLocationId ||
                   leftoverLoading
                 }
-                className="rounded-lg border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:border-indigo-300 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                className="rounded-lg border border-[var(--border-default)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--primary)] hover:border-[var(--border-default)] disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
               >
                 {leftoverLoading ? "Loading Consumed Data..." : "Load Consumed Data"}
               </button>
@@ -3416,9 +3409,9 @@ const DeliveryChallan = () => {
 
         <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
             <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-              <h2 className="text-lg font-semibold text-indigo-800">Line Items</h2>
+              <h2 className="text-lg font-semibold text-[var(--primary)]">Line Items</h2>
               <div className="flex flex-wrap gap-4 text-sm">
-                <span className="font-semibold text-indigo-700">
+                <span className="font-semibold text-[var(--primary)]">
                   {loadedReceiptsSummary.receipts} Receipts Selected
                 </span>
                 <span className="text-slate-600">
@@ -3496,7 +3489,7 @@ const DeliveryChallan = () => {
                                 className={`ml-auto block w-32 rounded-lg border px-3 py-2 text-right text-sm outline-none transition focus:ring-2 ${
                                   hasError
                                     ? "border-red-300 focus:border-red-500 focus:ring-red-100"
-                                    : "border-slate-200 focus:border-indigo-500 focus:ring-indigo-100"
+                                    : "border-slate-200 focus:border-[var(--border-default)] focus:ring-[var(--border-default)]"
                                 }`}
                               />
                             </td>
@@ -3531,7 +3524,7 @@ const DeliveryChallan = () => {
           </button>
           <button
             type="submit"
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)]"
           >
             {editingId ? "Update Challan" : "Save Challan"}
           </button>
@@ -4069,11 +4062,11 @@ const DeliveryChallan = () => {
                                 transfer.requestDate
                             )}
                           </td>
-                          <td className="p-3 font-semibold text-indigo-700">
+                          <td className="p-3 font-semibold text-[var(--primary)]">
                             {convertedDc?.dcNumber || "-"}
                           </td>
                           <td className="p-3">
-                            <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">
+                            <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-subtle)] px-2 py-1 text-xs font-semibold text-[var(--primary)]">
                               {transfer.status || "Legacy Audit"}
                             </span>
                           </td>
@@ -5119,7 +5112,7 @@ const DeliveryChallan = () => {
               </button>
               <button
                 type="submit"
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={podActionLoading}
               >
                 {podActionLoading ? "Uploading..." : "Upload POD"}
@@ -5195,7 +5188,7 @@ const DeliveryChallan = () => {
               </button>
               <button
                 type="submit"
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={podActionLoading}
               >
                 {podActionLoading

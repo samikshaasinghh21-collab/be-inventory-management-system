@@ -153,7 +153,7 @@ const CreateItems = () => {
                       <select
                         value={category}
                         onChange={(e) => setCategory(e.target.value)}
-                        className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                        className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] outline-none"
                       >
                         <option value="">Select Category</option>
                         {CATEGORIES.map((cat) => (
@@ -173,7 +173,7 @@ const CreateItems = () => {
                         onChange={(e) => setItemName(toSafeUppercase(e.target.value))}
                         type="text"
                         placeholder="Ex: Maggie 20gm"
-                        className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                        className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] outline-none"
                       />
                     </div>
                   </div>
@@ -207,7 +207,7 @@ const CreateItems = () => {
                       onChange={(e) => setHsn(toSafeUppercase(e.target.value))}
                       type="text"
                       placeholder="Ex: 190590"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] outline-none"
                     />
                   </div>
 
@@ -220,7 +220,7 @@ const CreateItems = () => {
                       onChange={(e) => setDescription(toSafeUppercase(e.target.value))}
                       type="text"
                       placeholder="Optional description"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] outline-none"
                     />
                   </div>
                 </div>
@@ -245,7 +245,7 @@ const CreateItems = () => {
                       min="0"
                       step="1"
                       placeholder="INR ex: 200"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] outline-none"
                     />
                   </div>
 
@@ -256,7 +256,7 @@ const CreateItems = () => {
                     <select
                       value={gst}
                       onChange={(e) => setGst(e.target.value)}
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] outline-none"
                     >
                       {GST_OPTIONS.map((gstOption) => (
                         <option key={gstOption} value={gstOption}>
@@ -278,7 +278,7 @@ const CreateItems = () => {
                     <label className="text-sm font-medium text-slate-700">
                       Measuring Unit
                     </label>
-                    <select className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none">
+                    <select className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] outline-none">
                       <optgroup label="Quantity">
                         <option>Pieces (PCS)</option>
                         <option>Nos (NOS)</option>
@@ -328,7 +328,7 @@ const CreateItems = () => {
                       onChange={(e) => setStock(e.target.value)}
                       type="text"
                       placeholder="Ex: 150 PCS"
-                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
+                      className="w-full mt-1 border border-slate-200 rounded-lg px-4 py-3 text-sm focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] outline-none"
                     />
                   </div>
                 </div>
@@ -357,7 +357,7 @@ const CreateItems = () => {
             <button
               form="create-item-form"
               type="submit"
-              className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
+              className="px-5 py-2 bg-[var(--primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--primary-hover)]"
             >
               Save Item
             </button>

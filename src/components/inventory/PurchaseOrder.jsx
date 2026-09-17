@@ -1,3 +1,4 @@
+import InventoryPageHeader, { InventoryWorkflowContext } from "./InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { fetchProjects } from "../../services/projectsApi";
@@ -702,19 +703,10 @@ const PurchaseOrder = () => {
 
   return (
     <div className="po-page p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Inventory Management
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">
-            Purchase Orders
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Issue procurement orders tied to project needs.
-          </p>
-        </div>
-        <div className="flex gap-2">
+      <InventoryPageHeader
+        title={<>Purchase Orders</>}
+        description={<>Issue procurement orders tied to project needs.</>}
+        actions={<><div className="flex gap-2">
           <button
             type="button"
             onClick={loadVendors}
@@ -736,8 +728,9 @@ const PurchaseOrder = () => {
           >
             Clear Form
           </button>
-        </div>
-      </div>
+        </div></>}
+      ></InventoryPageHeader>
+      <InventoryWorkflowContext steps={["Vendor & project", "Order items", "Terms & review"]} current={0} detail="Link procurement to project needs and check delivery dates before issuing your order." />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
@@ -847,7 +840,7 @@ const PurchaseOrder = () => {
                     {selectedProject.name}
                   </span>
                   {selectedProject.code ? (
-                    <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+                    <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-subtle)] px-2 py-0.5 font-medium text-[var(--primary)]">
                       Code: {selectedProject.code}
                     </span>
                   ) : null}
@@ -1042,7 +1035,7 @@ const PurchaseOrder = () => {
                               )
                             }
                             disabled={isEditingLockedWithoutOverride}
-                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600"
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[var(--primary)]"
                           />
                           <span>
                             {boq.boqNumber} | v{boq.version} | {boq.status || "Draft"}
@@ -1056,7 +1049,7 @@ const PurchaseOrder = () => {
                     type="button"
                     onClick={applyBoqToItems}
                     disabled={!selectedBoqIds.length || boqsLoading || isEditingLockedWithoutOverride}
-                    className="md:ml-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+                    className="md:ml-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-60"
                   >
                     Use BOQ Items
                   </button>
@@ -1151,7 +1144,7 @@ const PurchaseOrder = () => {
           <button
             type="submit"
             disabled={isEditingLockedWithoutOverride}
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)]"
           >
             {isEditingLockedWithoutOverride
               ? "Locked PO"

@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchBoq } from "../../services/boqApi";
@@ -163,13 +164,10 @@ const BoqDetail = () => {
 
   return (
     <div id="boq-print-area" className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">BOQ</p>
-          <h1 className="text-3xl font-semibold text-slate-800">{boq.boqNumber}</h1>
-          <p className="text-sm text-slate-500">Project: {projectName}</p>
-        </div>
-        <div className="flex gap-2">
+      <InventoryPageHeader
+        title={<>{boq.boqNumber}</>}
+        description={<>Project: {projectName}</>}
+        actions={<><div className="flex gap-2">
           <button
             type="button"
             onClick={() => navigate(-1)}
@@ -188,12 +186,12 @@ const BoqDetail = () => {
             type="button"
             onClick={handleExportCsv}
             disabled={exporting}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60"
+            className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-60"
           >
             {exporting ? "Exporting..." : "Export CSV"}
           </button>
-        </div>
-      </div>
+        </div></>}
+      ></InventoryPageHeader>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-lg border border-slate-200">

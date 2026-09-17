@@ -1,3 +1,4 @@
+import InventoryPageHeader from "../components/inventory/InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DateInput from "../components/common/DateInput";
@@ -10,7 +11,7 @@ import {
 } from "../services/toolsStore";
 
 const inputClass =
-  "mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
+  "mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]";
 
 const createId = (prefix) =>
   `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
@@ -141,17 +142,11 @@ const ToolsAssignTool = () => {
 
   return (
     <div className="min-h-screen bg-slate-50/80 p-4 md:p-6 space-y-5">
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-xs uppercase tracking-[0.25em] text-slate-500">
-          Tools
-        </p>
-        <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
-          Assign Tool to Employee
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Assign an available tool to an eligible employee and set the return plan.
-        </p>
-      </section>
+      <InventoryPageHeader
+        title={<>Assign Tool to Employee</>}
+        description={<>Assign an available tool to an eligible employee and set the return plan.</>}
+        
+      ></InventoryPageHeader>
 
       <form
         onSubmit={handleSubmit}
@@ -270,7 +265,7 @@ const ToolsAssignTool = () => {
           </button>
           <button
             type="submit"
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+            className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)]"
           >
             Assign Tool
           </button>

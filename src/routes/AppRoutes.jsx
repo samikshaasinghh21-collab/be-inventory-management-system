@@ -28,6 +28,7 @@ import ProjectManagementMilestones from "../pages/projectManagement/ProjectManag
 import ProjectManagementDocuments from "../pages/projectManagement/ProjectManagementDocuments";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
+import Login from "../pages/Login";
 import CreateAccount from "../pages/CreateAccount";
 import SsoCallback from "../pages/SsoCallback";
 import PasswordReset from "../pages/PasswordReset";
@@ -101,7 +102,7 @@ const HRMS_PAGE_ROUTES = [
 const AppRoutes = () => {
   return (
     <Routes>
-      <Route path="/login" element={<Navigate replace to="/" />} />
+      <Route path="/login" element={<Login />} />
       <Route path="/create-account" element={<CreateAccount />} />
       <Route path="/forgot-password" element={<PasswordReset requestOnly />} />
       <Route path="/reset-password" element={<PasswordReset />} />

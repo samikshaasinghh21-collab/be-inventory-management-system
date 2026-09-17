@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import {
   createCustomer,
@@ -434,17 +435,10 @@ const Customers = () => {
 
   return (
     <div className="p-6">
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Inventory Management
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">Customers</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Manage customer records and multiple client contacts for projects.
-          </p>
-        </div>
-        <div className="flex gap-2">
+      <InventoryPageHeader
+        title={<>Customers</>}
+        description={<>Manage customer records and multiple client contacts for projects.</>}
+        actions={<><div className="flex gap-2">
           <button
             type="button"
             onClick={loadCustomers}
@@ -455,12 +449,12 @@ const Customers = () => {
           <button
             type="button"
             onClick={openCreate}
-            className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
           >
             + Add Customer
           </button>
-        </div>
-      </div>
+        </div></>}
+      ></InventoryPageHeader>
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -561,7 +555,7 @@ const Customers = () => {
                       <button
                         type="button"
                         onClick={() => openEdit(customer)}
-                        className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                        className="rounded-md bg-[var(--primary)] px-3 py-1 text-xs font-medium text-white hover:bg-[var(--primary-hover)]"
                       >
                         Edit
                       </button>
@@ -762,7 +756,7 @@ const Customers = () => {
                             type="file"
                             multiple
                             onChange={handleDocumentUpload}
-                            className="block text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-indigo-700"
+                            className="block text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-[var(--primary)] file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-[var(--primary-hover)]"
                           />
                         </div>
                         {documentError ? (
@@ -945,7 +939,7 @@ const Customers = () => {
                   form="customer-form"
                   type="submit"
                   disabled={isSaving}
-                  className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+                  className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)] disabled:opacity-60"
                 >
                   {isSaving ? "Saving..." : "Save Customer"}
                 </button>

@@ -44,9 +44,14 @@ const Sidebar = ({
     createOpenState(location.pathname)
   );
 
-  const profile = settings?.profile || {};
-  const profileName = profile.fullName || "Demo Account";
+  const profileName = settings?.company?.name || "Bangalore Electronics";
   const profileInitials = buildInitials(profileName);
+  const [sectionVisibility, setSectionVisibility] = useState({});
+  const sectionIsOpen = (section) => sectionVisibility[section.id] ?? (
+    section.id === "workspace" || section.id === "account" ||
+    section.items.some((item) => isNavigationItemActive(location.pathname, item)) ||
+    (location.pathname === "/" && section.id === "workflow")
+  );
 
   useEffect(() => {
     if (isCollapsed && isDesktop) {
@@ -195,23 +200,17 @@ const Sidebar = ({
 
   return (
     <>
-      <aside className="app-sidebar" aria-hidden={!isDesktop && !isMobileOpen}>
+      <aside className="app-sidebar" aria-hidden={!isDesktop && !isMobileOpen} inert={!isDesktop && !isMobileOpen}>
         <div className="sidebar-workspace-card">
-          {profile.avatar ? (
-            <img
-              src={profile.avatar}
-              alt={profileName}
-              className="sidebar-workspace-avatar"
-            />
-          ) : (
+          {(
             <span className="sidebar-workspace-avatar initials">
-              {profileInitials}
+              {profileName === "Bangalore Electronics" ? "BE" : profileInitials}
             </span>
           )}
           {!isCollapsed && (
             <div className="sidebar-workspace-copy">
               <strong>{profileName}</strong>
-              <small>{profile.email || "demo@mybillbook.in"}</small>
+              <small>Enterprise workspace</small>
             </div>
           )}
         </div>
@@ -220,10 +219,10 @@ const Sidebar = ({
           {NAVIGATION_SECTIONS.map((section) => (
             <section key={section.id} className="sidebar-section">
               {!isCollapsed && (
-                <p className="sidebar-section-label">{section.label}</p>
+                <button type="button" className="sidebar-section-label" aria-expanded={sectionIsOpen(section)} onClick={() => setSectionVisibility((current) => ({ ...current, [section.id]: !sectionIsOpen(section) }))}>{section.label}<AppIcon name={sectionIsOpen(section) ? "chevron-down" : "chevron-right"} className="h-3 w-3" /></button>
               )}
               <div className="sidebar-nav-list">
-                {(section.items || []).map((item) => renderSectionItem(item))}
+                {(isCollapsed || sectionIsOpen(section)) && (section.items || []).map((item) => renderSectionItem(item))}
               </div>
             </section>
           ))}

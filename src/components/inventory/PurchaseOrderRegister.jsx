@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getProjects } from "../../services/projectsStore";
@@ -556,19 +557,10 @@ const PurchaseOrderRegister = () => {
 
   return (
     <div className="p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Projects
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">
-            Purchase Order Register
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Review all purchase orders and their current status.
-          </p>
-        </div>
-        <div className="flex gap-2">
+      <InventoryPageHeader
+        title={<>Purchase Order Register</>}
+        description={<>Review all purchase orders and their current status.</>}
+        actions={<><div className="flex gap-2">
           <button
             type="button"
             onClick={loadRecords}
@@ -579,12 +571,12 @@ const PurchaseOrderRegister = () => {
           <button
             type="button"
             onClick={() => navigate("/inventory/purchase-order")}
-            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)]"
           >
             + Create PO
           </button>
-        </div>
-      </div>
+        </div></>}
+      ></InventoryPageHeader>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
@@ -758,7 +750,7 @@ const PurchaseOrderRegister = () => {
                             handleEdit(record);
                           }}
                           disabled={isLocked && !isAdminUser && !isUnlocked}
-                          className="text-indigo-600 text-sm disabled:cursor-not-allowed disabled:text-slate-400"
+                          className="text-[var(--primary)] text-sm disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Edit
                         </button>

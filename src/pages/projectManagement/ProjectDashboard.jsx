@@ -1,612 +1,135 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import AppIcon from "../../components/layout/AppIcon";
+import { ArrowRight, AlertTriangle, CalendarDays, CheckCircle2, Clock3, FolderKanban, ListChecks, RefreshCw, Users, Wallet } from "lucide-react";
+import { Card, DataTable, EmptyState, MetricCard, PageHeader, ProgressBar, Skeleton } from "../../components/ui";
+import StatusBadge from "../../components/common/StatusBadge";
 import { formatInrCurrency } from "../../utils/formatters";
-import {
-  getProjectManagementProjects,
-  hydrateProjectManagementProjects,
-  PROJECT_MANAGEMENT_PROJECTS_EVENT,
-} from "../../services/projectManagementProjectsStore";
 import { formatDate } from "../../utils/dateFormat";
+import { getProjectManagementProjects, hydrateProjectManagementProjects, PROJECT_MANAGEMENT_PROJECTS_EVENT } from "../../services/projectManagementProjectsStore";
+import "../../styles/projects.css";
 
-const kpiColors = {
-  violet: "bg-violet-100 text-violet-600",
-  emerald: "bg-emerald-100 text-emerald-600",
-  blue: "bg-blue-100 text-blue-600",
-  rose: "bg-rose-100 text-rose-600",
-  amber: "bg-amber-100 text-amber-600",
-  purple: "bg-purple-100 text-purple-600",
+const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const closed = (status) => ["Completed", "Cancelled"].includes(status);
+const budgetFor = (project) => number(project.approvedBudget) || number(project.estimatedBudget);
+const spendFor = (project) => Array.isArray(project.financials) && project.financials.length
+  ? project.financials.reduce((sum, entry) => sum + number(entry.actual ?? entry.amount), 0)
+  : number(project.expenses);
+const daysUntil = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); date.setHours(0, 0, 0, 0);
+  return Math.round((date - today) / 86400000);
+};
+const healthFor = (project) => {
+  if (closed(project.status)) return project.status;
+  if (project.status === "Delayed" || (daysUntil(project.endDate) !== null && daysUntil(project.endDate) < 0)) return "Delayed";
+  if (project.status === "On Hold" || (budgetFor(project) > 0 && spendFor(project) > budgetFor(project)) || (project.tasks || []).some((task) => !closed(task.status) && daysUntil(task.dueDate) !== null && daysUntil(task.dueDate) < 0)) return "At Risk";
+  return "On Track";
 };
 
-const statusStyles = {
-  Planning: "bg-blue-50 text-blue-700",
-  Active: "bg-emerald-50 text-emerald-700",
-  "In Progress": "bg-emerald-50 text-emerald-700",
-  "On Hold": "bg-amber-50 text-amber-700",
-  Delayed: "bg-rose-50 text-rose-700",
-  Completed: "bg-violet-50 text-violet-700",
-  Cancelled: "bg-rose-50 text-rose-700",
-};
-
-const formatValue = (value, format) => {
-  if (format === "currency") {
-    return formatInrCurrency(value);
-  }
-  return Number(value || 0).toLocaleString("en-IN");
-};
-
-const buildConicGradient = (segments = []) => {
-  const total = segments.reduce((sum, segment) => sum + Number(segment.value || 0), 0);
-  if (!total) {
-    return "conic-gradient(#e2e8f0 0deg 360deg)";
-  }
-
-  let cursor = 0;
-  const stops = segments.map((segment) => {
-    const start = cursor;
-    const size = (Number(segment.value || 0) / total) * 360;
-    cursor += size;
-    return `${segment.color} ${start}deg ${cursor}deg`;
-  });
-
-  return `conic-gradient(${stops.join(", ")})`;
-};
-
-const KpiCard = ({ item }) => (
-  <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-    <div className="flex items-start gap-4">
-      <span
-        className={`grid h-12 w-12 shrink-0 place-items-center rounded-xl ${
-          kpiColors[item.color] || kpiColors.blue
-        }`}
-      >
-        <AppIcon name={item.icon} className="h-5 w-5" />
-      </span>
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-500">{item.label}</p>
-        <p className="mt-2 text-2xl font-bold text-slate-950">
-          {formatValue(item.value, item.format)}
-        </p>
-        <p className="mt-2 text-xs text-slate-500">{item.helper}</p>
-      </div>
-    </div>
-  </article>
-);
-
-const SectionCard = ({ title, action, children, className = "" }) => (
-  <section
-    className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${className}`.trim()}
-  >
-    <div className="mb-5 flex items-center justify-between gap-3">
-      <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
-      {action}
-    </div>
-    {children}
-  </section>
-);
-
-const DonutChart = ({ segments, centerValue, centerLabel, sizeClass = "h-44 w-44" }) => {
-  const background = useMemo(() => buildConicGradient(segments), [segments]);
-
-  return (
-    <div
-      className={`grid shrink-0 place-items-center rounded-full ${sizeClass}`}
-      style={{ background }}
-      aria-label={centerLabel}
-    >
-      <div className="grid h-[58%] w-[58%] place-items-center rounded-full bg-white text-center shadow-inner">
-        <div>
-          <p className="text-lg font-bold text-slate-950">{centerValue}</p>
-          <p className="text-xs text-slate-500">{centerLabel}</p>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const CostSummary = ({ summary }) => (
-  <SectionCard title="Project Cost Summary" className="xl:col-span-5">
-    <div className="grid gap-6 lg:grid-cols-[240px_1fr] lg:items-center">
-      <div className="flex justify-center">
-        <DonutChart
-          segments={summary.segments}
-          centerValue={formatInrCurrency(summary.totalBudget)}
-          centerLabel="Total Budget"
-        />
-      </div>
-
-      <div className="space-y-4">
-        {summary.segments.map((segment) => (
-          <div key={segment.label} className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span
-                className="h-3 w-3 rounded-full"
-                style={{ backgroundColor: segment.color }}
-              />
-              <span className="text-sm font-medium text-slate-600">{segment.label}</span>
-            </div>
-            <span className="text-sm font-semibold text-slate-950">
-              {formatInrCurrency(segment.value)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-
-    <div className="mt-6 grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
-      <span className="text-sm font-semibold text-slate-900">Budget Utilization</span>
-      <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-500"
-          style={{ width: `${summary.utilization}%` }}
-        />
-      </div>
-      <span className="text-sm font-semibold text-blue-700">
-        {summary.utilization}%
-      </span>
-    </div>
-  </SectionCard>
-);
-
-const StatusBarChart = ({ rows }) => {
-  const maxValue = Math.max(...rows.map((item) => item.value), 1);
-
-  return (
-    <SectionCard
-      title="Projects by Status"
-      className="xl:col-span-7"
-      action={
-        <select className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100">
-          <option>This Month</option>
-          <option>This Quarter</option>
-          <option>This Year</option>
-        </select>
-      }
-    >
-      <div className="flex h-64 items-end gap-3 border-b border-l border-slate-200 px-3 pb-0 sm:gap-5">
-        {rows.map((status) => {
-          const height = Math.max((status.value / maxValue) * 100, 10);
-
-          return (
-            <div key={status.label} className="flex h-full min-w-0 flex-1 flex-col justify-end">
-              <div className="flex flex-1 flex-col justify-end">
-                <span className="mb-2 text-center text-sm font-semibold text-slate-900">
-                  {status.value}
-                </span>
-                <div className="flex h-44 items-end justify-center">
-                  <span
-                    className="w-full max-w-[4.5rem] rounded-t-lg shadow-sm"
-                    style={{
-                      height: `${height}%`,
-                      backgroundColor: status.color,
-                    }}
-                  />
-                </div>
-              </div>
-              <span className="mt-3 truncate text-center text-xs font-medium text-slate-600">
-                {status.label}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </SectionCard>
-  );
-};
-
-const TeamAllocation = ({ summary }) => {
-  const totalRow = {
-    label: "Total Employees Allocated",
-    value: summary.total,
-    color: "#2563eb",
-    icon: "users",
-  };
-  const rows = [totalRow, ...summary.segments];
-
-  return (
-    <SectionCard title="Team Allocation Summary" className="xl:col-span-5">
-      <div className="grid gap-6 lg:grid-cols-[1fr_220px] lg:items-center">
-        <div className="space-y-4">
-          {rows.map((row) => (
-            <div key={row.label} className="flex items-center justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-3">
-                <span
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100"
-                  style={{ color: row.color }}
-                >
-                  <AppIcon name={row.icon} className="h-4 w-4" />
-                </span>
-                <span className="truncate text-sm font-medium text-slate-600">
-                  {row.label}
-                </span>
-              </div>
-              <span className="text-sm font-bold text-slate-950">{row.value}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex justify-center">
-          <DonutChart
-            segments={summary.segments}
-            centerValue={summary.total}
-            centerLabel="Total"
-            sizeClass="h-40 w-40"
-          />
-        </div>
-      </div>
-    </SectionCard>
-  );
-};
-
-const DeadlineList = ({ deadlines }) => (
-  <SectionCard
-    title="Upcoming Deadlines"
-    className="xl:col-span-7"
-    action={
-      <button
-        type="button"
-        className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
-      >
-        View All
-      </button>
-    }
-  >
-    <div className="divide-y divide-slate-100">
-      {deadlines.length ? deadlines.map((item) => (
-        <div
-          key={item.id}
-          className="grid gap-3 py-3 sm:grid-cols-[1fr_auto_auto] sm:items-center"
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-50 text-violet-600">
-              <AppIcon name="calendar" className="h-4 w-4" />
-            </span>
-            <span className="truncate text-sm font-semibold text-slate-800">
-              {item.projectName}
-            </span>
-          </div>
-          <span className="text-sm font-medium text-slate-700">{item.deadline}</span>
-          <span className="w-fit rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-            {item.daysRemaining} Days Left
-          </span>
-        </div>
-      )) : (
-        <p className="py-8 text-center text-sm text-slate-500">
-          No upcoming project deadlines.
-        </p>
-      )}
-    </div>
-  </SectionCard>
-);
-
-const DelayedTasks = ({ tasks, onOpenMilestones }) => (
-  <SectionCard
-    title="Delayed Tasks"
-    action={<button type="button" onClick={onOpenMilestones} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">Open Milestones</button>}
-  >
-    {tasks.length ? (
-      <div className="overflow-x-auto">
-        <table className="min-w-[850px] w-full text-sm">
-          <thead className="bg-rose-50 text-left text-xs uppercase tracking-wide text-rose-700"><tr><th className="px-4 py-3">Task</th><th className="px-4 py-3">Project</th><th className="px-4 py-3">Stage</th><th className="px-4 py-3">Milestone</th><th className="px-4 py-3">Owner</th><th className="px-4 py-3">Due</th><th className="px-4 py-3">Delay</th></tr></thead>
-          <tbody className="divide-y divide-slate-100">{tasks.map((task) => <tr key={`${task.projectId}-${task.id}`} className="bg-white hover:bg-rose-50/40"><td className="px-4 py-3 font-semibold text-slate-900">{task.taskName || task.title}</td><td className="px-4 py-3 text-slate-700">{task.projectName}</td><td className="px-4 py-3"><span className="rounded-full bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">{task.stage || "Implement"}</span></td><td className="px-4 py-3 text-slate-700">{task.milestoneName}</td><td className="px-4 py-3 text-slate-600">{task.assignedTo || task.assignedEmployeeName || "Unassigned"}</td><td className="px-4 py-3 text-slate-700">{formatDate(task.dueDate)}</td><td className="px-4 py-3"><span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-700">{task.daysDelayed} day{task.daysDelayed === 1 ? "" : "s"}</span></td></tr>)}</tbody>
-        </table>
-      </div>
-    ) : <p className="py-8 text-center text-sm text-slate-500">No delayed tasks for the selected project view.</p>}
-  </SectionCard>
-);
-
-const ProgressMeter = ({ value }) => (
-  <div className="flex min-w-[130px] items-center gap-3">
-    <div className="h-2 w-20 overflow-hidden rounded-full bg-slate-200">
-      <div className="h-full rounded-full bg-emerald-500" style={{ width: `${value}%` }} />
-    </div>
-    <span className="text-xs font-semibold text-slate-600">{value}%</span>
-  </div>
-);
-
-const ProjectStatusBadge = ({ status }) => (
-  <span
-    className={`inline-flex rounded-lg px-3 py-1 text-xs font-semibold ${
-      statusStyles[status] || "bg-slate-100 text-slate-700"
-    }`}
-  >
-    {status}
-  </span>
-);
-
-const RecentProjectsTable = ({ projects, onOpenProjects }) => (
-  <SectionCard title="Recent Projects">
-    <div className="overflow-x-auto">
-      <table className="min-w-[1050px] w-full text-sm">
-        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-          <tr>
-            <th className="px-4 py-3 text-left font-semibold">Project ID</th>
-            <th className="px-4 py-3 text-left font-semibold">Project Name</th>
-            <th className="px-4 py-3 text-left font-semibold">Client</th>
-            <th className="px-4 py-3 text-left font-semibold">Manager</th>
-            <th className="px-4 py-3 text-left font-semibold">Status</th>
-            <th className="px-4 py-3 text-left font-semibold">Progress</th>
-            <th className="px-4 py-3 text-left font-semibold">Budget</th>
-            <th className="px-4 py-3 text-left font-semibold">Deadline</th>
-            <th className="px-4 py-3 text-left font-semibold">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {projects.length ? projects.map((project) => (
-            <tr key={project.id} className="transition hover:bg-slate-50">
-              <td className="px-4 py-4 font-semibold text-slate-700">{project.id}</td>
-              <td className="px-4 py-4 font-semibold text-slate-950">{project.name}</td>
-              <td className="px-4 py-4 text-slate-600">{project.client}</td>
-              <td className="px-4 py-4 text-slate-600">{project.manager}</td>
-              <td className="px-4 py-4">
-                <ProjectStatusBadge status={project.status} />
-              </td>
-              <td className="px-4 py-4">
-                <ProgressMeter value={project.progress} />
-              </td>
-              <td className="px-4 py-4 font-semibold text-slate-800">
-                {formatInrCurrency(project.budget)}
-              </td>
-              <td className="px-4 py-4 text-slate-600">{project.deadline}</td>
-              <td className="px-4 py-4">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={onOpenProjects}
-                    className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
-                    aria-label={`View ${project.name}`}
-                    title="View project"
-                  >
-                    <AppIcon name="file" className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onOpenProjects}
-                    className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
-                    aria-label={`Edit ${project.name}`}
-                    title="Edit project"
-                  >
-                    <AppIcon name="edit" className="h-4 w-4" />
-                  </button>
-                </div>
-              </td>
-            </tr>
-          )) : (
-            <tr>
-              <td colSpan="9" className="px-4 py-12 text-center text-slate-500">
-                No projects have been created in the database yet.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  </SectionCard>
-);
-
-const ProjectDashboard = () => {
+export default function ProjectDashboard() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState(() => getProjectManagementProjects());
   const [projectFilter, setProjectFilter] = useState("All");
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-
+  const load = async () => {
+    setLoading(true);
+    try { setProjects(await hydrateProjectManagementProjects()); setLoadError(""); }
+    catch { setLoadError("Unable to refresh project information. Check your connection and try again."); }
+    finally { setLoading(false); }
+  };
   useEffect(() => {
-    const syncProjects = () => setProjects(getProjectManagementProjects());
-    window.addEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, syncProjects);
-    void hydrateProjectManagementProjects()
-      .then(setProjects)
-      .catch((error) =>
-        setLoadError(
-          error?.response?.data?.error ||
-            error?.message ||
-            "Project dashboard data could not be loaded."
-        )
-      );
-    return () =>
-      window.removeEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, syncProjects);
+    let active = true;
+    const sync = () => setProjects(getProjectManagementProjects());
+    window.addEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, sync);
+    hydrateProjectManagementProjects().then((rows) => { if (active) setProjects(rows); })
+      .catch(() => { if (active) setLoadError("Unable to load project information. Check your connection and try again."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; window.removeEventListener(PROJECT_MANAGEMENT_PROJECTS_EVENT, sync); };
   }, []);
 
-  const dashboard = useMemo(() => {
-    const scopedProjects = projectFilter === "All"
-      ? projects
-      : projects.filter((project) => String(project.id) === String(projectFilter));
-    const amount = (value) => {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : 0;
-    };
-    const budgetFor = (project) =>
-      amount(project.approvedBudget) || amount(project.estimatedBudget);
-    const spentFor = (project) => {
-      const entries = Array.isArray(project.financials) ? project.financials : [];
-      return entries.length
-        ? entries.reduce((sum, row) => sum + amount(row.actual ?? row.amount), 0)
-        : amount(project.expenses);
-    };
-    const totalBudget = scopedProjects.reduce((sum, project) => sum + budgetFor(project), 0);
-    const budgetUsed = scopedProjects.reduce((sum, project) => sum + spentFor(project), 0);
-    const remainingBudget = Math.max(totalBudget - budgetUsed, 0);
-    const onHoldAmount = scopedProjects
-      .filter((project) => project.status === "On Hold")
-      .reduce((sum, project) => sum + budgetFor(project), 0);
-    const utilization = totalBudget
-      ? Math.min(100, Math.round((budgetUsed / totalBudget) * 1000) / 10)
-      : 0;
+  const data = useMemo(() => {
+    const scoped = projectFilter === "All" ? projects : projects.filter((project) => String(project.id) === projectFilter);
+    const open = scoped.filter((project) => !closed(project.status));
+    const tasks = scoped.flatMap((project) => (project.tasks || []).map((task) => ({ ...task, projectId: project.id, projectName: project.name })));
+    const overdueTasks = tasks.filter((task) => !closed(task.status) && daysUntil(task.dueDate) !== null && daysUntil(task.dueDate) < 0).sort((a, b) => daysUntil(a.dueDate) - daysUntil(b.dueDate));
+    const milestones = scoped.flatMap((project) => (project.milestones || []).map((milestone) => ({ ...milestone, projectName: project.name })));
+    const overdueMilestones = milestones.filter((milestone) => !closed(milestone.status) && daysUntil(milestone.targetDate || milestone.endDate) !== null && daysUntil(milestone.targetDate || milestone.endDate) < 0);
+    const allocations = scoped.flatMap((project) => project.teamAllocations || []).filter((allocation) => !["Released", "Cancelled"].includes(allocation.status));
+    const totalBudget = scoped.reduce((sum, project) => sum + budgetFor(project), 0);
+    const spent = scoped.reduce((sum, project) => sum + spendFor(project), 0);
+    const overBudget = scoped.filter((project) => budgetFor(project) > 0 && spendFor(project) > budgetFor(project));
+    const health = ["On Track", "At Risk", "Delayed"].map((label) => ({ label, value: open.filter((project) => healthFor(project) === label).length }));
+    const deadlines = open.filter((project) => daysUntil(project.endDate) !== null && daysUntil(project.endDate) >= 0).sort((a, b) => daysUntil(a.endDate) - daysUntil(b.endDate)).slice(0, 5);
+    const recent = [...scoped].sort((a, b) => String(b.updatedAt || b.createdAt || b.id).localeCompare(String(a.updatedAt || a.createdAt || a.id))).slice(0, 6);
+    const reports = scoped.flatMap((project) => (project.siteReports || []).map((report) => ({ ...report, projectName: project.name }))).sort((a, b) => String(b.reportDate || b.date).localeCompare(String(a.reportDate || a.date))).slice(0, 3);
+    return { scoped, open, tasks, overdueTasks, overdueMilestones, allocations, totalBudget, spent, overBudget, health, deadlines, recent, reports };
+  }, [projects, projectFilter]);
+  const openProject = (project) => navigate(`/project-management/projects?project=${encodeURIComponent(project.id)}`);
+  const utilization = data.totalBudget ? Math.round(data.spent / data.totalBudget * 100) : 0;
+  const attention = [
+    { count: data.overdueTasks.length, title: "Overdue tasks", description: "Follow up with owners and unblock delivery.", icon: Clock3, route: "/project-management/tasks?view=overdue", tone: "danger" },
+    { count: data.overdueMilestones.length, title: "Milestones past target", description: "Review dependencies and confirm revised dates.", icon: CalendarDays, route: "/project-management/milestones?health=Overdue", tone: "danger" },
+    { count: data.overBudget.length, title: "Projects over budget", description: "Review actual costs against approved budgets.", icon: Wallet, route: "/project-management/financials", tone: "warning" },
+    { count: data.health.find((row) => row.label === "At Risk").value, title: "Projects at risk", description: "Schedule, task or cost issues need a review.", icon: AlertTriangle, route: "/project-management/projects", tone: "warning" },
+  ];
 
-    const statusDefinitions = [
-      ["Planning", "#2563eb"],
-      ["Active", "#22c55e"],
-      ["On Hold", "#f59e0b"],
-      ["Delayed", "#ef4444"],
-      ["Completed", "#8b5cf6"],
-      ["Cancelled", "#64748b"],
-    ];
-    const statusRows = statusDefinitions.map(([label, color]) => ({
-      label,
-      color,
-      value: scopedProjects.filter((project) => project.status === label).length,
-    }));
-
-    const allocations = scopedProjects.flatMap((project) => project.teamAllocations || [])
-      .filter((row) => !["Released", "Cancelled"].includes(row.status));
-    const teamDefinitions = [
-      ["Project Managers", "manager", "#2563eb", "briefcase"],
-      ["Engineers", "engineer", "#22c55e", "users"],
-      ["Technicians", "technician", "#f59e0b", "tool"],
-      ["Support Staff", "support", "#ef4444", "contacts"],
-    ];
-    const teamSegments = teamDefinitions.map(([label, keyword, color, icon]) => ({
-      label,
-      color,
-      icon,
-      value: allocations.filter((row) =>
-        String(row.role || "").toLowerCase().includes(keyword)
-      ).length,
-    }));
-    const categorizedTeamCount = teamSegments.reduce((sum, row) => sum + row.value, 0);
-    if (allocations.length > categorizedTeamCount) {
-      teamSegments[3].value += allocations.length - categorizedTeamCount;
-    }
-
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const deadlines = scopedProjects
-      .map((project) => {
-        const deadline = project.endDate ? new Date(project.endDate) : null;
-        if (!deadline || Number.isNaN(deadline.getTime())) return null;
-        deadline.setHours(0, 0, 0, 0);
-        return {
-          id: project.id,
-          projectName: project.name,
-          deadline: formatDate(project.endDate),
-          daysRemaining: Math.ceil((deadline.getTime() - now.getTime()) / 86400000),
-        };
-      })
-      .filter((row) => row && row.daysRemaining >= 0)
-      .sort((left, right) => left.daysRemaining - right.daysRemaining)
-      .slice(0, 5);
-
-    const recent = [...scopedProjects]
-      .sort((left, right) =>
-        String(right.updatedAt || right.createdAt || right.id).localeCompare(
-          String(left.updatedAt || left.createdAt || left.id)
-        )
-      )
-      .slice(0, 5)
-      .map((project) => ({
-        id: project.code || project.id,
-        name: project.name,
-        client: project.companyName || project.client || "-",
-        manager: project.projectManager || "-",
-        status: project.status || "Draft",
-        progress: Math.max(0, Math.min(100, amount(project.progress))),
-        budget: budgetFor(project),
-        deadline: formatDate(project.endDate),
-      }));
-
-    const delayedTasks = scopedProjects.flatMap((project) => (project.tasks || []).map((task) => {
-      const due = task.dueDate ? new Date(task.dueDate) : null;
-      if (!due || Number.isNaN(due.getTime()) || ["Completed", "Cancelled"].includes(task.status)) return null;
-      due.setHours(0, 0, 0, 0);
-      const daysDelayed = Math.floor((now.getTime() - due.getTime()) / 86400000);
-      return daysDelayed > 0 ? { ...task, projectId: project.id, projectName: project.name, daysDelayed } : null;
-    })).filter(Boolean).sort((left, right) => right.daysDelayed - left.daysDelayed);
-    const active = scopedProjects.filter((project) => project.status === "Active").length;
-    const completed = scopedProjects.filter((project) => project.status === "Completed").length;
-    const delayed = scopedProjects.filter((project) => project.status === "Delayed").length;
-    const upcomingCount = deadlines.filter((row) => row.daysRemaining <= 30).length;
-    return {
-      kpis: [
-        { id: "total-projects", label: "Total Projects", value: scopedProjects.length, helper: projectFilter === "All" ? "Database records" : "Selected project", icon: "folder", color: "violet" },
-        { id: "active-projects", label: "Active Projects", value: active, helper: "Currently executing", icon: "activity", color: "emerald" },
-        { id: "completed-projects", label: "Completed Projects", value: completed, helper: "Closed projects", icon: "grid", color: "blue" },
-        { id: "delayed-projects", label: "Delayed Projects", value: delayed, helper: "Needs attention", icon: "clock", color: "rose" },
-        { id: "delayed-tasks", label: "Delayed Tasks", value: delayedTasks.length, helper: "Past due and incomplete", icon: "clipboard", color: "rose" },
-        { id: "upcoming-deadlines", label: "Upcoming Deadlines", value: upcomingCount, helper: "Next 30 days", icon: "calendar", color: "amber" },
-        { id: "total-project-cost", label: "Total Project Cost", value: totalBudget, helper: "Approved budgets", icon: "chart", color: "purple", format: "currency" },
-      ],
-      costSummary: {
-        totalBudget,
-        utilization,
-        segments: [
-          { label: "Total Budget", value: totalBudget, color: "#2563eb" },
-          { label: "Budget Used", value: budgetUsed, color: "#22c55e" },
-          { label: "Remaining Budget", value: remainingBudget, color: "#f59e0b" },
-          { label: "On Hold", value: onHoldAmount, color: "#ef4444" },
-        ],
-      },
-      statusRows,
-      teamSummary: { total: allocations.length, segments: teamSegments },
-      deadlines,
-      recent,
-      delayedTasks,
-    };
-  }, [projectFilter, projects]);
-
-  return (
-    <div className="space-y-5">
-      <section className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-indigo-500">
-            Project Management
-          </p>
-          <h1 className="mt-2 text-2xl font-bold text-slate-950 md:text-3xl">
-            Project Dashboard
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Overview of all projects, budgets, teams, deadlines, and key statistics.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <select
-            value={projectFilter}
-            onChange={(event) => setProjectFilter(event.target.value)}
-            className="min-w-64 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
-            aria-label="Filter dashboard by project"
-          >
-            <option value="All">All Projects</option>
-            {projects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.code ? ` (${project.code})` : ""}</option>)}
-          </select>
-          <button
-            type="button"
-            onClick={() => navigate("/project-management/projects")}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
-          >
-            <AppIcon name="plus" className="h-4 w-4" />
-            New Project
-          </button>
-        </div>
-      </section>
-
-      {loadError ? (
-        <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {loadError}
-        </p>
-      ) : null}
-
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        {dashboard.kpis.map((item) => (
-          <KpiCard key={item.id} item={item} />
-        ))}
-      </section>
-
-      <DelayedTasks tasks={dashboard.delayedTasks} onOpenMilestones={() => navigate("/project-management/milestones")} />
-
-      <section className="grid gap-4 xl:grid-cols-12">
-        <CostSummary summary={dashboard.costSummary} />
-        <StatusBarChart rows={dashboard.statusRows} />
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-12">
-        <TeamAllocation summary={dashboard.teamSummary} />
-        <DeadlineList deadlines={dashboard.deadlines} />
-      </section>
-
-      <RecentProjectsTable
-        projects={dashboard.recent}
-        onOpenProjects={() => navigate("/project-management/projects")}
-      />
+  return <div className="pm-workspace space-y-5">
+    <PageHeader eyebrow="Project management" title="Project overview" description="Delivery health, resources and costs. Focus on the work that needs your attention."
+      actions={<><button className="pm-inline-button" onClick={load} disabled={loading}><RefreshCw size={15} className={loading ? "animate-spin" : ""} />Refresh</button><button className="pm-inline-button pm-inline-button--primary" onClick={() => navigate("/project-management/projects")}><FolderKanban size={15} />Open projects</button></>} />
+    <div className="pm-table-toolbar rounded-lg border border-slate-200 bg-white">
+      <p>Portfolio control <span aria-hidden="true"> / </span> {projectFilter === "All" ? "All projects" : data.scoped[0]?.name || "Selected project"}</p>
+      <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} aria-label="Filter overview by project" className="max-w-full min-w-56 px-3 py-2 border">
+        <option value="All">All projects</option>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
+      </select>
     </div>
-  );
-};
-
-export default ProjectDashboard;
+    {loadError && <div role="alert" className="flex items-center justify-between gap-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><span>{loadError}</span><button className="pm-inline-button" onClick={load}>Retry</button></div>}
+    {loading && !projects.length ? <Skeleton rows={5} /> : <>
+      <section className="pm-summary-grid" aria-label="Project performance">
+        <MetricCard label="Active projects" value={data.open.length} hint={`${data.scoped.length} total in this view`} icon={FolderKanban} />
+        <MetricCard label="Needs attention" value={data.health.filter((row) => row.label !== "On Track").reduce((sum, row) => sum + row.value, 0)} hint="At risk or delayed" icon={AlertTriangle} tone="warning" />
+        <MetricCard label="Overdue tasks" value={data.overdueTasks.length} hint="Past due and incomplete" icon={Clock3} tone="danger" onClick={() => navigate("/project-management/tasks?view=overdue")} />
+        <MetricCard label="Open tasks" value={data.tasks.filter((task) => !closed(task.status)).length} hint="Across project milestones" icon={ListChecks} />
+        <MetricCard label="Team allocations" value={data.allocations.length} hint="Active assignments" icon={Users} />
+        <MetricCard label="Budget used" value={`${utilization}%`} hint={formatInrCurrency(data.spent)} icon={Wallet} tone={utilization > 100 ? "danger" : "neutral"} />
+      </section>
+      <div className="pm-dashboard-grid">
+        <div className="pm-dashboard-column">
+          <Card title="Project health" description="Schedule, task and budget signals across open projects." action={<button className="pm-inline-button" onClick={() => navigate("/project-management/projects")}>View portfolio <ArrowRight size={14} /></button>}>
+            {data.open.length ? data.health.map((row) => <div className="pm-health-row" key={row.label}><span>{row.label}</span><div className="pm-health-track"><span style={{ width: `${row.value / Math.max(data.open.length, 1) * 100}%`, background: row.label === "Delayed" ? "var(--danger)" : row.label === "At Risk" ? "var(--warning)" : "var(--primary)" }} /></div><strong>{row.value}</strong></div>) : <EmptyState title="Your portfolio starts here" description="Create a project to track its timeline, budget and delivery health." action={<button className="pm-inline-button" onClick={() => navigate("/project-management/projects")}>Create a project</button>} />}
+          </Card>
+          <Card title="Project portfolio" description="Recently updated projects and their current delivery position.">
+            <DataTable rows={data.recent} pageSize={6} emptyTitle="No projects yet" emptyDescription="Projects will appear here once they are created." columns={[
+              { key: "name", label: "Project", render: (project) => <div><button className="pm-link" onClick={() => openProject(project)}>{project.name}</button><p className="mt-1 text-xs text-slate-500">{project.companyName || project.client || project.code || "Client not assigned"}</p></div> },
+              { key: "health", label: "Health", render: (project) => <StatusBadge status={healthFor(project)} /> },
+              { key: "progress", label: "Progress", render: (project) => <ProgressBar value={number(project.progress)} label /> },
+              { key: "endDate", label: "Target", render: (project) => <span className="whitespace-nowrap">{formatDate(project.endDate)}</span> },
+            ]} />
+          </Card>
+          <Card title="Delivery watchlist" description="The most overdue tasks, ordered by days past their target." action={<button className="pm-inline-button" onClick={() => navigate("/project-management/tasks?view=overdue")}>All tasks <ArrowRight size={14} /></button>}>
+            {data.overdueTasks.length ? data.overdueTasks.slice(0,4).map((task) => <button key={`${task.projectId}-${task.id}`} className="pm-action-row" onClick={() => navigate("/project-management/tasks?view=overdue")}><span className="pm-attention-icon pm-attention-icon--danger"><Clock3 size={17} /></span><div><strong>{task.taskName || task.title || "Untitled task"}</strong><p>{task.projectName} ? {task.assignedTo || task.assignedEmployeeName || "Unassigned"}</p></div><StatusBadge status={`${Math.abs(daysUntil(task.dueDate))}d overdue`} tone="danger" /></button>) : <EmptyState icon={CheckCircle2} title="No overdue tasks" description="No open task is past its recorded due date in this view." />}
+          </Card>
+        </div>
+        <div className="pm-dashboard-column">
+          <Card title="Action centre" description="Priorities for your next review.">
+            {attention.filter((item) => item.count > 0).length ? attention.filter((item) => item.count > 0).map(({ icon: Icon, ...item }) => <button key={item.title} className="pm-action-row" onClick={() => navigate(item.route)}><span className={`pm-attention-icon pm-attention-icon--${item.tone}`}><Icon size={17} /></span><div><strong>{item.count} {item.title.toLowerCase()}</strong><p>{item.description}</p></div><ArrowRight size={15} /></button>) : <EmptyState icon={CheckCircle2} title="No immediate flags" description="No overdue work or budget exceptions were found in the current project records." />}
+          </Card>
+          <Card title="Budget position" description="Recorded costs against the approved portfolio budget." action={<button className="pm-inline-button" onClick={() => navigate("/project-management/financials")} aria-label="Open financials"><ArrowRight size={15} /></button>}>
+            <p className="pm-budget-total">{formatInrCurrency(data.totalBudget)}</p><p className="pm-budget-meta">Approved / estimated budget</p>
+            <div className="pm-budget-track"><span style={{ width: `${Math.min(utilization,100)}%`, background: utilization > 100 ? "var(--danger)" : "var(--primary)" }} /></div>
+            <div className="pm-budget-caption"><span>{utilization}% used</span><span>{data.overBudget.length} over budget</span></div>
+            <div className="pm-stat-line"><span>Actual spend</span><strong>{formatInrCurrency(data.spent)}</strong></div>
+            <div className="pm-stat-line"><span>{data.spent > data.totalBudget ? "Budget exceeded by" : "Budget remaining"}</span><strong>{formatInrCurrency(Math.abs(data.totalBudget - data.spent))}</strong></div>
+          </Card>
+          <Card title="Upcoming deadlines" description="Next project targets, ordered by date.">
+            {data.deadlines.length ? data.deadlines.map((project) => <button key={project.id} className="pm-action-row" onClick={() => openProject(project)}><span className="pm-attention-icon"><CalendarDays size={16} /></span><div><strong>{project.name}</strong><p>{formatDate(project.endDate)}</p></div><span className="text-xs font-semibold text-slate-600">{daysUntil(project.endDate) === 0 ? "Today" : `${daysUntil(project.endDate)}d left`}</span></button>) : <EmptyState title="No upcoming targets" description="Add target dates to open projects to see upcoming delivery commitments." />}
+          </Card>
+          {data.reports.length > 0 && <Card title="Recent site activity" action={<button className="pm-inline-button" onClick={() => navigate("/project-management/site-reports")}>All reports</button>}>{data.reports.map((report) => <div key={report.id} className="pm-action-row"><div><strong>{report.projectName}</strong><p>{report.summary || report.workCompleted || report.reportNumber}</p><p>{formatDate(report.reportDate || report.date)}</p></div><StatusBadge status={report.status || "Draft"} /></div>)}</Card>}
+        </div>
+      </div>
+    </>}
+  </div>;
+}

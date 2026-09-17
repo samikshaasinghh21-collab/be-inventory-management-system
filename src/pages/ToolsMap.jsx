@@ -1,3 +1,4 @@
+import InventoryPageHeader from "../components/inventory/InventoryPageHeader";
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -48,8 +49,8 @@ const STATUS_META = {
   },
   inUse: {
     label: "In Use",
-    marker: "bg-blue-500",
-    badge: "border-blue-200 bg-blue-50 text-blue-700",
+    marker: "bg-[var(--primary)]",
+    badge: "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]",
     icon: Users,
   },
   overdue: {
@@ -103,8 +104,8 @@ const FLOOR_PLANS = {
       site: "Site B",
       capacity: 8,
       style:
-        "left-[7%] top-[52%] h-[35%] w-[25%] border-blue-400 bg-blue-50/70",
-      label: "left-[12%] top-[62%] border-blue-300 bg-white/95",
+        "left-[7%] top-[52%] h-[35%] w-[25%] border-[var(--border-default)] bg-[var(--bg-subtle)]/70",
+      label: "left-[12%] top-[62%] border-[var(--border-default)] bg-white/95",
     },
     {
       name: "Maintenance Bay",
@@ -137,8 +138,8 @@ const FLOOR_PLANS = {
       site: "Head Office",
       capacity: 9,
       style:
-        "left-[42%] top-[10%] h-[38%] w-[29%] border-blue-400 bg-blue-50/70",
-      label: "left-[49%] top-[20%] border-blue-300 bg-white/95",
+        "left-[42%] top-[10%] h-[38%] w-[29%] border-[var(--border-default)] bg-[var(--bg-subtle)]/70",
+      label: "left-[49%] top-[20%] border-[var(--border-default)] bg-white/95",
     },
     {
       name: "Admin Cage",
@@ -179,8 +180,8 @@ const FLOOR_PLANS = {
       site: "Warehouse 1",
       capacity: 11,
       style:
-        "left-[12%] top-[58%] h-[27%] w-[30%] border-blue-400 bg-blue-50/70",
-      label: "left-[18%] top-[65%] border-blue-300 bg-white/95",
+        "left-[12%] top-[58%] h-[27%] w-[30%] border-[var(--border-default)] bg-[var(--bg-subtle)]/70",
+      label: "left-[18%] top-[65%] border-[var(--border-default)] bg-white/95",
     },
     {
       name: "Quarantine Rack",
@@ -205,8 +206,8 @@ const FLOOR_PLANS = {
       site: "Site B",
       capacity: 10,
       style:
-        "left-[42%] top-[12%] h-[34%] w-[25%] border-blue-400 bg-blue-50/70",
-      label: "left-[48%] top-[21%] border-blue-300 bg-white/95",
+        "left-[42%] top-[12%] h-[34%] w-[25%] border-[var(--border-default)] bg-[var(--bg-subtle)]/70",
+      label: "left-[48%] top-[21%] border-[var(--border-default)] bg-white/95",
     },
     {
       name: "Site C",
@@ -799,7 +800,7 @@ export default function ToolsMap() {
         value: formatNumber(total),
         helper: `${formatNumber(floorTools.length)} on ${activeFloor}`,
         icon: BriefcaseBusiness,
-        tone: "bg-blue-50 text-blue-700",
+        tone: "bg-[var(--bg-subtle)] text-[var(--primary)]",
       },
       {
         label: "Active Today",
@@ -973,20 +974,11 @@ export default function ToolsMap() {
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-              Tools & Assets
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-              Tool Map Control Center
-            </h1>
-            <p className="mt-1 max-w-3xl text-sm text-slate-600">
-              Track tools by floor, zone, employee, status, and movement history
-              using the existing local tool records.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+        <InventoryPageHeader
+        title={<>Tool Map Control Center</>}
+        description={<>Track tools by floor, zone, employee, status, and movement history
+              using the existing local tool records.</>}
+        actions={<><div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => navigate("/inventory/tools/new")}
@@ -998,7 +990,7 @@ export default function ToolsMap() {
             <button
               type="button"
               onClick={() => navigate("/inventory/tools/assign")}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] px-3 text-sm font-semibold text-[var(--primary)] transition hover:bg-[var(--bg-subtle)]"
             >
               <Users size={16} />
               Assign Tool
@@ -1019,17 +1011,17 @@ export default function ToolsMap() {
               <FileDown size={16} />
               Export CSV
             </button>
-          </div>
-        </div>
+          </div></>}
+      ></InventoryPageHeader>
       </section>
 
       {message && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-3 text-sm text-[var(--primary)]">
           <span>{message}</span>
           <button
             type="button"
             onClick={() => setMessage("")}
-            className="grid h-7 w-7 place-items-center rounded-full text-blue-700 transition hover:bg-blue-100"
+            className="grid h-7 w-7 place-items-center rounded-full text-[var(--primary)] transition hover:bg-[var(--bg-subtle)]"
             aria-label="Dismiss message"
           >
             <X size={14} />
@@ -1065,7 +1057,7 @@ export default function ToolsMap() {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="text-xs font-semibold text-blue-700 transition hover:text-blue-900"
+                className="text-xs font-semibold text-[var(--primary)] transition hover:text-[var(--primary)]"
               >
                 Clear all
               </button>
@@ -1102,7 +1094,7 @@ export default function ToolsMap() {
                   <select
                     value={draftFilters[field]}
                     onChange={(event) => updateDraftFilter(field, event.target.value)}
-                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   >
                     <option value="all">{emptyLabel}</option>
                     {options.map((option) => (
@@ -1124,7 +1116,7 @@ export default function ToolsMap() {
                     onClick={() => toggleStatusFilter("all")}
                     className={`h-9 rounded-lg border px-2 text-xs font-semibold transition ${
                       draftFilters.statuses.length === 0
-                        ? "border-blue-500 bg-blue-600 text-white"
+                        ? "border-[var(--border-default)] bg-[var(--primary)] text-white"
                         : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                     }`}
                   >
@@ -1137,7 +1129,7 @@ export default function ToolsMap() {
                       onClick={() => toggleStatusFilter(statusKey)}
                       className={`flex h-9 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-semibold transition ${
                         draftFilters.statuses.includes(statusKey)
-                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          ? "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]"
                           : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                       }`}
                     >
@@ -1176,7 +1168,7 @@ export default function ToolsMap() {
               <button
                 type="button"
                 onClick={applyFilters}
-                className="h-10 w-full rounded-lg bg-blue-600 text-sm font-semibold text-white transition hover:bg-blue-700"
+                className="h-10 w-full rounded-lg bg-[var(--primary)] text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
               >
                 Apply Filters ({filteredTools.length})
               </button>
@@ -1226,7 +1218,7 @@ export default function ToolsMap() {
                   onClick={() => setViewMode(id)}
                   className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition ${
                     viewMode === id
-                      ? "border-blue-600 bg-blue-600 text-white"
+                      ? "border-[var(--border-default)] bg-[var(--primary)] text-white"
                       : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                   }`}
                 >
@@ -1452,9 +1444,9 @@ export default function ToolsMap() {
                         type="button"
                         key={tool.id}
                         onClick={() => selectTool(tool, `${tool.name} selected.`)}
-                        className={`absolute grid h-8 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-xl border-2 border-white text-[10px] font-black text-white shadow-lg transition hover:scale-110 focus:outline-none focus:ring-4 focus:ring-blue-200 ${
+                        className={`absolute grid h-8 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-xl border-2 border-white text-[10px] font-black text-white shadow-lg transition hover:scale-110 focus:outline-none focus:ring-4 focus:ring-[var(--border-default)] ${
                           STATUS_META[tool.statusKey]?.marker || STATUS_META.available.marker
-                        } ${isSelected || isHighlighted ? "ring-4 ring-blue-300" : ""}`}
+                        } ${isSelected || isHighlighted ? "ring-4 ring-[var(--border-default)]" : ""}`}
                         style={{ left: tool.left, top: tool.top }}
                         title={`${tool.name} - ${tool.zone}`}
                       >
@@ -1562,7 +1554,7 @@ export default function ToolsMap() {
                     {key === "cctv" ? "CCTV Feeds" : key}
                     <span
                       className={`flex h-5 w-9 items-center rounded-full p-0.5 transition ${
-                        enabled ? "bg-blue-600" : "bg-slate-200"
+                        enabled ? "bg-[var(--primary)]" : "bg-slate-200"
                       }`}
                     >
                       <span
@@ -1598,7 +1590,7 @@ export default function ToolsMap() {
                   }
                   className={`rounded-xl border p-4 text-left transition ${
                     enabled
-                      ? "border-blue-200 bg-blue-50"
+                      ? "border-[var(--border-default)] bg-[var(--bg-subtle)]"
                       : "border-slate-200 bg-white hover:bg-slate-50"
                   }`}
                 >
@@ -1713,7 +1705,7 @@ export default function ToolsMap() {
               <button
                 type="button"
                 onClick={() => setDrawer("alerts")}
-                className="text-xs font-semibold text-blue-700 hover:text-blue-900"
+                className="text-xs font-semibold text-[var(--primary)] hover:text-[var(--primary)]"
               >
                 View all
               </button>
@@ -1735,7 +1727,7 @@ export default function ToolsMap() {
                         ? "bg-red-50 text-red-600"
                         : alert.severity === "warning"
                           ? "bg-amber-50 text-amber-600"
-                          : "bg-blue-50 text-blue-600"
+                          : "bg-[var(--bg-subtle)] text-[var(--primary)]"
                     }`}
                   >
                     <alert.icon size={15} />
@@ -1766,7 +1758,7 @@ export default function ToolsMap() {
               <button
                 type="button"
                 onClick={() => setDrawer("zones")}
-                className="text-xs font-semibold text-blue-700 hover:text-blue-900"
+                className="text-xs font-semibold text-[var(--primary)] hover:text-[var(--primary)]"
               >
                 View all
               </button>
@@ -1796,7 +1788,7 @@ export default function ToolsMap() {
                     className="w-full text-left"
                   >
                     <div className="mb-2 flex items-center gap-3 text-xs">
-                      <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-[var(--primary)]" />
                       <span className="min-w-0 flex-1 truncate font-semibold text-slate-800">
                         {zone.name}
                       </span>
@@ -1807,7 +1799,7 @@ export default function ToolsMap() {
                     </div>
                     <div className="h-1.5 rounded-full bg-slate-200">
                       <div
-                        className="h-1.5 rounded-full bg-blue-500"
+                        className="h-1.5 rounded-full bg-[var(--primary)]"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
@@ -1857,7 +1849,7 @@ export default function ToolsMap() {
           <button
             type="button"
             onClick={() => setDrawer("timeline")}
-            className="mt-4 flex items-center gap-2 text-sm font-semibold text-blue-700 transition hover:text-blue-900"
+            className="mt-4 flex items-center gap-2 text-sm font-semibold text-[var(--primary)] transition hover:text-[var(--primary)]"
           >
             View full timeline <Route size={14} />
           </button>
@@ -1931,7 +1923,7 @@ export default function ToolsMap() {
           <button
             type="button"
             onClick={() => setDrawer("activity")}
-            className="mt-4 flex items-center gap-2 text-sm font-semibold text-blue-700 transition hover:text-blue-900"
+            className="mt-4 flex items-center gap-2 text-sm font-semibold text-[var(--primary)] transition hover:text-[var(--primary)]"
           >
             View all activity <Route size={14} />
           </button>
@@ -1953,7 +1945,7 @@ export default function ToolsMap() {
                 value={scanValue}
                 onChange={(event) => setScanValue(event.target.value)}
                 autoFocus
-                className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                 placeholder="Example: TL-211 or BCD123456"
               />
             </label>
@@ -1967,7 +1959,7 @@ export default function ToolsMap() {
               </button>
               <button
                 type="submit"
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+                className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
               >
                 Find Tool
               </button>
@@ -2016,7 +2008,7 @@ export default function ToolsMap() {
               <button
                 type="button"
                 onClick={() => navigate("/inventory/tools/assign")}
-                className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] px-4 py-2 text-sm font-semibold text-[var(--primary)] transition hover:bg-[var(--bg-subtle)]"
               >
                 Assign / Reassign
               </button>
@@ -2111,7 +2103,7 @@ export default function ToolsMap() {
                   }}
                   className="flex w-full items-start gap-3 rounded-xl border border-slate-200 p-3 text-left transition hover:bg-slate-50"
                 >
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-blue-50 text-blue-700">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--bg-subtle)] text-[var(--primary)]">
                     <row.icon size={16} />
                   </span>
                   <span className="min-w-0 flex-1">

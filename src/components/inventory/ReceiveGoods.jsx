@@ -1,3 +1,4 @@
+import InventoryPageHeader, { InventoryWorkflowContext } from "./InventoryPageHeader";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { getProjects } from "../../services/projectsStore";
@@ -1410,18 +1411,11 @@ const ReceiveGoods = () => {
 
   return (
     <div className="p-6">
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Inventory
-          </p>
-          <h1 className="text-3xl font-semibold text-slate-800">Receive Goods</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Open a PO, review all saved receipts, and update the receiving
-            details from one workflow.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+      <InventoryPageHeader
+        title={<>Receive Goods</>}
+        description={<>Open a PO, review all saved receipts, and update the receiving
+            details from one workflow.</>}
+        actions={<><div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => navigate("/inventory/purchase-order-register")}
@@ -1439,12 +1433,13 @@ const ReceiveGoods = () => {
           <button
             type="button"
             onClick={loadData}
-            className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
           >
             Refresh Data
           </button>
-        </div>
-      </div>
+        </div></>}
+      ></InventoryPageHeader>
+      <InventoryWorkflowContext steps={["Select purchase order", "Review balance", "Record receipt"]} current={0} detail="Ordered, received and remaining quantities stay visible while you record a receipt." />
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -1525,7 +1520,7 @@ const ReceiveGoods = () => {
                     key={`${record.id}-${record.poNumber}`}
                     onClick={() => syncSelectedPurchaseOrder(record.id)}
                     className={`cursor-pointer border-t hover:bg-slate-50 ${
-                      String(selectedId) === String(record.id) ? "bg-indigo-50/70" : ""
+                      String(selectedId) === String(record.id) ? "bg-[var(--bg-subtle)]/70" : ""
                     }`}
                   >
                     <td className="p-3 font-medium text-slate-800">
@@ -1723,7 +1718,7 @@ const ReceiveGoods = () => {
                           key={receipt.id}
                           className={`rounded-xl border p-4 transition ${
                             isEditingThisReceipt
-                              ? "border-indigo-300 bg-indigo-50/60"
+                              ? "border-[var(--border-default)] bg-[var(--bg-subtle)]/60"
                               : "border-slate-200 bg-slate-50/70"
                           }`}
                         >
@@ -1951,7 +1946,7 @@ const ReceiveGoods = () => {
                             type="file"
                             onChange={handleInvoiceUpload}
                             disabled={isReceiveReadOnly}
-                            className="block text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-indigo-700 disabled:opacity-60"
+                            className="block text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-[var(--primary)] file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-[var(--primary-hover)] disabled:opacity-60"
                           />
                         </div>
                         {invoiceUploadError ? (
@@ -2035,7 +2030,7 @@ const ReceiveGoods = () => {
                             )
                           }
                           disabled={isReceiveReadOnly}
-                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          className="h-4 w-4 rounded border-slate-300 text-[var(--primary)] focus:ring-indigo-500"
                         />
                         Show project details on the receipt
                       </label>
@@ -2245,7 +2240,7 @@ const ReceiveGoods = () => {
                           receiptLoading ||
                           isReceiveReadOnly
                         }
-                        className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                       {isSaving
                         ? "Saving..."

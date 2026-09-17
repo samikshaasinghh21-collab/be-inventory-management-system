@@ -73,7 +73,14 @@ let poolPromise;
 
 export const getPool = async () => {
   if (!poolPromise) {
-    poolPromise = sql.connect(dbConfig);
+    const connectionAttempt = new sql.ConnectionPool(dbConfig).connect();
+    poolPromise = connectionAttempt;
+
+    connectionAttempt.catch(() => {
+      if (poolPromise === connectionAttempt) {
+        poolPromise = undefined;
+      }
+    });
   }
   return poolPromise;
 };

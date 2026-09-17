@@ -1,3 +1,6 @@
+import StatusBadge from "../../components/common/StatusBadge";
+import { PageHeader, MetricCard as SharedMetricCard } from "../../components/ui";
+import "../../styles/projects.css";
 import { createElement, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -46,7 +49,7 @@ const ROLE_OPTIONS = [
 const CORE_ROLES = ["Project Manager", "Site Engineer", "Team Lead"];
 
 const inputClass =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-100";
 const selectClass = `${inputClass} appearance-none`;
 const cardClass = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm";
 
@@ -64,16 +67,10 @@ const emptyForm = {
   availability: "Available",
 };
 
-const statusStyles = {
-  Active: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  Planned: "border-blue-200 bg-blue-50 text-blue-700",
-  Released: "border-slate-200 bg-slate-100 text-slate-700",
-  "On Hold": "border-amber-200 bg-amber-50 text-amber-700",
-};
 
 const availabilityStyles = {
   Available: "border-sky-200 bg-sky-50 text-sky-700",
-  Occupied: "border-indigo-200 bg-indigo-50 text-indigo-700",
+  Occupied: "border-teal-200 bg-teal-50 text-teal-700",
   "On Leave": "border-amber-200 bg-amber-50 text-amber-700",
   Overallocated: "border-rose-200 bg-rose-50 text-rose-700",
 };
@@ -282,49 +279,12 @@ const recalculateProjectWorkload = (projects = []) => {
   });
 };
 
-const Badge = ({ label, variant = "status" }) => {
-  const styles = variant === "availability" ? availabilityStyles : statusStyles;
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
-        styles[label] || "border-slate-200 bg-slate-100 text-slate-700"
-      }`}
-    >
-      {label || "-"}
-    </span>
-  );
-};
+const Badge = ({ label, status, children }) => <StatusBadge status={status || label || children} />;
 
-const KpiCard = ({ icon: IconComponent, label, value, helper, tone = "indigo" }) => {
-  const toneClasses = {
-    indigo: "bg-indigo-50 text-indigo-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    amber: "bg-amber-50 text-amber-600",
-    rose: "bg-rose-50 text-rose-600",
-    sky: "bg-sky-50 text-sky-600",
-  };
-
-  return (
-    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <span
-          className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${
-            toneClasses[tone] || toneClasses.indigo
-          }`}
-        >
-          {createElement(IconComponent, { className: "h-5 w-5" })}
-        </span>
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {label}
-          </p>
-          <p className="mt-1 text-xl font-bold text-slate-950">{value}</p>
-          <p className="mt-1 truncate text-xs text-slate-500">{helper}</p>
-        </div>
-      </div>
-    </article>
-  );
-};
+const KpiCard = ({ icon, label, value, helper, tone = "", style = "" }) => (
+  <SharedMetricCard icon={icon} label={label} value={value} hint={helper}
+    tone={/rose|red/.test(tone || style) ? "danger" : /amber|orange/.test(tone || style) ? "warning" : "neutral"} />
+);
 
 const ProjectManagementTeamAllocation = () => {
   const navigate = useNavigate();
@@ -842,7 +802,7 @@ const ProjectManagementTeamAllocation = () => {
       value: metrics.totalAllocations.toLocaleString("en-IN"),
       helper: "All project assignments",
       icon: ClipboardList,
-      tone: "indigo",
+      tone: "teal",
     },
     {
       label: "Active Resources",
@@ -875,21 +835,9 @@ const ProjectManagementTeamAllocation = () => {
   ];
 
   return (
-    <div className="space-y-5">
-      <section className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-indigo-500">
-            Project Management
-          </p>
-          <h1 className="mt-2 text-2xl font-bold text-slate-950 md:text-3xl">
-            Team Allocation
-          </h1>
-          <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Allocate people to projects, monitor workload, spot overutilization,
-            and rebalance staffing before it impacts delivery.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
+    <div className="pm-workspace space-y-5">
+      <PageHeader eyebrow="Project management" title="Team Allocation" description="Allocate people to projects, monitor workload, spot overutilization, and rebalance staffing before it impacts delivery." actions={<>
+<div className="flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
             onClick={() => navigate("/project-management/projects")}
@@ -902,13 +850,13 @@ const ProjectManagementTeamAllocation = () => {
             type="button"
             onClick={openCreateDrawer}
             disabled={noProjects}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             <UserPlus className="h-4 w-4" />
             Add Allocation
           </button>
         </div>
-      </section>
+        </>} />
 
       {message ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
@@ -931,7 +879,7 @@ const ProjectManagementTeamAllocation = () => {
       {noProjects ? (
         <section className={cardClass}>
           <div className="flex min-h-[240px] flex-col items-center justify-center text-center">
-            <span className="grid h-14 w-14 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+            <span className="grid h-14 w-14 place-items-center rounded-xl bg-teal-50 text-teal-600">
               <FolderKanban className="h-6 w-6" />
             </span>
             <h2 className="mt-4 text-lg font-semibold text-slate-900">
@@ -945,7 +893,7 @@ const ProjectManagementTeamAllocation = () => {
             <button
               type="button"
               onClick={() => navigate("/project-management/projects")}
-              className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+              className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
             >
               <UserPlus className="h-4 w-4" />
               Create Project
@@ -971,7 +919,7 @@ const ProjectManagementTeamAllocation = () => {
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder="Search employee, project, role..."
-                    className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                    className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                   />
                 </label>
               </div>
@@ -1066,7 +1014,7 @@ const ProjectManagementTeamAllocation = () => {
                         <tr
                           key={row.id}
                           className={`transition hover:bg-slate-50 ${
-                            selectedId === row.id ? "bg-indigo-50/60" : ""
+                            selectedId === row.id ? "bg-teal-50/60" : ""
                           }`}
                         >
                           <td className="px-4 py-3">
@@ -1109,7 +1057,7 @@ const ProjectManagementTeamAllocation = () => {
                               <button
                                 type="button"
                                 onClick={() => openEditDrawer(row)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50"
+                                className="inline-flex items-center gap-1 rounded-lg border border-teal-200 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-50"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                                 Edit
@@ -1150,7 +1098,7 @@ const ProjectManagementTeamAllocation = () => {
                     <button
                       type="button"
                       onClick={() => openEditDrawer(selectedRow)}
-                      className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50"
+                      className="rounded-lg border border-teal-200 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-50"
                     >
                       Edit
                     </button>
@@ -1247,7 +1195,7 @@ const ProjectManagementTeamAllocation = () => {
                               employee.totalAllocation > 100
                                 ? "bg-rose-500"
                                 : employee.totalAllocation >= 100
-                                  ? "bg-indigo-500"
+                                  ? "bg-teal-500"
                                   : "bg-emerald-500"
                             }`}
                             style={{
@@ -1270,7 +1218,7 @@ const ProjectManagementTeamAllocation = () => {
           <section className="grid gap-4 xl:grid-cols-2">
             <section className={cardClass}>
               <div className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-indigo-600" />
+                <CalendarDays className="h-4 w-4 text-teal-600" />
                 <h2 className="text-base font-semibold text-slate-900">
                   Staffing Gaps
                 </h2>
@@ -1294,7 +1242,7 @@ const ProjectManagementTeamAllocation = () => {
                           <button
                             type="button"
                             onClick={openCreateDrawer}
-                            className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50"
+                            className="rounded-lg border border-teal-200 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-50"
                           >
                             Fill Gap
                           </button>
@@ -1402,16 +1350,16 @@ const ProjectManagementTeamAllocation = () => {
                   <span className="text-sm font-medium text-slate-700">Employee</span>
                   <div className="relative">
                     {form.employeeId && form.employee ? (
-                      <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
+                      <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2">
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-indigo-600 text-white">
+                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-teal-600 text-white">
                             <Users className="h-3.5 w-3.5" />
                           </span>
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-indigo-950">
+                            <p className="truncate text-sm font-semibold text-teal-950">
                               {form.employee}
                             </p>
-                            <p className="truncate text-xs text-indigo-600">
+                            <p className="truncate text-xs text-teal-600">
                               HRMS #{form.employeeId}
                             </p>
                           </div>
@@ -1419,7 +1367,7 @@ const ProjectManagementTeamAllocation = () => {
                         <button
                           type="button"
                           onClick={clearEmployee}
-                          className="rounded-md p-1 text-indigo-500 transition hover:bg-indigo-100 hover:text-indigo-800"
+                          className="rounded-md p-1 text-teal-500 transition hover:bg-teal-100 hover:text-teal-800"
                           aria-label={`Remove ${form.employee}`}
                           title="Remove employee tag"
                         >
@@ -1467,7 +1415,7 @@ const ProjectManagementTeamAllocation = () => {
                                   type="button"
                                   key={employee.employeeId}
                                   onClick={() => selectEmployee(employee)}
-                                  className="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none"
+                                  className="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-teal-50 focus:bg-teal-50 focus:outline-none"
                                 >
                                   <span className="min-w-0">
                                     <span className="block truncate text-sm font-semibold text-slate-900">
@@ -1590,7 +1538,7 @@ const ProjectManagementTeamAllocation = () => {
                       projectedAllocationTotal > 100
                         ? "bg-rose-50 text-rose-700"
                         : projectedAllocationTotal >= 100
-                          ? "bg-indigo-50 text-indigo-700"
+                          ? "bg-teal-50 text-teal-700"
                           : "bg-emerald-50 text-emerald-700"
                     }`}
                   >
@@ -1620,7 +1568,7 @@ const ProjectManagementTeamAllocation = () => {
                 <button
                   type="button"
                   onClick={handleSave}
-                  className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+                  className="rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-700"
                 >
                   {form.id ? "Update Allocation" : "Save Allocation"}
                 </button>

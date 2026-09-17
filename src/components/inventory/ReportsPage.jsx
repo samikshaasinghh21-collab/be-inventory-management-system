@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { fetchBoqs } from "../../services/boqApi";
 import { fetchConsumptions } from "../../services/consumptionApi";
@@ -552,7 +553,7 @@ const ReportsPage = () => {
       label: "Total Activities",
       value: filteredRows.length.toLocaleString("en-IN"),
       hint: "Filtered live records",
-      tone: "bg-blue-50 text-blue-700 border-blue-100",
+      tone: "bg-[var(--bg-subtle)] text-[var(--primary)] border-[var(--border-default)]",
     },
     {
       id: "quantity",
@@ -573,7 +574,7 @@ const ReportsPage = () => {
       label: "Final Available",
       value: totalAvailableQuantity.toLocaleString("en-IN"),
       hint: inventoryLoading ? "Calculating transaction balances" : "Current all-time transaction balance",
-      tone: "bg-violet-50 text-violet-700 border-violet-100",
+      tone: "bg-[var(--bg-subtle)] text-[var(--primary)] border-[var(--border-default)]",
     },
     {
       id: "balance",
@@ -594,25 +595,11 @@ const ReportsPage = () => {
   return (
     <div id="inventory-project-report" className="reports-page space-y-5 p-4 md:p-6">
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm md:px-6">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Inventory Management / Reports
-            </p>
-            <h1 className="mt-2 text-2xl font-semibold text-slate-900 md:text-3xl">
-              Inventory Reports
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              View all live inventory activities under a project across BOQ, purchase
-              orders, receive goods, delivery challans, reallocations, and consumption.
-            </p>
-            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              Synced {lastUpdatedLabel}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-3 xl:justify-end">
+        <InventoryPageHeader
+        title={<>Inventory Reports</>}
+        description={<>View all live inventory activities under a project across BOQ, purchase
+              orders, receive goods, delivery challans, reallocations, and consumption.</>}
+        actions={<><div className="flex flex-wrap gap-3 xl:justify-end">
             <button
               type="button"
               onClick={handleExportExcel}
@@ -631,8 +618,11 @@ const ReportsPage = () => {
               <AppIcon name="file" className="h-4 w-4" />
               Export PDF
             </button>
-          </div>
-        </div>
+          </div></>}
+      ><div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              Synced {lastUpdatedLabel}
+            </div></InventoryPageHeader>
       </section>
 
       {errorMessage ? (

@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchCustomers } from "../../services/customersApi";
@@ -138,28 +139,16 @@ const CreateProjects = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+    <div className="inventory-full-page-form">
       <div className="flex max-h-[92vh] w-[1080px] max-w-[96vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b bg-slate-50 px-6 py-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-              Inventory Management
-            </p>
-            <h2 className="text-xl font-semibold text-slate-900">
-              Create Project
-            </h2>
-          </div>
-          <button
-            type="button"
+        <div className="p-5"><InventoryPageHeader title={<>Create Project</>} description={<>Complete the details below. Fields marked with an asterisk are required.</>} actions={<><button
+            type="button" aria-label="Back to previous page"
             onClick={() => navigate(-1)}
-            className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-900"
-          >
-            X
-          </button>
-        </div>
+            className="app-btn app-btn-secondary"
+          >Back</button></>} navigation={false} /></div>
 
         <div className="flex flex-1 min-h-0">
-          <aside className="w-64 shrink-0 border-r bg-slate-50 p-5">
+          <aside className="hidden xl:block w-48 shrink-0 border-r bg-slate-50 p-5">
             <p className="mb-4 text-xs uppercase tracking-[0.3em] text-slate-400">
               Sections
             </p>
@@ -436,7 +425,7 @@ const CreateProjects = () => {
               form="create-project-form"
               type="submit"
               disabled={isSubmitting}
-              className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-70"
+              className="rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--primary-hover)] disabled:opacity-70"
             >
               {isSubmitting ? "Saving..." : "Save Project"}
             </button>

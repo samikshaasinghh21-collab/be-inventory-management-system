@@ -7,6 +7,7 @@ import AppHeader from "./AppHeader";
 import Sidebar from "./Sidebar";
 import { getRouteMeta } from "./navigation";
 import NotificationPanel from "../notifications/NotificationPanel";
+import ErrorBoundary from "../ui/ErrorBoundary";
 
 const SIDEBAR_COLLAPSE_KEY = "app-shell:sidebar-collapsed";
 
@@ -139,8 +140,13 @@ const AppShell = ({ children }) => {
       document.body.style.overflow = "";
     }
 
+    const handleEscape = (event) => {
+      if (event.key === "Escape") setIsMobileSidebarOpen(false);
+    };
+    if (!isDesktop && isMobileSidebarOpen) document.addEventListener("keydown", handleEscape);
     return () => {
       document.body.style.overflow = "";
+      document.removeEventListener("keydown", handleEscape);
     };
   }, [isDesktop, isMobileSidebarOpen]);
 
@@ -160,7 +166,7 @@ const AppShell = ({ children }) => {
         .join(" ")}
     >
       <Sidebar
-        isCollapsed={isCollapsed}
+        isCollapsed={isDesktop && isCollapsed}
         isDesktop={isDesktop}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
@@ -170,7 +176,7 @@ const AppShell = ({ children }) => {
 
       <div className="app-main">
         <AppHeader
-          isCollapsed={isCollapsed}
+          isCollapsed={isDesktop && isCollapsed}
           isDesktop={isDesktop}
           isMobileSidebarOpen={isMobileSidebarOpen}
           onToggleCollapse={() => setIsCollapsed((current) => !current)}
@@ -182,10 +188,11 @@ const AppShell = ({ children }) => {
         />
         <NotificationPanel />
 
-        <main className="app-content">
+        <a className="ui-skip-link" href="#main-content">Skip to content</a>
+        <main id="main-content" tabIndex={-1} className="app-content">
           <div className="app-content-inner">
-            <div className="app-route-frame" key={location.pathname}>
-              {children ?? <Outlet />}
+            <div className={`app-route-frame ${location.pathname.startsWith("/inventory") ? "inventory-workspace" : ""}`} data-module={location.pathname.startsWith("/inventory") ? "inventory" : location.pathname.startsWith("/project-management") ? "projects" : "workspace"} key={location.pathname}>
+              <ErrorBoundary>{children ?? <Outlet />}</ErrorBoundary>
             </div>
           </div>
         </main>

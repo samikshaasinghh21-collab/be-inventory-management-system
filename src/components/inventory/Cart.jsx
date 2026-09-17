@@ -1,4 +1,7 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
+import InventoryPageHeader from "./InventoryPageHeader";
+import { EmptyState } from "../ui";
  
 const loadCart = () => {
   try {
@@ -39,22 +42,17 @@ export default function Cart() {
   );
  
   return (
-    <div className="bg-gray-100 min-h-screen p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-3xl font-semibold">Cart</h2>
-        <div className="text-sm text-slate-600">
+    <div className="space-y-5">
+      <InventoryPageHeader title="Material cart" description="Review selected materials and adjust quantities before the next step." actions={<div className="text-sm text-slate-600">
           Total:{" "}
           <span className="font-semibold text-slate-800">
             ₹ {total.toLocaleString("en-IN")}
           </span>
-        </div>
-      </div>
+        </div>} />
  
       <div className="bg-white rounded-lg shadow overflow-x-auto">
         {cartItems.length === 0 ? (
-          <div className="p-6 text-slate-600">
-            No items added to cart.
-          </div>
+          <EmptyState title="Your material cart is empty" description="Add materials from the product catalog to review them here." action={<Link className="app-btn app-btn-primary" to="/inventory/products">Browse materials</Link>} />
         ) : (
           <table className="w-full text-sm border-collapse">
             <thead className="bg-gray-200">

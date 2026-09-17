@@ -1,3 +1,4 @@
+import InventoryPageHeader from "./InventoryPageHeader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -26,9 +27,9 @@ import {
 const panel =
   "rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_-22px_rgba(15,23,42,0.45)]";
 const field =
-  "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100";
+  "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]";
 const qtyInput =
-  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100";
+  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]";
 
 const issuedByOptions = [
   "Store Keeper",
@@ -746,7 +747,7 @@ const statusPillClass = (status) => {
   if (value === "reviewed") {
     return "border-amber-200 bg-amber-50 text-amber-700";
   }
-  return "border-violet-200 bg-violet-50 text-violet-700";
+  return "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]";
 };
 
 const sourceTypeLabel = (row = {}) => {
@@ -2684,16 +2685,16 @@ const Consumption = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <section className="flex flex-wrap justify-end gap-2">
+    <div className="space-y-5 p-4 md:p-6">
+      <InventoryPageHeader title="Material consumption" description="Record site usage against issued stock and keep project balances accurate." actions={<section className="flex flex-wrap justify-end gap-2">
         <button
           type="button"
           onClick={() => navigate("/inventory/delivery-challan")}
-          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-violet-200 hover:text-violet-700"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-[var(--border-default)] hover:text-[var(--primary)]"
         >
-          DC Option
+          Delivery challans
         </button>
-      </section>
+      </section>} />
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <article className={`${panel} p-5`}>
@@ -2726,7 +2727,7 @@ const Consumption = () => {
       <form onSubmit={onSubmit} className="space-y-5">
         <section className={panel}>
           <div className="border-b border-slate-200 px-6 py-4">
-            <h2 className="text-2xl font-semibold text-violet-800">Consumption Details</h2>
+            <h2 className="text-2xl font-semibold text-[var(--primary)]">Consumption Details</h2>
           </div>
 
           <div className="grid grid-cols-1 gap-4 px-6 py-5 md:grid-cols-3">
@@ -2882,7 +2883,7 @@ const Consumption = () => {
             <label className="md:col-span-2">
               <span className="text-sm font-semibold text-slate-700">Notes</span>
               <textarea
-                className="mt-1 min-h-[72px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
+                className="mt-1 min-h-[72px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                 value={form.notes}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, notes: event.target.value }))
@@ -2894,7 +2895,7 @@ const Consumption = () => {
             <label>
               <span className="text-sm font-semibold text-slate-700">Company Address</span>
               <textarea
-                className="mt-1 min-h-[72px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
+                className="mt-1 min-h-[72px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                 value={form.companyAddress}
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, companyAddress: event.target.value }))
@@ -2946,7 +2947,7 @@ const Consumption = () => {
         <section className={panel}>
           <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h3 className="text-2xl font-semibold text-violet-800">
+              <h3 className="text-2xl font-semibold text-[var(--primary)]">
                 Inventory Source Lookup
               </h3>
               <p className="mt-1 text-sm text-slate-500">
@@ -2977,7 +2978,7 @@ const Consumption = () => {
                       ? "Search reallocation ref or location..."
                       : "Search DC number or location..."
                   }
-                  className="w-full min-w-[260px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
+                  className="w-full min-w-[260px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                 />
                 <button
                   type="button"
@@ -3074,7 +3075,7 @@ const Consumption = () => {
                             return (
                               <tr
                                 key={id}
-                                className="border-t border-slate-200 bg-white hover:bg-violet-50/40"
+                                className="border-t border-slate-200 bg-white hover:bg-[var(--bg-subtle)]/40"
                               >
                                 <td className="px-3 py-3">
                                   <input
@@ -3142,7 +3143,7 @@ const Consumption = () => {
                               row.sourceKey ||
                               `${challanId}:${row.deliveryChallanItemId ?? index}`
                             }
-                            className="border-t border-slate-200 bg-white hover:bg-violet-50/40"
+                            className="border-t border-slate-200 bg-white hover:bg-[var(--bg-subtle)]/40"
                           >
                             <td className="px-3 py-3">
                               <input
@@ -3195,7 +3196,7 @@ const Consumption = () => {
                     : `Showing ${filteredDeliveryChallanInventoryRows.length} of ${availableDcInventoryRows.length} remaining DC inventory rows`}
                 </p>
                 <div className="flex items-center gap-4">
-                  <span className="font-semibold text-violet-800">
+                  <span className="font-semibold text-[var(--primary)]">
                     {lookupSource === LOOKUP_SOURCE.REALLOCATION
                       ? selectedReallocationIds.length
                       : selectedDeliveryChallanIds.length}{" "}
@@ -3209,7 +3210,7 @@ const Consumption = () => {
                         ? !selectedReallocationIds.length
                         : !selectedDeliveryChallanIds.length
                     }
-                    className="text-sm font-semibold text-violet-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                    className="text-sm font-semibold text-[var(--primary)] disabled:cursor-not-allowed disabled:text-slate-400"
                   >
                     Clear Selection
                   </button>
@@ -3217,8 +3218,8 @@ const Consumption = () => {
               </div>
             </div>
 
-            <aside className="rounded-lg border border-violet-100 bg-violet-50 p-4">
-              <p className="text-sm font-semibold text-violet-900">Selection Summary</p>
+            <aside className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-subtle)] p-4">
+              <p className="text-sm font-semibold text-[var(--primary)]">Selection Summary</p>
               <div className="mt-4 space-y-3 text-sm">
                 <div className="flex justify-between gap-3">
                   <span className="text-slate-600">
@@ -3273,7 +3274,7 @@ const Consumption = () => {
                     ? !selectedReallocationIds.length
                     : !selectedDeliveryChallanIds.length
                 }
-                className="mt-5 w-full rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="mt-5 w-full rounded-lg bg-[var(--primary-hover)] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 {lookupSource === LOOKUP_SOURCE.REALLOCATION
                   ? "Load Selected Reallocations"
@@ -3295,10 +3296,10 @@ const Consumption = () => {
         <section className={panel}>
           <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h3 className="text-2xl font-semibold text-violet-800">
+              <h3 className="text-2xl font-semibold text-[var(--primary)]">
                 Available Inventory
                 {itemRows.length ? (
-                  <span className="ml-3 rounded-full bg-violet-100 px-2.5 py-1 align-middle text-xs font-semibold text-violet-700">
+                  <span className="ml-3 rounded-full bg-[var(--bg-subtle)] px-2.5 py-1 align-middle text-xs font-semibold text-[var(--primary)]">
                     {itemRows.length} Items
                   </span>
                 ) : null}
@@ -3307,7 +3308,7 @@ const Consumption = () => {
                 Select items and provide consumption quantity. Available quantity includes receive, DC, and reallocated stock minus prior consumption.
               </p>
               {inventoryLoading && (
-                <p className="mt-2 text-xs font-semibold text-violet-700">
+                <p className="mt-2 text-xs font-semibold text-[var(--primary)]">
                   Loading available inventory...
                 </p>
               )}
@@ -3327,7 +3328,7 @@ const Consumption = () => {
                 type="button"
                 onClick={() => onToggleAllRows(true)}
                 disabled={!allSelectableRows.length}
-                className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="rounded-lg bg-[var(--primary-hover)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 Add All Available Items
               </button>
@@ -3467,11 +3468,11 @@ const Consumption = () => {
               </tbody>
               {!!itemRows.length && (
                 <tfoot>
-                  <tr className="bg-violet-50">
-                    <td colSpan="8" className="px-3 py-3 text-right font-semibold text-violet-800">
+                  <tr className="bg-[var(--bg-subtle)]">
+                    <td colSpan="8" className="px-3 py-3 text-right font-semibold text-[var(--primary)]">
                       Total Quantity to Consume:
                     </td>
-                    <td colSpan="2" className="px-3 py-3 text-right text-lg font-bold text-violet-900">
+                    <td colSpan="2" className="px-3 py-3 text-right text-lg font-bold text-[var(--primary)]">
                       {formatQty(totalToConsume)}
                     </td>
                   </tr>
@@ -3500,7 +3501,7 @@ const Consumption = () => {
             <button
               type="submit"
               disabled={saving || loading}
-              className="rounded-lg bg-violet-700 px-6 py-2.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg bg-[var(--primary-hover)] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving
                 ? editingId
@@ -3535,12 +3536,12 @@ const Consumption = () => {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search reference, project, location"
-              className="w-64 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
+              className="w-64 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
             />
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
             >
               <option value="all">All Status</option>
               {statusOptions.map((option) => (
@@ -3642,7 +3643,7 @@ const Consumption = () => {
                         <button
                           type="button"
                           onClick={() => onEdit(record)}
-                          className="font-semibold text-violet-700 hover:underline"
+                          className="font-semibold text-[var(--primary)] hover:underline"
                         >
                           Edit
                         </button>

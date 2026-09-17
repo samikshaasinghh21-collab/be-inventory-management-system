@@ -1,3 +1,5 @@
+import { PageHeader, MetricCard as SharedMetricCard } from "../../components/ui";
+import "../../styles/projects.css";
 import { createElement, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -45,7 +47,7 @@ const keyOf = (value) => String(value ?? "");
 const followUpStatuses = ["Open", "In Progress", "Waiting on Vendor", "Escalated", "Resolved"];
 const priorities = ["Low", "Medium", "High", "Critical"];
 const purchaseStatuses = ["Requested", "Approved", "Ordered", "In Transit", "Partially Received", "Received", "Delayed", "Cancelled"];
-const inputClass = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+const inputClass = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-100";
 const cardClass = "rounded-xl border border-slate-200 bg-white shadow-sm";
 
 const formatDate = (value) => {
@@ -120,19 +122,9 @@ const Badge = ({ children, className = "" }) => (
   </span>
 );
 
-const MetricCard = ({ icon, label, value, helper, tone }) => (
-  <article className={`${cardClass} p-4`}>
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-        <p className="mt-2 text-2xl font-bold text-slate-950">{value}</p>
-        <p className="mt-1 text-xs text-slate-500">{helper}</p>
-      </div>
-      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${tone}`}>
-        {createElement(icon, { className: "h-5 w-5" })}
-      </span>
-    </div>
-  </article>
+const MetricCard = ({ icon, label, value, helper, tone = "", style = "" }) => (
+  <SharedMetricCard icon={icon} label={label} value={value} hint={helper}
+    tone={/rose|red/.test(tone || style) ? "danger" : /amber|orange/.test(tone || style) ? "warning" : "neutral"} />
 );
 
 const buildRows = ({ orders, projects, followUps, vendors, products }) => {
@@ -506,32 +498,25 @@ const ProjectManagementPurchaseTracking = () => {
   };
 
   return (
-    <div className="space-y-5 pb-8">
-      <section className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-indigo-500">Project Management</p>
-          <h1 className="mt-2 text-2xl font-bold text-slate-950 md:text-3xl">Purchase Tracking</h1>
-          <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Track project purchases, delivery progress, and follow-ups with SQL-backed persistence.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <div className="pm-workspace space-y-5 pb-8">
+      <PageHeader eyebrow="Project management" title="Purchase Tracking" description="Track project purchases, delivery progress, and follow-ups with SQL-backed persistence." actions={<>
+<div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => void load({ quiet: true })} disabled={refreshing} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60">
             <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Refresh
           </button>
           <button type="button" onClick={exportCsv} disabled={!visibleRows.length} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60">
             <Download className="h-4 w-4" /> Export
           </button>
-          <button type="button" onClick={openCreatePurchase} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">
+          <button type="button" onClick={openCreatePurchase} className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700">
             <Plus className="h-4 w-4" /> Add Purchase
           </button>
         </div>
-      </section>
+        </>} />
 
       {error && !selected && <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><AlertCircle className="h-4 w-4" />{error}</div>}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard icon={CircleDollarSign} label="Committed Value" value={formatInrCurrency(metrics.committed)} helper={`${rows.length} purchase orders`} tone="bg-indigo-50 text-indigo-600" />
+        <MetricCard icon={CircleDollarSign} label="Committed Value" value={formatInrCurrency(metrics.committed)} helper={`${rows.length} purchase orders`} tone="bg-teal-50 text-teal-600" />
         <MetricCard icon={Truck} label="Open Deliveries" value={metrics.open} helper={`${metrics.averageProgress}% average received`} tone="bg-blue-50 text-blue-600" />
         <MetricCard icon={AlertCircle} label="Delayed" value={metrics.delayed} helper="Past expected date" tone="bg-rose-50 text-rose-600" />
         <MetricCard icon={PackageCheck} label="Fully Received" value={metrics.received} helper="No PO balance" tone="bg-emerald-50 text-emerald-600" />
@@ -543,7 +528,7 @@ const ProjectManagementPurchaseTracking = () => {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap gap-2">
               {["All", "Attention", "In Transit", "Received"].map((item) => (
-                <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition ${tab === item ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition ${tab === item ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
                   {item}
                 </button>
               ))}
@@ -563,9 +548,9 @@ const ProjectManagementPurchaseTracking = () => {
         </div>
 
         {loading ? (
-          <div className="grid min-h-[360px] place-items-center"><div className="text-center"><RefreshCw className="mx-auto h-7 w-7 animate-spin text-indigo-500"/><p className="mt-3 text-sm text-slate-500">Loading local purchase records...</p></div></div>
+          <div className="grid min-h-[360px] place-items-center"><div className="text-center"><RefreshCw className="mx-auto h-7 w-7 animate-spin text-teal-500"/><p className="mt-3 text-sm text-slate-500">Loading local purchase records...</p></div></div>
         ) : !visibleRows.length ? (
-          <div className="grid min-h-[360px] place-items-center px-4 text-center"><div><ClipboardList className="mx-auto h-12 w-12 text-slate-300"/><h3 className="mt-4 font-semibold text-slate-900">No purchases match this view</h3><p className="mt-1 text-sm text-slate-500">Change the filters or add a local project purchase.</p><button type="button" onClick={openCreatePurchase} className="mt-4 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white">Add Purchase</button></div></div>
+          <div className="grid min-h-[360px] place-items-center px-4 text-center"><div><ClipboardList className="mx-auto h-12 w-12 text-slate-300"/><h3 className="mt-4 font-semibold text-slate-900">No purchases match this view</h3><p className="mt-1 text-sm text-slate-500">Change the filters or add a local project purchase.</p><button type="button" onClick={openCreatePurchase} className="mt-4 rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white">Add Purchase</button></div></div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-[1220px] w-full text-sm">
@@ -582,7 +567,7 @@ const ProjectManagementPurchaseTracking = () => {
                     <td className="px-4 py-4 text-right font-semibold text-slate-900">{formatInrCurrency(row.amount)}</td>
                     <td className="px-4 py-4"><div className="flex flex-wrap gap-1.5"><Badge className={toneForFollowUp(row.followUp.followUpStatus)}>{row.followUp.followUpStatus}</Badge><Badge className={priorityTone(row.followUp.priority)}>{row.followUp.priority}</Badge></div></td>
                     <td className="px-4 py-4"><p className="flex items-center gap-1.5 font-medium text-slate-700"><UserRound className="h-3.5 w-3.5 text-slate-400"/>{row.followUp.owner || "Unassigned"}</p><p className={`mt-1 text-xs ${row.followUp.nextFollowUpDate && row.followUp.nextFollowUpDate < today() && row.followUp.followUpStatus !== "Resolved" ? "font-semibold text-rose-600" : "text-slate-500"}`}>Next: {formatDate(row.followUp.nextFollowUpDate)}</p></td>
-                    <td className="px-4 py-4 text-right"><button type="button" onClick={() => openDetails(row)} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">Track <ChevronRight className="h-3.5 w-3.5"/></button></td>
+                    <td className="px-4 py-4 text-right"><button type="button" onClick={() => openDetails(row)} className="inline-flex items-center gap-1 rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-50">Track <ChevronRight className="h-3.5 w-3.5"/></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -593,10 +578,10 @@ const ProjectManagementPurchaseTracking = () => {
       </section>
 
       {purchaseForm && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4 ">
           <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <header className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
-              <div><p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">Project purchase</p><h2 className="mt-1 text-xl font-bold text-slate-950">{editingPurchaseId ? "Edit Purchase" : "Add Purchase"}</h2><p className="mt-1 text-sm text-slate-500">This record will be saved in SQL Server.</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-widest text-teal-600">Project purchase</p><h2 className="mt-1 text-xl font-bold text-slate-950">{editingPurchaseId ? "Edit Purchase" : "Add Purchase"}</h2><p className="mt-1 text-sm text-slate-500">Track the supplier, expected delivery and receipt progress.</p></div>
               <button type="button" onClick={() => { setPurchaseForm(null); setError(""); }} className="rounded-lg border border-slate-200 p-2 text-slate-500"><X className="h-4 w-4"/></button>
             </header>
             <div className="space-y-4 p-5">
@@ -617,16 +602,16 @@ const ProjectManagementPurchaseTracking = () => {
                 <label className="sm:col-span-2"><span className="mb-1 block text-xs font-medium text-slate-500">Delivery Notes</span><textarea rows="3" value={purchaseForm.notes} onChange={(event) => setPurchaseForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Dispatch details, invoice reference, delay reason, or delivery notes" className={inputClass}/></label>
               </div>
             </div>
-            <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4"><button type="button" onClick={() => setPurchaseForm(null)} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700">Cancel</button><button type="button" onClick={savePurchase} disabled={saving} className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{saving ? "Saving..." : "Save Purchase"}</button></footer>
+            <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4"><button type="button" onClick={() => setPurchaseForm(null)} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700">Cancel</button><button type="button" onClick={savePurchase} disabled={saving} className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{saving ? "Saving..." : "Save Purchase"}</button></footer>
           </div>
         </div>
       )}
 
       {selected && followUpForm && (
-        <div className="fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 bg-slate-950/45 ">
           <div className="ml-auto flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl">
             <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-              <div><p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">Purchase control</p><div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-xl font-bold text-slate-950">{selected.poNumber || `PO-${selected.id}`}</h2><Badge className={`border ${toneForDelivery(selected.deliveryStatus)}`}>{selected.deliveryStatus}</Badge></div><p className="mt-1 text-sm text-slate-500">{selected.project?.name || "Unlinked project"} · {selected.vendor?.name || "Vendor unavailable"}</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-widest text-teal-600">Purchase control</p><div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-xl font-bold text-slate-950">{selected.poNumber || `PO-${selected.id}`}</h2><Badge className={`border ${toneForDelivery(selected.deliveryStatus)}`}>{selected.deliveryStatus}</Badge></div><p className="mt-1 text-sm text-slate-500">{selected.project?.name || "Unlinked project"} · {selected.vendor?.name || "Vendor unavailable"}</p></div>
               <button type="button" onClick={() => setSelected(null)} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50"><X className="h-4 w-4"/></button>
             </header>
 
@@ -637,7 +622,7 @@ const ProjectManagementPurchaseTracking = () => {
               </section>
 
               <section className={`${cardClass} p-4`}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-semibold text-slate-900">Project purchase record</h3><p className="mt-1 text-xs text-slate-500">Purchase and delivery quantities are stored in SQL Server.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openEditPurchase(selected)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700"><Pencil className="h-3.5 w-3.5"/> Edit</button><button type="button" onClick={() => removePurchase(selected)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700"><Trash2 className="h-3.5 w-3.5"/> Delete</button></div></div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="font-semibold text-slate-900">Project purchase record</h3><p className="mt-1 text-xs text-slate-500">Purchase and delivery quantities are stored in SQL Server.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openEditPurchase(selected)} className="inline-flex items-center gap-1.5 rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-700"><Pencil className="h-3.5 w-3.5"/> Edit</button><button type="button" onClick={() => removePurchase(selected)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700"><Trash2 className="h-3.5 w-3.5"/> Delete</button></div></div>
                 <div className="mt-4 overflow-x-auto"><table className="min-w-[700px] w-full text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2 text-left">Item Summary</th><th className="px-3 py-2 text-left">Unit</th><th className="px-3 py-2 text-right">Ordered</th><th className="px-3 py-2 text-right">Received</th><th className="px-3 py-2 text-right">Balance</th><th className="px-3 py-2 text-right">Value</th></tr></thead><tbody><tr><td className="px-3 py-3 font-medium text-slate-800">{selected.itemSummary || selected.summary || "Purchase materials"}</td><td className="px-3 py-3 text-slate-500">{selected.unit || "PCS"}</td><td className="px-3 py-3 text-right">{selected.orderedQty}</td><td className="px-3 py-3 text-right text-emerald-700">{selected.receivedQty}</td><td className="px-3 py-3 text-right font-semibold">{selected.balanceQty}</td><td className="px-3 py-3 text-right">{formatInrCurrency(selected.amount)}</td></tr></tbody></table></div>
               </section>
 
@@ -655,12 +640,12 @@ const ProjectManagementPurchaseTracking = () => {
                   <label><span className="mb-1 block text-xs font-medium text-slate-500">Next follow-up</span><input type="date" value={followUpForm.nextFollowUpDate} disabled={followUpForm.followUpStatus === "Resolved"} onChange={(event) => setFollowUpForm((current) => ({ ...current, nextFollowUpDate: event.target.value }))} className={`${inputClass} disabled:bg-slate-100`}/></label>
                   <label className="sm:col-span-2"><span className="mb-1 block text-xs font-medium text-slate-500">Update note</span><textarea rows="3" value={followUpForm.note} onChange={(event) => setFollowUpForm((current) => ({ ...current, note: event.target.value }))} placeholder="Example: Vendor confirmed dispatch; vehicle number expected tomorrow." className={inputClass}/></label>
                 </div>
-                <div className="mt-4 flex justify-end"><button type="button" onClick={saveFollowUp} disabled={saving} className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60">{saving ? "Saving..." : "Save Follow-up"}</button></div>
+                <div className="mt-4 flex justify-end"><button type="button" onClick={saveFollowUp} disabled={saving} className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60">{saving ? "Saving..." : "Save Follow-up"}</button></div>
               </section>
 
               <section className={`${cardClass} p-4`}>
                 <h3 className="font-semibold text-slate-900">Follow-up history</h3>
-                {!selected.followUp.history?.length ? <p className="mt-3 text-sm text-slate-500">No local follow-up activity yet.</p> : <div className="mt-4 space-y-4">{selected.followUp.history.map((entry) => <div key={entry.id} className="relative border-l-2 border-indigo-100 pl-4"><span className="absolute -left-[5px] top-1 h-2 w-2 rounded-full bg-indigo-500"/><div className="flex flex-wrap items-center gap-2"><Badge className={toneForFollowUp(entry.status)}>{entry.status}</Badge><span className="text-xs text-slate-500">{entry.owner || "Unassigned"} · {formatDateTime(entry.createdAt)}</span></div>{entry.note && <p className="mt-2 text-sm text-slate-700">{entry.note}</p>}</div>)}</div>}
+                {!selected.followUp.history?.length ? <p className="mt-3 text-sm text-slate-500">No local follow-up activity yet.</p> : <div className="mt-4 space-y-4">{selected.followUp.history.map((entry) => <div key={entry.id} className="relative border-l-2 border-teal-100 pl-4"><span className="absolute -left-[5px] top-1 h-2 w-2 rounded-full bg-teal-500"/><div className="flex flex-wrap items-center gap-2"><Badge className={toneForFollowUp(entry.status)}>{entry.status}</Badge><span className="text-xs text-slate-500">{entry.owner || "Unassigned"} · {formatDateTime(entry.createdAt)}</span></div>{entry.note && <p className="mt-2 text-sm text-slate-700">{entry.note}</p>}</div>)}</div>}
               </section>
             </div>
           </div>

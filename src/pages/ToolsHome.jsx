@@ -1,3 +1,4 @@
+import InventoryPageHeader from "../components/inventory/InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import DateInput from "../components/common/DateInput";
@@ -63,8 +64,8 @@ const STATUS_META = {
   },
   inUse: {
     label: "In Use",
-    badgeClass: "bg-blue-100 text-blue-800 border-blue-200",
-    dotClass: "bg-blue-500",
+    badgeClass: "bg-[var(--bg-subtle)] text-[var(--primary)] border-[var(--border-default)]",
+    dotClass: "bg-[var(--primary)]",
   },
   maintenance: {
     label: "Maintenance",
@@ -79,13 +80,13 @@ const STATUS_META = {
 };
 
 const ACTION_BUTTON_BASE =
-  "inline-flex h-9 w-9 items-center justify-center rounded-lg border text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-100";
+  "inline-flex h-9 w-9 items-center justify-center rounded-lg border text-sm transition focus:outline-none focus:ring-2 focus:ring-[var(--border-default)]";
 
 const ACTION_BUTTONS = {
   neutral:
     `${ACTION_BUTTON_BASE} border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700`,
   primary:
-    `${ACTION_BUTTON_BASE} border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100`,
+    `${ACTION_BUTTON_BASE} border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)] hover:bg-[var(--bg-subtle)]`,
   warning:
     `${ACTION_BUTTON_BASE} border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100`,
   danger:
@@ -331,7 +332,7 @@ const ToolsHome = () => {
           <path d="M12 11v10" />
         </svg>
       ),
-      iconClass: "bg-blue-50 text-blue-600",
+      iconClass: "bg-[var(--bg-subtle)] text-[var(--primary)]",
       filterValue: "all",
     },
     {
@@ -353,7 +354,7 @@ const ToolsHome = () => {
           <path d="M12 8v4l3 2" />
         </svg>
       ),
-      iconClass: "bg-blue-100 text-blue-700",
+      iconClass: "bg-[var(--bg-subtle)] text-[var(--primary)]",
       filterValue: "inUse",
     },
     {
@@ -740,36 +741,27 @@ const ToolsHome = () => {
 
   return (
     <div className="min-h-screen bg-slate-50/80 p-4 md:p-6 space-y-5">
-      <section className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-500">
-            Tools
-          </p>
-          <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
-            Tool Management
-          </h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Track tools across sites, assignments, and maintenance cycles.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+      <InventoryPageHeader
+        title={<>Tool Management</>}
+        description={<>Track tools across sites, assignments, and maintenance cycles.</>}
+        actions={<><div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={handleOpenAdd}
-            className="inline-flex items-center rounded-lg bg-blue-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600"
+            className="inline-flex items-center rounded-lg bg-[var(--primary)] px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-[var(--primary)]"
           >
             + Add Tool
           </button>
-        </div>
-      </section>
+        </div></>}
+      ></InventoryPageHeader>
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-5">
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {isLoading &&
               Array.from({ length: 4 }).map((_, index) => (
@@ -799,9 +791,9 @@ const ToolsHome = () => {
                     onKeyDown={(event) =>
                       handleCardKeyDown(event, card.filterValue)
                     }
-                    className={`cursor-pointer rounded-2xl border bg-white px-5 py-5 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md ${
+                    className={`cursor-pointer rounded-2xl border bg-white px-5 py-5 shadow-sm transition hover:-translate-y-0.5 hover:border-[var(--border-default)] hover:shadow-md ${
                       isActive
-                        ? "border-blue-200 ring-1 ring-blue-100"
+                        ? "border-[var(--border-default)] ring-1 ring-[var(--border-default)]"
                         : "border-slate-200"
                     }`}
                   >
@@ -842,13 +834,13 @@ const ToolsHome = () => {
               {toolModules.map((module) => {
                 const tagClass =
                   module.tag === "New"
-                    ? "border-blue-100 bg-blue-50 text-blue-600"
+                    ? "border-[var(--border-default)] bg-[var(--bg-subtle)] text-[var(--primary)]"
                     : "border-slate-200 bg-slate-100 text-slate-600";
                 return (
                   <Link
                     key={module.id}
                     to={module.href}
-                    className="group rounded-xl border border-slate-200 bg-slate-50/40 p-4 transition hover:border-blue-200 hover:bg-blue-50/40"
+                    className="group rounded-xl border border-slate-200 bg-slate-50/40 p-4 transition hover:border-[var(--border-default)] hover:bg-[var(--bg-subtle)]/40"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -927,7 +919,7 @@ const ToolsHome = () => {
                     setCurrentPage(1);
                   }}
                   placeholder="Search tool, serial, location..."
-                  className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                 />
               </label>
 
@@ -937,7 +929,7 @@ const ToolsHome = () => {
                   setTypeFilter(event.target.value);
                   setCurrentPage(1);
                 }}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
               >
                 <option value="all">All Types</option>
                 {toolTypes.map((type) => (
@@ -953,7 +945,7 @@ const ToolsHome = () => {
                   setStatusFilter(event.target.value);
                   setCurrentPage(1);
                 }}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
               >
                 <option value="all">All Status</option>
                 <option value="available">Available</option>
@@ -968,7 +960,7 @@ const ToolsHome = () => {
                   setLocationFilter(event.target.value);
                   setCurrentPage(1);
                 }}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
               >
                 <option value="all">All Locations</option>
                 {locations.map((location) => (
@@ -986,7 +978,7 @@ const ToolsHome = () => {
                 const isActive = statusFilter === chip.value;
                 const activeClass =
                   chip.value === "all"
-                    ? "border-blue-600 bg-blue-600 text-white"
+                    ? "border-[var(--border-default)] bg-[var(--primary)] text-white"
                     : STATUS_META[chip.value]?.badgeClass;
                 const countClass =
                   isActive && chip.value === "all"
@@ -1040,7 +1032,7 @@ const ToolsHome = () => {
               <button
                 type="button"
                 onClick={handleOpenAdd}
-                className="mt-4 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600"
+                className="mt-4 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[var(--primary)]"
               >
                 Add First Tool
               </button>
@@ -1064,7 +1056,7 @@ const ToolsHome = () => {
               <button
                 type="button"
                 onClick={handleOpenAdd}
-                className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[var(--primary)]"
               >
                 + Add Tool
               </button>
@@ -1214,7 +1206,7 @@ const ToolsHome = () => {
                         <tr
                           key={tool.id}
                           className={`cursor-pointer transition-colors hover:bg-slate-50/80 ${
-                            isSelected ? "bg-blue-50/50" : ""
+                            isSelected ? "bg-[var(--bg-subtle)]/50" : ""
                           }`}
                           onClick={() => setSelectedToolId(tool.id)}
                         >
@@ -1507,7 +1499,7 @@ const ToolsHome = () => {
               <button
                 type="button"
                 onClick={handleOpenAdd}
-                className="mt-4 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600"
+                className="mt-4 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[var(--primary)]"
               >
                 Add Tool
               </button>
@@ -1552,7 +1544,7 @@ const ToolsHome = () => {
                           name: event.target.value,
                         }))
                       }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                   </div>
 
@@ -1569,7 +1561,7 @@ const ToolsHome = () => {
                             type: event.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                       />
                     </div>
                     <div>
@@ -1584,7 +1576,7 @@ const ToolsHome = () => {
                             serialNumber: event.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                       />
                     </div>
                   </div>
@@ -1608,7 +1600,7 @@ const ToolsHome = () => {
                           baseLocation: event.target.value,
                         }))
                       }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                   </div>
                   <div>
@@ -1623,7 +1615,7 @@ const ToolsHome = () => {
                           purchaseDate: value || "",
                         }))
                       }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                   </div>
                   <div>
@@ -1652,7 +1644,7 @@ const ToolsHome = () => {
                           condition: event.target.value,
                         }))
                       }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     >
                       <option value="Good">Good</option>
                       <option value="Damaged">Damaged</option>
@@ -1680,7 +1672,7 @@ const ToolsHome = () => {
                         }))
                       }
                       placeholder="drilling_mechine.png or /tool-images/drill.png"
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                   </div>
                   <div>
@@ -1695,7 +1687,7 @@ const ToolsHome = () => {
                           notes: event.target.value,
                         }))
                       }
-                      className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 min-h-[90px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                   </div>
                 </div>
@@ -1711,7 +1703,7 @@ const ToolsHome = () => {
                       <button
                         type="button"
                         onClick={handleCheckin}
-                        className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600"
+                        className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[var(--primary)]"
                       >
                         Checkin Tool
                       </button>
@@ -1722,7 +1714,7 @@ const ToolsHome = () => {
                       <button
                         type="button"
                         onClick={handleOpenAssign}
-                        className="rounded-lg bg-blue-500 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600"
+                        className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[var(--primary)]"
                       >
                         Assign / Checkout
                       </button>
@@ -1950,7 +1942,7 @@ const ToolsHome = () => {
                         name: event.target.value,
                       }))
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                   {newToolErrors.name && (
                     <p className="mt-1 text-xs text-red-600">
@@ -1971,7 +1963,7 @@ const ToolsHome = () => {
                           type: event.target.value,
                         }))
                       }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                     {newToolErrors.type && (
                       <p className="mt-1 text-xs text-red-600">
@@ -1991,7 +1983,7 @@ const ToolsHome = () => {
                           serialNumber: event.target.value,
                         }))
                       }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                     {newToolErrors.serialNumber && (
                       <p className="mt-1 text-xs text-red-600">
@@ -2013,7 +2005,7 @@ const ToolsHome = () => {
                           purchaseDate: value || "",
                         }))
                       }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                   </div>
                   <div>
@@ -2028,7 +2020,7 @@ const ToolsHome = () => {
                           baseLocation: event.target.value,
                         }))
                       }
-                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     />
                   </div>
                 </div>
@@ -2045,7 +2037,7 @@ const ToolsHome = () => {
                       }))
                     }
                     placeholder="drilling_mechine.png or /tool-images/drill.png"
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                 </div>
                 <div>
@@ -2060,7 +2052,7 @@ const ToolsHome = () => {
                         notes: event.target.value,
                       }))
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 min-h-[90px]"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)] min-h-[90px]"
                   />
                 </div>
               </div>
@@ -2074,7 +2066,7 @@ const ToolsHome = () => {
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600"
+                  className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[var(--primary)]"
                 >
                   Add Tool
                 </button>
@@ -2108,7 +2100,7 @@ const ToolsHome = () => {
                         assignedTo: event.target.value,
                       }))
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                     placeholder="Select user or team"
                   />
                 </div>
@@ -2134,7 +2126,7 @@ const ToolsHome = () => {
                         expectedReturnDate: value || "",
                       }))
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                   <p className="mt-1 text-xs text-slate-500">
                     Optional for open-ended laptop or tool issue records.
@@ -2154,7 +2146,7 @@ const ToolsHome = () => {
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600"
+                  className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[var(--primary)]"
                 >
                   Assign Tool
                 </button>
@@ -2188,7 +2180,7 @@ const ToolsHome = () => {
                         issue: event.target.value,
                       }))
                     }
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                 </div>
                 <div>
@@ -2205,7 +2197,7 @@ const ToolsHome = () => {
                     }
                     type="number"
                     min="0"
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[var(--border-default)] focus:ring-2 focus:ring-[var(--border-default)]"
                   />
                 </div>
                 {maintenanceError && (

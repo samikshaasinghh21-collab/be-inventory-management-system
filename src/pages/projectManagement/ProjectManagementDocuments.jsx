@@ -1,3 +1,6 @@
+import StatusBadge from "../../components/common/StatusBadge";
+import { PageHeader, MetricCard as SharedMetricCard } from "../../components/ui";
+import "../../styles/projects.css";
 import { createElement, useEffect, useMemo, useState } from "react";
 import {
   Archive, CheckCircle2, ChevronLeft, ChevronRight, Download, Eye, FileText,
@@ -25,7 +28,7 @@ import {
 import { formatDate } from "../../utils/dateFormat";
 
 const inputClass =
-  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+  "w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-100";
 const cardClass = "rounded-2xl border border-slate-200 bg-white shadow-sm";
 const statuses = ["Draft", "Submitted", "Approved", "Rejected", "Superseded"];
 const disciplines = ["Electrical", "Civil", "Mechanical", "ELV", "IT / Network", "Safety", "Quality", "Commercial", "General"];
@@ -62,13 +65,6 @@ const emptyForm = {
   file: null,
 };
 
-const statusTone = {
-  Draft: "border-slate-200 bg-slate-100 text-slate-700",
-  Submitted: "border-blue-200 bg-blue-50 text-blue-700",
-  Approved: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  Rejected: "border-rose-200 bg-rose-50 text-rose-700",
-  Superseded: "border-amber-200 bg-amber-50 text-amber-700",
-};
 
 const bytes = (value) => {
   const size = Number(value) || 0;
@@ -102,18 +98,11 @@ const appendReportSheet = (XLSX, workbook, name, rows, emptyHeaders) => {
   XLSX.utils.book_append_sheet(workbook, worksheet, name);
 };
 
-const Badge = ({ status }) => (
-  <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone[status] || statusTone.Draft}`}>
-    {status}
-  </span>
-);
+const Badge = ({ label, status, children }) => <StatusBadge status={status || label || children} />;
 
-const Metric = ({ label, value, icon: Icon, tone }) => (
-  <article className={`${cardClass} p-4`}>
-    <span className={`grid h-10 w-10 place-items-center rounded-xl ${tone}`}>{createElement(Icon, { className: "h-5 w-5" })}</span>
-    <p className="mt-3 text-2xl font-bold text-slate-950">{value}</p>
-    <p className="mt-1 text-xs font-medium text-slate-500">{label}</p>
-  </article>
+const Metric = ({ icon, label, value, helper, tone = "", style = "" }) => (
+  <SharedMetricCard icon={icon} label={label} value={value} hint={helper}
+    tone={/rose|red/.test(tone || style) ? "danger" : /amber|orange/.test(tone || style) ? "warning" : "neutral"} />
 );
 
 const DocumentForm = ({
@@ -134,7 +123,7 @@ const DocumentForm = ({
     <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/50 p-3">
       <div className="flex max-h-[95vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <header className="flex items-start justify-between border-b border-slate-200 p-5">
-          <div><p className="text-xs font-semibold uppercase tracking-widest text-indigo-500">Document control</p>
+          <div><p className="text-xs font-semibold uppercase tracking-widest text-teal-500">Document control</p>
             <h2 className="mt-1 text-xl font-bold text-slate-950">{editing ? "Edit document details" : "Create document"}</h2>
             <p className="mt-1 text-sm text-slate-500">{editing ? "Update metadata and linked records without replacing the file." : "Upload the controlled initial revision and its metadata."}</p>
           </div>
@@ -202,7 +191,7 @@ const DocumentForm = ({
           </section>}
           <section className="mt-5 rounded-2xl border border-slate-200 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2"><Link2 className="h-4 w-4 text-indigo-600" /><h3 className="font-semibold text-slate-900">Linked records</h3></div>
+              <div className="flex items-center gap-2"><Link2 className="h-4 w-4 text-teal-600" /><h3 className="font-semibold text-slate-900">Linked records</h3></div>
               <label className="relative w-full sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
@@ -229,7 +218,7 @@ const DocumentForm = ({
         </div>
         <footer className="flex justify-end gap-2 border-t border-slate-200 p-4">
           <button onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold">Cancel</button>
-          <button disabled={saving} onClick={onSave} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save document"}</button>
+          <button disabled={saving} onClick={onSave} className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving…" : "Save document"}</button>
         </footer>
       </div>
     </div>
@@ -574,24 +563,20 @@ const ProjectManagementDocuments = () => {
   }));
 
   return (
-    <div className="space-y-5 pb-8">
-      <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.28em] text-indigo-500">Project Management</p>
-          <h1 className="mt-2 text-3xl font-bold text-slate-950">Documents</h1>
-          <p className="mt-1 text-sm text-slate-500">Controlled files, immutable revisions, approvals, and links to project execution records.</p>
-        </div>
-        <div className="flex gap-2">
+    <div className="pm-workspace space-y-5 pb-8">
+      <PageHeader eyebrow="Project management" title="Documents" description="Controlled files, immutable revisions, approvals, and links to project execution records." actions={<>
+<div className="flex gap-2">
           <button disabled={!pagination.total || exporting} onClick={exportReport} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet className="h-4 w-4" /> {exporting ? "Exporting..." : "Export Excel"}</button>
           <button onClick={() => load()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700"><RefreshCw className="h-4 w-4" /> Refresh</button>
-          {permissions.canCreateSupporting && <button onClick={openCreate} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" /> Create Document</button>}
+          {permissions.canCreateSupporting && <button onClick={openCreate} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" /> Create Document</button>}
         </div>
-      </header>
+        </>} />
 
       {error && <div className="flex justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{error}</span><button onClick={() => setError("")}><X className="h-4 w-4" /></button></div>}
       {message && <div className="flex justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"><span>{message}</span><button onClick={() => setMessage("")}><X className="h-4 w-4" /></button></div>}
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-        <Metric label="Active documents" value={metrics.total} icon={FileText} tone="bg-indigo-50 text-indigo-600" />
+        <Metric label="Active documents" value={metrics.total} icon={FileText} tone="bg-teal-50 text-teal-600" />
         <Metric label="Draft" value={metrics.draft} icon={Pencil} tone="bg-slate-100 text-slate-600" />
         <Metric label="Awaiting approval" value={metrics.review} icon={Send} tone="bg-blue-50 text-blue-600" />
         <Metric label="Approved" value={metrics.approved} icon={ShieldCheck} tone="bg-emerald-50 text-emerald-600" />
@@ -601,7 +586,7 @@ const ProjectManagementDocuments = () => {
 
       <section className={`${cardClass} p-5`}>
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <div><p className="text-xs font-semibold uppercase tracking-widest text-indigo-500">Document report</p><h2 className="mt-1 text-lg font-bold text-slate-950">Overview</h2></div>
+          <div><p className="text-xs font-semibold uppercase tracking-widest text-teal-500">Document report</p><h2 className="mt-1 text-lg font-bold text-slate-950">Overview</h2></div>
           <p className="text-xs text-slate-500">All figures reflect the current filters, not only the visible page.</p>
         </div>
         <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -632,16 +617,16 @@ const ProjectManagementDocuments = () => {
           <tbody className="divide-y divide-slate-100">
             {loading ? <tr><td colSpan="9" className="py-16 text-center text-slate-500">Loading controlled documents…</td></tr> :
               sortedDocuments.map((document) => <tr key={document.id} className="hover:bg-slate-50/70">
-                <td className="px-4 py-4"><button onClick={() => openDetail(document.id)} className="font-semibold text-indigo-700 hover:underline">{document.documentNumber}</button><p className="mt-1 max-w-xs truncate text-xs text-slate-500">{document.name}</p></td>
+                <td className="px-4 py-4"><button onClick={() => openDetail(document.id)} className="font-semibold text-teal-700 hover:underline">{document.documentNumber}</button><p className="mt-1 max-w-xs truncate text-xs text-slate-500">{document.name}</p></td>
                 <td className="px-4 py-4"><p className="font-medium text-slate-800">{document.projectName}</p><p className="text-xs text-slate-400">{document.projectCode}</p></td>
-                <td className="px-4 py-4"><div className="flex max-w-xs flex-wrap gap-1">{document.milestones?.length ? document.milestones.map((milestone) => <span key={milestone.id} className="rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700">{milestone.label}</span>) : <span className="text-slate-400">Not linked</span>}</div></td>
+                <td className="px-4 py-4"><div className="flex max-w-xs flex-wrap gap-1">{document.milestones?.length ? document.milestones.map((milestone) => <span key={milestone.id} className="rounded-full bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700">{milestone.label}</span>) : <span className="text-slate-400">Not linked</span>}</div></td>
                 <td className="px-4 py-4">{document.category === "Other" ? document.customCategory : document.category}</td>
                 <td className="px-4 py-4">{document.discipline || "—"}</td>
                 <td className="px-4 py-4 font-semibold">{document.revisionLabel}</td>
                 <td className="px-4 py-4"><Badge status={document.status} /></td>
                 <td className="px-4 py-4"><p>{document.updatedBy}</p><p className="text-xs text-slate-400">{formatDate(document.updatedAt)}</p></td>
                 <td className="px-4 py-4"><div className="flex gap-1">
-                  <button title="Details" onClick={() => openDetail(document.id)} className="rounded-lg p-2 text-slate-500 hover:bg-indigo-50 hover:text-indigo-700"><Eye className="h-4 w-4" /></button>
+                  <button title="Details" onClick={() => openDetail(document.id)} className="rounded-lg p-2 text-slate-500 hover:bg-teal-50 hover:text-teal-700"><Eye className="h-4 w-4" /></button>
                   <button title="Download current revision" onClick={() => downloadAuthenticatedFile(`/api/project-management/documents/${document.id}/download`, document.name)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><Download className="h-4 w-4" /></button>
                 </div></td>
               </tr>)}
@@ -666,11 +651,11 @@ const ProjectManagementDocuments = () => {
           <label className="block text-sm font-medium">Client revision reference<input className={`${inputClass} mt-1`} value={revisionForm.clientRevisionReference} onChange={(event) => setRevisionForm({ ...revisionForm, clientRevisionReference: event.target.value })} /></label>
           <label className="block text-sm font-medium">Change summary<input className={`${inputClass} mt-1`} value={revisionForm.changeSummary} onChange={(event) => setRevisionForm({ ...revisionForm, changeSummary: event.target.value })} /></label>
           <label className="block text-sm font-medium">Remarks<textarea className={`${inputClass} mt-1`} value={revisionForm.remarks} onChange={(event) => setRevisionForm({ ...revisionForm, remarks: event.target.value })} /></label>
-        </div><footer className="flex justify-end gap-2 border-t p-4"><button onClick={() => setRevisionForm(null)} className="rounded-xl border px-4 py-2">Cancel</button><button disabled={saving} onClick={saveRevision} className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white">Upload revision</button></footer>
+        </div><footer className="flex justify-end gap-2 border-t p-4"><button onClick={() => setRevisionForm(null)} className="rounded-xl border px-4 py-2">Cancel</button><button disabled={saving} onClick={saveRevision} className="rounded-xl bg-teal-600 px-4 py-2 font-semibold text-white">Upload revision</button></footer>
       </div></div>}
 
       {selected && <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/35"><aside className="flex h-full w-full max-w-4xl flex-col bg-white shadow-2xl">
-        <header className="border-b bg-white p-5"><div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="text-xs font-semibold uppercase tracking-widest text-indigo-600">{selected.documentNumber}</p><Badge status={selected.status} /><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold">{selected.revisionLabel}</span></div><h2 className="mt-2 text-2xl font-bold text-slate-950">{selected.name}</h2><p className="mt-1 text-sm text-slate-500">{selected.projectName} · {selected.category} · {selected.discipline || "General"}</p></div><button onClick={() => setSelected(null)} className="rounded-xl p-2 hover:bg-slate-100"><X /></button></div>
+        <header className="border-b bg-white p-5"><div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="text-xs font-semibold uppercase tracking-widest text-teal-600">{selected.documentNumber}</p><Badge status={selected.status} /><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold">{selected.revisionLabel}</span></div><h2 className="mt-2 text-2xl font-bold text-slate-950">{selected.name}</h2><p className="mt-1 text-sm text-slate-500">{selected.projectName} · {selected.category} · {selected.discipline || "General"}</p></div><button onClick={() => setSelected(null)} className="rounded-xl p-2 hover:bg-slate-100"><X /></button></div>
           <div className="mt-4 flex flex-wrap gap-2">
             <button onClick={() => downloadAuthenticatedFile(`/api/project-management/documents/${selected.id}/download`, selected.name)} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold"><Download className="h-4 w-4" /> Download</button>
             {selected.canEdit && ["Draft", "Rejected"].includes(selected.status) && <button onClick={openEdit} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold"><Pencil className="h-4 w-4" /> Edit</button>}
@@ -682,7 +667,7 @@ const ProjectManagementDocuments = () => {
             {selected.canDelete && <button onClick={remove} className="ml-auto inline-flex items-center gap-2 rounded-xl border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700"><Trash2 className="h-4 w-4" /> Delete</button>}
           </div>
         </header>
-        <nav className="flex gap-1 overflow-x-auto border-b px-5">{[["overview", "Overview", FileText], ["links", "Linked Records", Link2], ["revisions", "Revisions", History], ["preview", "Preview", Eye], ["activity", "Activity", RefreshCw]].map(([key, label, Icon]) => <button key={key} onClick={() => { setDetailTab(key); if (key === "preview") void showPreview(); }} className={`inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold ${detailTab === key ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500"}`}>{createElement(Icon, { className: "h-4 w-4" })}{label}</button>)}</nav>
+        <nav className="flex gap-1 overflow-x-auto border-b px-5">{[["overview", "Overview", FileText], ["links", "Linked Records", Link2], ["revisions", "Revisions", History], ["preview", "Preview", Eye], ["activity", "Activity", RefreshCw]].map(([key, label, Icon]) => <button key={key} onClick={() => { setDetailTab(key); if (key === "preview") void showPreview(); }} className={`inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold ${detailTab === key ? "border-teal-600 text-teal-700" : "border-transparent text-slate-500"}`}>{createElement(Icon, { className: "h-4 w-4" })}{label}</button>)}</nav>
         <div className="flex-1 overflow-y-auto p-5">
           {detailTab === "overview" && <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[
             ["Document number", selected.documentNumber], ["Project", `${selected.projectName}${selected.projectCode ? ` (${selected.projectCode})` : ""}`],
@@ -700,13 +685,13 @@ const ProjectManagementDocuments = () => {
               ["Superseded", selected.supersededBy, selected.supersededAt],
             ].filter(([, actor, occurredAt]) => actor || occurredAt).map(([label, actor, occurredAt]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-medium text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold text-slate-800">{actor || "System"}</p><p className="text-xs text-slate-500">{formatDate(occurredAt)}</p></div>)}</div></section>
             <section className="rounded-xl border p-4"><h3 className="font-semibold">Description</h3><p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{selected.description || "No description."}</p></section>
-            <section className="rounded-xl border p-4"><div className="flex items-center gap-2"><Tags className="h-4 w-4" /><h3 className="font-semibold">Tags</h3></div><div className="mt-3 flex flex-wrap gap-2">{selected.tags?.map((tag) => <span key={tag} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">{tag}</span>)}{!selected.tags?.length && <span className="text-sm text-slate-400">No tags</span>}</div></section>
+            <section className="rounded-xl border p-4"><div className="flex items-center gap-2"><Tags className="h-4 w-4" /><h3 className="font-semibold">Tags</h3></div><div className="mt-3 flex flex-wrap gap-2">{selected.tags?.map((tag) => <span key={tag} className="rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700">{tag}</span>)}{!selected.tags?.length && <span className="text-sm text-slate-400">No tags</span>}</div></section>
             {selected.rejectionReason && <section className="rounded-xl border border-rose-200 bg-rose-50 p-4"><h3 className="font-semibold text-rose-800">Rejection reason</h3><p className="mt-1 text-sm text-rose-700">{selected.rejectionReason}</p></section>}
           </div>}
           {detailTab === "links" && <div className="grid gap-4 md:grid-cols-2">{Object.entries(linkLabels).map(([type, label]) => <section key={type} className="rounded-xl border"><h3 className="border-b px-4 py-3 font-semibold">{label}</h3><div className="p-3">{selected.links?.filter((link) => link.type === type).map((link) => <div key={link.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-medium">{link.label}</div>)}{!selected.links?.some((link) => link.type === type) && <p className="px-2 py-3 text-sm text-slate-400">No linked records</p>}</div></section>)}</div>}
           {detailTab === "revisions" && <div className="space-y-3">{selected.revisions?.map((revision) => <article key={revision.id} className="rounded-xl border p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="font-bold">{revision.revisionLabel}</h3><Badge status={revision.status} /></div><p className="mt-1 text-sm text-slate-600">{revision.fileName} · {bytes(revision.fileSize)}</p><p className="mt-1 text-xs text-slate-400">{revision.uploadedBy} · {formatDate(revision.uploadedAt)}</p></div><div className="flex gap-2"><button onClick={() => showPreview(selected, revision)} className="rounded-lg border p-2"><Eye className="h-4 w-4" /></button><button onClick={() => downloadAuthenticatedFile(revision.downloadUrl, revision.fileName)} className="rounded-lg border p-2"><Download className="h-4 w-4" /></button></div></div>{revision.changeSummary && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm">{revision.changeSummary}</p>}{revision.clientRevisionReference && <p className="mt-2 text-xs text-slate-500">Client reference: {revision.clientRevisionReference}</p>}</article>)}</div>}
-          {detailTab === "preview" && <div className="grid min-h-[560px] place-items-center rounded-xl border bg-slate-50">{preview.loading ? <p className="text-slate-500">Loading preview…</p> : preview.url && preview.type.startsWith("image/") ? <img src={preview.url} alt={selected.name} className="max-h-[75vh] max-w-full object-contain" /> : preview.url && preview.type === "application/pdf" ? <iframe title={selected.name} src={preview.url} className="h-[70vh] w-full rounded-xl" /> : <div className="text-center"><FileText className="mx-auto h-12 w-12 text-slate-300" /><p className="mt-3 font-semibold text-slate-700">Inline preview is unavailable for this format.</p><button onClick={() => downloadAuthenticatedFile(`/api/project-management/documents/${selected.id}/download`, selected.name)} className="mt-3 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Download file</button></div>}</div>}
-          {detailTab === "activity" && <div className="space-y-3">{selected.activity?.map((event) => <article key={event.id} className="flex gap-3 rounded-xl border p-4"><span className="mt-1 h-2.5 w-2.5 rounded-full bg-indigo-500" /><div><p className="font-semibold text-slate-800">{String(event.action).replaceAll(".", " ")}</p><p className="mt-1 text-sm text-slate-500">{event.actor || "System"} · {formatDate(event.createdAt)}</p></div></article>)}{!selected.activity?.length && <p className="py-12 text-center text-slate-400">No document activity recorded yet.</p>}</div>}
+          {detailTab === "preview" && <div className="grid min-h-[560px] place-items-center rounded-xl border bg-slate-50">{preview.loading ? <p className="text-slate-500">Loading preview…</p> : preview.url && preview.type.startsWith("image/") ? <img src={preview.url} alt={selected.name} className="max-h-[75vh] max-w-full object-contain" /> : preview.url && preview.type === "application/pdf" ? <iframe title={selected.name} src={preview.url} className="h-[70vh] w-full rounded-xl" /> : <div className="text-center"><FileText className="mx-auto h-12 w-12 text-slate-300" /><p className="mt-3 font-semibold text-slate-700">Inline preview is unavailable for this format.</p><button onClick={() => downloadAuthenticatedFile(`/api/project-management/documents/${selected.id}/download`, selected.name)} className="mt-3 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white">Download file</button></div>}</div>}
+          {detailTab === "activity" && <div className="space-y-3">{selected.activity?.map((event) => <article key={event.id} className="flex gap-3 rounded-xl border p-4"><span className="mt-1 h-2.5 w-2.5 rounded-full bg-teal-500" /><div><p className="font-semibold text-slate-800">{String(event.action).replaceAll(".", " ")}</p><p className="mt-1 text-sm text-slate-500">{event.actor || "System"} · {formatDate(event.createdAt)}</p></div></article>)}{!selected.activity?.length && <p className="py-12 text-center text-slate-400">No document activity recorded yet.</p>}</div>}
         </div>
       </aside></div>}
     </div>
