@@ -1,3 +1,6 @@
+import { attendanceStatuses, attendanceTotals } from "../../shared/attendance.js";
+import { registerHrmsPolicies } from "./hrmsPolicies.js";
+import { calculateLop, monthlyProfessionalTax } from "../../shared/payroll.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
@@ -12959,6 +12962,8 @@ const ensureHrmsAttendanceTable = async () => {
           SavedDate DATETIME NULL
         );
       END
+      IF COL_LENGTH(N'${hrmsObjectName("Attendance")}', 'HalfDayCount') IS NULL
+        ALTER TABLE ${hrmsTable("Attendance")} ADD HalfDayCount INT NULL;
     `);
   })();
 
@@ -12969,7 +12974,7 @@ const ensureHrmsAttendanceTable = async () => {
   }
 };
 
-const hrmsAttendanceStatuses = new Set(["P", "A", "L", "H"]);
+const hrmsAttendanceStatuses = new Set(["P", "A", "L", "H", "O"]);
 
 const normalizeHrmsAttendanceStatus = (value) => {
   const status = String(value || "P").trim().toUpperCase();
@@ -13015,28 +13020,16 @@ const buildHrmsAttendanceStatusMap = (statuses = []) =>
     {}
   );
 
-const countHrmsAttendanceStatuses = (statuses = []) =>
-  statuses.reduce(
-    (counts, status) => {
-      const key = normalizeHrmsAttendanceStatus(status);
-      counts[key] += 1;
-      return counts;
-    },
-    { A: 0, H: 0, L: 0, P: 0 }
-  );
-
 const buildHrmsAttendancePayload = (source = {}) => {
-  const statuses = parseHrmsAttendanceStatuses(
-    source.statuses ?? source.DayStatusJson ?? source.dayStatusJson
-  );
-  const counts = countHrmsAttendanceStatuses(statuses);
+  const month = source.month ?? source.AttendanceMonth ?? source.attendanceMonth;
+  const statuses = attendanceStatuses(parseHrmsAttendanceStatuses(source.statuses ?? source.DayStatusJson ?? source.dayStatusJson), month);
+  const counts = attendanceTotals(statuses);
 
   return {
     employeeId: trimToLength(source.employeeId ?? source.EmployeeID, 20),
-    month: trimToLength(
-      source.month ?? source.AttendanceMonth ?? source.attendanceMonth,
-      50
-    ),
+    month: /^\d{4}-\d{2}$/.test(month)
+      ? new Date(Number(month.slice(0, 4)), Number(month.slice(5)) - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+      : trimToLength(month, 50),
     statuses,
     dayStatusJson: serializeJson(buildHrmsAttendanceStatusMap(statuses)),
     counts,
@@ -13044,8 +13037,7 @@ const buildHrmsAttendancePayload = (source = {}) => {
 };
 
 const normalizeHrmsAttendanceRow = (row = {}) => {
-  const statuses = parseHrmsAttendanceStatuses(row.DayStatusJson);
-  const calculatedCounts = countHrmsAttendanceStatuses(statuses);
+  const statuses = attendanceStatuses(parseHrmsAttendanceStatuses(row.DayStatusJson), row.AttendanceMonth, row.HalfDayCount == null);
 
   return {
     id: String(row.Id ?? ""),
@@ -13053,12 +13045,7 @@ const normalizeHrmsAttendanceRow = (row = {}) => {
     employeeName: row.EmployeeName ?? row.FullName ?? row.EmployeeID ?? "",
     month: row.AttendanceMonth ?? "",
     statuses,
-    counts: {
-      P: Number(row.PresentCount ?? calculatedCounts.P ?? 0),
-      A: Number(row.AbsentCount ?? calculatedCounts.A ?? 0),
-      L: Number(row.LeaveCount ?? calculatedCounts.L ?? 0),
-      H: Number(row.HolidayCount ?? calculatedCounts.H ?? 0),
-    },
+    counts: attendanceTotals(statuses),
     savedAt: row.SavedDate ?? null,
   };
 };
@@ -13146,7 +13133,8 @@ app.post("/api/hrms/attendance", async (req, res) => {
       .input("PresentCount", sql.Int, payload.counts.P)
       .input("AbsentCount", sql.Int, payload.counts.A)
       .input("LeaveCount", sql.Int, payload.counts.L)
-      .input("HolidayCount", sql.Int, payload.counts.H);
+      .input("HalfDayCount", sql.Int, payload.counts.H)
+      .input("HolidayCount", sql.Int, payload.counts.O);
 
     let id = existingId;
     if (existingId !== null) {
@@ -13157,6 +13145,7 @@ app.post("/api/hrms/attendance", async (req, res) => {
           PresentCount = @PresentCount,
           AbsentCount = @AbsentCount,
           LeaveCount = @LeaveCount,
+          HalfDayCount = @HalfDayCount,
           HolidayCount = @HolidayCount,
           SavedDate = GETDATE()
         WHERE Id = @Id
@@ -13171,6 +13160,7 @@ app.post("/api/hrms/attendance", async (req, res) => {
           AbsentCount,
           LeaveCount,
           HolidayCount,
+          HalfDayCount,
           SavedDate
         )
         OUTPUT INSERTED.Id AS id
@@ -13182,6 +13172,7 @@ app.post("/api/hrms/attendance", async (req, res) => {
           @AbsentCount,
           @LeaveCount,
           @HolidayCount,
+          @HalfDayCount,
           GETDATE()
         )
       `);
@@ -13256,7 +13247,27 @@ const ensureHrmsSalariesTable = async () => {
       BEGIN
         ALTER TABLE ${hrmsTable("Salaries")} ADD TDSAmount DECIMAL(12,2) NULL;
       END
+
+      IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'WorkingDays') IS NULL ALTER TABLE ${hrmsTable("Salaries")} ADD WorkingDays DECIMAL(6,2) NULL;
+
+      IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'UnpaidDays') IS NULL ALTER TABLE ${hrmsTable("Salaries")} ADD UnpaidDays DECIMAL(6,2) NULL;
+
+      IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'LOPAmount') IS NULL ALTER TABLE ${hrmsTable("Salaries")} ADD LOPAmount DECIMAL(12,2) NULL;
+
+      IF COL_LENGTH(N'${hrmsObjectName("Salaries")}', N'Reimbursement') IS NULL ALTER TABLE ${hrmsTable("Salaries")} ADD Reimbursement DECIMAL(12,2) NULL;
     `);
+    await pool.request().query(`
+      IF EXISTS (SELECT 1 FROM ${toIdentifier(HRMS_DATABASE_NAME)}.sys.computed_columns c
+        JOIN ${toIdentifier(HRMS_DATABASE_NAME)}.sys.tables t ON t.object_id=c.object_id
+        WHERE t.name='Salaries' AND c.name='NetSalary' AND c.definition NOT LIKE '%LOPAmount%')
+      BEGIN
+        ALTER TABLE ${hrmsTable("Salaries")} DROP COLUMN NetSalary;
+        ALTER TABLE ${hrmsTable("Salaries")} ADD NetSalary AS
+          (ROUND(ISNULL(BasicSalary,0)/12,0)+ISNULL(Allowances,0)+ISNULL(Reimbursement,0)
+          -ISNULL(LOPAmount,0)-ISNULL(Deductions,0)-ISNULL(PFAmount,0)-ISNULL(ESIAmount,0)-ISNULL(ProfessionalTax,0)-ISNULL(TDSAmount,0));
+      END
+    `);
+
   })();
 
   try {
@@ -13265,6 +13276,8 @@ const ensureHrmsSalariesTable = async () => {
     ensureHrmsSalariesTablePromise = null;
   }
 };
+
+const hrmsPolicies = registerHrmsPolicies({ app, getPool, sql, hrmsTable, hrmsObjectName, ensureEmployees: ensureHrmsEmployeesTable });
 
 const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
   const basicSalary = normalizeHrmsDecimal(
@@ -13297,8 +13310,12 @@ const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
     providedEsiAmount === ""
       ? calculateHrmsEsiAmount(basicSalary)
       : normalizeHrmsDecimal(providedEsiAmount);
+  const workingDays = Number(source.workingDays ?? 0);
+  const unpaidDays = Number(source.unpaidDays ?? 0);
+  const lopAmount = calculateLop(calculateHrmsMonthlyGross(basicSalary), workingDays, unpaidDays);
+  const reimbursement = normalizeHrmsDecimal(source.reimbursement);
   const netSalary =
-    calculateHrmsMonthlyGross(basicSalary) + allowances - deductions - pfAmount - esiAmount - professionalTax - tdsAmount;
+    calculateHrmsMonthlyGross(basicSalary) + allowances + reimbursement - lopAmount - deductions - pfAmount - esiAmount - professionalTax - tdsAmount;
 
   return {
     employeeId: trimToLength(
@@ -13321,6 +13338,7 @@ const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
           source.Department,
         100
       ) ?? "All",
+    workingDays, unpaidDays, lopAmount, reimbursement,
     basicSalary,
     allowances,
     deductions,
@@ -13345,11 +13363,14 @@ const normalizeHrmsSalaryRow = (row = {}) => {
     normalizeHrmsOptionalDecimal(row.ESIAmount) ?? calculateHrmsEsiAmount(basicSalary);
   const professionalTax = Number(row.ProfessionalTax ?? 0);
   const tdsAmount = Number(row.TDSAmount ?? 0);
+  const lopAmount = Number(row.LOPAmount ?? 0);
+  const reimbursement = Number(row.Reimbursement ?? 0);
   const totalDeductions =
-    deductions + pfAmount + esiAmount + professionalTax + tdsAmount;
-  const netSalary = monthlySalary + allowances - totalDeductions;
+    lopAmount + deductions + pfAmount + esiAmount + professionalTax + tdsAmount;
+  const netSalary = monthlySalary + allowances + reimbursement - totalDeductions;
 
   return {
+    lopAmount, reimbursement, workingDays: Number(row.WorkingDays ?? 0), unpaidDays: Number(row.UnpaidDays ?? 0),
     id: String(row.Id ?? ""),
     employeeId: row.EmployeeID ?? "",
     employeeName: row.EmployeeName ?? row.FullName ?? row.EmployeeID ?? "",
@@ -13375,7 +13396,7 @@ const normalizeHrmsSalaryRow = (row = {}) => {
     pt: professionalTax,
     tdsAmount,
     tds: tdsAmount,
-    totalEarnings: monthlySalary + allowances,
+    totalEarnings: monthlySalary + allowances + reimbursement,
     totalDeductions,
     status: row.Status ?? "Processed",
     savedAt: row.SavedDate ?? null,
@@ -13439,6 +13460,10 @@ const getNextHrmsSalaryId = async (source) => {
 
 const bindHrmsSalaryInputs = (request, payload) =>
   request
+    .input("WorkingDays", sql.Decimal(6,2), payload.workingDays)
+    .input("UnpaidDays", sql.Decimal(6,2), payload.unpaidDays)
+    .input("LOPAmount", sql.Decimal(12,2), payload.lopAmount)
+    .input("Reimbursement", sql.Decimal(12,2), payload.reimbursement)
     .input("EmployeeID", sql.VarChar(20), payload.employeeId)
     .input("PayrollMonth", sql.VarChar(50), payload.month)
     .input("Department", sql.VarChar(100), payload.department)
@@ -13475,6 +13500,7 @@ const saveHrmsSalaryRow = async (source, payload) => {
       SET
         PayrollMonth = @PayrollMonth,
         Department = @Department,
+        WorkingDays = @WorkingDays, UnpaidDays = @UnpaidDays, LOPAmount = @LOPAmount, Reimbursement = @Reimbursement,
         BasicSalary = @BasicSalary,
         Allowances = @Allowances,
         Deductions = @Deductions,
@@ -13499,7 +13525,8 @@ const saveHrmsSalaryRow = async (source, payload) => {
         EmployeeID,
         PayrollMonth,
         Department,
-        BasicSalary,
+        WorkingDays, UnpaidDays, LOPAmount, Reimbursement,
+      BasicSalary,
         Allowances,
         Deductions,
         PFAmount,
@@ -13514,7 +13541,8 @@ const saveHrmsSalaryRow = async (source, payload) => {
         @EmployeeID,
         @PayrollMonth,
         @Department,
-        @BasicSalary,
+        @WorkingDays, @UnpaidDays, @LOPAmount, @Reimbursement,
+      @BasicSalary,
         @Allowances,
         @Deductions,
         @PFAmount,
@@ -13541,6 +13569,7 @@ const saveHrmsSalaryRow = async (source, payload) => {
       EmployeeID,
       PayrollMonth,
       Department,
+      WorkingDays, UnpaidDays, LOPAmount, Reimbursement,
       BasicSalary,
       Allowances,
       Deductions,
@@ -13556,6 +13585,7 @@ const saveHrmsSalaryRow = async (source, payload) => {
       @EmployeeID,
       @PayrollMonth,
       @Department,
+      @WorkingDays, @UnpaidDays, @LOPAmount, @Reimbursement,
       @BasicSalary,
       @Allowances,
       @Deductions,
@@ -13608,6 +13638,7 @@ app.post("/api/hrms/salaries", async (req, res) => {
   let tx;
   try {
     await ensureHrmsSalariesTable();
+    await hrmsPolicies.ensure();
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [req.body ?? {}];
     if (!rows.length) {
       return res.status(400).json({
@@ -13639,6 +13670,9 @@ app.post("/api/hrms/salaries", async (req, res) => {
 
     const savedRows = [];
     for (const payload of payloads) {
+      const policyYear = new Date(`1 ${payload.month}`).getFullYear() || Number(payload.month.slice(0,4));
+      const policy = await hrmsPolicies.load(payload.employeeId, policyYear);
+      payload.professionalTax = monthlyProfessionalTax(policy.ptRule, payload.month, payload.professionalTax);
       savedRows.push(await saveHrmsSalaryRow(tx, payload));
     }
 
@@ -13949,6 +13983,7 @@ app.get("/api/hrms/relieving", async (_req, res) => {
 });
 
 app.post("/api/hrms/relieving", async (req, res) => {
+  let tx;
   try {
     await ensureHrmsRelievingTable();
     const payload = buildHrmsRelievingPayload(req.body);
@@ -13968,12 +14003,16 @@ app.post("/api/hrms/relieving", async (req, res) => {
     }
 
     const pool = await getPool();
-    const hasIdentityId = await isHrmsRelievingIdIdentity(pool);
+    tx = pool.transaction();
+    await tx.begin();
+    const employeeCheck = await createDbRequest(tx).input("EmployeeID", sql.VarChar(20), payload.employeeId).query(`SELECT EmployeeID FROM ${hrmsTable("Employees")} WITH (UPDLOCK, HOLDLOCK) WHERE EmployeeID=@EmployeeID`);
+    if (!employeeCheck.recordset.length) throw Object.assign(new Error("Employee not found."), {statusCode:404});
+    const hasIdentityId = await isHrmsRelievingIdIdentity(tx);
     let id = null;
 
     if (hasIdentityId) {
       const insertResult = await bindHrmsRelievingInputs(
-        pool.request(),
+        createDbRequest(tx),
         payload
       ).query(`
         INSERT INTO ${hrmsTable("Relieving")} (
@@ -14012,9 +14051,9 @@ app.post("/api/hrms/relieving", async (req, res) => {
       `);
       id = toNullableInt(insertResult.recordset?.[0]?.id);
     } else {
-      id = await getNextHrmsRelievingId(pool);
+      id = await getNextHrmsRelievingId(tx);
       await bindHrmsRelievingInputs(
-        pool.request().input("Id", sql.Int, id),
+        createDbRequest(tx).input("Id", sql.Int, id),
         payload
       ).query(`
         INSERT INTO ${hrmsTable("Relieving")} (
@@ -14054,9 +14093,14 @@ app.post("/api/hrms/relieving", async (req, res) => {
       `);
     }
 
+    if (payload.status.toLowerCase() === "relieved") {
+      await createDbRequest(tx).input("EmployeeID", sql.VarChar(20), payload.employeeId).query(`UPDATE ${hrmsTable("Employees")} SET Status='Relieved' WHERE EmployeeID=@EmployeeID`);
+    }
+    await tx.commit();
     const relievingRecord = await loadHrmsRelievingById(pool, id);
     return res.status(201).json({ ok: true, relievingRecord });
   } catch (error) {
+    await rollbackTx(tx);
     return res.status(error?.statusCode ?? 500).json({
       ok: false,
       error: error?.message ?? "Failed to create HRMS relieving record",

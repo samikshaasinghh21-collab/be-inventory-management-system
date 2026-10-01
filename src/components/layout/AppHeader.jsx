@@ -323,7 +323,7 @@ const AppHeader = ({
                         <small>Open workspace configuration and policies</small>
                       </span>
                     </button>
-                    <button
+                    {!profile.authenticationDisabled && <button
                       type="button"
                       className="header-menu-item"
                       onClick={handleLogout}
@@ -335,7 +335,7 @@ const AppHeader = ({
                         <strong>Logout</strong>
                         <small>Exit the application and return to sign in</small>
                       </span>
-                    </button>
+                    </button>}
                   </div>
                 </div>
               )}

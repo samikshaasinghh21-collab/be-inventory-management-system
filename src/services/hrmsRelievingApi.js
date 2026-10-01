@@ -99,6 +99,7 @@ export const createHrmsRelieving = async (payload) => {
     response.data?.relievingRecord ?? response.data
   );
   emitHrmsRelievingChange();
+  window.dispatchEvent(new Event("hrms:employees:changed"));
   return normalized;
 };
 

@@ -57,7 +57,7 @@ const FinalInventoryTable = ({ rows = [], loading = false, error = "" }) => (
           ) : rows.length === 0 ? (
             <tr><td colSpan="9" className="px-4 py-10 text-center text-slate-500">No available inventory matches the selected project and inventory filters.</td></tr>
           ) : rows.map((row) => (
-            <tr key={`${row.locationId}-${row.sourceKey}-${row.itemId ?? row.name}`} className="hover:bg-slate-50/80">
+            <tr key={`${row.locationId}-${row.sourceKey}-${row.itemId ?? row.name}`} className="hover:bg-[var(--bg-subtle)]">
               <td className="px-4 py-3 font-medium text-slate-700">{row.locationTag || "-"}</td>
               <td className="px-4 py-3 text-slate-700">{row.locationName || "-"}</td>
               <td className="px-4 py-3"><p className="font-semibold text-slate-900">{row.name || "-"}</p><p className="mt-0.5 text-xs text-slate-500">{row.itemCode || row.hsn || "No item code"} / {row.unit || "PCS"}</p></td>

@@ -213,7 +213,7 @@ const NAVIGATION_CATALOG = [
           }),
           createNavItem({
             id: "hrms-reviews",
-            label: "Reviews",
+            label: "Review",
             to: "/reviews",
             icon: "clipboard",
             matchPrefixes: ["/reviews", "/hrms/reviews"],
@@ -236,14 +236,6 @@ const NAVIGATION_CATALOG = [
                 icon: "chart",
                 subtitle: "Revise salary after review.",
                 searchKeywords: ["salary revision", "reassessment"],
-              }),
-              createNavItem({
-                id: "hrms-review-history",
-                label: "Review History",
-                to: "/reviews/history",
-                icon: "clock",
-                subtitle: "Review previous appraisals.",
-                searchKeywords: ["review report", "review records"],
               }),
             ],
           }),

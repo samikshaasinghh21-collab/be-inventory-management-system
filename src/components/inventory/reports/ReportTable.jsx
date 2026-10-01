@@ -82,7 +82,7 @@ const ReportTable = ({
               </tr>
             ) : (
               pagedRows.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50/80">
+                <tr key={row.id} className="hover:bg-[var(--bg-subtle)]">
                   <td className="px-4 py-3 text-slate-700">
                     {formatReportDate(row.date)}
                   </td>
@@ -156,7 +156,7 @@ const ReportTable = ({
               onClick={() => onPageChange(pageNumber)}
               className={`grid h-10 w-10 place-items-center rounded-lg border text-sm font-medium transition ${
                 pageNumber === safePage
-                  ? "border-[var(--border-default)] bg-[var(--primary)] text-white"
+                  ? "border-[var(--border-default)] bg-[var(--primary)] text-[var(--text-on-primary)]"
                   : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
               }`}
             >

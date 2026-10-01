@@ -93,11 +93,12 @@ const AppShell = ({ children }) => {
   useEffect(() => {
     let active = true;
     const syncSettings = () => {
-      setSettings(safeReadSettings());
+      setSettings({ ...safeReadSettings() });
     };
     const handleExpiredSession = () => window.location.assign("/login");
 
     window.addEventListener("settings:changed", syncSettings);
+    window.addEventListener("auth:changed", syncSettings);
     window.addEventListener("auth:expired", handleExpiredSession);
     const initializeShell = async () => {
       try {
@@ -118,13 +119,14 @@ const AppShell = ({ children }) => {
         if (!active || isApiUnavailableError(error)) {
           return;
         }
-        window.location.assign("/login");
+        console.warn("Unable to load the current user:", error?.message || error);
       }
     };
     void initializeShell();
     return () => {
       active = false;
       window.removeEventListener("settings:changed", syncSettings);
+      window.removeEventListener("auth:changed", syncSettings);
       window.removeEventListener("auth:expired", handleExpiredSession);
     };
   }, []);

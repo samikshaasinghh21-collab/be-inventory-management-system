@@ -1,3 +1,4 @@
+import { attendanceStatuses, attendanceTotals } from "../../shared/attendance.js";
 import api from "./api";
 
 const emitHrmsAttendanceChange = () => {
@@ -7,7 +8,7 @@ const emitHrmsAttendanceChange = () => {
 };
 
 const defaultStatuses = Array.from({ length: 31 }, () => "P");
-const validStatuses = new Set(["P", "A", "L", "H"]);
+const validStatuses = new Set(["P", "A", "L", "H", "O"]);
 
 const normalizeStatus = (value) => {
   const status = String(value || "P").trim().toUpperCase();
@@ -41,29 +42,10 @@ const parseStatuses = (value) => {
   return [...defaultStatuses];
 };
 
-const buildCounts = (statuses = []) =>
-  statuses.reduce(
-    (counts, status) => {
-      const key = normalizeStatus(status);
-      return {
-        ...counts,
-        [key]: (counts[key] || 0) + 1,
-      };
-    },
-    { A: 0, H: 0, L: 0, P: 0 }
-  );
-
 export const normalizeHrmsAttendance = (record = {}) => {
-  const statuses = parseStatuses(
-    record.statuses ?? record.DayStatusJson ?? record.dayStatusJson
-  );
-  const calculatedCounts = buildCounts(statuses);
-  const counts = {
-    P: Number(record.counts?.P ?? record.PresentCount ?? calculatedCounts.P ?? 0),
-    A: Number(record.counts?.A ?? record.AbsentCount ?? calculatedCounts.A ?? 0),
-    L: Number(record.counts?.L ?? record.LeaveCount ?? calculatedCounts.L ?? 0),
-    H: Number(record.counts?.H ?? record.HolidayCount ?? calculatedCounts.H ?? 0),
-  };
+  const month = record.month ?? record.AttendanceMonth ?? "";
+  const statuses = attendanceStatuses(parseStatuses(record.statuses ?? record.DayStatusJson ?? record.dayStatusJson), month);
+  const counts = attendanceTotals(statuses);
   const employeeId = record.employeeId ?? record.EmployeeID ?? "";
 
   return {

@@ -1,3 +1,4 @@
+import HrmsReportDetails from "../pages/HrmsReportDetails";
 import { Navigate, Routes, Route } from "react-router-dom";
 import Layout from "../components/layout/Layout";
 import MainLayout from "../layouts/MainLayout";
@@ -32,6 +33,7 @@ import Login from "../pages/Login";
 import CreateAccount from "../pages/CreateAccount";
 import SsoCallback from "../pages/SsoCallback";
 import PasswordReset from "../pages/PasswordReset";
+import AuthEntry from "../components/auth/AuthEntry";
 
 import EditItems from "../components/inventory/EditItems";
 import CreateVendors from "../components/inventory/CreateVendors";
@@ -43,6 +45,7 @@ import Product from "../components/inventory/Product";
 
 import Cart from "../components/inventory/Cart";
 import Boq from "../components/inventory/Boq";
+import PartyDetails from "../components/inventory/PartyDetails";
 import Vendors from "../components/inventory/Vendors";
 import Customers from "../components/inventory/Customers";
 import Locations from "../components/inventory/Locations";
@@ -102,11 +105,11 @@ const HRMS_PAGE_ROUTES = [
 const AppRoutes = () => {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/create-account" element={<CreateAccount />} />
-      <Route path="/forgot-password" element={<PasswordReset requestOnly />} />
-      <Route path="/reset-password" element={<PasswordReset />} />
-      <Route path="/auth/sso/callback" element={<SsoCallback />} />
+      <Route path="/login" element={<AuthEntry><Login /></AuthEntry>} />
+      <Route path="/create-account" element={<AuthEntry><CreateAccount /></AuthEntry>} />
+      <Route path="/forgot-password" element={<AuthEntry><PasswordReset requestOnly /></AuthEntry>} />
+      <Route path="/reset-password" element={<AuthEntry><PasswordReset /></AuthEntry>} />
+      <Route path="/auth/sso/callback" element={<AuthEntry><SsoCallback /></AuthEntry>} />
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
       </Route>
@@ -156,6 +159,8 @@ const AppRoutes = () => {
 
         <Route path="/inventory/create-item" element={<CreateProduct />} />
         <Route path="/inventory/edit/:id" element={<EditItems />} />
+        <Route path="/inventory/vendors/:id" element={<PartyDetails kind="vendors" />} />
+        <Route path="/inventory/customers/:id" element={<PartyDetails kind="customers" />} />
         <Route path="/inventory/vendors" element={<Vendors />} />
         <Route path="/inventory/customers" element={<Customers />} />
         <Route path="/inventory/create-vendors" element={<CreateVendors />} />
@@ -182,6 +187,8 @@ const AppRoutes = () => {
         <Route path="/inventory/reallocate-return" element={<Navigate replace to="/inventory/delivery-challan" />} />
         <Route path="/inventory/reallocation-register" element={<Navigate replace to="/inventory/delivery-challan" />} />
         <Route path="/inventory/reports" element={<ReportsPage />} />
+        <Route path="/hrms/reports/:reportType" element={<HrmsReportDetails />} />
+        <Route path="/reports/:reportType" element={<HrmsReportDetails />} />
         {HRMS_PAGE_ROUTES.map((screen) => (
           <Route
             key={screen.path}

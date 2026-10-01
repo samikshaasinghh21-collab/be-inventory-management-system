@@ -61,21 +61,23 @@ export const normalizeHrmsSalary = (record = {}) => {
   const tdsAmount = toNumber(
     record.tdsAmount ?? record.tds ?? record.TDSAmount
   );
-  const pfAmount = normalizeMonthlyPfAmount(
+  const pfAmount = toOptionalNumber(
     record.pfAmount ??
       record.providentFund ??
       record.PFAmount ??
       record.ProvidentFund,
-    salary
-  );
+  ) ?? calculatePfAmount(salary);
   const esiAmount =
     toOptionalNumber(record.esiAmount ?? record.esi ?? record.ESIAmount) ??
     calculateEsiAmount(salary);
   const monthlySalary = calculateMonthlySalary(salary);
-  const totalDeductions = deduction + pfAmount + esiAmount + professionalTax + tdsAmount;
-  const totalEarnings = monthlySalary + allowance;
+  const lopAmount = toNumber(record.lopAmount ?? record.LOPAmount);
+  const reimbursement = toNumber(record.reimbursement ?? record.Reimbursement);
+  const totalDeductions = lopAmount + deduction + pfAmount + esiAmount + professionalTax + tdsAmount;
+  const totalEarnings = monthlySalary + allowance + reimbursement;
   return {
     ...record,
+    lopAmount, reimbursement,
     id: String(record.id ?? record.Id ?? ""),
     employeeId,
     employeeName:

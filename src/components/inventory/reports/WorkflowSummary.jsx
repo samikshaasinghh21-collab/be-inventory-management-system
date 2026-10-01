@@ -21,17 +21,17 @@ const WorkflowSummary = ({
       </div>
 
       <div className="relative mt-5 space-y-1">
-        <div className="absolute bottom-3 left-[14px] top-3 w-px bg-slate-200" />
+        <div className="absolute bottom-3 left-[14px] top-3 w-px bg-[var(--border-default)]" />
         {stages.map((stage) => (
           <div key={stage.key} className="relative flex gap-3 py-3">
             <div className="relative z-10 pt-1">
               <span
-                className={`block h-7 w-7 rounded-full border-4 border-white shadow ${
-                  stage.isActive ? stage.dotClass : "bg-slate-300"
+                className={`block h-7 w-7 rounded-full border-4 border-[var(--bg-surface)] shadow ${
+                  stage.isActive ? stage.dotClass : "bg-[var(--bg-muted)]"
                 }`}
               />
             </div>
-            <div className="min-w-0 flex-1 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3">
+            <div className="min-w-0 flex-1 rounded-xl border border-slate-100 bg-[var(--bg-subtle)] px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-base font-semibold text-slate-800">
@@ -62,8 +62,8 @@ const WorkflowSummary = ({
                 <span
                   className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
                     stage.isActive
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-slate-200 text-slate-500"
+                      ? "bg-[var(--success-soft)] text-[var(--success)]"
+                      : "bg-[var(--bg-muted)] text-[var(--text-secondary)]"
                   }`}
                 >
                   {stage.latestLabel}

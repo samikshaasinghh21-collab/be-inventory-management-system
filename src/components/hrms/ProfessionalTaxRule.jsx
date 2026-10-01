@@ -1,0 +1,9 @@
+import { useEffect, useState } from 'react';
+import api from '../../services/api';
+
+export default function ProfessionalTaxRule({ employeeId, year, onSaved }) {
+  const [annual,setAnnual]=useState(''), [schedule,setSchedule]=useState(''), [message,setMessage]=useState('');
+  useEffect(() => { let live=true; setMessage(''); api.get(`/hrms/payroll-rules/${encodeURIComponent(employeeId)}/${year}`).then(({data}) => {if(live){setAnnual(data.ptRule?.annualAmount ?? '');setSchedule(data.ptRule?.monthlyAmounts?.join(', ') || '');}}).catch(() => {if(live)setMessage('Unable to load PT configuration.');}); return () => {live=false;}; },[employeeId,year]);
+  const save=async() => {try {const ptRule={annualAmount:Number(annual), ...(schedule.trim() ? {monthlyAmounts:schedule.split(',').map(Number)} : {adjustmentMonth:3})}; await api.put(`/hrms/payroll-rules/${encodeURIComponent(employeeId)}/${year}`,{ptRule}); setMessage('Annual PT rule saved. Regenerate payroll to apply it.'); onSaved(ptRule);} catch(err){setMessage(err.response?.data?.error || 'Could not save PT rule.');}};
+  return <details className="rounded border p-3"><summary>Annual PT configuration — {year}</summary><p className="text-sm my-2">Configure the applicable annual PT amount and January–December deductions. Without a schedule, the amount is split over 12 months with the rounding balance in March. Existing monthly PT remains unchanged until an annual rule is saved.</p><label>Annual PT <input type="number" min="0" value={annual} onChange={(e)=>setAnnual(e.target.value)} /></label><label className="block mt-2">Monthly schedule (12 comma-separated amounts, optional)<input className="w-full border p-2" value={schedule} onChange={(e)=>setSchedule(e.target.value)} /></label><button type="button" disabled={annual === ''} onClick={save}>Save PT rule</button><p role="status">{message}</p></details>;
+}

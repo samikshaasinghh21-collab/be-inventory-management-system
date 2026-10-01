@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import InventoryPageHeader from "./InventoryPageHeader";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -552,6 +553,7 @@ const Customers = () => {
                   <td className="p-3">{customer.contacts?.length || 0}</td>
                   <td className="p-3">
                     <div className="flex gap-2">
+                      <Link className="text-blue-700 text-xs" to={`/inventory/customers/${customer.id}`}>View</Link>
                       <button
                         type="button"
                         onClick={() => openEdit(customer)}

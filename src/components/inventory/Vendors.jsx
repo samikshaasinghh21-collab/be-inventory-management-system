@@ -504,6 +504,7 @@ const Vendors = () => {
                   <td className="p-3">{vendor.contacts?.length || 0}</td>
                   <td className="p-3">
                     <div className="flex gap-2">
+                      <button type="button" className="text-blue-700 text-xs" onClick={() => navigate(`/inventory/vendors/${vendor.id}`)}>View</button>
                       <button
                         type="button"
                         onClick={() => openEdit(vendor)}

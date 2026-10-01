@@ -1,3 +1,9 @@
+import AttendanceRegister from "../components/hrms/AttendanceRegister";
+import EmployeeAttendanceSummary from "../components/hrms/EmployeeAttendanceSummary";
+import ProfessionalTaxRule from "../components/hrms/ProfessionalTaxRule";
+import api from "../services/api";
+import { reportNames } from "./HrmsReportDetails";
+import { calculateLop, monthlyProfessionalTax } from "../../shared/payroll.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import DateInput from "../components/common/DateInput";
@@ -1170,7 +1176,7 @@ const printEmployeeProfile = (employee, company = {}) => {
     ["Nationality", displayValue(employee.nationality)],
     ["Blood Group", displayValue(employee.bloodGroup)],
     ["PAN Number", displayValue(employee.panNumber)],
-    ["Aadhaar Number", displayValue(employee.documentNumber)],
+    ["PAN Number", displayValue(employee.panNumber)],
     ["UAN Number", displayValue(employee.uanNumber)],
     ["ESI Number", displayValue(employee.esiNumber)],
     ["Annual Gross Salary", money(employee.salary)],
@@ -1449,7 +1455,7 @@ const printRelievingLetter = (record, employee) => {
         <article class="letter">
           <section class="header">
             <div>
-              <h1>Bangalore Electronics</h1>
+              <img src="${escapeHtml(new URL(defaultBrandLogoUrl, window.location.origin).href)}" alt="Company logo" style="max-height:70px;max-width:180px" /><h1>Bangalore Electronics</h1>
               <p class="muted">Human Resources Department</p>
             </div>
             <div>
@@ -1604,11 +1610,14 @@ const getSalaryBreakup = (source = {}, grossOverride) => {
     0
   );
   const monthlySalary = calculateMonthlySalary(grossSalary);
-  const totalEarnings = monthlySalary + allowances;
+  const lopAmount = toSalaryNumber(source.lopAmount);
+  const reimbursement = toSalaryNumber(source.reimbursement);
+  const totalEarnings = monthlySalary + allowances + reimbursement;
   const totalDeductions =
-    deduction + pfAmount + esiAmount + tdsAmount + professionalTax;
+    lopAmount + deduction + pfAmount + esiAmount + tdsAmount + professionalTax;
 
   return {
+    lopAmount, reimbursement,
     allowances,
     deduction,
     esiAmount,
@@ -4044,10 +4053,11 @@ const EmployeeProfilePage = () => {
       </Panel>
 
       <Panel className="people-profile-hero"><Avatar initials={employee.avatar || getInitials(employee.name)} src={employee.photo} size="lg" /><div><span className="people-eyebrow">{employee.id}</span><h2>{employee.name}</h2><p>{employee.designation || "Employee"} ? {employee.department || "Department not assigned"}</p><span className="people-profile-meta">{employee.email || "No email added"} ? Joined {formatDate(employee.joined)}</span></div><div className="people-profile-hero-actions"><StatusBadge status={employee.status} /><Button variant="secondary" onClick={() => printEmployeeProfile(employee, settings.company)}><AppIcon name="file" className="h-4 w-4" />Print profile</Button></div></Panel>
-      <Tabs items={["Overview", "Employment", "Salary", "Documents", "Emergency contact", "Reviews"].map((label) => ({ id: label, label }))} value={profileTab} onChange={setProfileTab} />
+      <Tabs items={["Overview", "Employment", "Salary", "Attendance", "Documents", "Emergency contact", "Reviews"].map((label) => ({ id: label, label }))} value={profileTab} onChange={setProfileTab} />
       {profileTab === "Overview" && <div className="people-profile-grid"><Panel><SectionHeader title="Personal details" description="Employee identity and contact information" /><dl className="people-detail-list">{[["Full name", employee.name], ["Email", employee.email], ["Phone", employee.phone], ["Date of birth", formatDate(employee.dateOfBirth)], ["Gender", employee.gender], ["Marital status", employee.maritalStatus], ["Nationality", employee.nationality], ["Blood group", employee.bloodGroup]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl></Panel><Panel><SectionHeader title="Addresses" description="Residential contact details" /><dl className="people-detail-list"><div><dt>Permanent address</dt><dd>{displayValue(employee.permanentAddress)}</dd></div><div><dt>Current address</dt><dd>{displayValue(employee.presentAddress || employee.address)}</dd></div></dl><SectionHeader title="Employment summary" /><dl className="people-detail-list"><div><dt>Reporting manager</dt><dd>{displayValue(employee.manager)}</dd></div><div><dt>Joined</dt><dd>{formatDate(employee.joined)}</dd></div><div><dt>Status</dt><dd><StatusBadge status={employee.status} /></dd></div></dl></Panel></div>}
       {profileTab === "Employment" && <Panel><SectionHeader title="Employment details" description="Role, reporting line, and statutory identifiers" /><dl className="people-detail-list people-detail-columns">{[["Employee ID", employee.id], ["Department", employee.department], ["Job title", employee.designation], ["Reporting manager", employee.manager], ["Joining date", formatDate(employee.joined)], ["PAN number", employee.panNumber], ["Aadhaar number", employee.documentNumber], ["UAN number", employee.uanNumber], ["ESI number", employee.esiNumber]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl></Panel>}
       {profileTab === "Salary" && <Panel><SectionHeader title="Compensation" description="Current salary information from the employee record" /><div className="people-metrics"><MetricCard label="Annual gross salary" value={money(employee.salary)} /><MetricCard label="Monthly gross salary" value={money(getSalaryBreakup(employee).monthlySalary)} /></div><SalaryGrowthChart records={salaryHistory.filter((record) => record.employeeId === employee.id)} currentSalary={employee.salary} /><Link className="people-text-action" to="/reviews/salary-reassessment">Open salary reviews <ArrowUpRight size={14} /></Link></Panel>}
+      {profileTab === "Attendance" && <EmployeeAttendanceSummary employeeId={employee.id} />}
       {profileTab === "Documents" && <EmployeeDocumentsViewer documents={employee.documents} onError={setError} />}
       {profileTab === "Emergency contact" && <Panel><SectionHeader title="Emergency contact" description="Who to contact when urgent support is needed" /><dl className="people-detail-list">{[["Contact name", employee.emergencyContactName], ["Relationship", employee.relation || employee.emergencyContactRelation], ["Phone", employee.emergencyContactNumber], ["Address", employee.emergencyContactAddress]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl></Panel>}
       {profileTab === "Reviews" && <Panel><SectionHeader title="Salary review history" description="Compensation reviews associated with this employee" />{salaryHistory.filter((record) => record.employeeId === employee.id).length ? <div className="people-recent-list">{salaryHistory.filter((record) => record.employeeId === employee.id).map((record) => <div key={record.id}><span><strong>{formatDate(record.reviewDate || record.effectiveDate)}</strong><small>Revised salary: {money(record.revisedSalary)}</small></span><StatusBadge status={record.status || "Draft"} /></div>)}</div> : <EmptyState title="No salary reviews yet" description="Saved compensation reviews for this employee will appear here." />}<Link className="people-text-action" to="/reviews">Open performance reviews <ArrowUpRight size={14} /></Link></Panel>}
@@ -5452,121 +5462,7 @@ const SalaryReassessmentPage = () => {
 
       {selectedEmployee && (
         <>
-          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-            <Panel>
-              <h2 className="text-sm font-bold">Performance Review</h2>
-              <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm md:grid-cols-2">
-                <div className="flex justify-between gap-4 md:block">
-                  <span className="text-slate-500">Employee</span>
-                  <strong className="md:block">{selectedEmployee.name}</strong>
-                </div>
-                <div className="flex justify-between gap-4 md:block">
-                  <span className="text-slate-500">Employee ID</span>
-                  <strong className="md:block">{selectedEmployee.id}</strong>
-                </div>
-                <div className="flex justify-between gap-4 md:block">
-                  <span className="text-slate-500">Department</span>
-                  <strong className="md:block">
-                    {displayValue(selectedEmployee.department)}
-                  </strong>
-                </div>
-                <div className="flex justify-between gap-4 md:block">
-                  <span className="text-slate-500">Current Role</span>
-                  <strong className="md:block">
-                    {displayValue(selectedEmployee.designation)}
-                  </strong>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-3">
-                <Field label="Review Start Date">
-                  <DateInput
-                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
-                    value={form.reviewStartDate}
-                    onChange={(value) => updateReviewPeriodDate("reviewStartDate", value)}
-                  />
-                </Field>
-                <Field label="Review End Date">
-                  <DateInput
-                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
-                    value={form.reviewEndDate}
-                    onChange={(value) => updateReviewPeriodDate("reviewEndDate", value)}
-                  />
-                </Field>
-                <Field label="Reviewer Name">
-                  <Input
-                    value={form.reviewerName}
-                    onChange={(event) => updateForm("reviewerName", event.target.value)}
-                    placeholder="Enter reviewer"
-                  />
-                </Field>
-                <Field label="Review Date">
-                  <DateInput
-                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
-                    value={form.reviewDate}
-                    onChange={(value) => updateForm("reviewDate", value)}
-                  />
-                </Field>
-              </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <Field label="Review Period">
-                  <Input value={form.reviewPeriod} disabled />
-                </Field>
-                <div className="grid gap-3 rounded-lg border border-slate-200 p-4 text-sm">
-                  <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Overall Score</span>
-                    <strong>{reviewScore}%</strong>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Grade</span>
-                    <strong>{grade}</strong>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Last Increment</span>
-                    <strong>
-                      {lastIncrement?.effectiveDate
-                        ? formatDate(lastIncrement.effectiveDate)
-                        : "Not provided"}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {[
-                  ["KPI Score", "kpiScore"],
-                  ["Attendance Score", "attendanceScore"],
-                  ["Behavior Score", "behaviorScore"],
-                  ["Productivity Score", "productivityScore"],
-                ].map(([label, key]) => (
-                  <ScoreInput
-                    key={key}
-                    label={label}
-                    value={form[key]}
-                    onChange={(value) => updateForm(key, value)}
-                  />
-                ))}
-              </div>
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <span className="text-xs font-bold text-slate-700">Overall Rating</span>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    type="button"
-                    onClick={() => updateForm("overallRating", star)}
-                    className={[
-                      "grid h-9 w-9 place-items-center rounded-md border text-base font-semibold",
-                      star <= form.overallRating
-                        ? "border-slate-500 bg-slate-100 text-slate-700"
-                        : "border-slate-200 text-slate-300",
-                    ].join(" ")}
-                    aria-label={`${star} star rating`}
-                  >
-                    {star}
-                  </button>
-                ))}
-                <StatusBadge status={`Grade ${grade}`} />
-              </div>
-            </Panel>
-
+          <section className="grid gap-4">
             <Panel>
               <h2 className="text-sm font-bold">Salary Reassessment</h2>
               <div className="mt-4 grid gap-4">
@@ -5630,244 +5526,6 @@ const SalaryReassessmentPage = () => {
             </Panel>
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-2">
-            <Panel>
-              <h2 className="text-sm font-bold">KPI / Performance Metrics</h2>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {metricRows.map((metric) => (
-                  <ScoreInput
-                    key={metric.key}
-                    label={metric.label}
-                    value={metric.value}
-                    onChange={(value) => updateMetric(metric.key, value)}
-                  />
-                ))}
-              </div>
-            </Panel>
-
-            <Panel>
-              <h2 className="text-sm font-bold">Promotion Management</h2>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <Field label="Current Role">
-                  <Input value={selectedEmployee.designation || ""} disabled />
-                </Field>
-                <Field label="Proposed Role">
-                  <Input
-                    value={form.proposedRole}
-                    onChange={(event) => updateForm("proposedRole", event.target.value)}
-                    placeholder="Enter proposed role"
-                  />
-                </Field>
-                <Field label="Promotion Effective Date">
-                  <DateInput
-                    className="min-h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
-                    value={form.promotionEffectiveDate}
-                    onChange={(value) =>
-                      updateForm("promotionEffectiveDate", value)
-                    }
-                  />
-                </Field>
-                <Field label="Department Transfer">
-                  <Input
-                    value={form.departmentTransfer}
-                    onChange={(event) => updateForm("departmentTransfer", event.target.value)}
-                    placeholder="Enter department"
-                  />
-                </Field>
-              </div>
-
-              <h2 className="mt-6 text-sm font-bold">Review Comments</h2>
-              <div className="mt-4 grid gap-4">
-                {[
-                  ["Employee Strengths", "strengths"],
-                  ["Areas of Improvement", "improvement"],
-                  ["HR Comments", "hrComments"],
-                  ["Manager Comments", "managerComments"],
-                  ["Employee Self Review", "employeeSelfReview"],
-                ].map(([label, key]) => (
-                  <Field key={key} label={label}>
-                    <Input
-                      as="textarea"
-                      rows={2}
-                      value={form[key]}
-                      onChange={(event) => updateForm(key, event.target.value)}
-                      placeholder={label}
-                    />
-                  </Field>
-                ))}
-              </div>
-            </Panel>
-          </section>
-
-          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_430px]">
-            <Panel>
-              <h2 className="text-sm font-bold">Approval Workflow</h2>
-              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                {[
-                  ["Manager Review", "managerStatus"],
-                  ["HR Approval", "hrStatus"],
-                  ["Director Approval", "directorStatus"],
-                  ["Salary Activated", "salaryStatus"],
-                ].map(([label, key], index) => (
-                  <div key={key} className="rounded-lg border border-slate-200 p-3">
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <strong className="text-sm text-slate-800">{label}</strong>
-                      <span className="text-xs font-semibold text-slate-400">
-                        Step {index + 1}
-                      </span>
-                    </div>
-                    <Input
-                      as="select"
-                      value={form[key]}
-                      onChange={(event) => updateForm(key, event.target.value)}
-                    >
-                      {approvalStatuses.map((status) => (
-                        <option key={status}>{status}</option>
-                      ))}
-                    </Input>
-                  </div>
-                ))}
-              </div>
-
-              <h2 className="mt-6 text-sm font-bold">Review History Timeline</h2>
-              <div className="mt-4 grid gap-3">
-                {employeeHistory.length ? (
-                  employeeHistory.slice(0, 5).map((record) => (
-                    <div key={record.id} className="grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-[120px_1fr_auto]">
-                      <strong>
-                        {formatDate(record.effectiveDate || record.reviewDate)}
-                      </strong>
-                      <span className="text-sm text-slate-600">
-                        {money(record.currentSalary)} to {money(record.revisedSalary)} | Grade {record.grade}
-                      </span>
-                      <StatusBadge status={record.salaryStatus} />
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-500">
-                    No salary reassessment history saved for this employee yet.
-                  </p>
-                )}
-              </div>
-            </Panel>
-
-            <Panel>
-              <h2 className="text-sm font-bold">Assessment Summary</h2>
-              <div className="mt-4 grid gap-3 text-sm">
-                {[
-                  ["Suggested Increment", `${aiIncrement}%`],
-                  ["Promotion Eligibility", promotionReadiness],
-                  ["Resignation Risk", resignationRisk],
-                  ["Metric Average", `${metricAverage}%`],
-                ].map(([label, value]) => (
-                  <div
-                    key={label}
-                    className="flex justify-between gap-4 rounded-md border border-slate-200 px-3 py-2"
-                  >
-                    <span className="text-slate-500">{label}</span>
-                    <strong>{value}</strong>
-                  </div>
-                ))}
-              </div>
-              <Button
-                className="mt-4 w-full"
-                variant="secondary"
-                onClick={() => updateForm("incrementPercent", aiIncrement)}
-              >
-                Apply Suggested Increment
-              </Button>
-            </Panel>
-          </section>
-
-          <section className="grid gap-4 xl:grid-cols-3">
-            <Panel>
-              <h2 className="text-sm font-bold">Compensation Breakdown</h2>
-              <div className="mt-4 grid gap-3 text-sm">
-                {compensationRows.map(([label, value]) => (
-                  <div
-                    key={label}
-                    className={[
-                      "flex justify-between gap-4 border-b border-slate-100 pb-2",
-                      label === "Net Salary" ? "font-bold text-blue-800" : "",
-                    ].join(" ")}
-                  >
-                    <span className={label === "Net Salary" ? "" : "text-slate-600"}>{label}</span>
-                    <strong>{money(value)}</strong>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-
-            <Panel>
-              <h2 className="text-sm font-bold">Documents & Notifications</h2>
-              <div className="mt-4 grid gap-4">
-                <Input type="file" multiple onChange={handleDocumentUpload} />
-                <div className="grid gap-2 text-sm">
-                  {documents.length ? (
-                    documents.map((document) => (
-                      <div key={`${document.name}-${document.addedAt}`} className="flex justify-between gap-3 rounded-md bg-slate-50 px-3 py-2">
-                        <span>{document.name}</span>
-                        <span className="text-slate-500">{Math.ceil(document.size / 1024)} KB</span>
-                      </div>
-                    ))
-                  ) : (
-                    <span className="text-slate-500">No documents attached.</span>
-                  )}
-                </div>
-                {[ 
-                  ["Increment approval email", "notifyEmail"],
-                  ["Promotion notice", "notifyPromotion"],
-                  ["HR alerts", "notifyHr"],
-                  ["Reminder for pending reviews", "reminder"],
-                ].map(([label, key]) => (
-                  <label key={key} className="flex items-center gap-3 text-sm font-semibold">
-                    <input
-                      type="checkbox"
-                      checked={form[key]}
-                      onChange={(event) => updateForm(key, event.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-slate-700"
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </Panel>
-
-            <Panel>
-              <h2 className="text-sm font-bold">Employee Acknowledgement</h2>
-              <div className="mt-4 grid gap-4">
-                <Field label="Acknowledgement">
-                  <Input
-                    as="select"
-                    value={form.acknowledgement}
-                    onChange={(event) => updateForm("acknowledgement", event.target.value)}
-                  >
-                    <option>Pending</option>
-                    <option>Accepted</option>
-                    <option>Accepted With Comments</option>
-                    <option>Rejected</option>
-                  </Input>
-                </Field>
-                <Field label="Employee Comments">
-                  <Input
-                    as="textarea"
-                    rows={3}
-                    value={form.employeeComment}
-                    onChange={(event) => updateForm("employeeComment", event.target.value)}
-                    placeholder="Employee acknowledgement comments"
-                  />
-                </Field>
-                <Field label="Digital Signature">
-                  <Input
-                    value={form.digitalSignature}
-                    onChange={(event) => updateForm("digitalSignature", event.target.value)}
-                    placeholder="Type employee name"
-                  />
-                </Field>
-              </div>
-            </Panel>
-          </section>
-
           <Panel>
             <div className="flex flex-wrap justify-end gap-2">
               <Button
@@ -5900,7 +5558,7 @@ const SalaryReassessmentPage = () => {
       <Panel>
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h2 className="text-base font-bold">Salary Reassessment Register</h2>
+            <h2 className="text-base font-bold">Review Register</h2>
             <p className="mt-1 text-sm text-slate-500">
               Saved drafts, approved reviews, and activated salary revisions from HRMS database.
             </p>
@@ -6144,517 +5802,17 @@ const SalaryReassessmentPage = () => {
 };
 
 const AttendancePage = () => {
-  const [employees] = useHrmsEmployees();
-  const [records, setRecords, attendanceState] = useHrmsAttendance();
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState(
-    employees[0]?.id || ""
-  );
-  const [month, setMonth] = useState(getCurrentAttendanceMonth());
-  const [isManualMonthSelection, setIsManualMonthSelection] = useState(false);
-  const [statuses, setStatuses] = useState(DEFAULT_ATTENDANCE_STATUSES);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [activeAttendanceId, setActiveAttendanceId] = useState("");
-  const colorMap = {
-    P: "bg-emerald-100 text-emerald-700",
-    A: "bg-rose-100 text-rose-700",
-    L: "bg-amber-100 text-amber-700",
-    H: "bg-blue-100 text-blue-700",
-  };
-  const currentAttendanceMonth = getCurrentAttendanceMonth();
-  const selectedEmployee =
-    employees.find((employee) => employee.id === selectedEmployeeId) || null;
-  const latestAttendanceRecord = useMemo(() => {
-    return [...records]
-      .filter((record) => normalizeAttendanceMonth(record.month))
-      .sort((first, second) => {
-        const monthDiff =
-          getAttendanceMonthIndex(second.month) -
-          getAttendanceMonthIndex(first.month);
-        if (monthDiff) return monthDiff;
-        return String(second.savedAt || "").localeCompare(
-          String(first.savedAt || "")
-        );
-      })[0] || null;
-  }, [records]);
-  const latestAttendanceMonth = normalizeAttendanceMonth(
-    latestAttendanceRecord?.month
-  );
-  const selectedMonth = normalizeAttendanceMonth(month);
-  const attendanceDays = useMemo(
-    () => getAttendanceDays(selectedMonth || month),
-    [month, selectedMonth]
-  );
-  const normalizedStatuses = useMemo(
-    () => normalizeAttendanceStatusesForMonth(statuses, selectedMonth || month),
-    [month, selectedMonth, statuses]
-  );
-  const isCurrentMonthSelected =
-    selectedMonth &&
-    areAttendanceMonthsEqual(selectedMonth, currentAttendanceMonth);
-  const isLatestMonthSelected =
-    latestAttendanceMonth &&
-    areAttendanceMonthsEqual(selectedMonth, latestAttendanceMonth);
-  const attendanceRows = useMemo(
-    () =>
-      [...records].sort((first, second) => {
-        const monthDiff =
-          getAttendanceMonthIndex(second.month) -
-          getAttendanceMonthIndex(first.month);
-        if (monthDiff) return monthDiff;
-        return String(second.savedAt || "").localeCompare(
-          String(first.savedAt || "")
-        );
-      }),
-    [records]
-  );
-  const activeAttendanceRecord =
-    attendanceRows.find((record) => record.id === activeAttendanceId) || null;
-  const activeAttendanceDays = useMemo(
-    () =>
-      activeAttendanceRecord
-        ? getAttendanceDays(activeAttendanceRecord.month)
-        : [],
-    [activeAttendanceRecord]
-  );
-
-  useEffect(() => {
-    if (!selectedEmployeeId && employees[0]?.id) {
-      setSelectedEmployeeId(employees[0].id);
-    }
-  }, [employees, selectedEmployeeId]);
-
-  useEffect(() => {
-    if (isManualMonthSelection) return;
-    const nextMonth = currentAttendanceMonth;
-    if (nextMonth && !areAttendanceMonthsEqual(month, nextMonth)) {
-      setMonth(nextMonth);
-    }
-  }, [currentAttendanceMonth, isManualMonthSelection, month]);
-
-  const findAttendanceRecord = useCallback(
-    (employeeId, attendanceMonth) =>
-      [...records]
-        .filter(
-          (record) =>
-            record.employeeId === employeeId &&
-            areAttendanceMonthsEqual(record.month, attendanceMonth)
-        )
-        .sort((first, second) =>
-          String(second.savedAt || "").localeCompare(String(first.savedAt || ""))
-        )[0] || null,
-    [records]
-  );
-
-  const loadAttendance = useCallback(
-    ({ silent = false } = {}) => {
-      if (!selectedEmployee) {
-        if (!silent) {
-          setError("Add an employee before viewing attendance.");
-        }
-        return;
-      }
-
-      const saved = findAttendanceRecord(selectedEmployeeId, month);
-      setStatuses(
-        normalizeAttendanceStatusesForMonth(
-          saved?.statuses || DEFAULT_ATTENDANCE_STATUSES,
-          month
-        )
-      );
-      setActiveAttendanceId(saved?.id || "");
-      if (!silent) {
-        setMessage(
-          saved
-            ? `Loaded ${normalizeAttendanceMonth(month)} attendance from HRMS database for ${selectedEmployee.name}.`
-            : `No saved attendance found for ${selectedEmployee.name} in ${normalizeAttendanceMonth(
-                month
-              )}. Showing default grid.`
-        );
-      }
-      setError("");
-    },
-    [findAttendanceRecord, month, selectedEmployee, selectedEmployeeId]
-  );
-
-  useEffect(() => {
-    if (!selectedEmployeeId || !month) return;
-    loadAttendance({ silent: true });
-  }, [loadAttendance, month, selectedEmployeeId]);
-
-  useEffect(() => {
-    if (!month) return;
-    setStatuses((current) =>
-      normalizeAttendanceStatusesForMonth(current, selectedMonth || month)
-    );
-  }, [month, selectedMonth]);
-
-  useEffect(() => {
-    if (!latestAttendanceRecord?.employeeId || selectedEmployeeId) return;
-    setSelectedEmployeeId(latestAttendanceRecord.employeeId);
-  }, [latestAttendanceRecord?.employeeId, selectedEmployeeId]);
-
-  const loadRegisterRecord = (record) => {
-    setSelectedEmployeeId(record.employeeId);
-    setMonth(normalizeAttendanceMonth(record.month));
-    setIsManualMonthSelection(true);
-    setStatuses(
-      normalizeAttendanceStatusesForMonth(
-        record.statuses || DEFAULT_ATTENDANCE_STATUSES,
-        record.month
-      )
-    );
-    setActiveAttendanceId(record.id);
-    setError("");
-    setMessage(
-      `Loaded ${normalizeAttendanceMonth(record.month)} attendance from HRMS database for ${record.employeeName}.`
-    );
-  };
-  const saveAttendance = async () => {
-    if (!selectedEmployee) {
-      setError("Add an employee before saving attendance.");
-      return;
-    }
-
-    const nextStatuses = normalizeAttendanceStatusesForMonth(
-      statuses,
-      selectedMonth || month
-    );
-    const counts = nextStatuses.reduce(
-      (summary, status) => ({
-        ...summary,
-        [status]: (summary[status] || 0) + 1,
-      }),
-      {}
-    );
-    const record = {
-      employeeId: selectedEmployeeId,
-      employeeName: selectedEmployee.name,
-      month: selectedMonth || month,
-      statuses: nextStatuses,
-      counts,
-    };
-
-    try {
-      setSaving(true);
-      setError("");
-      const savedRecord = await saveHrmsAttendance(record);
-      setRecords((current) => [
-        savedRecord,
-        ...current.filter(
-          (item) =>
-            !(
-              item.employeeId === savedRecord.employeeId &&
-              areAttendanceMonthsEqual(item.month, savedRecord.month)
-            )
-        ),
-      ]);
-      setActiveAttendanceId(savedRecord.id);
-      setMessage(`Attendance saved to HRMS database for ${savedRecord.employeeName}.`);
-    } catch (saveError) {
-      setError(
-        getHrmsAttendanceErrorMessage(
-          saveError,
-          "Could not save attendance to the HRMS database."
-        )
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="grid gap-4">
-      <Panel>
-        <div className="mb-4 grid gap-2">
-          <Notice>{message}</Notice>
-          <Notice>
-            {selectedMonth
-              ? isCurrentMonthSelected
-                ? `Current attendance month selected: ${selectedMonth}.`
-                : latestAttendanceMonth
-                  ? `Manual month selected: ${selectedMonth}. Latest saved attendance month is ${latestAttendanceMonth}.`
-                  : `Manual month selected: ${selectedMonth}.`
-              : "Select a month to view or save attendance."}
-          </Notice>
-          <Notice tone="warning">{error || attendanceState.error}</Notice>
-          <Notice>
-            {attendanceState.loading && !records.length
-              ? "Loading attendance from HRMS database..."
-              : ""}
-          </Notice>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-          <Field label="Employee">
-            <Input
-              as="select"
-              value={selectedEmployeeId}
-              onChange={(event) => {
-                setSelectedEmployeeId(event.target.value);
-                setActiveAttendanceId("");
-                setMessage("");
-                setError("");
-              }}
-            >
-              <option value="">Select Employee</option>
-              {employees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {`${employee.name} (${employee.id})`}
-                </option>
-              ))}
-            </Input>
-          </Field>
-          <Field label="Month">
-            <Input
-              type="month"
-              value={toAttendanceMonthInputValue(month)}
-              onChange={(event) => {
-                setMonth(normalizeAttendanceMonth(event.target.value));
-                setIsManualMonthSelection(true);
-                setActiveAttendanceId("");
-                setMessage("");
-                setError("");
-              }}
-            />
-          </Field>
-          <Button className="self-end" onClick={loadAttendance}>
-            View
-          </Button>
-        </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-bold">
-            Attendance Overview - {selectedMonth || "Select Month"}
-          </h2>
-          {isCurrentMonthSelected && (
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-              Current
-            </span>
-          )}
-          {!isCurrentMonthSelected && isLatestMonthSelected && (
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-              Latest Saved
-            </span>
-          )}
-        </div>
-
-        <div className="mt-6 overflow-x-auto">
-          <div className="min-w-[1100px]">
-            <div
-              className="grid text-center text-xs"
-              style={{
-                gridTemplateColumns: `72px repeat(${
-                  attendanceDays.length || normalizedStatuses.length
-                }, minmax(32px, 1fr))`,
-              }}
-            >
-              <div className="border border-slate-200 bg-slate-50 py-2 font-bold">Date</div>
-              {attendanceDays.map((day) => (
-                <div
-                  key={day.iso}
-                  className={[
-                    "border-y border-r border-slate-200 py-2 font-bold",
-                    day.isWeekend ? "bg-blue-50 text-blue-700" : "bg-slate-50",
-                  ].join(" ")}
-                >
-                  {day.day}
-                </div>
-              ))}
-              <div className="border-x border-b border-slate-200 bg-slate-50 py-2 font-bold">Day</div>
-              {attendanceDays.map((day) => (
-                <div
-                  key={`${day.iso}-weekday`}
-                  className={[
-                    "border-b border-r border-slate-200 py-2 font-bold",
-                    day.isWeekend ? "bg-blue-50 text-blue-700" : "bg-white",
-                  ].join(" ")}
-                >
-                  {day.weekday}
-                </div>
-              ))}
-              <div className="border-x border-b border-slate-200 py-2 font-bold">Status</div>
-              {normalizedStatuses.map((status, index) => (
-                <button
-                  key={`${status}-${index}`}
-                  type="button"
-                  onClick={() =>
-                    setStatuses((current) =>
-                      current.map((item, itemIndex) =>
-                        itemIndex === index ? cycleAttendanceStatus(item) : item
-                      )
-                    )
-                  }
-                  className={`border-b border-r border-slate-200 py-2 font-bold ${colorMap[status]}`}
-                >
-                  {status}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-5 flex flex-wrap gap-4 text-xs font-semibold text-slate-600">
-          {[
-            ["P", "Present", colorMap.P],
-            ["A", "Absent", colorMap.A],
-            ["L", "Leave", colorMap.L],
-            ["H", "Holiday", colorMap.H],
-          ].map(([code, label, classes]) => (
-            <span key={code} className="inline-flex items-center gap-2">
-              <span className={`grid h-5 w-5 place-items-center rounded ${classes}`}>{code}</span>
-              {label}
-            </span>
-          ))}
-        </div>
-
-        <div className="mt-6 flex justify-end gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => {
-              loadAttendance({ silent: true });
-              setMessage("");
-              setError("");
-            }}
-          >
-            Cancel
-          </Button>
-          <Button onClick={saveAttendance} disabled={saving}>
-            {saving ? "Saving..." : "Save Attendance"}
-          </Button>
-        </div>
-      </Panel>
-
-      <Panel>
-        <div>
-          <h2 className="text-base font-bold">Attendance Register</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Saved monthly attendance details from HRMS database.
-          </p>
-        </div>
-
-        <div className="mt-5 overflow-x-auto">
-          <table className="min-w-[900px] w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs text-slate-500">
-              <tr>
-                {["Saved Date", "Employee", "Month", "Present", "Absent", "Leave", "Holiday", "Action"].map(
-                  (heading) => (
-                    <th key={heading} className="px-3 py-3 font-bold">
-                      {heading}
-                    </th>
-                  )
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {attendanceRows.map((record) => (
-                <tr
-                  key={record.id}
-                  className={[
-                    "hover:bg-slate-50",
-                    activeAttendanceId === record.id ? "bg-blue-50/50" : "",
-                  ].join(" ")}
-                >
-                  <td className="px-3 py-3">
-                    {record.savedAt
-                      ? formatDateTime(record.savedAt)
-                      : "Not provided"}
-                  </td>
-                  <td className="px-3 py-3">
-                    <strong>{record.employeeName}</strong>
-                    <p className="text-xs text-slate-500">{record.employeeId}</p>
-                  </td>
-                  <td className="px-3 py-3">
-                    {normalizeAttendanceMonth(record.month)}
-                    {areAttendanceMonthsEqual(record.month, latestAttendanceMonth) && (
-                      <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
-                        Latest
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-3">{record.counts?.P || 0}</td>
-                  <td className="px-3 py-3">{record.counts?.A || 0}</td>
-                  <td className="px-3 py-3">{record.counts?.L || 0}</td>
-                  <td className="px-3 py-3">{record.counts?.H || 0}</td>
-                  <td className="px-3 py-3">
-                    <Button
-                      className="min-h-8 px-2 text-xs"
-                      variant="secondary"
-                      onClick={() => loadRegisterRecord(record)}
-                    >
-                      View
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {!attendanceRows.length && (
-                <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
-                    No registered attendance details found. Save attendance to create an entry.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
-      {activeAttendanceRecord && (
-        <RegisterDocumentView
-          title="MONTHLY ATTENDANCE"
-          subtitle={`${activeAttendanceRecord.employeeName} | ${normalizeAttendanceMonth(activeAttendanceRecord.month)}`}
-          onClose={() => setActiveAttendanceId("")}
-          leftRows={[
-            ["Employee", activeAttendanceRecord.employeeName],
-            ["Employee ID", activeAttendanceRecord.employeeId],
-            ["Month", normalizeAttendanceMonth(activeAttendanceRecord.month)],
-            [
-              "Saved Date",
-              activeAttendanceRecord.savedAt
-                ? formatDateTime(activeAttendanceRecord.savedAt)
-                : "Not provided",
-            ],
-          ]}
-          rightRows={[
-            ["Present", activeAttendanceRecord.counts?.P || 0],
-            ["Absent", activeAttendanceRecord.counts?.A || 0],
-            ["Leave", activeAttendanceRecord.counts?.L || 0],
-            ["Holiday", activeAttendanceRecord.counts?.H || 0],
-          ]}
-          tableColumns={["Date", "Status", "Description"]}
-          tableRows={normalizeAttendanceStatusesForMonth(
-            activeAttendanceRecord.statuses || [],
-            activeAttendanceRecord.month
-          ).map((status, index) => {
-            const day = activeAttendanceDays[index];
-            return {
-              id: `${activeAttendanceRecord.id}-${index}`,
-              values: [
-                day ? `${day.day} ${day.weekday}` : String(index + 1),
-                status,
-                {
-                  P: "Present",
-                  A: "Absent",
-                  L: "Leave",
-                  H: "Holiday",
-                }[status] || "Present",
-              ],
-            };
-          })}
-          bottomLeftTitle="Attendance Summary"
-          bottomLeftValue={`Present: ${activeAttendanceRecord.counts?.P || 0}\nAbsent: ${
-            activeAttendanceRecord.counts?.A || 0
-          }\nLeave: ${activeAttendanceRecord.counts?.L || 0}\nHoliday: ${
-            activeAttendanceRecord.counts?.H || 0
-          }`}
-        />
-      )}
-    </div>
-  );
+  const [employees, , employeeState] = useHrmsEmployees();
+  const [records, setRecords, state] = useHrmsAttendance();
+  return <AttendanceRegister employees={employees} records={records} state={state} employeeState={employeeState} onSaved={record => setRecords(current => [record, ...current.filter(item => !(item.employeeId === record.employeeId && areAttendanceMonthsEqual(item.month, record.month)))])} />;
 };
 
 const PayrollPage = () => {
-  const [employees] = useHrmsEmployees();
+  const settings = useSettings();
+  const companyAddress = [settings.company?.address, settings.company?.city, settings.company?.state, settings.company?.pincode].filter(Boolean).join(", ");
+  const [allEmployees] = useHrmsEmployees();
+  const employees = allEmployees.filter((employee) => employee.status === "Active");
+  const [attendance] = useHrmsAttendance();
   const [payrollBatches, setPayrollBatches, payrollState] = useHrmsSalaries();
   const [generated, setGenerated] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -6664,6 +5822,13 @@ const PayrollPage = () => {
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [payrollEdits, setPayrollEdits] = useState({});
+  const [ptRules,setPtRules] = useState({});
+  useEffect(() => {
+    let live=true;
+    const year=String(getAttendanceMonthDate(month)?.getFullYear() || new Date().getFullYear());
+    Promise.all(allEmployees.map(async (employee) => [employee.id, (await api.get(`/hrms/payroll-rules/${encodeURIComponent(employee.id)}/${year}`)).data.ptRule])).then((entries) => {if(live)setPtRules(Object.fromEntries(entries));}).catch(() => {if(live)setMessage("Could not load annual PT rules. Check the connection before generating payroll.");});
+    return () => {live=false;};
+  },[allEmployees,month]);
   const visibleEmployees =
     department === "All"
       ? employees
@@ -6688,21 +5853,24 @@ const PayrollPage = () => {
       edit.esiAmount,
       employeeBreakup.esiAmount
     );
-    const rowProfessionalTax = toSalaryNumber(
-      edit.professionalTax,
-      employeeBreakup.professionalTax
-    );
+    const rowProfessionalTax = monthlyProfessionalTax(ptRules[employee.id], month, toSalaryNumber(edit.professionalTax, employeeBreakup.professionalTax));
     const rowTdsAmount = toSalaryNumber(
       edit.tdsAmount,
       employeeBreakup.tdsAmount
     );
+    const attendanceRow = attendance.find((record) => record.employeeId === employee.id && areAttendanceMonthsEqual(record.month, month));
+    const workingDays = toSalaryNumber(edit.workingDays, attendanceRow ? getAttendanceDays(month).length - (attendanceRow.counts.O || 0) : 0);
+    const unpaidDays = toSalaryNumber(edit.unpaidDays, attendanceRow ? attendanceRow.counts.A + attendanceRow.counts.H / 2 : 0);
+    const lopAmount = unpaidDays <= workingDays ? calculateLop(calculateMonthlySalary(salary), workingDays, unpaidDays) : 0;
+    const reimbursement = toSalaryNumber(edit.reimbursement);
     const totalDeductions =
-      rowDeduction + rowPfAmount + rowEsiAmount + rowProfessionalTax + rowTdsAmount;
+      lopAmount + rowDeduction + rowPfAmount + rowEsiAmount + rowProfessionalTax + rowTdsAmount;
     const monthlySalary = calculateMonthlySalary(salary);
-    const totalEarnings = monthlySalary + rowAllowances;
+    const totalEarnings = monthlySalary + rowAllowances + reimbursement;
 
     return {
       ...employee,
+      workingDays, unpaidDays, lopAmount, reimbursement,
       salary,
       basicSalary: salary,
       grossSalary: salary,
@@ -6771,6 +5939,7 @@ const PayrollPage = () => {
     setMessage("");
   };
   const savePayroll = async () => {
+    if (rows.some((row) => row.unpaidDays < 0 || row.workingDays < 0 || row.unpaidDays > row.workingDays)) { setMessage("Unpaid days must be between zero and working days."); return; }
     if (!rows.length) {
       setMessage("Add employees before saving payroll.");
       return;
@@ -6916,6 +6085,8 @@ const PayrollPage = () => {
   return (
     <div className="grid gap-4">
       <Panel>
+        <p className="font-bold">{resolveBrandName(settings.company?.name || "")}</p>
+        <p className="mb-4 whitespace-pre-line text-sm text-slate-600">{companyAddress}</p>
         <div className="mb-4">
           <Notice tone={payrollNoticeTone}>{payrollNotice}</Notice>
         </div>
@@ -6981,6 +6152,7 @@ const PayrollPage = () => {
                 ))}
               </Input>
             </Field>
+            <ProfessionalTaxRule employeeId={selectedPayrollRow.id} year={getAttendanceMonthDate(month)?.getFullYear()} onSaved={(rule)=>setPtRules((current)=>({...current,[selectedPayrollRow.id]:rule}))} />
             <Field label="Annual Gross Salary">
               <Input
                 type="number"
@@ -6992,6 +6164,45 @@ const PayrollPage = () => {
             <Field label="Monthly Gross Salary">
               <Input value={money(selectedPayrollRow.monthlySalary)} disabled />
             </Field>
+
+
+
+            {selectedPayrollRow.unpaidDays > selectedPayrollRow.workingDays && <p role="alert">Unpaid days cannot exceed working days.</p>}
+
+
+
+
+
+
+
+            <Field label="LOP"><Input value={money(selectedPayrollRow.lopAmount)} disabled /></Field>
+            <Field label="Applicable working days"><Input type="number" min="0" max="31" step="0.5" value={selectedPayrollRow.workingDays} onChange={(e) => updatePayrollEdit("workingDays", e.target.value)} /></Field>
+            <Field label="Unpaid days"><Input type="number" min="0" max={selectedPayrollRow.workingDays} step="0.5" value={selectedPayrollRow.unpaidDays} onChange={(e) => updatePayrollEdit("unpaidDays", e.target.value)} /></Field>
+            <Field label="PT">
+              <Input
+                type="number"
+                min="0"
+                value={selectedPayrollRow.professionalTax}
+                onChange={(event) => updatePayrollEdit("professionalTax", event.target.value)}
+              />
+            </Field>
+            <Field label="Monthly ESI">
+              <Input
+                type="number"
+                min="0"
+                value={selectedPayrollRow.esiAmount}
+                onChange={(event) => updatePayrollEdit("esiAmount", event.target.value)}
+              />
+            </Field>
+            <Field label="TDS">
+              <Input
+                type="number"
+                min="0"
+                value={selectedPayrollRow.tdsAmount}
+                onChange={(event) => updatePayrollEdit("tdsAmount", event.target.value)}
+              />
+            </Field>
+            <Field label="Reimbursement"><Input type="number" min="0" value={selectedPayrollRow.reimbursement} onChange={(e) => updatePayrollEdit("reimbursement", e.target.value)} /></Field>
             <Field label="Allowances">
               <Input
                 type="number"
@@ -7016,40 +6227,6 @@ const PayrollPage = () => {
                 onChange={(event) => updatePayrollEdit("pfAmount", event.target.value)}
               />
             </Field>
-            <Field label="Monthly ESI">
-              <Input
-                type="number"
-                min="0"
-                value={selectedPayrollRow.esiAmount}
-                onChange={(event) => updatePayrollEdit("esiAmount", event.target.value)}
-              />
-            </Field>
-            <Field label="TDS">
-              <Input
-                type="number"
-                min="0"
-                value={selectedPayrollRow.tdsAmount}
-                onChange={(event) => updatePayrollEdit("tdsAmount", event.target.value)}
-              />
-            </Field>
-            <Field label="PT">
-              <Input
-                type="number"
-                min="0"
-                value={selectedPayrollRow.professionalTax}
-                onChange={(event) => updatePayrollEdit("professionalTax", event.target.value)}
-              />
-            </Field>
-            <Field label="Status">
-              <Input
-                as="select"
-                value={selectedPayrollRow.status}
-                onChange={(event) => updatePayrollEdit("status", event.target.value)}
-              >
-                <option>Pending</option>
-                <option>Processed</option>
-              </Input>
-            </Field>
             <Button
               onClick={savePayroll}
               className="self-end"
@@ -7064,7 +6241,7 @@ const PayrollPage = () => {
           <table className="min-w-[1280px] w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
               <tr>
-                {["ID", "Employee", "Annual Gross", "Monthly Gross", "Allowances", "Deduction", "Monthly PF", "Monthly ESI", "TDS", "PT", "Net Salary", "Status", "Action"].map((heading) => (
+                {["ID", "Employee", "Annual Gross", "Monthly Gross", "LOP", "PT", "ESI", "TDS", "Reimbursement", "Allowance", "Other Deduction", "Monthly PF", "Net Salary", "Action"].map((heading) => (
                   <th key={heading} className="px-3 py-3 font-bold">
                     {heading}
                   </th>
@@ -7081,16 +6258,15 @@ const PayrollPage = () => {
                   <td className="px-3 py-3">{row.name}</td>
                   <td className="px-3 py-3">{money(row.salary)}</td>
                   <td className="px-3 py-3">{money(row.monthlySalary)}</td>
+                  <td className="px-3 py-3">{money(row.lopAmount)}</td>
+                  <td className="px-3 py-3">{money(row.professionalTax)}</td>
+                  <td className="px-3 py-3">{money(row.esiAmount)}</td>
+                  <td className="px-3 py-3">{money(row.tdsAmount)}</td>
+                  <td className="px-3 py-3">{money(row.reimbursement)}</td>
                   <td className="px-3 py-3">{money(row.allowances)}</td>
                   <td className="px-3 py-3">{money(row.deduction)}</td>
                   <td className="px-3 py-3">{money(row.pfAmount)}</td>
-                  <td className="px-3 py-3">{money(row.esiAmount)}</td>
-                  <td className="px-3 py-3">{money(row.tdsAmount)}</td>
-                  <td className="px-3 py-3">{money(row.professionalTax)}</td>
                   <td className="px-3 py-3 font-bold">{money(row.net)}</td>
-                  <td className="px-3 py-3">
-                    <StatusBadge status={row.status} />
-                  </td>
                   <td className="px-3 py-3">
                     <Button
                       className="min-h-8 px-2 text-xs"
@@ -7104,7 +6280,7 @@ const PayrollPage = () => {
               ))}
               {!rows.length && (
                 <tr>
-                  <td colSpan={13} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={14} className="px-3 py-8 text-center text-slate-500">
                     No employees found for this payroll selection.
                   </td>
                 </tr>
@@ -7124,7 +6300,7 @@ const PayrollPage = () => {
           <table className="min-w-[920px] w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
               <tr>
-                {["Saved Date", "Month", "Department", "Employees", "Net Total", "Status", "Action"].map((heading) => (
+                {["Saved Date", "Month", "Department", "Employees", "Net Total", "Action"].map((heading) => (
                   <th key={heading} className="px-3 py-3 font-bold">
                     {heading}
                   </th>
@@ -7152,9 +6328,6 @@ const PayrollPage = () => {
                     <td className="px-3 py-3">{batch.department}</td>
                     <td className="px-3 py-3">{batch.rows?.length || 0}</td>
                     <td className="px-3 py-3 font-bold">{money(netTotal)}</td>
-                    <td className="px-3 py-3">
-                      <StatusBadge status={batch.status || "Processed"} />
-                    </td>
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap gap-2">
                         <Button
@@ -7186,7 +6359,7 @@ const PayrollPage = () => {
               })}
               {!payrollBatches.length && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
                     No payroll batches saved in the HRMS database yet. Generate payroll to create a register entry.
                   </td>
                 </tr>
@@ -7199,7 +6372,7 @@ const PayrollPage = () => {
       {selectedPayrollBatch && (
         <RegisterDocumentView
           title="PAYROLL REGISTER"
-          subtitle={`${selectedPayrollBatch.month} | ${selectedPayrollBatch.department}`}
+          subtitle={`${resolveBrandName(settings.company?.name || "")} | ${companyAddress} | ${selectedPayrollBatch.month} | ${selectedPayrollBatch.department}`}
           onClose={() => setSelectedBatchId("")}
           leftRows={[
             ["Month", selectedPayrollBatch.month],
@@ -7271,14 +6444,8 @@ const PayrollPage = () => {
             "Employee",
             "Annual Gross Salary",
             "Monthly Gross Salary",
-            "Allowances",
-            "Deduction",
-            "Monthly PF",
-            "Monthly ESI",
-            "TDS",
-            "PT",
+            "LOP", "PT", "ESI", "TDS", "Reimbursement", "Allowance", "Other Deduction", "Monthly PF",
             "Net Pay",
-            "Status",
           ]}
           tableRows={(selectedPayrollBatch.rows || []).map((row) => ({
             id: row.id,
@@ -7287,14 +6454,8 @@ const PayrollPage = () => {
               row.name,
               money(row.salary),
               money(row.monthlySalary ?? calculateMonthlySalary(row.salary)),
-              money(row.allowances),
-              money(row.deduction),
-              money(row.pfAmount),
-              money(row.esiAmount),
-              money(row.tdsAmount),
-              money(row.professionalTax),
+              money(row.lopAmount), money(row.professionalTax), money(row.esiAmount), money(row.tdsAmount), money(row.reimbursement), money(row.allowances), money(row.deduction), money(row.pfAmount),
               money(row.net),
-              row.status,
             ],
           }))}
           bottomLeftTitle="Payroll Notes"
@@ -7326,16 +6487,18 @@ const PayslipPage = () => {
   const earnings = payslip
     ? [
         ["Monthly Gross Salary", payrollBreakup.monthlySalary],
-        ["Allowances", payrollBreakup.allowances],
+        ["Reimbursement", payrollBreakup.reimbursement],
+        ["Allowance", payrollBreakup.allowances],
       ]
     : [];
   const deductions = payslip
     ? [
-        ["Deduction", payrollBreakup.deduction],
-        ["Monthly PF", payrollBreakup.pfAmount],
-        ["Monthly ESI", payrollBreakup.esiAmount],
+        ["LOP", payrollBreakup.lopAmount],
+        ["PT", payrollBreakup.professionalTax],
+        ["ESI", payrollBreakup.esiAmount],
         ["TDS", payrollBreakup.tdsAmount],
-        ["Professional Tax", payrollBreakup.professionalTax],
+        ["Other deduction", payrollBreakup.deduction],
+        ["Monthly PF", payrollBreakup.pfAmount],
       ]
     : [];
   const totalEarnings = earnings.reduce((sum, [, value]) => sum + value, 0);
@@ -7470,6 +6633,14 @@ const PayslipPage = () => {
       </Panel>
 
       <Panel id="payslip-print-area">
+        <style>{`@media print {
+          @page { size: A4; margin: 0; }
+          #payslip-print-area { padding: 12mm !important; box-sizing: border-box; font-size: 11px; }
+          #payslip-print-area .lg\\:grid-cols-2,
+          #payslip-print-area .sm\\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          #payslip-print-area img { max-height: 64px; }
+          #payslip-print-area > div { break-inside: avoid; }
+        }`}</style>
         <div className="flex justify-end">
           <Button onClick={downloadPayslip} disabled={!selectedEmployee}>
             <AppIcon name="download" className="h-4 w-4" />
@@ -7495,6 +6666,7 @@ const PayslipPage = () => {
               />
               <div>
                 <p className="text-base font-bold text-slate-900">{companyName}</p>
+                <p className="whitespace-pre-line text-sm text-slate-600">{[settings.company?.address, settings.company?.city, settings.company?.state, settings.company?.pincode].filter(Boolean).join(", ")}</p>
                 <p className="text-sm text-slate-500">Monthly Salary Payslip</p>
               </div>
             </div>
@@ -7522,11 +6694,9 @@ const PayslipPage = () => {
                   ["Department", displayValue(employee?.department)],
                   ["Month", payslip.month],
                   ["Date of Joining", displayValue(employee?.joined)],
-                  ["Days Worked", "26"],
-                  ["Aadhaar Number", displayValue(employee?.documentNumber)],
+                  ["Days Worked", payrollRow?.workingDays != null ? Math.max(0, Number(payrollRow.workingDays) - Number(payrollRow.unpaidDays || 0)) : "Not recorded"],
+                  ["PAN Number", displayValue(employee?.panNumber)],
                   ["Payment Date", getPayrollPaymentDate(payslip.month)],
-                  ["Payroll Status", payrollRow?.status || "Pending"],
-                  ["Payroll Ref", payslip.batch?.id || "Not saved"],
                 ].map(([label, value]) => (
                   <div key={label} className="grid grid-cols-[120px_1fr] gap-3">
                     <span className="text-slate-500">{label}</span>
@@ -7579,6 +6749,7 @@ const RelievingLetterDocument = ({ record, employee }) => {
     <article className="rounded-md border border-slate-300 bg-white p-5 text-sm leading-7 text-slate-800">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-blue-700 pb-4">
         <div>
+          <img src={defaultBrandLogoUrl} alt="Company logo" className="h-16 w-auto mb-2" />
           <h2 className="text-xl font-bold text-slate-950">
             Bangalore Electronics
           </h2>
@@ -8187,7 +7358,10 @@ const SearchPage = () => {
 };
 
 const HrmsReportsPage = () => {
+  const navigate = useNavigate();
   const settings = useSettings();
+  const [reportStatus,setReportStatus] = useState("All");
+  const [reportMonth,setReportMonth] = useState(new Date().toISOString().slice(0,7));
   const [employees, , employeesState] = useHrmsEmployees();
   const [payrollBatches, , payrollState] = useHrmsSalaries();
   const [, setGeneratedReports] = useStoredList(HRMS_STORAGE_KEYS.reports, []);
@@ -8200,7 +7374,7 @@ const HrmsReportsPage = () => {
   const [employeeReportPage, setEmployeeReportPage] = useState(1);
   const employeeReportRows = useMemo(() => {
     const payrollRows = payrollBatches.flatMap((batch) => batch.rows || []);
-    return employees.map((employee) => {
+    return employees.filter((employee) => reportStatus === "All" || employee.status === reportStatus).map((employee) => {
       const latestPayrollRow = payrollRows.find(
         (row) => String(row.employeeId || row.id) === String(employee.id)
       );
@@ -8222,7 +7396,7 @@ const HrmsReportsPage = () => {
         location: location || "Not provided",
       };
     });
-  }, [employees, payrollBatches]);
+  }, [employees, payrollBatches, reportStatus]);
   const employeeReportDepartments = useMemo(
     () =>
       Array.from(
@@ -8249,7 +7423,7 @@ const HrmsReportsPage = () => {
           employee.designation,
           employee.phone,
           employee.email,
-          employee.documentNumber,
+          employee.panNumber,
           location,
         ]
           .join(" ")
@@ -8318,16 +7492,11 @@ const HrmsReportsPage = () => {
     ["Relieving Report", "View Relieving Details", "logout"],
     ["Salary Summary", "View Salary Summary", "chart"],
   ];
-  const generateReport = (title) => {
-    setGeneratedReports((current) => [
-      {
-        id: `RPT-${Date.now()}`,
-        title,
-        generatedAt: new Date().toISOString(),
-      },
-      ...current,
-    ]);
-    setMessage(`${title} generated and saved locally.`);
+  const viewReport = (title) => {
+    const reportType = Object.keys(reportNames).find((key) => reportNames[key] === title);
+    if (reportType) {
+      navigate(`/hrms/reports/${reportType}?month=${reportMonth}&status=${reportStatus}`);
+    }
   };
 
   const generateAllEmployeeFinalReport = (exportType = "pdf") => {
@@ -8367,7 +7536,7 @@ const HrmsReportsPage = () => {
             <td>${escapeHtml(displayValue(employee.designation))}</td>
             <td>${escapeHtml(displayValue(employee.phone))}</td>
             <td>${escapeHtml(displayValue(employee.email))}</td>
-            <td>${escapeHtml(displayValue(employee.documentNumber))}</td>
+            <td>${escapeHtml(displayValue(employee.panNumber))}</td>
             <td>${escapeHtml(displayValue(employee.joined))}</td>
             <td>${escapeHtml(location)}</td>
             <td class="amount">${escapeHtml(money(salary.monthlySalary))}</td>
@@ -8408,7 +7577,7 @@ const HrmsReportsPage = () => {
           ["Date of Joining", employee.joined],
           ["Employment Status", employee.status],
           ["PAN Number", employee.panNumber],
-          ["Aadhaar Number", employee.documentNumber],
+          ["PAN Number", employee.panNumber],
           ["UAN Number", employee.uanNumber],
           ["ESI Number", employee.esiNumber],
           ["Annual Gross Salary", money(salary.grossSalary)],
@@ -8492,7 +7661,7 @@ const HrmsReportsPage = () => {
               <div class="card"><span>Total Monthly Net</span><strong>${escapeHtml(money(totalMonthlyNet))}</strong></div>
             </div>
             <table>
-              <thead><tr><th>Employee ID</th><th>Employee Name</th><th>Department</th><th>Designation</th><th>Contact Number</th><th>Email</th><th>Aadhaar Number</th><th>Joining Date</th><th>Location</th><th>Monthly Gross</th><th>PF</th><th>ESI</th><th>Total Deduction</th><th>Net Salary</th></tr></thead>
+              <thead><tr><th>Employee ID</th><th>Employee Name</th><th>Department</th><th>Designation</th><th>Contact Number</th><th>Email</th><th>PAN Number</th><th>Joining Date</th><th>Location</th><th>Monthly Gross</th><th>PF</th><th>ESI</th><th>Total Deduction</th><th>Net Salary</th></tr></thead>
               <tbody>${summaryRows}</tbody>
             </table>
           </section>
@@ -8521,6 +7690,7 @@ const HrmsReportsPage = () => {
 
   return (
     <div className="grid gap-4">
+      <Panel><div className="flex gap-4"><Field label="Report month"><Input type="month" value={reportMonth} onChange={(e)=>setReportMonth(e.target.value)} /></Field><Field label="Employees"><Input as="select" value={reportStatus} onChange={(e)=>setReportStatus(e.target.value)}>{["All","Active","Relieved"].map((status)=><option key={status}>{status}</option>)}</Input></Field></div><div className="grid gap-3 md:grid-cols-3 mt-4">{Object.entries(reportNames).map(([key,title])=><div key={key} className="border rounded p-4"><h2 className="font-bold">{title}</h2><Link className="text-blue-700 block mt-2" to={`/hrms/reports/${key}?month=${reportMonth}&status=${reportStatus}`}>{key === "salary-summary" ? "View Salary Summary" : "Generate"}</Link></div>)}</div></Panel>
       <Notice>{message}</Notice>
       <Notice tone="warning">{employeesState.error}</Notice>
       <Notice tone="warning">{payrollState.error}</Notice>
@@ -8554,14 +7724,14 @@ const HrmsReportsPage = () => {
                     onClick={() =>
                       title === "All Employee Report"
                         ? generateAllEmployeeFinalReport("pdf")
-                        : generateReport(title)
+                        : viewReport(title)
                     }
                     disabled={
                       title === "All Employee Report" &&
                       (employeesState.loading || !employees.length)
                     }
                   >
-                    {title === "All Employee Report" ? "PDF Export" : "Generate"}
+                    {title === "All Employee Report" ? "PDF Export" : title === "Salary Summary" ? "View Salary Summary" : "Generate"}
                   </Button>
                 </div>
               </div>
@@ -8605,7 +7775,7 @@ const HrmsReportsPage = () => {
                 setEmployeeReportSearch(event.target.value);
                 setEmployeeReportPage(1);
               }}
-              placeholder="Search ID, name, phone, email, Aadhaar..."
+              placeholder="Search ID, name, phone, email, PAN..."
             />
           </Field>
           <Field label="Department">
@@ -8727,7 +7897,7 @@ const HrmsReportsPage = () => {
               <table className="min-w-[2200px] w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
-                    {["Employee ID", "Employee Name", "Department", "Designation", "Contact Number", "Email", "Aadhaar Number", "Joining Date", "Location", "Monthly Gross Salary", "PF", "ESI", "Total Deduction", "Net Salary", "Action"].map((heading) => (
+                    {["Employee ID", "Employee Name", "Department", "Designation", "Contact Number", "Email", "PAN Number", "Joining Date", "Location", "Monthly Gross Salary", "PF", "ESI", "Total Deduction", "Net Salary", "Action"].map((heading) => (
                       <th key={heading} className="whitespace-nowrap px-3 py-3 font-bold">{heading}</th>
                     ))}
                   </tr>
@@ -8741,7 +7911,7 @@ const HrmsReportsPage = () => {
                       <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.designation)}</td>
                       <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.phone)}</td>
                       <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.email)}</td>
-                      <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.documentNumber)}</td>
+                      <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.panNumber)}</td>
                       <td className="whitespace-nowrap px-3 py-3">{displayValue(employee.joined)}</td>
                       <td className="whitespace-nowrap px-3 py-3">{location}</td>
                       <td className="whitespace-nowrap px-3 py-3">{money(salary.monthlySalary)}</td>
@@ -8841,6 +8011,8 @@ const PermissionsPage = () => {
   );
 };
 
+const ReviewWorkspace = () => <SalaryReassessmentPage />;
+
 const renderPage = (page) => {
   switch (page) {
     case "dashboard":
@@ -8854,7 +8026,7 @@ const renderPage = (page) => {
     case "employee-profile":
       return <EmployeeProfilePage />;
     case "reviews":
-      return <ReviewsPage />;
+      return <ReviewWorkspace />;
     case "salary-reassessment":
       return <SalaryReassessmentPage />;
     case "attendance":

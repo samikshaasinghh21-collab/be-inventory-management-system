@@ -74,8 +74,9 @@ const csrfCookieOptions = () => ({
 });
 const cleanEmail = (value) => String(value || "").trim().toLowerCase();
 const requiresMfaEnrollment = () => env("REQUIRE_MFA_ENROLLMENT", "false").toLowerCase() === "true";
-const authenticationDisabled = () =>
-  !isProduction() && env("AUTH_DISABLED", "true").toLowerCase() === "true";
+// Temporary switch shared with the frontend through /auth/mode.
+export const authenticationDisabled = () =>
+  env("AUTH_DISABLED", "true").toLowerCase() === "true";
 
 const appOrigins = () => {
   const configured = env("WEBAUTHN_ORIGINS", env("WEBAUTHN_ORIGIN", env("APP_PUBLIC_URL", env("TRUSTED_FRONTEND_ORIGIN"))))
@@ -179,7 +180,7 @@ IF COL_LENGTH('dbo.AuditEvents','AssuranceLevel') IS NULL ALTER TABLE dbo.AuditE
 `;
 
 const validateProductionConfig = () => {
-  if (!isProduction()) return;
+  if (!isProduction() || authenticationDisabled()) return;
   const required = [
     "TOTP_ENCRYPTION_KEY", "SMTP_HOST", "SMTP_FROM",
     "APP_PUBLIC_URL", "TRUSTED_FRONTEND_ORIGIN", "WEBAUTHN_RP_ID", "WEBAUTHN_ORIGIN",
@@ -424,8 +425,8 @@ export const authenticate = async (req, res, next) => {
           (SELECT COUNT(*) FROM dbo.WebAuthnCredentials c WHERE c.UserId=u.UserId) AS PasskeyCount
         FROM dbo.AppUsers u
         WHERE u.IsActive=1 AND u.AccountStatus=N'Active'
-          AND (@Email=N'' OR u.Email=@Email)
-        ORDER BY CASE WHEN u.RoleName=N'Super Admin' THEN 0 WHEN u.RoleName=N'Admin' THEN 1 ELSE 2 END,u.UserId
+        ORDER BY CASE WHEN u.Email=@Email THEN 0 ELSE 1 END,
+          CASE WHEN u.RoleName=N'Super Admin' THEN 0 WHEN u.RoleName=N'Admin' THEN 1 ELSE 2 END,u.UserId
       `);
       const row = result.recordset[0];
       if (!row) {
@@ -438,7 +439,7 @@ export const authenticate = async (req, res, next) => {
         StepUpScopesJson: JSON.stringify({ "*": "2999-12-31T23:59:59.999Z" }),
         EnrollmentOnly: false,
       };
-      req.user = publicUser({ ...row, EnrollmentOnly: false });
+      req.user = { ...publicUser(row), enrollmentRequired: false, authenticationDisabled: true };
       return next();
     }
     const token = req.cookies?.[sessionCookie()];
@@ -467,9 +468,9 @@ export const authenticate = async (req, res, next) => {
       .input("Idle", sql.DateTime2, addMinutes(now, idleMinutes))
       .query("UPDATE dbo.AppSessions SET LastSeenAt=SYSUTCDATETIME(),IdleExpiresAt=@Idle WHERE SessionId=@Sid");
     return next();
-  } catch {
-    clearSessionCookies(res);
-    return res.status(401).json({ ok: false, code: "AUTH_REQUIRED", error: "Authentication required" });
+  } catch (error) {
+    // Infrastructure failures must not masquerade as an expired login.
+    return next(error);
   }
 };
 
@@ -779,10 +780,18 @@ export const createAuthRouter = () => {
       idleExpiresAt: req.session.IdleExpiresAt,
     },
   }));
+  router.get("/mode", (req, res) => {
+    res.set("Cache-Control", "no-store");
+    return res.json({ ok: true, authenticationDisabled: authenticationDisabled() });
+  });
   router.get("/me", authenticate, (req, res) => res.json({ ok: true, user: req.user }));
 
   router.post("/logout", authenticate, async (req, res, next) => {
     try {
+      if (req.user.authenticationDisabled) {
+        clearSessionCookies(res);
+        return res.json({ ok: true, user: req.user });
+      }
       await (await getPool()).request().input("Sid", sql.UniqueIdentifier, req.session.SessionId)
         .query("UPDATE dbo.AppSessions SET RevokedAt=SYSUTCDATETIME(),RevokeReason=N'Logout' WHERE SessionId=@Sid");
       clearSessionCookies(res);

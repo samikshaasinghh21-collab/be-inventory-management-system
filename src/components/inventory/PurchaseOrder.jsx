@@ -955,7 +955,7 @@ const PurchaseOrder = () => {
               />
             </div>
             <div className="md:col-span-3 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr,0.8fr]">
-              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+              <div className="rounded-lg border border-slate-200 bg-[var(--bg-subtle)] p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
                   Vendor Details
                 </p>
@@ -976,7 +976,7 @@ const PurchaseOrder = () => {
                   </p>
                 </div>
               </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+              <div className="rounded-lg border border-slate-200 bg-[var(--bg-subtle)] p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
                   GST Summary
                 </p>
@@ -994,7 +994,7 @@ const PurchaseOrder = () => {
                 </div>
               </div>
             </div>
-            <div className="md:col-span-3 border border-slate-200 rounded-lg p-4 bg-slate-50/70">
+            <div className="md:col-span-3 border border-slate-200 rounded-lg p-4 bg-[var(--bg-subtle)]">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-sm font-medium text-slate-700">

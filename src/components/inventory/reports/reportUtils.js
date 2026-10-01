@@ -12,7 +12,7 @@ export const REPORT_ACTIVITY_TYPES = [
     key: "purchase-order",
     label: "Purchase Orders",
     timelineLabel: "PO Created",
-    badgeClass: "border-sky-200 bg-sky-50 text-sky-700",
+    badgeClass: "border-[var(--border-default)] bg-[var(--info-soft)] text-[var(--info)]",
     dotClass: "bg-sky-500",
   },
   {
@@ -33,7 +33,7 @@ export const REPORT_ACTIVITY_TYPES = [
     key: "reallocation",
     label: "Reallocation / Move",
     timelineLabel: "Inventory Moved",
-    badgeClass: "border-violet-200 bg-violet-50 text-violet-700",
+    badgeClass: "border-[var(--border-default)] bg-[var(--primary-muted)] text-[var(--primary)]",
     dotClass: "bg-violet-500",
   },
   {
@@ -784,7 +784,7 @@ export const getStatusBadgeClass = (status) => {
     normalized.includes("issued") ||
     normalized.includes("reviewed")
   ) {
-    return "border-sky-200 bg-sky-50 text-sky-700";
+    return "border-[var(--border-default)] bg-[var(--info-soft)] text-[var(--info)]";
   }
   if (
     normalized.includes("partial") ||

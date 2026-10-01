@@ -15,6 +15,7 @@ export const loadCurrentUser = async () => {
     if (isApiUnavailableError(error)) {
       throw error;
     }
+    if (error?.response?.status !== 401) throw error;
     currentUser = null;
   }
   emit();
@@ -56,6 +57,7 @@ export const registerPasskey = async (deviceName = "My passkey") => {
   return data;
 };
 export const logout = async () => {
+  if (currentUser?.authenticationDisabled) return;
   try { await api.post("/auth/logout"); } finally { currentUser = null; emit(); }
 };
 export const register = async ({ token, password }) => {
