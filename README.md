@@ -1,19 +1,23 @@
-# React + Vite
+# BE Inventory Management System
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React and Express application covering inventory, procurement, HRMS, project management, tools, invoicing, and reporting. SQL Server is the system of record.
 
-Currently, two official plugins are available:
+## Requirements
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Node.js 22+
+- SQL Server reachable from the API host
+- A modern browser with WebAuthn support for passkeys
 
-## React Compiler
+## Local setup
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. Copy `.env.example` to `.env`.
+2. Copy `backend/.env.example` to `backend/.env` and provide database credentials.
+3. Create a development administrator through the documented seed environment values. Set `AUTH_DISABLED=false` to require normal login; see the temporary bypass section below.
+4. Install dependencies with `npm ci`.
+5. Apply schema changes with `npm run db:migrate`.
+6. Start both services with `npm run dev:all`.
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+The frontend runs on `http://localhost:5173`; Vite proxies `/api` to the API on port 5000. Check `GET /api/health` for readiness.
 
 ## Temporary Login Bypass
 
@@ -31,3 +35,54 @@ normal login, session, CSRF, and MFA checks. Existing login code, passwords,
 passkeys, and accounts are retained. While bypassed, anyone who can reach the
 app has the selected user's access, including in production. The database must
 be available and contain an active account.
+
+## Verification
+
+```text
+npm run lint
+npm test
+npm run build
+```
+
+`npm run ci` runs all three checks. Browser checks are available through `npm run test:ui` and `npm run test:ui:routes` while the Vite server is running.
+
+## Database migrations
+
+SQL migrations live in `backend/migrations` and are applied in filename order. `npm run db:migrate` records successful migrations in `dbo.SchemaMigrations` and wraps each migration in a transaction. Apply migrations before starting a new production version. The production database identity should not have general schema-alter permissions during normal API operation.
+
+For an existing installation created by the legacy runtime schema initializer, the first migration run records migrations 001–011 as the baseline and applies newer migrations. Production startup verifies the schema and never performs runtime DDL.
+
+Back up both inventory and HRMS databases before applying migrations. Test restore procedures regularly; an untested backup is not considered verified.
+
+## Production
+
+Build and run the container with environment values supplied by your secret manager:
+
+```text
+docker build -t be-inventory .
+docker run --env-file /secure/path/inventory.env -p 5000:5000 be-inventory
+```
+
+The production Express server serves both the built frontend and `/api`. Set `NODE_ENV=production`, HTTPS public/WebAuthn origins, SMTP configuration, encryption keys, trusted proxy hops, and secure database settings. Never bake `.env` files into the image.
+
+Operational requirements:
+
+- Terminate TLS at the load balancer or reverse proxy.
+- Restrict SQL Server network access to API hosts.
+- Send application logs to centralized storage with retention and alerting.
+- Monitor `/api/health`, HTTP 5xx rate, authentication failures, database latency, and storage capacity.
+- Rotate seed passwords immediately after initial provisioning.
+
+## Access control
+
+With `AUTH_DISABLED=false`, public endpoints are limited to authentication flows and `/api/health`. Every other API requires an enrolled session and a module permission. During the temporary bypass, API requests use the selected active database user and retain module permission checks. UI route guards are a user-experience feature; backend permission checks are authoritative.
+
+## Repository layout
+
+- `src/` — React application
+- `backend/src/` — API, authentication, module routers and services
+- `backend/migrations/` — ordered SQL migrations
+- `backend/tests/` — Node test suite
+- `scripts/` — build and browser-audit utilities
+
+The legacy `inventory-api` directory is not part of the supported runtime and must not be used for deployments.

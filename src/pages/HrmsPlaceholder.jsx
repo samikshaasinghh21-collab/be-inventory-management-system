@@ -1,10 +1,11 @@
 import AttendanceRegister from "../components/hrms/AttendanceRegister";
+import { currentHrmsEmployees, recordsForHrmsEmployees, isRelievedEmployee } from "../utils/hrmsEmployeeVisibility";
 import EmployeeAttendanceSummary from "../components/hrms/EmployeeAttendanceSummary";
 import ProfessionalTaxRule from "../components/hrms/ProfessionalTaxRule";
 import api from "../services/api";
-import { reportNames } from "./HrmsReportDetails";
+import { reportNames } from "../utils/hrmsReports";
 import { calculateLop, monthlyProfessionalTax } from "../../shared/payroll.js";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import DateInput from "../components/common/DateInput";
 import PasswordPromptModal from "../components/common/PasswordPromptModal";
@@ -155,7 +156,7 @@ const useStoredList = (key, fallback = []) => {
   return [items, saveItems];
 };
 
-const useHrmsEmployees = () => {
+const useHrmsEmployees = ({ includeRelieved = false } = {}) => {
   const [employees, saveEmployees] = useStoredList(
     HRMS_STORAGE_KEYS.employees,
     seedEmployees
@@ -241,7 +242,7 @@ const useHrmsEmployees = () => {
   }, [saveEmployees]);
 
   return [
-    cleanedEmployees,
+    includeRelieved ? cleanedEmployees : currentHrmsEmployees(cleanedEmployees),
     saveCleanEmployees,
     {
       ...apiState,
@@ -2213,6 +2214,7 @@ const HRMS_PAGE_META = {
   payroll: ["Salary processing", "Prepare monthly salaries and review deductions before processing."],
   payslip: ["Payslips", "Review and print clear, complete employee salary statements."],
   relieving: ["Employee exits", "Coordinate exit requests, final settlement, and relieving documents."],
+  "relieving-letters": ["Relieving letters", "View and print saved employee relieving letters."],
   search: ["People search", "Find employees by name, team, role, or contact information."],
   reports: ["HR reports", "Review workforce registers and export the information your team needs."],
   permissions: ["Access permissions", "Understand the roles and permissions available in your workspace."],
@@ -2326,13 +2328,16 @@ const HrmsLoginPage = () => {
 const DashboardPage = () => {
   const [employees, , employeesState] = useHrmsEmployees();
   const [attendance, , attendanceState] = useHrmsAttendance();
-  const [reviews, , reviewsState] = useHrmsReviews();
-  const [payroll, , payrollState] = useHrmsSalaries();
-  const [salaryReviews] = useHrmsSalaryReassessments();
+  const [allReviews, , reviewsState] = useHrmsReviews();
+  const reviews = recordsForHrmsEmployees(allReviews, employees);
+  const [allPayroll, , payrollState] = useHrmsSalaries();
+  const payroll = allPayroll.map((batch) => ({ ...batch, rows: recordsForHrmsEmployees(batch.rows || [], employees) })).filter((batch) => batch.rows.length);
+  const [allSalaryReviews] = useHrmsSalaryReassessments();
+  const salaryReviews = recordsForHrmsEmployees(allSalaryReviews, employees);
   const currentMonth = getCurrentAttendanceMonth();
   const now = new Date();
   const activeEmployees = employees.filter((employee) => employee.status !== "Relieved");
-  const monthlyAttendance = [...attendance].filter((record) => areAttendanceMonthsEqual(record.month, currentMonth)).sort((a, b) => String(b.savedAt || "").localeCompare(String(a.savedAt || ""))).filter((record, index, records) => records.findIndex((item) => item.employeeId === record.employeeId) === index);
+  const monthlyAttendance = recordsForHrmsEmployees(attendance, employees).filter((record) => areAttendanceMonthsEqual(record.month, currentMonth)).sort((a, b) => String(b.savedAt || "").localeCompare(String(a.savedAt || ""))).filter((record, index, records) => records.findIndex((item) => item.employeeId === record.employeeId) === index);
   const todayCounts = monthlyAttendance.reduce((counts, record) => {
     if (activeEmployees.some((employee) => employee.id === record.employeeId)) {
       const status = record.statuses?.[now.getDate() - 1];
@@ -2402,6 +2407,12 @@ const EmployeeListPage = () => {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [editingEmployeeId, setEditingEmployeeId] = useState("");
+  const employeeEditorRef = useRef(null);
+  useEffect(() => {
+    if (editingEmployeeId) {
+      employeeEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [editingEmployeeId]);
   const [authPrompt, setAuthPrompt] = useState(null);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminPasswordError, setAdminPasswordError] = useState("");
@@ -2451,19 +2462,9 @@ const EmployeeListPage = () => {
   };
 
   const requestEdit = (employee) => {
-    if (!isAdmin) {
-      setError("Only Admin users can edit employee details.");
-      return;
-    }
     setMessage("");
     setError("");
-    setAuthPrompt({
-      action: "edit",
-      employeeId: employee.id,
-      employeeName: employee.name,
-    });
-    setAdminPassword("");
-    setAdminPasswordError("");
+    setEditingEmployeeId(employee.id);
   };
 
   const requestDelete = (employee) => {
@@ -2490,14 +2491,10 @@ const EmployeeListPage = () => {
   };
 
   const confirmAdminAction = async () => {
-    const actionLabel =
-      authPrompt?.action === "delete"
-        ? "delete employee records"
-        : "edit employee details";
     const authError = getHrmsAdminAuthError(
       settings,
       adminPassword,
-      actionLabel
+      "delete employee records"
     );
 
     if (authError) {
@@ -2506,12 +2503,6 @@ const EmployeeListPage = () => {
     }
 
     if (!authPrompt?.employeeId) {
-      closeAuthPrompt();
-      return;
-    }
-
-    if (authPrompt.action === "edit") {
-      setEditingEmployeeId(authPrompt.employeeId);
       closeAuthPrompt();
       return;
     }
@@ -2596,6 +2587,16 @@ const EmployeeListPage = () => {
                     <StatusBadge status={employee.status} />
                   </td>
                   <td className="px-3 py-3">
+                    <div className="flex items-start gap-2">
+                        <Button
+                          className="min-h-8 px-2 text-xs"
+                          variant="secondary"
+                          onClick={() => requestEdit(employee)}
+                          aria-label={`Edit ${employee.name}`}
+                        >
+                          <AppIcon name="edit" className="h-4 w-4" />
+                          Edit
+                        </Button>
                     <details className="people-row-menu"><summary aria-label={`Actions for ${employee.name}`}>Actions <span aria-hidden="true">?</span></summary><div>
                       <Link
                         to={`/employees/profile/${employee.id}`}
@@ -2619,15 +2620,6 @@ const EmployeeListPage = () => {
                         <>
                           <Button
                             className="min-h-8 px-2 text-xs"
-                            variant="secondary"
-                            onClick={() => requestEdit(employee)}
-                            aria-label={`Edit ${employee.name}`}
-                          >
-                            <AppIcon name="edit" className="h-4 w-4" />
-                            Edit
-                          </Button>
-                          <Button
-                            className="min-h-8 px-2 text-xs"
                             variant="danger"
                             onClick={() => requestDelete(employee)}
                             aria-label={`Delete ${employee.name}`}
@@ -2638,6 +2630,7 @@ const EmployeeListPage = () => {
                         </>
                       ) : null}
                     </div></details>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -2691,7 +2684,7 @@ const EmployeeListPage = () => {
       </div>
 
       {editingEmployee ? (
-        <div className="mt-6 border-t border-slate-200 pt-6">
+        <div ref={employeeEditorRef} className="mt-6 border-t border-slate-200 pt-6">
           <EmployeeEditor
             employee={editingEmployee}
             showHeading
@@ -2711,19 +2704,11 @@ const EmployeeListPage = () => {
 
       <PasswordPromptModal
         isOpen={Boolean(authPrompt)}
-        title={
-          authPrompt?.action === "delete"
-            ? "Admin Approval Required"
-            : "Verify Before Editing"
-        }
-        description={
-          authPrompt?.action === "delete"
-            ? `Enter the admin password to delete ${authPrompt?.employeeName || "this employee"}.`
-            : `Enter the admin password to edit ${authPrompt?.employeeName || "this employee"}.`
-        }
+        title="Admin Approval Required"
+        description={`Enter the admin password to delete ${authPrompt?.employeeName || "this employee"}.`}
         password={adminPassword}
         error={adminPasswordError}
-        confirmLabel={authPrompt?.action === "delete" ? "Approve Delete" : "Approve Edit"}
+        confirmLabel="Approve Delete"
         onPasswordChange={(value) => {
           setAdminPassword(value);
           if (adminPasswordError) {
@@ -4092,7 +4077,8 @@ const ReviewsPage = () => {
   const role = String(settings?.profile?.role || "").toLowerCase();
   const canAddReview = ["super admin", "admin", "hr manager", "manager"].includes(role);
   const [employees] = useHrmsEmployees();
-  const [reviews, setReviews, reviewsState] = useHrmsReviews();
+  const [allReviews, setReviews, reviewsState] = useHrmsReviews();
+  const reviews = useMemo(() => recordsForHrmsEmployees(allReviews, employees), [allReviews, employees]);
   const [salaryAssessments, , salaryAssessmentsState] =
     useHrmsSalaryReassessments();
   const currentReviewYear = new Date().getFullYear();
@@ -4655,8 +4641,9 @@ const SalaryReassessmentPage = () => {
   const companyLogo = resolveBrandLogo(settings.company?.logo || "");
   const companyName = resolveBrandName(settings.company?.name || "");
   const [employees, setEmployees] = useHrmsEmployees();
-  const [salaryHistory, setSalaryHistory, salaryReassessmentsState] =
+  const [allSalaryHistory, setSalaryHistory, salaryReassessmentsState] =
     useHrmsSalaryReassessments();
+  const salaryHistory = useMemo(() => recordsForHrmsEmployees(allSalaryHistory, employees), [allSalaryHistory, employees]);
   const currentReviewYear = new Date().getFullYear();
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(
     employees[0]?.id || ""
@@ -5810,10 +5797,15 @@ const AttendancePage = () => {
 const PayrollPage = () => {
   const settings = useSettings();
   const companyAddress = [settings.company?.address, settings.company?.city, settings.company?.state, settings.company?.pincode].filter(Boolean).join(", ");
-  const [allEmployees] = useHrmsEmployees();
-  const employees = allEmployees.filter((employee) => employee.status === "Active");
+  const [allEmployees] = useHrmsEmployees({ includeRelieved: true });
+  const employees = currentHrmsEmployees(allEmployees).filter((employee) => String(employee.status).trim().toLowerCase() === "active");
   const [attendance] = useHrmsAttendance();
-  const [payrollBatches, setPayrollBatches, payrollState] = useHrmsSalaries();
+  const [allPayrollBatches, setPayrollBatches, payrollState] = useHrmsSalaries();
+  const payrollBatches = allPayrollBatches.map((batch) => ({
+    ...batch,
+    hasArchivedEmployees: (batch.rows || []).some((row) => allEmployees.some((employee) => String(employee.id) === String(row.employeeId ?? row.id) && isRelievedEmployee(employee))),
+    rows: recordsForHrmsEmployees(batch.rows || [], employees),
+  })).filter((batch) => batch.rows.length);
   const [generated, setGenerated] = useState(false);
   const [saving, setSaving] = useState(false);
   const [month, setMonth] = useState(getCurrentAttendanceMonth());
@@ -5826,7 +5818,7 @@ const PayrollPage = () => {
   useEffect(() => {
     let live=true;
     const year=String(getAttendanceMonthDate(month)?.getFullYear() || new Date().getFullYear());
-    Promise.all(allEmployees.map(async (employee) => [employee.id, (await api.get(`/hrms/payroll-rules/${encodeURIComponent(employee.id)}/${year}`)).data.ptRule])).then((entries) => {if(live)setPtRules(Object.fromEntries(entries));}).catch(() => {if(live)setMessage("Could not load annual PT rules. Check the connection before generating payroll.");});
+    Promise.all(currentHrmsEmployees(allEmployees).map(async (employee) => [employee.id, (await api.get(`/hrms/payroll-rules/${encodeURIComponent(employee.id)}/${year}`)).data.ptRule])).then((entries) => {if(live)setPtRules(Object.fromEntries(entries));}).catch(() => {if(live)setMessage("Could not load annual PT rules. Check the connection before generating payroll.");});
     return () => {live=false;};
   },[allEmployees,month]);
   const visibleEmployees =
@@ -5962,10 +5954,14 @@ const PayrollPage = () => {
       }
 
       setGenerated(true);
-      setPayrollBatches((current) => [
-        batch,
-        ...current.filter((item) => item.id !== batch.id),
-      ]);
+      setPayrollBatches((current) => {
+        const previousBatch = current.find((item) => item.id === batch.id);
+        const savedIds = new Set((batch.rows || []).map((row) => String(row.employeeId ?? row.id)));
+        return [
+          { ...batch, rows: [...(batch.rows || []), ...(previousBatch?.rows || []).filter((row) => !savedIds.has(String(row.employeeId ?? row.id)))] },
+          ...current.filter((item) => item.id !== batch.id),
+        ];
+      });
       setSelectedBatchId(batch.id);
       setMessage(
         `Payroll saved to HRMS database for ${processedRows.length} employee${
@@ -6012,6 +6008,10 @@ const PayrollPage = () => {
   };
   const updatePayrollBatch = async (batch) => {
     if (!batch) return;
+    if (batch.hasArchivedEmployees) {
+      setMessage("This batch includes archived employee history. Review it in Reports.");
+      return;
+    }
 
     const updatedRows = rows.map((row) => ({ ...row, status: "Processed" }));
 
@@ -6050,6 +6050,10 @@ const PayrollPage = () => {
   };
   const deletePayrollBatch = async (batch) => {
     if (!batch) return;
+    if (batch.hasArchivedEmployees) {
+      setMessage("This batch includes archived employee history. Review it in Reports.");
+      return;
+    }
 
     const confirmed = window.confirm(
       `Delete payroll batch ${batch.month} / ${batch.department}?`
@@ -6340,7 +6344,7 @@ const PayrollPage = () => {
                         <Button
                           className="min-h-8 px-2 text-xs"
                           onClick={() => updatePayrollBatch(batch)}
-                          disabled={saving}
+                          disabled={saving || batch.hasArchivedEmployees}
                         >
                           Update
                         </Button>
@@ -6348,7 +6352,7 @@ const PayrollPage = () => {
                           className="min-h-8 px-2 text-xs"
                           variant="danger"
                           onClick={() => deletePayrollBatch(batch)}
-                          disabled={saving}
+                          disabled={saving || batch.hasArchivedEmployees}
                         >
                           Delete
                         </Button>
@@ -6826,8 +6830,106 @@ const RelievingLetterDocument = ({ record, employee }) => {
   );
 };
 
+const RelievingLettersPage = () => {
+  const [employees] = useHrmsEmployees({ includeRelieved: true });
+  const [records, , { loading, error }] = useHrmsRelieving();
+  const [selectedRecordId, setSelectedRecordId] = useState("");
+  const [letterSearch, setLetterSearch] = useState("");
+  const record = records.find((item) => item.id === selectedRecordId) || records[0];
+  const employee = employees.find((item) => item.id === record?.employeeId);
+  const matchingRecords = records.filter((item) =>
+    `${item.employeeId} ${item.employeeName} ${item.id}`
+      .toLowerCase()
+      .includes(letterSearch.trim().toLowerCase())
+  );
+
+  return (
+    <div className="grid gap-4">
+      <Notice tone={error ? "warning" : "success"}>
+        {error || (loading ? "Loading relieving letters..." : "")}
+      </Notice>
+      {record ? (
+        <Panel id="relieving-letter-print-area">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div className="w-full sm:max-w-lg">
+              <p id="relieving-letter-label" className="mb-2 text-sm font-semibold">Relieving letter</p>
+              <details
+                className="relative"
+                onToggle={(event) => {
+                  if (event.currentTarget.open) {
+                    setLetterSearch("");
+                    event.currentTarget.querySelector("input")?.focus();
+                  }
+                }}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    event.currentTarget.open = false;
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.currentTarget.open = false;
+                    event.currentTarget.querySelector("summary")?.focus();
+                  }
+                }}
+              >
+                <summary aria-labelledby="relieving-letter-label relieving-letter-value" className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">
+                  <span id="relieving-letter-value">{record.employeeId} - {record.employeeName} ({record.id})</span>
+                </summary>
+                <div className="absolute left-0 right-0 z-20 mt-1 rounded-md border border-slate-200 bg-white p-2 shadow-lg">
+                  <Input
+                    type="search"
+                    aria-label="Search relieving letters"
+                    placeholder="Search name, employee ID, or reference..."
+                    value={letterSearch}
+                    onChange={(event) => setLetterSearch(event.target.value)}
+                  />
+                  <div className="mt-2 max-h-60 overflow-y-auto">
+                    {matchingRecords.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        aria-pressed={item.id === record.id}
+                        className={`block w-full rounded px-3 py-2 text-left text-sm hover:bg-blue-50 focus-visible:bg-blue-50 ${item.id === record.id ? "bg-blue-50 font-semibold text-blue-700" : "text-slate-700"}`}
+                        onClick={(event) => {
+                          setSelectedRecordId(item.id);
+                          const dropdown = event.currentTarget.closest("details");
+                          dropdown.open = false;
+                          dropdown.querySelector("summary")?.focus();
+                        }}
+                      >
+                        {item.employeeId} - {item.employeeName} ({item.id})
+                      </button>
+                    ))}
+                    {!matchingRecords.length && <p className="px-3 py-2 text-sm text-slate-500" role="status">No matching letters found.</p>}
+                  </div>
+                </div>
+              </details>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => printRelievingLetter(record, employee)}>
+                <AppIcon name="file" className="h-4 w-4" />
+                Print
+              </Button>
+              <Button onClick={() => printRelievingLetter(record, employee)}>
+                <AppIcon name="download" className="h-4 w-4" />
+                PDF
+              </Button>
+            </div>
+          </div>
+          <RelievingLetterDocument record={record} employee={employee} />
+        </Panel>
+      ) : !loading && !error ? (
+        <Panel>
+          <Notice>No relieving letters are available. Complete final settlement to create a relieving record.</Notice>
+        </Panel>
+      ) : null}
+    </div>
+  );
+};
+
 const RelievingPage = () => {
-  const [employees, setEmployees] = useHrmsEmployees();
+  const [employees, setEmployees] = useHrmsEmployees({ includeRelieved: true });
   const [relievingRecords, setRelievingRecords, relievingState] =
     useHrmsRelieving();
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(
@@ -7362,7 +7464,7 @@ const HrmsReportsPage = () => {
   const settings = useSettings();
   const [reportStatus,setReportStatus] = useState("All");
   const [reportMonth,setReportMonth] = useState(new Date().toISOString().slice(0,7));
-  const [employees, , employeesState] = useHrmsEmployees();
+  const [employees, , employeesState] = useHrmsEmployees({ includeRelieved: true });
   const [payrollBatches, , payrollState] = useHrmsSalaries();
   const [, setGeneratedReports] = useStoredList(HRMS_STORAGE_KEYS.reports, []);
   const [message, setMessage] = useState("");
@@ -7920,8 +8022,8 @@ const HrmsReportsPage = () => {
                       <td className="whitespace-nowrap px-3 py-3">{money(salary.totalDeductions)}</td>
                       <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-950">{money(salary.netSalary)}</td>
                       <td className="whitespace-nowrap px-3 py-3">
-                        <Link to={`/employees/profile/${employee.id}`}>
-                          <Button variant="secondary" className="min-h-8 px-3 text-xs">View Employee</Button>
+                        <Link to={isRelievedEmployee(employee) ? `/hrms/reports/relieving?month=all&status=Relieved&employee=${encodeURIComponent(employee.id)}` : `/employees/profile/${employee.id}`}>
+                          <Button variant="secondary" className="min-h-8 px-3 text-xs">{isRelievedEmployee(employee) ? "View History" : "View Employee"}</Button>
                         </Link>
                       </td>
                     </tr>
@@ -8037,6 +8139,8 @@ const renderPage = (page) => {
       return <PayslipPage />;
     case "relieving":
       return <RelievingPage />;
+    case "relieving-letters":
+      return <RelievingLettersPage />;
     case "search":
       return <SearchPage />;
     case "reports":

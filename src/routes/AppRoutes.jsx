@@ -1,62 +1,64 @@
 import HrmsReportDetails from "../pages/HrmsReportDetails";
 import { Navigate, Routes, Route } from "react-router-dom";
-import Layout from "../components/layout/Layout";
-import MainLayout from "../layouts/MainLayout";
-import Dashboard from "../pages/Dashboard";
-import InventoryHome from "../pages/InventoryHome";
-import ProjectsHome from "../pages/ProjectsHome";
-import ToolsHome from "../pages/ToolsHome";
-import ToolsAddTool from "../pages/ToolsAddTool";
-import ToolsAssignTool from "../pages/ToolsAssignTool";
-import ToolsAnalytics from "../pages/ToolsAnalytics";
-import ToolsMaintenance from "../pages/ToolsMaintenance";
-import ToolsAssignments from "../pages/ToolsAssignments";
-import ToolsCategories from "../pages/ToolsCategories";
-import ToolsHistory from "../pages/ToolsHistory";
-import ToolsBulkImport from "../pages/ToolsBulkImport";
-import ToolsHandoverTool from "../pages/ToolsHandoverTool";
-import ToolsMap from "../pages/ToolsMap";
-import HrmsPlaceholder from "../pages/HrmsPlaceholder";
-import ProjectDashboard from "../pages/projectManagement/ProjectDashboard";
-import ProjectManagementProjects from "../pages/projectManagement/ProjectManagementProjects";
-import ProjectManagementTasks from "../pages/projectManagement/ProjectManagementTasks";
-import ProjectManagementTeamAllocation from "../pages/projectManagement/ProjectManagementTeamAllocation";
-import ProjectManagementSiteReports from "../pages/projectManagement/ProjectManagementSiteReports";
-import ProjectManagementInventoryAllocation from "../pages/projectManagement/ProjectManagementInventoryAllocation";
-import ProjectManagementPurchaseTracking from "../pages/projectManagement/ProjectManagementPurchaseTracking";
-import ProjectManagementFinancials from "../pages/projectManagement/ProjectManagementFinancials";
-import ProjectManagementMilestones from "../pages/projectManagement/ProjectManagementMilestones";
-import ProjectManagementDocuments from "../pages/projectManagement/ProjectManagementDocuments";
-import Settings from "../pages/Settings";
-import Profile from "../pages/Profile";
-import Login from "../pages/Login";
-import CreateAccount from "../pages/CreateAccount";
-import SsoCallback from "../pages/SsoCallback";
-import PasswordReset from "../pages/PasswordReset";
-import AuthEntry from "../components/auth/AuthEntry";
+import { lazy, Suspense } from "react";
 
-import EditItems from "../components/inventory/EditItems";
-import CreateVendors from "../components/inventory/CreateVendors";
-import CreateProjects from "../components/inventory/CreateProjects";
-import CreateProduct from "../components/inventory/CreateProduct";
-import ReceiveGoods from "../components/inventory/ReceiveGoods";
-import DeliveryChallan from "../components/inventory/DeliveryChallan";
-import Product from "../components/inventory/Product";
-
-import Cart from "../components/inventory/Cart";
-import Boq from "../components/inventory/Boq";
-import PartyDetails from "../components/inventory/PartyDetails";
-import Vendors from "../components/inventory/Vendors";
-import Customers from "../components/inventory/Customers";
-import Locations from "../components/inventory/Locations";
-import PurchaseOrder from "../components/inventory/PurchaseOrder";
-import PurchaseOrderRegister from "../components/inventory/PurchaseOrderRegister";
-import Invoice from "../components/inventory/Invoice";
-import Invoices from "../components/inventory/Invoices";
-import ReceiveGoodsRegister from "../components/inventory/ReceiveGoodsRegister";
-import Consumption from "../components/inventory/Consumption";
-import BoqDetail from "../components/inventory/BoqDetail";
-import ReportsPage from "../components/inventory/ReportsPage";
+const lazyPage = (loader) => lazy(loader);
+const Layout = lazyPage(() => import("../components/layout/Layout"));
+const MainLayout = lazyPage(() => import("../layouts/MainLayout"));
+const ProtectedRoute = lazyPage(() => import("../components/auth/ProtectedRoute"));
+const Dashboard = lazyPage(() => import("../pages/Dashboard"));
+const InventoryHome = lazyPage(() => import("../pages/InventoryHome"));
+const ProjectsHome = lazyPage(() => import("../pages/ProjectsHome"));
+const ToolsHome = lazyPage(() => import("../pages/ToolsHome"));
+const ToolsAddTool = lazyPage(() => import("../pages/ToolsAddTool"));
+const ToolsAssignTool = lazyPage(() => import("../pages/ToolsAssignTool"));
+const ToolsAnalytics = lazyPage(() => import("../pages/ToolsAnalytics"));
+const ToolsMaintenance = lazyPage(() => import("../pages/ToolsMaintenance"));
+const ToolsAssignments = lazyPage(() => import("../pages/ToolsAssignments"));
+const ToolsCategories = lazyPage(() => import("../pages/ToolsCategories"));
+const ToolsHistory = lazyPage(() => import("../pages/ToolsHistory"));
+const ToolsBulkImport = lazyPage(() => import("../pages/ToolsBulkImport"));
+const ToolsHandoverTool = lazyPage(() => import("../pages/ToolsHandoverTool"));
+const ToolsMap = lazyPage(() => import("../pages/ToolsMap"));
+const HrmsPlaceholder = lazyPage(() => import("../pages/HrmsPlaceholder"));
+const ProjectDashboard = lazyPage(() => import("../pages/projectManagement/ProjectDashboard"));
+const ProjectManagementProjects = lazyPage(() => import("../pages/projectManagement/ProjectManagementProjects"));
+const ProjectManagementTasks = lazyPage(() => import("../pages/projectManagement/ProjectManagementTasks"));
+const ProjectManagementTeamAllocation = lazyPage(() => import("../pages/projectManagement/ProjectManagementTeamAllocation"));
+const ProjectManagementSiteReports = lazyPage(() => import("../pages/projectManagement/ProjectManagementSiteReports"));
+const ProjectManagementInventoryAllocation = lazyPage(() => import("../pages/projectManagement/ProjectManagementInventoryAllocation"));
+const ProjectManagementPurchaseTracking = lazyPage(() => import("../pages/projectManagement/ProjectManagementPurchaseTracking"));
+const ProjectManagementFinancials = lazyPage(() => import("../pages/projectManagement/ProjectManagementFinancials"));
+const ProjectManagementMilestones = lazyPage(() => import("../pages/projectManagement/ProjectManagementMilestones"));
+const ProjectManagementDocuments = lazyPage(() => import("../pages/projectManagement/ProjectManagementDocuments"));
+const Settings = lazyPage(() => import("../pages/Settings"));
+const Profile = lazyPage(() => import("../pages/Profile"));
+const Login = lazyPage(() => import("../pages/Login"));
+const AuthEntry = lazyPage(() => import("../components/auth/AuthEntry"));
+const CreateAccount = lazyPage(() => import("../pages/CreateAccount"));
+const SsoCallback = lazyPage(() => import("../pages/SsoCallback"));
+const PasswordReset = lazyPage(() => import("../pages/PasswordReset"));
+const EditItems = lazyPage(() => import("../components/inventory/EditItems"));
+const CreateVendors = lazyPage(() => import("../components/inventory/CreateVendors"));
+const CreateProjects = lazyPage(() => import("../components/inventory/CreateProjects"));
+const CreateProduct = lazyPage(() => import("../components/inventory/CreateProduct"));
+const ReceiveGoods = lazyPage(() => import("../components/inventory/ReceiveGoods"));
+const DeliveryChallan = lazyPage(() => import("../components/inventory/DeliveryChallan"));
+const Product = lazyPage(() => import("../components/inventory/Product"));
+const Cart = lazyPage(() => import("../components/inventory/Cart"));
+const Boq = lazyPage(() => import("../components/inventory/Boq"));
+const PartyDetails = lazyPage(() => import("../components/inventory/PartyDetails"));
+const Vendors = lazyPage(() => import("../components/inventory/Vendors"));
+const Customers = lazyPage(() => import("../components/inventory/Customers"));
+const Locations = lazyPage(() => import("../components/inventory/Locations"));
+const PurchaseOrder = lazyPage(() => import("../components/inventory/PurchaseOrder"));
+const PurchaseOrderRegister = lazyPage(() => import("../components/inventory/PurchaseOrderRegister"));
+const Invoice = lazyPage(() => import("../components/inventory/Invoice"));
+const Invoices = lazyPage(() => import("../components/inventory/Invoices"));
+const ReceiveGoodsRegister = lazyPage(() => import("../components/inventory/ReceiveGoodsRegister"));
+const Consumption = lazyPage(() => import("../components/inventory/Consumption"));
+const BoqDetail = lazyPage(() => import("../components/inventory/BoqDetail"));
+const ReportsPage = lazyPage(() => import("../components/inventory/ReportsPage"));
 
 const HRMS_PAGE_ROUTES = [
   { path: "/dashboard", page: "dashboard" },
@@ -77,7 +79,7 @@ const HRMS_PAGE_ROUTES = [
   { path: "/relieving", page: "relieving" },
   { path: "/relieving/exit-request", page: "relieving" },
   { path: "/relieving/final-settlement", page: "relieving" },
-  { path: "/relieving/letters", page: "relieving" },
+  { path: "/relieving/letters", page: "relieving-letters" },
   { path: "/search", page: "search" },
   { path: "/reports", page: "reports" },
   { path: "/permissions", page: "permissions" },
@@ -96,7 +98,7 @@ const HRMS_PAGE_ROUTES = [
   { path: "/hrms/payroll/payslip", page: "payslip" },
   { path: "/hrms/relieving/exit-request", page: "relieving" },
   { path: "/hrms/relieving/final-settlement", page: "relieving" },
-  { path: "/hrms/relieving/letters", page: "relieving" },
+  { path: "/hrms/relieving/letters", page: "relieving-letters" },
   { path: "/hrms/search", page: "search" },
   { path: "/hrms/reports", page: "reports" },
   { path: "/hrms/permissions", page: "permissions" },
@@ -104,16 +106,18 @@ const HRMS_PAGE_ROUTES = [
 
 const AppRoutes = () => {
   return (
-    <Routes>
+    <Suspense fallback={<div className="min-h-screen bg-slate-50 p-8 text-sm text-slate-600" role="status">Loading workspace…</div>}>
+      <Routes>
       <Route path="/login" element={<AuthEntry><Login /></AuthEntry>} />
       <Route path="/create-account" element={<AuthEntry><CreateAccount /></AuthEntry>} />
       <Route path="/forgot-password" element={<AuthEntry><PasswordReset requestOnly /></AuthEntry>} />
       <Route path="/reset-password" element={<AuthEntry><PasswordReset /></AuthEntry>} />
       <Route path="/auth/sso/callback" element={<AuthEntry><SsoCallback /></AuthEntry>} />
-      <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
-      </Route>
-      <Route element={<MainLayout />}>
+      <Route element={<ProtectedRoute />}>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Dashboard />} />
+        </Route>
+        <Route element={<MainLayout />}>
         <Route path="/inventory" element={<InventoryHome />} />
         <Route
           path="/inventory/material-planning"
@@ -251,9 +255,12 @@ const AppRoutes = () => {
         <Route path="/inventory/cart" element={<Cart />} />
         <Route path="/account" element={<Profile />} />
         <Route path="/profile" element={<Profile />} />
-        <Route path="/settings" element={<Settings />} />
+          <Route path="/settings" element={<Settings />} />
+        </Route>
       </Route>
-    </Routes>
+      <Route path="*" element={<Navigate replace to="/" />} />
+      </Routes>
+    </Suspense>
   );
 };
 

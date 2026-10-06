@@ -21,6 +21,9 @@ test("temporary authentication bypass and restoration", async (t) => {
       query: async (query) => {
         queries.push(query);
         if (databaseFailure) throw new Error("Database offline");
+        if (query.includes("SELECT name FROM sys.tables")) {
+          return { recordset: ["AppUsers", "AppSessions", "WebAuthnCredentials", "AuthChallenges"].map((name) => ({ name })) };
+        }
         return { recordset: query.includes("SELECT TOP 1 u.*") ? [{
           UserId: 42, FullName: "Test Admin", Email: "admin@example.test",
           RoleName: "Admin", IsActive: true, AccountStatus: "Active",
@@ -57,6 +60,7 @@ test("temporary authentication bypass and restoration", async (t) => {
     assert.equal(checks, 2);
   }
   assert.equal(queries.some((query) => query.includes("SET LastSeenAt=")), false);
+  assert.equal(queries.some((query) => /CREATE TABLE|ALTER TABLE/.test(query)), false);
 
   databaseFailure = true;
   const failed = response();

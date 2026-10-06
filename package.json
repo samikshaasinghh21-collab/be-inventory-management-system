@@ -8,6 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "node --test backend/tests/*.test.js",
+    "db:migrate": "node backend/scripts/migrate.mjs",
+    "ci": "npm run lint && npm test && npm run build",
     "test:ui": "node scripts/ui-interactions.mjs",
     "test:ui:routes": "node scripts/ui-route-check.mjs",
     "check:ui": "node scripts/audit-ui.mjs",

@@ -12,6 +12,12 @@ dist
 dist-ssr
 artifacts/ui-review/
 *.local
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
 
 # Editor directories and files
 .vscode/*

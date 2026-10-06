@@ -110,5 +110,22 @@ export const deleteVendor = async (id) => {
 };
 
 export const syncVendorsCache = (vendors) => {
-  localStorage.setItem("vendors", JSON.stringify(vendors));
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  // Uploaded documents can contain base64 data and quickly exceed the small
+  // localStorage quota. The API remains the source of truth, so keep the cache
+  // lightweight and never let a cache failure break the page that fetched it.
+  const cacheableVendors = (Array.isArray(vendors) ? vendors : []).map(
+    ({ documents: _documents, Documents: _legacyDocuments, ...vendor }) => vendor
+  );
+
+  try {
+    window.localStorage.setItem("vendors", JSON.stringify(cacheableVendors));
+    return true;
+  } catch (error) {
+    console.warn("Unable to cache vendors in localStorage:", error);
+    return false;
+  }
 };

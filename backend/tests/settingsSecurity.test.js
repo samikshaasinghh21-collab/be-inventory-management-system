@@ -16,7 +16,7 @@ test("predefined role permissions preserve administration boundaries", () => {
 });
 
 test("permission definitions are returned as immutable predefined values", () => {
-  assert.deepEqual(permissionsForRole("Storekeeper"), ["documents.view", "inventory.manage"]);
+  assert.deepEqual(permissionsForRole("Storekeeper"), ["documents.view", "inventory.view", "inventory.manage", "procurement.view"]);
   assert.deepEqual(permissionsForRole("unknown"), permissionsForRole("Viewer"));
 });
 

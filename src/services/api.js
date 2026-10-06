@@ -183,6 +183,7 @@ export const ensureApiAvailable = async ({ force = false } = {}) => {
 const api = axios.create({
   baseURL: activeApiBaseUrl,
   withCredentials: true,
+  timeout: 30_000,
 });
 
 const readCookie = (name) => {

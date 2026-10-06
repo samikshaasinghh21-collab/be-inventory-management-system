@@ -1,3 +1,5 @@
+import { hydrateWorkspaceData, persistWorkspaceData } from "./workspaceDataApi";
+
 const TOOL_STORAGE_KEY = "tools";
 const ASSIGNMENT_STORAGE_KEY = "toolAssignments";
 const MAINTENANCE_STORAGE_KEY = "toolMaintenance";
@@ -157,6 +159,20 @@ const writeList = (key, list) => {
     return;
   }
   localStorage.setItem(key, JSON.stringify(Array.isArray(list) ? list : []));
+  const serverKey = {
+    [TOOL_STORAGE_KEY]: "tools",
+    [ASSIGNMENT_STORAGE_KEY]: "tool-assignments",
+    [MAINTENANCE_STORAGE_KEY]: "tool-maintenance",
+  }[key];
+  if (serverKey) persistWorkspaceData(serverKey, Array.isArray(list) ? list : []);
+};
+
+const hydrateList = (storageKey, serverKey) => {
+  const current = readList(storageKey);
+  hydrateWorkspaceData(serverKey, current, (value) => {
+    localStorage.setItem(storageKey, JSON.stringify(Array.isArray(value) ? value : []));
+    window.dispatchEvent(new Event("tools:changed"));
+  });
 };
 
 const ensureSeeded = () => {
@@ -193,6 +209,7 @@ const ensureSeeded = () => {
 
 export const getTools = () => {
   ensureSeeded();
+  hydrateList(TOOL_STORAGE_KEY, "tools");
   return readList(TOOL_STORAGE_KEY);
 };
 
@@ -213,6 +230,7 @@ export const generateNextToolId = (tools = []) => {
 
 export const getToolAssignments = () => {
   ensureSeeded();
+  hydrateList(ASSIGNMENT_STORAGE_KEY, "tool-assignments");
   return readList(ASSIGNMENT_STORAGE_KEY);
 };
 
@@ -222,6 +240,7 @@ export const setToolAssignments = (assignments) => {
 
 export const getToolMaintenance = () => {
   ensureSeeded();
+  hydrateList(MAINTENANCE_STORAGE_KEY, "tool-maintenance");
   return readList(MAINTENANCE_STORAGE_KEY);
 };
 

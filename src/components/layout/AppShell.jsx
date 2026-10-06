@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { getSettings, hydrateSettings } from "../../services/settingsStore";
-import { loadCurrentUser } from "../../services/authService";
+import { getCurrentUser, loadCurrentUser } from "../../services/authService";
 import { isApiUnavailableError } from "../../services/api";
 import AppHeader from "./AppHeader";
 import Sidebar from "./Sidebar";
@@ -102,7 +102,7 @@ const AppShell = ({ children }) => {
     window.addEventListener("auth:expired", handleExpiredSession);
     const initializeShell = async () => {
       try {
-        const user = await loadCurrentUser();
+        const user = getCurrentUser() || await loadCurrentUser();
         if (!active) return;
         if (!user) {
           window.location.assign("/login");

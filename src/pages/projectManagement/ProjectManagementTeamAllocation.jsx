@@ -1,4 +1,5 @@
 import StatusBadge from "../../components/common/StatusBadge";
+import { currentHrmsEmployees } from "../../utils/hrmsEmployeeVisibility";
 import { PageHeader, MetricCard as SharedMetricCard } from "../../components/ui";
 import "../../styles/projects.css";
 import { createElement, useEffect, useMemo, useState } from "react";
@@ -344,7 +345,7 @@ const ProjectManagementTeamAllocation = () => {
       try {
         const response = await fetchAllHrmsEmployees();
         if (!cancelled) {
-          setEmployees(Array.isArray(response) ? response : []);
+          setEmployees(currentHrmsEmployees(Array.isArray(response) ? response : []));
           setEmployeeLoadError("");
         }
       } catch (loadError) {

@@ -1,4 +1,3 @@
-/* global Buffer, process */
 import express from "express";
 import fs from "fs/promises";
 import multer from "multer";
@@ -44,6 +43,12 @@ export const ensureProjectManagementSchema = async () => {
   if (!schemaPromise) {
     schemaPromise = (async () => {
       const pool = await getPool();
+      if (process.env.NODE_ENV === "production") {
+        const required = ["ProjectTasks", "ProjectMilestones", "ProjectDocuments", "DailySiteReports", "ProjectModuleRecords"];
+        const result = await pool.request().query(`SELECT name FROM sys.tables WHERE name IN (${required.map((name) => `N'${name}'`).join(",")})`);
+        if (result.recordset.length !== required.length) throw new Error("Project-management migrations are required");
+        return;
+      }
       for (const fileName of [
         "004-project-management.sql",
         "007-project-management-modules.sql",

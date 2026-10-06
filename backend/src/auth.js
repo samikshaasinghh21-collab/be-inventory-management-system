@@ -1,4 +1,3 @@
-/* global process */
 import argon2 from "argon2";
 import bcrypt from "bcryptjs";
 import { Buffer } from "node:buffer";
@@ -24,17 +23,19 @@ export const ROLE_PERMISSIONS = Object.freeze({
     "documents.view", "documents.support.upload", "drawings.create", "drawings.edit",
     "drawings.delete.any", "drawings.approve", "tasks.manage", "reports.manage",
     "reports.approve", "purchase_orders.override_closed", "inventory.manage",
-    "procurement.manage",
+    "procurement.view", "procurement.manage", "inventory.view", "hrms.view",
+    "hrms.manage", "finance.view", "finance.manage",
   ],
   Manager: [
     "documents.view", "drawings.create", "drawings.edit", "drawings.delete.own",
     "drawings.approve", "tasks.manage", "reports.manage", "reports.approve",
+    "inventory.view", "hrms.view",
   ],
-  Engineer: ["documents.view", "documents.support.upload", "tasks.update.assigned"],
-  Storekeeper: ["documents.view", "inventory.manage"],
-  "Purchase Executive": ["documents.view", "procurement.manage"],
-  "Project User": ["documents.view", "tasks.update.assigned"],
-  Viewer: ["documents.view"],
+  Engineer: ["documents.view", "documents.support.upload", "tasks.update.assigned", "inventory.view"],
+  Storekeeper: ["documents.view", "inventory.view", "inventory.manage", "procurement.view"],
+  "Purchase Executive": ["documents.view", "inventory.view", "procurement.view", "procurement.manage", "finance.view", "finance.manage"],
+  "Project User": ["documents.view", "tasks.update.assigned", "inventory.view"],
+  Viewer: ["documents.view", "inventory.view"],
 });
 export const ROLE_NAMES = Object.freeze(Object.keys(ROLE_PERMISSIONS));
 
@@ -198,6 +199,14 @@ export const ensureAuthSchema = async () => {
   validateProductionConfig();
   if (!schemaPromise) schemaPromise = (async () => {
     const pool = await getPool();
+    if (isProduction()) {
+      const result = await pool.request().query(`
+        SELECT name FROM sys.tables
+        WHERE name IN (N'AppUsers',N'AppSessions',N'WebAuthnCredentials',N'AuthChallenges')
+      `);
+      if (result.recordset.length !== 4) throw new Error("Authentication migrations are required");
+      return;
+    }
     await pool.request().query(baseSchemaSql);
     const secureDataStart = secureSchemaSql.indexOf("UPDATE dbo.AppSessions");
     await pool.request().query(secureSchemaSql.slice(0, secureDataStart));
@@ -416,8 +425,8 @@ const requestOriginAllowed = (req) => {
 
 export const authenticate = async (req, res, next) => {
   try {
-    await ensureAuthSchema();
     if (authenticationDisabled()) {
+      await ensureAuthSchema();
       const pool = await getPool();
       const configuredEmail = cleanEmail(env("SUPER_ADMIN_EMAIL", env("ADMIN_EMAIL")));
       const result = await pool.request().input("Email", sql.NVarChar(320), configuredEmail).query(`
@@ -444,6 +453,7 @@ export const authenticate = async (req, res, next) => {
     }
     const token = req.cookies?.[sessionCookie()];
     if (!token) return res.status(401).json({ ok: false, code: "AUTH_REQUIRED", error: "Authentication required" });
+    await ensureAuthSchema();
     const row = await loadSessionByToken(token);
     const now = new Date();
     const policy = json(row?.SecurityPolicyJson);

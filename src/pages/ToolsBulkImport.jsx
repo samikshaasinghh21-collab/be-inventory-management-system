@@ -55,7 +55,7 @@ export default function ToolsBulkImport() {
   return <div className="space-y-5"><InventoryPageHeader title="Import tools" description="Upload a CSV, review each record, and add validated tools to the register." actions={<Button variant="secondary" onClick={downloadTemplate}><Download size={16} />Download template</Button>} />
     <Card title="Upload a tool register" description="Required columns: name, type, serialNumber. Optional: baseLocation, notes.">
       <div className="inventory-upload-area"><Upload size={22} /><div><strong>Select a CSV file</strong><p>Up to 1,000 tools · maximum 2 MB · unique serial numbers</p></div><input aria-label="Upload tool CSV" type="file" accept=".csv,text/csv" disabled={busy} onChange={readFile} /></div>
-      <p className="mt-3 text-xs text-slate-500">Tools are stored in this browser, using the same storage as the tool register. Existing records are preserved.</p>
+      <p className="mt-3 text-xs text-slate-500">Tools are saved to the shared workspace register. A local cache keeps the screen responsive if the connection is interrupted.</p>
       {error && <p role="alert" className="mt-4 text-sm text-red-700">{error}</p>}
     </Card>
     <Card title={fileName || "Import preview"} description={rows.length ? rows.length + " rows · " + invalid + " need attention" : "Review the file before importing."} action={rows.length > 0 && <Button disabled={busy || invalid > 0} onClick={importRows}>Import {rows.length} tools</Button>}>

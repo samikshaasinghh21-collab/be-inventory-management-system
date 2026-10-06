@@ -1,4 +1,5 @@
 import StatusBadge from "../../components/common/StatusBadge";
+import { currentHrmsEmployees } from "../../utils/hrmsEmployeeVisibility";
 import { toast } from "../../utils/toast";
 import { PageHeader, MetricCard as SharedMetricCard } from "../../components/ui";
 import "../../styles/projects.css";
@@ -3726,7 +3727,7 @@ const ProjectManagementProjects = () => {
           fetchLocations(),
         ]);
         setCustomers(Array.isArray(customerList) ? customerList : []);
-        setEmployees(Array.isArray(employeeResponse?.employees) ? employeeResponse.employees : []);
+        setEmployees(currentHrmsEmployees(Array.isArray(employeeResponse?.employees) ? employeeResponse.employees : []));
         setLocations(Array.isArray(locationList) ? locationList : []);
       } catch (error) {
         console.error("Failed to load project management master data", error);

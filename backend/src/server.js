@@ -24,6 +24,10 @@ import {
 } from "./projectManagement.js";
 import { createSettingsAdminRouter } from "./settingsAdmin.js";
 import { isAllowedOrigin } from "./corsConfig.js";
+import { authorizeApiRequest } from "./apiAccess.js";
+import { sanitizeErrorResponses } from "./errorResponse.js";
+import { createWorkspaceDataRouter } from "./workspaceData.js";
+import { optionalPagination } from "./pagination.js";
 import version from "../../scripts/getVersion.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +43,7 @@ loadEnv(path.resolve(__dirname, "../../../backend/.env"));
 
 const app = express();
 const port = Number.parseInt(process.env.PORT ?? "5000", 10);
+const runtimeSchemaUpdatesEnabled = process.env.NODE_ENV !== "production";
 process.env.APP_VERSION = process.env.APP_VERSION || version;
 console.log(`Backend starting with app version: ${process.env.APP_VERSION}`);
 
@@ -60,7 +65,9 @@ app.use(cors({
   credentials: true,
 }));
 app.use(cookieParser());
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "5mb" }));
+app.use(sanitizeErrorResponses(process.env.NODE_ENV === "production"));
+app.use(optionalPagination);
 
 // Basic request logger to surface 2xx/4xx/5xx hits in the terminal
 app.use((req, res, next) => {
@@ -78,7 +85,13 @@ app.use((req, res, next) => {
 app.use("/api/auth", createAuthRouter());
 app.use("/api/settings", createSettingsAdminRouter());
 app.use("/api/project-management", createProjectManagementRouter());
-app.use(["/api/purchase-orders", "/api/receive-goods", "/api/goods-receipts"], authenticate, requireEnrollment);
+app.use(
+  "/api",
+  (req, res, next) => req.path === "/health" ? next() : authenticate(req, res, next),
+  (req, res, next) => req.path === "/health" ? next() : requireEnrollment(req, res, next),
+  (req, res, next) => req.path === "/health" ? next() : authorizeApiRequest(req, res, next)
+);
+app.use("/api/workspace-data", createWorkspaceDataRouter());
 
 const hasClosedMutationGrant = (req) =>
   hasPermission(req.user, "purchase_orders.override_closed") &&
@@ -3549,6 +3562,7 @@ const normalizeReceiveGoodsItemsInput = (items = []) =>
   );
 
 const ensureItemsTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   const pool = await getPool();
   await pool.request().query(`
     IF OBJECT_ID('dbo.Items', 'U') IS NULL
@@ -3666,6 +3680,7 @@ const ensureItemsTable = async () => {
 };
 
 const ensureBrandsTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   const pool = await getPool();
   await pool.request().query(`
     IF OBJECT_ID('dbo.Brands', 'U') IS NULL
@@ -3738,6 +3753,7 @@ const resolveOrCreateBrand = async (pool, brandName) => {
 };
 
 const ensureVendorsTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   const pool = await getPool();
   await pool.request().query(`
     IF OBJECT_ID('dbo.Vendors', 'U') IS NULL
@@ -3921,6 +3937,7 @@ const ensureVendorsTable = async () => {
 };
 
 const ensureCustomersTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureCustomersTable.promise) {
     return ensureCustomersTable.promise;
   }
@@ -4112,6 +4129,7 @@ const createTimingLogger = (label) => {
 ensureCustomersTable.promise = null;
 
 const ensureProjectsTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureProjectsTable.promise) {
     return ensureProjectsTable.promise;
   }
@@ -4270,6 +4288,7 @@ const ensureProjectsTable = async () => {
 ensureProjectsTable.promise = null;
 
 const ensureLocationsTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   const pool = await getPool();
   await pool.request().query(`
     IF OBJECT_ID('dbo.Locations', 'U') IS NULL
@@ -4339,6 +4358,7 @@ const ensureLocationsTable = async () => {
 let ensurePurchaseTablesPromise = null;
 
 const ensurePurchaseTables = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensurePurchaseTablesPromise) {
     return ensurePurchaseTablesPromise;
   }
@@ -6152,6 +6172,7 @@ const writeReceiveAuditLog = async (
 let ensureReceiveTablesPromise = null;
 
 const ensureReceiveTables = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureReceiveTablesPromise) {
     return ensureReceiveTablesPromise;
   }
@@ -6554,6 +6575,7 @@ const ensureReceiveTables = async () => {
 let ensureBoqTablesPromise = null;
 
 const ensureBoqTables = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureBoqTablesPromise) {
     return ensureBoqTablesPromise;
   }
@@ -7625,6 +7647,7 @@ const refreshDeliveryChallanItemsFk = async () => {
 };
 
 const ensureDeliveryChallanTables = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureDeliveryChallanTablesPromise) {
     return ensureDeliveryChallanTablesPromise;
   }
@@ -8141,6 +8164,7 @@ const refreshConsumptionItemsFk = async () => {
 };
 
 const ensureConsumptionTables = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureConsumptionTablesPromise) {
     return ensureConsumptionTablesPromise;
   }
@@ -8958,6 +8982,7 @@ const refreshReallocateInventoryItemsFk = async () => {
 };
 
 const ensureReallocateInventoryTables = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureReallocateInventoryTablesPromise) {
     return ensureReallocateInventoryTablesPromise;
   }
@@ -11376,6 +11401,7 @@ const normalizeHrmsOptionalDecimal = (value) => {
 };
 
 const ensureHrmsEmployeesTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureHrmsEmployeesTablePromise) {
     return ensureHrmsEmployeesTablePromise;
   }
@@ -11914,6 +11940,7 @@ const getNextHrmsEmployeeId = async (source) => {
 let ensureHrmsReviewsTablePromise = null;
 
 const ensureHrmsReviewsTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureHrmsReviewsTablePromise) {
     return ensureHrmsReviewsTablePromise;
   }
@@ -12170,6 +12197,7 @@ app.post("/api/hrms/reviews", async (req, res) => {
 let ensureHrmsSalaryReassessmentsTablePromise = null;
 
 const ensureHrmsSalaryReassessmentsTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureHrmsSalaryReassessmentsTablePromise) {
     return ensureHrmsSalaryReassessmentsTablePromise;
   }
@@ -12940,6 +12968,7 @@ app.delete("/api/hrms/salary-reassessments/:id", async (req, res) => {
 let ensureHrmsAttendanceTablePromise = null;
 
 const ensureHrmsAttendanceTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureHrmsAttendanceTablePromise) {
     return ensureHrmsAttendanceTablePromise;
   }
@@ -13195,6 +13224,7 @@ app.post("/api/hrms/attendance", async (req, res) => {
 let ensureHrmsSalariesTablePromise = null;
 
 const ensureHrmsSalariesTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureHrmsSalariesTablePromise) {
     return ensureHrmsSalariesTablePromise;
   }
@@ -13741,6 +13771,7 @@ app.delete("/api/hrms/salaries", async (req, res) => {
 let ensureHrmsRelievingTablePromise = null;
 
 const ensureHrmsRelievingTable = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureHrmsRelievingTablePromise) {
     return ensureHrmsRelievingTablePromise;
   }
@@ -14537,7 +14568,7 @@ app.get("/api/health", async (_req, res) => {
       api: "up",
       db: "disconnected",
       code: "DB_UNAVAILABLE",
-      error: error?.message ?? "Unknown database error",
+      error: "Database connection is unavailable",
     });
   }
 });
@@ -17465,6 +17496,7 @@ app.delete("/api/purchase-orders/:id", async (req, res) => {
 let ensureInvoicesTablesPromise = null;
 
 const ensureInvoicesTables = async () => {
+  if (!runtimeSchemaUpdatesEnabled) return;
   if (ensureInvoicesTablesPromise) {
     return ensureInvoicesTablesPromise;
   }
@@ -19907,7 +19939,6 @@ app.get("/api/delivery-challans/lookup", async (req, res) => {
 });
 
 app.get("/api/delivery-challans/:id", async (req, res) => {
-  console.log("Matched /api/delivery-challans/:id with params:", req.params);
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) {
     return res.status(400).json({ ok: false, error: "Invalid delivery challan id" });
@@ -21404,8 +21435,9 @@ app.delete("/api/delivery-challans/:id", async (req, res) => {
   }
 });
 
-app.get("/api/delivery-challans/:id", async (req, res) => {
-  console.log("Matched /api/delivery-challans/:id with params:", req.params);
+// Kept temporarily for clients that depended on the older expanded response.
+// The distinct path prevents this handler from being shadowed by the canonical route above.
+app.get("/api/delivery-challans/:id/legacy-details", async (req, res) => {
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) {
     return res.status(400).json({ ok: false, error: "Invalid delivery challan id" });
@@ -23387,7 +23419,7 @@ app.delete("/api/reallocate-inventory/:id", async (req, res) => {
   }
 });
 
-app.use((req, res) => {
+app.use("/api", (req, res) => {
   res.status(404).json({
     ok: false,
     code: "NOT_FOUND",
@@ -23395,6 +23427,15 @@ app.use((req, res) => {
     path: req.path,
   });
 });
+
+if (process.env.NODE_ENV === "production") {
+  const frontendDirectory = path.resolve(__dirname, "../../dist");
+  app.use(express.static(frontendDirectory, { index: false, maxAge: "1d" }));
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || !req.accepts("html")) return next();
+    return res.sendFile(path.join(frontendDirectory, "index.html"));
+  });
+}
 
 app.use((err, _req, res, _next) => {
   void _next;
@@ -23435,23 +23476,48 @@ const warmupSchema = async ({ fatal = false } = {}) => {
   }
 };
 
+const verifyProductionSchema = async () => {
+  const requiredTables = [
+    "AppUsers", "AppSessions", "Items", "Vendors", "Customers", "Projects",
+    "Locations", "PurchaseOrders", "ReceiveGoods", "DeliveryChallan",
+    "Consumption", "WorkspaceData", "SchemaMigrations",
+  ];
+  const request = (await getPool()).request();
+  const parameters = requiredTables.map((name, index) => {
+    request.input(`RequiredTable${index}`, sql.NVarChar(128), name);
+    return `@RequiredTable${index}`;
+  });
+  const result = await request.query(`
+    SELECT name FROM sys.tables WHERE name IN (${parameters.join(",")})
+  `);
+  const existing = new Set(result.recordset.map((row) => row.name));
+  const missing = requiredTables.filter((name) => !existing.has(name));
+  if (missing.length) {
+    throw new Error(`Database migrations are required. Missing tables: ${missing.join(", ")}`);
+  }
+};
+
 if (process.env.NODE_ENV === "production") {
-  await warmupSchema({ fatal: true });
+  await verifyProductionSchema();
 }
 
-app.listen(port, () => {
-  const localUrl = `http://localhost:${port}/api`;
-  console.log(`API server running on ${localUrl}`);
+export { app };
 
-  const lanAddresses = getLanAddresses();
-  if (lanAddresses.length > 0) {
-    console.log("LAN URLs:");
-    lanAddresses.forEach((address) => {
-      console.log(`  http://${address}:${port}/api`);
-    });
-  }
+if (process.env.NODE_ENV !== "test") {
+  app.listen(port, () => {
+    const localUrl = `http://localhost:${port}/api`;
+    console.log(`API server running on ${localUrl}`);
 
-  if (process.env.NODE_ENV !== "production") {
-    void warmupSchema();
-  }
-});
+    const lanAddresses = getLanAddresses();
+    if (lanAddresses.length > 0) {
+      console.log("LAN URLs:");
+      lanAddresses.forEach((address) => {
+        console.log(`  http://${address}:${port}/api`);
+      });
+    }
+
+    if (process.env.NODE_ENV !== "production") {
+      void warmupSchema();
+    }
+  });
+}

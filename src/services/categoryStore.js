@@ -1,4 +1,7 @@
+import { hydrateWorkspaceData, persistWorkspaceData } from "./workspaceDataApi";
+
 const CATEGORY_STORAGE_KEY = "productCategories";
+const SERVER_KEY = "product-categories";
 
 const DEFAULT_CATEGORIES = [
   "Networking",
@@ -32,6 +35,10 @@ export const getCategories = () => {
     const stored = JSON.parse(
       localStorage.getItem(CATEGORY_STORAGE_KEY) || "[]"
     );
+    hydrateWorkspaceData(SERVER_KEY, stored, (value) => {
+      localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(Array.isArray(value) ? value : []));
+      emitChange();
+    });
     const merged = [
       ...DEFAULT_CATEGORIES,
       ...(Array.isArray(stored) ? stored : []),
@@ -62,6 +69,7 @@ export const addCategory = (name) => {
   const stored = JSON.parse(localStorage.getItem(CATEGORY_STORAGE_KEY) || "[]");
   const nextCustom = Array.isArray(stored) ? [...stored, value] : [value];
   localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(nextCustom));
+  persistWorkspaceData(SERVER_KEY, nextCustom);
   emitChange();
 
   return dedupe([...categories, value]);
@@ -69,6 +77,7 @@ export const addCategory = (name) => {
 
 export const resetCategories = () => {
   localStorage.removeItem(CATEGORY_STORAGE_KEY);
+  persistWorkspaceData(SERVER_KEY, []);
   emitChange();
   return DEFAULT_CATEGORIES;
 };

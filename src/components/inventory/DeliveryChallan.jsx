@@ -1216,7 +1216,10 @@ const DeliveryChallan = () => {
 
   const getRemainingReceiptItemQty = useCallback((item = {}) => {
     const receiptQty = getReceiptItemReceivedQty(item);
-    const hintedAvailableQty = getReceiptItemAvailableQty(item);
+    const consumedQty = Math.max(
+      Number(item.consumedQty ?? item.ConsumedQty ?? 0) || 0,
+      0
+    );
     const receiptItemId = Number.parseInt(
       item.receiveGoodsItemId ?? item.ReceiveGoodsItemId ?? item.id ?? "",
       10
@@ -1225,8 +1228,10 @@ const DeliveryChallan = () => {
       Number.isFinite(receiptItemId) && receiptItemId > 0
         ? deliveredQtyByReceiptItem.get(receiptItemId) ?? 0
         : 0;
-    const remainingFromHistory = Math.max(receiptQty - alreadyDelivered, 0);
-    return Math.max(0, Math.min(hintedAvailableQty, remainingFromHistory));
+    // Derive availability from the quantity registered on this receipt. The
+    // API's availability hint can be stale (notably zero immediately after a
+    // receipt is saved), which previously hid otherwise dispatchable items.
+    return Math.max(receiptQty - consumedQty - alreadyDelivered, 0);
   }, [deliveredQtyByReceiptItem]);
 
   const selectedReceiptItems = useMemo(() => {
@@ -1636,10 +1641,18 @@ const DeliveryChallan = () => {
   }, [editingId, hydrateEditableChallanItems, receipts.length]);
 
   const handleDelete = async (id) => {
+    setReceiptError("");
     try {
       await deleteDeliveryChallan(id);
       await loadRecords();
+      setUpdateProof("Delivery challan deleted successfully.");
     } catch (error) {
+      const apiErrorMessage =
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to delete delivery challan.";
+      setReceiptError(apiErrorMessage);
       console.error("Failed to delete delivery challan:", error);
     }
   };
