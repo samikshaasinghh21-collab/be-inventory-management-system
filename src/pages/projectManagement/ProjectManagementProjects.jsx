@@ -888,9 +888,10 @@ const Field = ({ label, required, error, children, className = "" }) => (
   </label>
 );
 
-const SelectField = ({ value, onChange, children }) => (
+const SelectField = ({ value, onChange, children, ...rest }) => (
   <div className="relative">
     <select
+      {...rest}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       className={selectClass}
@@ -1033,6 +1034,10 @@ const ProjectFormModal = ({
         (inventoryProject) =>
           String(inventoryProject.id) === String(inventoryProjectId)
       ) || null;
+    if (!selectedProject) {
+      updateField("inventoryProjectId", "");
+      return;
+    }
     const selectedCustomer = selectedProject
       ? customers.find(
           (customer) =>
@@ -1207,17 +1212,17 @@ const ProjectFormModal = ({
                   subtitle="Core project identity, customer, category, priority, and status."
                 />
                 <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="Project Name" required error={errors.name}>
-                    {mode === "create" ? (
-                      <>
+                  {mode === "create" ? (
+                    <Field label="Inventory Project (optional)">
                         <SelectField
+                          aria-label="Inventory project (optional)"
                           value={form.inventoryProjectId}
                           onChange={updateInventoryProject}
                         >
                           <option value="">
                             {inventoryProjects.length
-                              ? "Select inventory project"
-                              : "No inventory projects available"}
+                              ? "None — create a new project"
+                              : "None — no inventory projects available"}
                           </option>
                           {inventoryProjectSelectOptions.map((option) => (
                             <option key={option.value} value={option.value}>
@@ -1230,9 +1235,11 @@ const ProjectFormModal = ({
                             {inventoryProjectsError}
                           </p>
                         ) : null}
-                      </>
-                    ) : (
+                    </Field>
+                  ) : null}
+                  <Field label="Project Name" required error={errors.name}>
                       <input
+                        aria-label="Project name"
                         value={form.name}
                         onChange={(event) =>
                           updateField("name", event.target.value.toUpperCase())
@@ -1240,7 +1247,6 @@ const ProjectFormModal = ({
                         className={inputClass}
                         placeholder="Ex: Metro control panel upgrade"
                       />
-                    )}
                   </Field>
                   <Field label="Project Code" required error={errors.code}>
                     <input

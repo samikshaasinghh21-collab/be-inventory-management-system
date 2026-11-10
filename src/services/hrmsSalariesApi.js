@@ -78,6 +78,8 @@ export const normalizeHrmsSalary = (record = {}) => {
   return {
     ...record,
     lopAmount, reimbursement,
+    workingDays: toOptionalNumber(record.workingDays ?? record.WorkingDays),
+    unpaidDays: toOptionalNumber(record.unpaidDays ?? record.UnpaidDays),
     id: String(record.id ?? record.Id ?? ""),
     employeeId,
     employeeName:

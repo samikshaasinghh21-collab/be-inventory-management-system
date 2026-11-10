@@ -1,6 +1,14 @@
 import api from "./api";
+import { createInFlightRequests } from "../../shared/inFlightRequests.js";
+
+const employeeRequests = createInFlightRequests();
+if (typeof window !== "undefined") {
+  window.addEventListener("auth:changed", employeeRequests.clear);
+  window.addEventListener("auth:expired", employeeRequests.clear);
+}
 
 const emitHrmsEmployeesChange = () => {
+  employeeRequests.clear();
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("hrms:employees:changed"));
   }
@@ -236,7 +244,9 @@ export const fetchHrmsEmployees = async (page = 1, pageSize = 50, filters = {}) 
       ...filters
     });
     
-    const response = await api.get(`/hrms/employees?${params}`);
+    params.sort();
+    const url = `/hrms/employees?${params}`;
+    const response = await employeeRequests.run(url, () => api.get(url));
     const { data } = response.data;
     
     if (data && data.data) {

@@ -11600,10 +11600,12 @@ const ensureHrmsEmployeesTable = async () => {
     `);
   })();
 
+  // Keep successful initialization so reads do not repeat DDL or sequence writes.
   try {
     await ensureHrmsEmployeesTablePromise;
-  } finally {
+  } catch (error) {
     ensureHrmsEmployeesTablePromise = null;
+    throw error;
   }
 };
 
@@ -11985,10 +11987,12 @@ const ensureHrmsReviewsTable = async () => {
     `);
   })();
 
+  // Keep successful initialization so reads do not repeat DDL or sequence writes.
   try {
     await ensureHrmsReviewsTablePromise;
-  } finally {
+  } catch (error) {
     ensureHrmsReviewsTablePromise = null;
+    throw error;
   }
 };
 
@@ -12313,10 +12317,12 @@ const ensureHrmsSalaryReassessmentsTable = async () => {
     `);
   })();
 
+  // Keep successful initialization so reads do not repeat DDL or sequence writes.
   try {
     await ensureHrmsSalaryReassessmentsTablePromise;
-  } finally {
+  } catch (error) {
     ensureHrmsSalaryReassessmentsTablePromise = null;
+    throw error;
   }
 };
 
@@ -12996,10 +13002,12 @@ const ensureHrmsAttendanceTable = async () => {
     `);
   })();
 
+  // Keep successful initialization so reads do not repeat DDL or sequence writes.
   try {
     await ensureHrmsAttendanceTablePromise;
-  } finally {
+  } catch (error) {
     ensureHrmsAttendanceTablePromise = null;
+    throw error;
   }
 };
 
@@ -13300,10 +13308,12 @@ const ensureHrmsSalariesTable = async () => {
 
   })();
 
+  // Keep successful initialization so reads do not repeat DDL or sequence writes.
   try {
     await ensureHrmsSalariesTablePromise;
-  } finally {
+  } catch (error) {
     ensureHrmsSalariesTablePromise = null;
+    throw error;
   }
 };
 
@@ -13803,10 +13813,12 @@ const ensureHrmsRelievingTable = async () => {
     `);
   })();
 
+  // Keep successful initialization so reads do not repeat DDL or sequence writes.
   try {
     await ensureHrmsRelievingTablePromise;
-  } finally {
+  } catch (error) {
     ensureHrmsRelievingTablePromise = null;
+    throw error;
   }
 };
 
@@ -23449,6 +23461,22 @@ app.use((err, _req, res, _next) => {
   });
 });
 
+const warmupHrmsSchema = async () => {
+  try {
+    await ensureHrmsEmployeesTable();
+    await Promise.all([
+      ensureHrmsReviewsTable(),
+      ensureHrmsSalaryReassessmentsTable(),
+      ensureHrmsAttendanceTable(),
+      ensureHrmsSalariesTable(),
+      ensureHrmsRelievingTable(),
+    ]);
+    console.log("HRMS schema warmup complete");
+  } catch (error) {
+    console.error("HRMS schema warmup failed:", error?.message ?? error);
+  }
+};
+
 const warmupSchema = async ({ fatal = false } = {}) => {
   try {
     await ensureAuthSchema();
@@ -23517,6 +23545,7 @@ if (process.env.NODE_ENV !== "test") {
     }
 
     if (process.env.NODE_ENV !== "production") {
+      void warmupHrmsSchema();
       void warmupSchema();
     }
   });

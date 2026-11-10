@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { attendanceStatuses, attendanceTotals } from '../../shared/attendance.js';
+import { attendanceDates, attendanceStatuses, attendanceTotals, formatAttendanceDate } from '../../shared/attendance.js';
 import { attendanceWorkbook } from '../../src/utils/attendanceExport.js';
 import { calculateLop } from '../../shared/payroll.js';
 
@@ -26,7 +26,22 @@ test('Excel round-trip preserves every employee, day and numeric totals', () => 
   const read = XLSX.read(bytes, {type:'buffer'});
   const rows = XLSX.utils.sheet_to_json(read.Sheets['Attendance Register'], {header:1});
   assert.equal(rows.length, 3); assert.equal(rows[1][0], '001');
-  assert.deepEqual(rows[1].slice(3,7), ['H','A','L','O']);
+  assert.deepEqual(rows[1].slice(3,8), [0.5,0,0,0,1]);
+  assert.equal(read.Sheets['Attendance Register'].D2.t, 'n');
+  assert.equal(read.Sheets['Attendance Register'].D1.t, 'n');
+  assert.equal(XLSX.utils.format_cell(read.Sheets['Attendance Register'].D1), '01/02/2026');
+  assert.equal(XLSX.utils.format_cell(read.Sheets['Attendance Register'].AE1), '28/02/2026');
+  assert.equal(rows[1].slice(3,31).reduce((sum, value) => sum + value, 0), rows[1].at(-2));
   assert.deepEqual(rows[1].slice(-8), [24,1,1,1,1,28,24.5,1.5]);
   assert.deepEqual(rows[2].slice(-8), [28,0,0,0,0,28,28,0]);
+});
+
+test('attendance dates include full calendar dates through the last day of the month', () => {
+  for (const [month, lastDay] of [['2026-02', '28'], ['2024-02', '29'], ['2026-04', '30'], ['2026-12', '31']]) {
+    const dates = attendanceDates(month);
+    assert.equal(dates[0], `${month}-01`);
+    assert.equal(dates.at(-1), `${month}-${lastDay}`);
+    assert.equal(dates.length, Number(lastDay));
+    assert.equal(formatAttendanceDate(dates[0]), `01/${month.slice(5)}/${month.slice(0,4)}`);
+  }
 });

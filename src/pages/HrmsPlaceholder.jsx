@@ -5851,9 +5851,10 @@ const PayrollPage = () => {
       employeeBreakup.tdsAmount
     );
     const attendanceRow = attendance.find((record) => record.employeeId === employee.id && areAttendanceMonthsEqual(record.month, month));
-    const workingDays = toSalaryNumber(edit.workingDays, attendanceRow ? getAttendanceDays(month).length - (attendanceRow.counts.O || 0) : 0);
+    const workingDays = toSalaryNumber(edit.workingDays, getAttendanceDays(month).length - (attendanceRow?.counts.O || 0));
     const unpaidDays = toSalaryNumber(edit.unpaidDays, attendanceRow ? attendanceRow.counts.A + attendanceRow.counts.H / 2 : 0);
-    const lopAmount = unpaidDays <= workingDays ? calculateLop(calculateMonthlySalary(salary), workingDays, unpaidDays) : 0;
+    const validLopDays = workingDays >= 0 && workingDays <= 31 && unpaidDays >= 0 && unpaidDays <= workingDays;
+    const lopAmount = validLopDays ? calculateLop(calculateMonthlySalary(salary), workingDays, unpaidDays) : 0;
     const reimbursement = toSalaryNumber(edit.reimbursement);
     const totalDeductions =
       lopAmount + rowDeduction + rowPfAmount + rowEsiAmount + rowProfessionalTax + rowTdsAmount;
@@ -5862,7 +5863,7 @@ const PayrollPage = () => {
 
     return {
       ...employee,
-      workingDays, unpaidDays, lopAmount, reimbursement,
+      workingDays, unpaidDays, validLopDays, lopAmount, reimbursement,
       salary,
       basicSalary: salary,
       grossSalary: salary,
@@ -5894,7 +5895,7 @@ const PayrollPage = () => {
     message ||
     (payrollState.loading ? "Loading payroll from HRMS database..." : "");
   const payrollNoticeTone =
-    payrollState.error || /^(Add|Could not|No salary)/.test(message)
+    payrollState.error || /^(Add|Could not|No salary|LOP days)/.test(message)
       ? "warning"
       : "success";
 
@@ -5931,7 +5932,7 @@ const PayrollPage = () => {
     setMessage("");
   };
   const savePayroll = async () => {
-    if (rows.some((row) => row.unpaidDays < 0 || row.workingDays < 0 || row.unpaidDays > row.workingDays)) { setMessage("Unpaid days must be between zero and working days."); return; }
+    if (rows.some((row) => !row.validLopDays)) { setMessage("LOP days must be between zero and applicable working days. Working days must be between zero and 31."); return; }
     if (!rows.length) {
       setMessage("Add employees before saving payroll.");
       return;
@@ -5992,6 +5993,9 @@ const PayrollPage = () => {
     setPayrollEdits(
       (batch.rows || []).reduce((edits, row) => {
         edits[row.id] = {
+          workingDays: row.workingDays,
+          unpaidDays: row.unpaidDays,
+          reimbursement: Number(row.reimbursement || 0),
           allowances: Number(row.allowances || 0),
           deduction: Number(row.deduction || 0),
           esiAmount: Number(row.esiAmount || 0),
@@ -6008,6 +6012,7 @@ const PayrollPage = () => {
   };
   const updatePayrollBatch = async (batch) => {
     if (!batch) return;
+    if (rows.some((row) => !row.validLopDays)) { setMessage("LOP days must be between zero and applicable working days. Working days must be between zero and 31."); return; }
     if (batch.hasArchivedEmployees) {
       setMessage("This batch includes archived employee history. Review it in Reports.");
       return;
@@ -6104,6 +6109,7 @@ const PayrollPage = () => {
                   normalizeAttendanceMonth(event.target.value) ||
                     getCurrentAttendanceMonth()
                 );
+                setPayrollEdits({});
                 setGenerated(false);
                 setSelectedBatchId("");
                 setSelectedEmployeeId("");
@@ -6171,17 +6177,13 @@ const PayrollPage = () => {
 
 
 
-            {selectedPayrollRow.unpaidDays > selectedPayrollRow.workingDays && <p role="alert">Unpaid days cannot exceed working days.</p>}
-
-
-
-
-
-
-
-            <Field label="LOP"><Input value={money(selectedPayrollRow.lopAmount)} disabled /></Field>
             <Field label="Applicable working days"><Input type="number" min="0" max="31" step="0.5" value={selectedPayrollRow.workingDays} onChange={(e) => updatePayrollEdit("workingDays", e.target.value)} /></Field>
-            <Field label="Unpaid days"><Input type="number" min="0" max={selectedPayrollRow.workingDays} step="0.5" value={selectedPayrollRow.unpaidDays} onChange={(e) => updatePayrollEdit("unpaidDays", e.target.value)} /></Field>
+            <Field label="LOP days"><Input type="number" min="0" max={selectedPayrollRow.workingDays} step="0.5" value={selectedPayrollRow.unpaidDays} onChange={(e) => updatePayrollEdit("unpaidDays", e.target.value)} aria-invalid={!selectedPayrollRow.validLopDays} aria-describedby="payroll-lop-help" /></Field>
+            <Field label="LOP amount"><Input value={money(selectedPayrollRow.lopAmount)} readOnly /></Field>
+            <p id="payroll-lop-help" className="text-xs text-slate-500 lg:col-span-full">
+              Enter the employee's loss of pay days, including half days (for example, 2.5). The LOP amount and net salary update automatically. Check applicable working days before saving.
+            </p>
+            {!selectedPayrollRow.validLopDays && <p role="alert" className="text-sm text-red-600 lg:col-span-full">LOP days must be between zero and applicable working days. Working days must be between zero and 31.</p>}
             <Field label="PT">
               <Input
                 type="number"

@@ -1,5 +1,16 @@
 import { monthKey } from './payroll.js';
 
+export function attendanceDates(month) {
+  const key = monthKey(month);
+  return attendanceStatuses([], key).map((_, index) =>
+    `${key}-${String(index + 1).padStart(2, '0')}`
+  );
+}
+
+export function formatAttendanceDate(date) {
+  return date.split('-').reverse().join('/');
+}
+
 export function attendanceStatuses(values, month, legacyHolidays = false) {
   const key = monthKey(month);
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(key)) throw new Error('Select a valid attendance month.');
