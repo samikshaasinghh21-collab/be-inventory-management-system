@@ -1,6 +1,6 @@
 import { attendanceStatuses, attendanceTotals } from "../../shared/attendance.js";
 import { registerHrmsPolicies } from "./hrmsPolicies.js";
-import { calculateLop, monthlyProfessionalTax } from "../../shared/payroll.js";
+import { calculateLop, manualLopAmount, monthlyProfessionalTax, monthKey } from "../../shared/payroll.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
@@ -27,6 +27,7 @@ import { isAllowedOrigin } from "./corsConfig.js";
 import { authorizeApiRequest } from "./apiAccess.js";
 import { sanitizeErrorResponses } from "./errorResponse.js";
 import { createWorkspaceDataRouter } from "./workspaceData.js";
+import { createBankGuaranteeRouter } from "./bankGuarantees.js";
 import { optionalPagination } from "./pagination.js";
 import version from "../../scripts/getVersion.js";
 
@@ -92,6 +93,7 @@ app.use(
   (req, res, next) => req.path === "/health" ? next() : authorizeApiRequest(req, res, next)
 );
 app.use("/api/workspace-data", createWorkspaceDataRouter());
+app.use("/api/finance/bank-guarantees", createBankGuaranteeRouter());
 
 const hasClosedMutationGrant = (req) =>
   hasPermission(req.user, "purchase_orders.override_closed") &&
@@ -13352,7 +13354,8 @@ const buildHrmsSalaryPayload = (source = {}, inherited = {}) => {
       : normalizeHrmsDecimal(providedEsiAmount);
   const workingDays = Number(source.workingDays ?? 0);
   const unpaidDays = Number(source.unpaidDays ?? 0);
-  const lopAmount = calculateLop(calculateHrmsMonthlyGross(basicSalary), workingDays, unpaidDays);
+  calculateLop(calculateHrmsMonthlyGross(basicSalary), workingDays, unpaidDays); // Validate attendance without deriving LOP.
+  const lopAmount = manualLopAmount(source.lopAmount ?? source.LOPAmount);
   const reimbursement = normalizeHrmsDecimal(source.reimbursement);
   const netSalary =
     calculateHrmsMonthlyGross(basicSalary) + allowances + reimbursement - lopAmount - deductions - pfAmount - esiAmount - professionalTax - tdsAmount;
@@ -13693,13 +13696,13 @@ app.post("/api/hrms/salaries", async (req, res) => {
     };
     const payloads = rows.map((row) => buildHrmsSalaryPayload(row, inherited));
     const invalidPayload = payloads.find(
-      (payload) => !payload.employeeId || !payload.month
+      (payload) => !payload.employeeId || !monthKey(payload.month)
     );
     if (invalidPayload) {
       return res.status(400).json({
         ok: false,
         error: invalidPayload.employeeId
-          ? "month is required."
+          ? "A valid payroll month is required."
           : "employeeId is required.",
       });
     }
@@ -13710,8 +13713,8 @@ app.post("/api/hrms/salaries", async (req, res) => {
 
     const savedRows = [];
     for (const payload of payloads) {
-      const policyYear = new Date(`1 ${payload.month}`).getFullYear() || Number(payload.month.slice(0,4));
-      const policy = await hrmsPolicies.load(payload.employeeId, policyYear);
+      const policyYear = Number(monthKey(payload.month).slice(0,4));
+      const policy = await hrmsPolicies.load(payload.employeeId, policyYear, tx);
       payload.professionalTax = monthlyProfessionalTax(policy.ptRule, payload.month, payload.professionalTax);
       savedRows.push(await saveHrmsSalaryRow(tx, payload));
     }

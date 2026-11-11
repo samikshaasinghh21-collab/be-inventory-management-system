@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateLop, monthlyProfessionalTax, monthKey } from '../../shared/payroll.js';
+import { manualLopAmount, calculateLop, monthlyProfessionalTax, monthKey } from '../../shared/payroll.js';
 
 test('LOP uses applicable working days and supports partial unpaid days',()=>{
   assert.equal(calculateLop(30000,25,2.5),3000);
@@ -25,4 +25,25 @@ test('report and payroll months agree across stored and input formats',()=>{
   assert.equal(monthKey('September 2026'),'2026-09');
   assert.equal(monthKey('2026-09'),'2026-09');
   assert.equal(monthKey('invalid'),'');
+  assert.equal(monthKey('2026-00'),'');
+  assert.equal(monthKey('2026-13'),'');
+  assert.throws(()=>monthlyProfessionalTax({annualAmount:2500},'2026-13'));
+});
+test('invalid LOP inputs are rejected and saved currency keeps paise', () => {
+  for (const [gross, working, unpaid] of [[30000,32,1],[30000,25,-0.5],[-1,25,0],[30000,NaN,1]]) {
+    assert.throws(() => calculateLop(gross, working, unpaid));
+  }
+  assert.equal(calculateLop(30000,31,0.5),483.87);
+  assert.equal(monthlyProfessionalTax({annualAmount:0},'2026-01'),0);
+});
+
+
+test('manual LOP preserves entered amounts including zero and rejects invalid values', () => {
+  assert.equal(manualLopAmount(1250.75), 1250.75);
+  assert.equal(manualLopAmount("0"), 0);
+  assert.equal(manualLopAmount(undefined), 0);
+  assert.equal(manualLopAmount("434.785"), 434.79);
+  for (const value of [-1, "invalid", Infinity, NaN]) {
+    assert.throws(() => manualLopAmount(value), /LOP must/);
+  }
 });

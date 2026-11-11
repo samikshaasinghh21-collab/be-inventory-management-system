@@ -25,5 +25,6 @@ export function attendanceStatuses(values, month, legacyHolidays = false) {
 
 export function attendanceTotals(statuses) {
   const counts = statuses.reduce((result, status) => { result[status] = (result[status] || 0) + 1; return result; }, { P: 0, A: 0, L: 0, H: 0, O: 0 });
-  return { ...counts, total: statuses.length, worked: counts.P + counts.H / 2, unpaid: counts.A + counts.H / 2, working: statuses.length - counts.O };
+  // Holidays are paid days in the payroll denominator, but are not days actually worked.
+  return { ...counts, total: statuses.length, worked: counts.P + counts.H / 2, unpaid: counts.A + counts.H / 2, paid: statuses.length - counts.A - counts.H / 2, working: statuses.length };
 }

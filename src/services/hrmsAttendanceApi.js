@@ -1,7 +1,7 @@
 import { attendanceStatuses, attendanceTotals } from "../../shared/attendance.js";
 import api from "./api";
 
-const emitHrmsAttendanceChange = () => {
+export const emitHrmsAttendanceChange = () => {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("hrms:attendance:changed"));
   }
@@ -74,12 +74,12 @@ export const fetchHrmsAttendance = async () => {
   return list.map(normalizeHrmsAttendance);
 };
 
-export const saveHrmsAttendance = async (payload) => {
+export const saveHrmsAttendance = async (payload, { notify = true } = {}) => {
   const response = await api.post("/hrms/attendance", payload);
   const normalized = normalizeHrmsAttendance(
     response.data?.attendanceRecord ?? response.data
   );
-  emitHrmsAttendanceChange();
+  if (notify) emitHrmsAttendanceChange();
   return normalized;
 };
 

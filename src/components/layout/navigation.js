@@ -615,6 +615,7 @@ const NAVIGATION_CATALOG = [
 const findSection = (id) => NAVIGATION_CATALOG.find((section) => section.id === id);
 const hrItems = findSection("hrm").items[0].children;
 export const NAVIGATION_SECTIONS = [
+  { id: "finance", label: "Finance", items: [createNavItem({ id: "bank-guarantees", label: "Bank Guarantee", to: "/finance/bank-guarantees", icon: "file", subtitle: "Project-linked bank guarantees, renewals and release tracking.", searchKeywords: ["security", "BG", "bank", "guarantee", "finance"] })] },
   { id: "workspace", label: "Workspace", items: findSection("workspace").items.filter((item) => item.id === "dashboard") },
   { id: "workflow", label: "Inventory", items: [
     { ...findSection("workspace").items.find((item) => item.id === "inventory-home"), label: "Overview" },

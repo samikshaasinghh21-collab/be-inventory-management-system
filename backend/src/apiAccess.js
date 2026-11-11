@@ -3,6 +3,7 @@ import { hasPermission } from "./auth.js";
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 const POLICIES = [
+  { prefix: "/finance", read: ["finance.view"], write: ["finance.manage"] },
   { prefix: "/hrms", read: ["hrms.view"], write: ["hrms.manage"] },
   { prefix: "/invoices", read: ["finance.view"], write: ["finance.manage"] },
   { prefix: "/purchase-orders", read: ["procurement.view"], write: ["procurement.manage"] },

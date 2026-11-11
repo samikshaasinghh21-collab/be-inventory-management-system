@@ -3,6 +3,7 @@ import { Navigate, Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
 
 const lazyPage = (loader) => lazy(loader);
+const BankGuarantees = lazyPage(() => import("../pages/BankGuarantees"));
 const Layout = lazyPage(() => import("../components/layout/Layout"));
 const MainLayout = lazyPage(() => import("../layouts/MainLayout"));
 const ProtectedRoute = lazyPage(() => import("../components/auth/ProtectedRoute"));
@@ -118,6 +119,7 @@ const AppRoutes = () => {
           <Route path="/" element={<Dashboard />} />
         </Route>
         <Route element={<MainLayout />}>
+        <Route path="/finance/bank-guarantees" element={<BankGuarantees />} />
         <Route path="/inventory" element={<InventoryHome />} />
         <Route
           path="/inventory/material-planning"

@@ -1,6 +1,7 @@
 import AttendanceRegister from "../components/hrms/AttendanceRegister";
 import { currentHrmsEmployees, recordsForHrmsEmployees, isRelievedEmployee } from "../utils/hrmsEmployeeVisibility";
 import EmployeeAttendanceSummary from "../components/hrms/EmployeeAttendanceSummary";
+import EmployeePayrollSummary from "../components/hrms/EmployeePayrollSummary";
 import ProfessionalTaxRule from "../components/hrms/ProfessionalTaxRule";
 import api from "../services/api";
 import { reportNames } from "../utils/hrmsReports";
@@ -1177,17 +1178,18 @@ const printEmployeeProfile = (employee, company = {}) => {
     ["Nationality", displayValue(employee.nationality)],
     ["Blood Group", displayValue(employee.bloodGroup)],
     ["PAN Number", displayValue(employee.panNumber)],
-    ["PAN Number", displayValue(employee.panNumber)],
     ["UAN Number", displayValue(employee.uanNumber)],
     ["ESI Number", displayValue(employee.esiNumber)],
     ["Annual Gross Salary", money(employee.salary)],
     ["Monthly Gross Salary", money(salaryBreakup.monthlySalary)],
-    ["Monthly Allowances", money(salaryBreakup.allowances)],
-    ["Monthly PF", money(salaryBreakup.pfAmount)],
-    ["Monthly ESI", money(salaryBreakup.esiAmount)],
-    ["Other Monthly Deductions", money(salaryBreakup.deduction)],
+    ["LOP", money(salaryBreakup.lopAmount)],
+    ["PT", money(salaryBreakup.professionalTax)],
+    ["ESI", money(salaryBreakup.esiAmount)],
     ["TDS", money(salaryBreakup.tdsAmount)],
-    ["Professional Tax", money(salaryBreakup.professionalTax)],
+    ["Reimbursement", money(salaryBreakup.reimbursement)],
+    ["Allowance", money(salaryBreakup.allowances)],
+    ["Monthly PF", money(salaryBreakup.pfAmount)],
+    ["Other Monthly Deductions", money(salaryBreakup.deduction)],
     ["Monthly Net Salary", money(salaryBreakup.netSalary)],
     ["Permanent Address", displayValue(employee.permanentAddress)],
     ["Present Address", displayValue(employee.presentAddress || employee.address)],
@@ -1370,7 +1372,7 @@ const getRelievingLetterData = (record = {}, employee = {}) => {
   };
 };
 
-const printRelievingLetter = (record, employee) => {
+const printRelievingLetter = (record, employee, company = {}) => {
   if (typeof window === "undefined" || !record) return;
 
   const letter = getRelievingLetterData(record, employee);
@@ -1456,7 +1458,7 @@ const printRelievingLetter = (record, employee) => {
         <article class="letter">
           <section class="header">
             <div>
-              <img src="${escapeHtml(new URL(defaultBrandLogoUrl, window.location.origin).href)}" alt="Company logo" style="max-height:70px;max-width:180px" /><h1>Bangalore Electronics</h1>
+              <img src="${escapeHtml(new URL(resolveBrandLogo(company.logo || ""), window.location.origin).href)}" alt="Company logo" style="max-height:70px;max-width:180px" /><h1>${escapeHtml(resolveBrandName(company.name || ""))}</h1>
               <p class="muted">Human Resources Department</p>
             </div>
             <div>
@@ -1554,7 +1556,8 @@ const DEFAULT_ATTENDANCE_STATUSES = [
 
 const money = (value) =>
   `Rs. ${Number(value || 0).toLocaleString("en-IN", {
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   })}`;
 
 const toSalaryNumber = (value, fallback = 0) => {
@@ -1572,15 +1575,7 @@ const calculateMonthlySalary = (grossSalary) =>
   Math.round(toSalaryNumber(grossSalary) / 12);
 
 const normalizeMonthlyPfAmount = (pfAmount, annualGrossSalary) => {
-  const monthlyPfAmount = calculatePfAmount(annualGrossSalary);
-  const storedPfAmount = toSalaryNumber(pfAmount, monthlyPfAmount);
-  const legacyAnnualPfAmount = Math.round(
-    toSalaryNumber(annualGrossSalary) * 0.12
-  );
-
-  return Math.abs(storedPfAmount - legacyAnnualPfAmount) <= 1
-    ? monthlyPfAmount
-    : storedPfAmount;
+  return toSalaryNumber(pfAmount, calculatePfAmount(annualGrossSalary));
 };
 
 const getSalaryBreakup = (source = {}, grossOverride) => {
@@ -4041,7 +4036,7 @@ const EmployeeProfilePage = () => {
       <Tabs items={["Overview", "Employment", "Salary", "Attendance", "Documents", "Emergency contact", "Reviews"].map((label) => ({ id: label, label }))} value={profileTab} onChange={setProfileTab} />
       {profileTab === "Overview" && <div className="people-profile-grid"><Panel><SectionHeader title="Personal details" description="Employee identity and contact information" /><dl className="people-detail-list">{[["Full name", employee.name], ["Email", employee.email], ["Phone", employee.phone], ["Date of birth", formatDate(employee.dateOfBirth)], ["Gender", employee.gender], ["Marital status", employee.maritalStatus], ["Nationality", employee.nationality], ["Blood group", employee.bloodGroup]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl></Panel><Panel><SectionHeader title="Addresses" description="Residential contact details" /><dl className="people-detail-list"><div><dt>Permanent address</dt><dd>{displayValue(employee.permanentAddress)}</dd></div><div><dt>Current address</dt><dd>{displayValue(employee.presentAddress || employee.address)}</dd></div></dl><SectionHeader title="Employment summary" /><dl className="people-detail-list"><div><dt>Reporting manager</dt><dd>{displayValue(employee.manager)}</dd></div><div><dt>Joined</dt><dd>{formatDate(employee.joined)}</dd></div><div><dt>Status</dt><dd><StatusBadge status={employee.status} /></dd></div></dl></Panel></div>}
       {profileTab === "Employment" && <Panel><SectionHeader title="Employment details" description="Role, reporting line, and statutory identifiers" /><dl className="people-detail-list people-detail-columns">{[["Employee ID", employee.id], ["Department", employee.department], ["Job title", employee.designation], ["Reporting manager", employee.manager], ["Joining date", formatDate(employee.joined)], ["PAN number", employee.panNumber], ["Aadhaar number", employee.documentNumber], ["UAN number", employee.uanNumber], ["ESI number", employee.esiNumber]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl></Panel>}
-      {profileTab === "Salary" && <Panel><SectionHeader title="Compensation" description="Current salary information from the employee record" /><div className="people-metrics"><MetricCard label="Annual gross salary" value={money(employee.salary)} /><MetricCard label="Monthly gross salary" value={money(getSalaryBreakup(employee).monthlySalary)} /></div><SalaryGrowthChart records={salaryHistory.filter((record) => record.employeeId === employee.id)} currentSalary={employee.salary} /><Link className="people-text-action" to="/reviews/salary-reassessment">Open salary reviews <ArrowUpRight size={14} /></Link></Panel>}
+      {profileTab === "Salary" && <Panel><SectionHeader title="Compensation" description="Current salary information from the employee record" /><div className="people-metrics"><MetricCard label="Annual gross salary" value={money(employee.salary)} /><MetricCard label="Monthly gross salary" value={money(getSalaryBreakup(employee).monthlySalary)} /></div><EmployeePayrollSummary employeeId={employee.id} /><SalaryGrowthChart records={salaryHistory.filter((record) => record.employeeId === employee.id)} currentSalary={employee.salary} /><Link className="people-text-action" to="/reviews/salary-reassessment">Open salary reviews <ArrowUpRight size={14} /></Link></Panel>}
       {profileTab === "Attendance" && <EmployeeAttendanceSummary employeeId={employee.id} />}
       {profileTab === "Documents" && <EmployeeDocumentsViewer documents={employee.documents} onError={setError} />}
       {profileTab === "Emergency contact" && <Panel><SectionHeader title="Emergency contact" description="Who to contact when urgent support is needed" /><dl className="people-detail-list">{[["Contact name", employee.emergencyContactName], ["Relationship", employee.relation || employee.emergencyContactRelation], ["Phone", employee.emergencyContactNumber], ["Address", employee.emergencyContactAddress]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl></Panel>}
@@ -4635,7 +4630,7 @@ const approvalStatuses = [
   "Revision Requested",
 ];
 
-const SalaryReassessmentPage = () => {
+const SalaryReassessmentPage = ({ reviewMode = false }) => {
   const navigate = useNavigate();
   const settings = useSettings();
   const companyLogo = resolveBrandLogo(settings.company?.logo || "");
@@ -4669,7 +4664,7 @@ const SalaryReassessmentPage = () => {
     employeeSelfReview: "",
     hrComments: "",
     hrStatus: "Pending",
-    incrementPercent: 10,
+    incrementPercent: reviewMode ? 0 : 10,
     kpiScore: 86,
     managerComments: "",
     managerStatus: "Pending",
@@ -4714,7 +4709,7 @@ const SalaryReassessmentPage = () => {
         .includes(query)
     );
   }, [employeeSearch, employees]);
-  const currentSalary = Number(selectedEmployee?.salary || 0);
+  const currentSalary = Number(salaryHistory.find((record) => record.id === activeRegisterId)?.currentSalary ?? selectedEmployee?.salary ?? 0);
   const incrementPercent = clampNumber(form.incrementPercent, 0, 100);
   const incrementAmount = Math.round((currentSalary * incrementPercent) / 100);
   const revisedSalary = currentSalary + incrementAmount;
@@ -4942,7 +4937,9 @@ const SalaryReassessmentPage = () => {
     try {
       setSavingAction(status);
       setError("");
-      const savedRecord = await createHrmsSalaryReassessment(record);
+      const savedRecord = activeRegisterRecord
+        ? await updateHrmsSalaryReassessment(activeRegisterRecord.id, { ...record, id: activeRegisterRecord.id })
+        : await createHrmsSalaryReassessment(record);
       setSalaryHistory((current) => [
         savedRecord,
         ...current.filter((item) => item.id !== savedRecord.id),
@@ -5372,7 +5369,7 @@ const SalaryReassessmentPage = () => {
           Back
         </Button>
         <Button variant="secondary" onClick={() => navigate("/reviews")}>
-          Close Reassessment
+          {reviewMode ? "Review Home" : "Close Reassessment"}
         </Button>
       </div>
       <Panel>
@@ -5414,10 +5411,10 @@ const SalaryReassessmentPage = () => {
             </div>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <Link to="/reviews">
+            <Link to={reviewMode ? "/reviews/salary-reassessment" : "/reviews"}>
               <Button variant="secondary">
                 <AppIcon name="clipboard" className="h-4 w-4" />
-                Review
+                {reviewMode ? "Salary Reassessment" : "Review"}
               </Button>
             </Link>
             <Button
@@ -5449,7 +5446,44 @@ const SalaryReassessmentPage = () => {
 
       {selectedEmployee && (
         <>
-          <section className="grid gap-4">
+          {reviewMode && <>
+            <Panel>
+              <SectionHeader title="Performance Review" description="Saved assessment details for the selected employee" />
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Reviewer"><Input value={form.reviewerName} onChange={(e) => updateForm("reviewerName", e.target.value)} /></Field>
+                <Field label="Review Date"><Input type="date" value={form.reviewDate} onChange={(e) => updateForm("reviewDate", e.target.value)} /></Field>
+                <Field label="Period Start"><Input type="date" value={form.reviewStartDate} onChange={(e) => updateReviewPeriodDate("reviewStartDate", e.target.value)} /></Field>
+                <Field label="Period End"><Input type="date" value={form.reviewEndDate} onChange={(e) => updateReviewPeriodDate("reviewEndDate", e.target.value)} /></Field>
+                {[["kpiScore", "KPI Score"], ["attendanceScore", "Attendance Score"], ["behaviorScore", "Behavior Score"], ["productivityScore", "Productivity Score"]].map(([key, label]) => <Field key={key} label={label}><Input type="number" min="0" max="100" value={form[key]} onChange={(e) => updateForm(key, clampNumber(e.target.value))} /></Field>)}
+                <Field label="Overall Rating (1–5)"><Input type="number" min="1" max="5" value={form.overallRating} onChange={(e) => updateForm("overallRating", clampNumber(e.target.value, 1, 5))} /></Field>
+                {[["strengths", "Strengths"], ["improvement", "Areas for Improvement"], ["employeeSelfReview", "Employee Self Review"], ["managerComments", "Manager Comments"], ["hrComments", "HR Comments"]].map(([key, label]) => <Field key={key} label={label}><Input as="textarea" value={form[key]} onChange={(e) => updateForm(key, e.target.value)} /></Field>)}
+              </div>
+            </Panel>
+            <Panel>
+              <SectionHeader title="KPI / Performance Metrics" />
+              <div className="grid gap-3 md:grid-cols-3">{metricRows.map(({key, label, value}) => <Field key={key} label={label}><Input type="number" min="0" max="100" value={value} onChange={(e) => updateMetric(key, e.target.value)} /></Field>)}</div>
+            </Panel>
+            <Panel>
+              <SectionHeader title="Promotion Management" />
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Promotion Recommendation"><Input as="select" value={form.promotionRecommendation} onChange={(e) => updateForm("promotionRecommendation", e.target.value)}>{["No Promotion", "Promotion Recommended", "Role Enhancement"].map((value) => <option key={value}>{value}</option>)}</Input></Field>
+                <Field label="Proposed Role"><Input value={form.proposedRole} onChange={(e) => updateForm("proposedRole", e.target.value)} /></Field>
+                <Field label="Department Transfer"><Input value={form.departmentTransfer} onChange={(e) => updateForm("departmentTransfer", e.target.value)} /></Field>
+                <Field label="Promotion Effective Date"><Input type="date" value={form.promotionEffectiveDate} onChange={(e) => updateForm("promotionEffectiveDate", e.target.value)} /></Field>
+              </div>
+            </Panel>
+            <Panel>
+              <SectionHeader title="Approval Workflow" />
+              <div className="grid gap-3 md:grid-cols-2">{[["managerStatus", "Manager"], ["hrStatus", "HR"], ["directorStatus", "Director"], ["acknowledgement", "Employee Acknowledgement"]].map(([key,label]) => <Field key={key} label={label}><Input as="select" value={form[key]} onChange={(e) => updateForm(key, e.target.value)}>{Array.from(new Set([form[key], "Pending", "Approved", "Rejected", "Revision Requested", ...(key === "acknowledgement" ? ["Acknowledged"] : [])])).map((value) => <option key={value}>{value}</option>)}</Input></Field>)}</div>
+            </Panel>
+            <Panel>
+              <SectionHeader title="Assessment Summary" />
+              <div className="grid gap-3 md:grid-cols-3"><MetricCard label="Review Score" value={`${reviewScore}%`} /><MetricCard label="Grade" value={grade} /><MetricCard label="Promotion Readiness" value={promotionReadiness} /></div>
+              <p className="mt-3 text-sm">Review period: {form.reviewPeriod}</p>
+              <Link className="text-blue-700" to="/reviews/history">View performance review history</Link>
+            </Panel>
+          </>}
+          {!reviewMode && <section className="grid gap-4">
             <Panel>
               <h2 className="text-sm font-bold">Salary Reassessment</h2>
               <div className="mt-4 grid gap-4">
@@ -5483,17 +5517,6 @@ const SalaryReassessmentPage = () => {
                       onChange={(value) => updateForm("effectiveDate", value)}
                     />
                   </Field>
-                  <Field label="Promotion Recommendation">
-                    <Input
-                      as="select"
-                      value={form.promotionRecommendation}
-                      onChange={(event) => updateForm("promotionRecommendation", event.target.value)}
-                    >
-                      <option>No Promotion</option>
-                      <option>Promotion Recommended</option>
-                      <option>Role Enhancement</option>
-                    </Input>
-                  </Field>
                 </div>
                 <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
                   <div className="flex justify-between gap-4">
@@ -5511,7 +5534,7 @@ const SalaryReassessmentPage = () => {
                 </div>
               </div>
             </Panel>
-          </section>
+          </section>}
 
           <Panel>
             <div className="flex flex-wrap justify-end gap-2">
@@ -5529,14 +5552,14 @@ const SalaryReassessmentPage = () => {
               >
                 {savingAction === "Approved" ? "Saving..." : "Save Approved Review"}
               </Button>
-              <Button
+              {!reviewMode && <Button
                 onClick={() => saveReassessment("Salary Activated", true)}
                 disabled={Boolean(savingAction)}
               >
                 {savingAction === "Salary Activated"
                   ? "Activating..."
                   : "Activate Salary"}
-              </Button>
+              </Button>}
             </div>
           </Panel>
         </>
@@ -5815,10 +5838,12 @@ const PayrollPage = () => {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [payrollEdits, setPayrollEdits] = useState({});
   const [ptRules,setPtRules] = useState({});
+  const [ptRulesReady, setPtRulesReady] = useState(false);
   useEffect(() => {
     let live=true;
+    setPtRulesReady(false);
     const year=String(getAttendanceMonthDate(month)?.getFullYear() || new Date().getFullYear());
-    Promise.all(currentHrmsEmployees(allEmployees).map(async (employee) => [employee.id, (await api.get(`/hrms/payroll-rules/${encodeURIComponent(employee.id)}/${year}`)).data.ptRule])).then((entries) => {if(live)setPtRules(Object.fromEntries(entries));}).catch(() => {if(live)setMessage("Could not load annual PT rules. Check the connection before generating payroll.");});
+    Promise.all(currentHrmsEmployees(allEmployees).map(async (employee) => [employee.id, (await api.get(`/hrms/payroll-rules/${encodeURIComponent(employee.id)}/${year}`)).data.ptRule])).then((entries) => {if(live){setPtRules(Object.fromEntries(entries));setPtRulesReady(true);}}).catch(() => {if(live)setMessage("Could not load annual PT rules. Check the connection before generating payroll.");});
     return () => {live=false;};
   },[allEmployees,month]);
   const visibleEmployees =
@@ -5845,14 +5870,14 @@ const PayrollPage = () => {
       edit.esiAmount,
       employeeBreakup.esiAmount
     );
-    const rowProfessionalTax = monthlyProfessionalTax(ptRules[employee.id], month, toSalaryNumber(edit.professionalTax, employeeBreakup.professionalTax));
+    let rowProfessionalTax = toSalaryNumber(edit.professionalTax, employeeBreakup.professionalTax);
     const rowTdsAmount = toSalaryNumber(
       edit.tdsAmount,
       employeeBreakup.tdsAmount
     );
     const attendanceRow = attendance.find((record) => record.employeeId === employee.id && areAttendanceMonthsEqual(record.month, month));
-    const workingDays = toSalaryNumber(edit.workingDays, getAttendanceDays(month).length - (attendanceRow?.counts.O || 0));
-    const unpaidDays = toSalaryNumber(edit.unpaidDays, attendanceRow ? attendanceRow.counts.A + attendanceRow.counts.H / 2 : 0);
+    const workingDays = toSalaryNumber(edit.workingDays, attendanceRow?.counts.working ?? getAttendanceDays(month).length);
+    const unpaidDays = toSalaryNumber(edit.unpaidDays, attendanceRow?.counts.unpaid ?? 0);
     const validLopDays = workingDays >= 0 && workingDays <= 31 && unpaidDays >= 0 && unpaidDays <= workingDays;
     const lopAmount = validLopDays ? calculateLop(calculateMonthlySalary(salary), workingDays, unpaidDays) : 0;
     const reimbursement = toSalaryNumber(edit.reimbursement);
@@ -6017,6 +6042,11 @@ const PayrollPage = () => {
       setMessage("This batch includes archived employee history. Review it in Reports.");
       return;
     }
+    if (selectedBatchId !== batch.id) {
+      loadPayrollBatch(batch);
+      setMessage(`Payroll loaded for ${batch.month} / ${batch.department}. Review the values, then click Update to save.`);
+      return;
+    }
 
     const updatedRows = rows.map((row) => ({ ...row, status: "Processed" }));
 
@@ -6145,7 +6175,7 @@ const PayrollPage = () => {
         </div>
 
         {selectedPayrollRow && (
-          <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[repeat(9,minmax(0,1fr))_auto]">
+          <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 xl:grid-cols-4">
             <Field label="Select Employee">
               <Input
                 as="select"
@@ -6178,10 +6208,11 @@ const PayrollPage = () => {
 
 
             <Field label="Applicable working days"><Input type="number" min="0" max="31" step="0.5" value={selectedPayrollRow.workingDays} onChange={(e) => updatePayrollEdit("workingDays", e.target.value)} /></Field>
+            <Field label="Paid days"><Input type="number" min="0" max={selectedPayrollRow.workingDays} step="0.5" value={selectedPayrollRow.workingDays - selectedPayrollRow.unpaidDays} onChange={(e) => updatePayrollEdit("unpaidDays", selectedPayrollRow.workingDays - Number(e.target.value))} /></Field>
             <Field label="LOP days"><Input type="number" min="0" max={selectedPayrollRow.workingDays} step="0.5" value={selectedPayrollRow.unpaidDays} onChange={(e) => updatePayrollEdit("unpaidDays", e.target.value)} aria-invalid={!selectedPayrollRow.validLopDays} aria-describedby="payroll-lop-help" /></Field>
             <Field label="LOP amount"><Input value={money(selectedPayrollRow.lopAmount)} readOnly /></Field>
             <p id="payroll-lop-help" className="text-xs text-slate-500 lg:col-span-full">
-              Enter the employee's loss of pay days, including half days (for example, 2.5). The LOP amount and net salary update automatically. Check applicable working days before saving.
+              Days are filled from saved monthly attendance and can be edited here. Leave and holidays are paid; absence deducts 1 day and half day deducts 0.5 day. Editing paid days or LOP days updates salary automatically.
             </p>
             {!selectedPayrollRow.validLopDays && <p role="alert" className="text-sm text-red-600 lg:col-span-full">LOP days must be between zero and applicable working days. Working days must be between zero and 31.</p>}
             <Field label="PT">
@@ -6490,21 +6521,30 @@ const PayslipPage = () => {
   const payrollBreakup = payslip
     ? getSalaryBreakup(payrollRow || {}, payrollRow?.salary)
     : null;
+  // Component allocations are not stored in the current payroll schema.
+  // Keep the saved gross explicit rather than inventing a salary split.
   const earnings = payslip
     ? [
-        ["Monthly Gross Salary", payrollBreakup.monthlySalary],
-        ["Reimbursement", payrollBreakup.reimbursement],
+        ["Monthly Fixed Gross (unallocated)", payrollBreakup.monthlySalary],
+        ["Basic + DA", null],
+        ["HRA", null],
+        ["Travel Allowance", null],
+        ["Medical Allowance", null],
+        ["Special Allowance", null],
+        ["Incentives", null],
         ["Allowance", payrollBreakup.allowances],
+        ["Reimbursement", payrollBreakup.reimbursement],
       ]
     : [];
   const deductions = payslip
     ? [
-        ["LOP", payrollBreakup.lopAmount],
-        ["PT", payrollBreakup.professionalTax],
+        ["PF", payrollBreakup.pfAmount],
         ["ESI", payrollBreakup.esiAmount],
+        ["PT", payrollBreakup.professionalTax],
         ["TDS", payrollBreakup.tdsAmount],
-        ["Other deduction", payrollBreakup.deduction],
-        ["Monthly PF", payrollBreakup.pfAmount],
+        ["CTC DD", null],
+        ["Other Deduction", payrollBreakup.deduction],
+        ["LOP Amount", payrollBreakup.lopAmount],
       ]
     : [];
   const totalEarnings = earnings.reduce((sum, [, value]) => sum + value, 0);
@@ -6539,36 +6579,23 @@ const PayslipPage = () => {
     const savedRow = matchingBatch?.rows?.find(
       (row) => row.id === selectedEmployee.id
     );
-    const fallbackBreakup = getSalaryBreakup(selectedEmployee);
-    const fallbackRow = {
-      ...selectedEmployee,
-      allowance: fallbackBreakup.allowances,
-      allowances: fallbackBreakup.allowances,
-      deduction: fallbackBreakup.deduction,
-      esiAmount: fallbackBreakup.esiAmount,
-      net: fallbackBreakup.netSalary,
-      pfAmount: fallbackBreakup.pfAmount,
-      professionalTax: fallbackBreakup.professionalTax,
-      salary: fallbackBreakup.grossSalary,
-      tdsAmount: fallbackBreakup.tdsAmount,
-      totalDeductions: fallbackBreakup.totalDeductions,
-      status: "Pending",
-    };
+    if (!savedRow) {
+      setPayslip(null);
+      setMessageTone("warning");
+      setMessage(`No saved payroll found for ${selectedEmployee.name} in ${month}. Save payroll before generating a payslip.`);
+      return null;
+    }
 
     const nextPayslip = {
       batch: matchingBatch || null,
       employee: selectedEmployee,
       month,
-      payrollRow: savedRow || fallbackRow,
+      payrollRow: savedRow,
     };
 
     setPayslip(nextPayslip);
-    setMessageTone(savedRow ? "success" : "warning");
-    setMessage(
-      savedRow
-        ? `Payslip created for ${selectedEmployee.name} from HRMS database payroll.`
-        : `No saved payroll found in the HRMS database for ${selectedEmployee.name} in ${month}. Showing fallback values. Save payroll first for registered payslip data.`
-    );
+    setMessageTone("success");
+    setMessage(`Payslip created for ${selectedEmployee.name} from HRMS database payroll.`);
     return nextPayslip;
   };
 
@@ -6673,7 +6700,8 @@ const PayslipPage = () => {
               <div>
                 <p className="text-base font-bold text-slate-900">{companyName}</p>
                 <p className="whitespace-pre-line text-sm text-slate-600">{[settings.company?.address, settings.company?.city, settings.company?.state, settings.company?.pincode].filter(Boolean).join(", ")}</p>
-                <p className="text-sm text-slate-500">Monthly Salary Payslip</p>
+                <p className="text-sm text-slate-500">FORM "VII"</p>
+                <p className="text-sm text-slate-500">Wage Slip for the month of {payslip.month}</p>
               </div>
             </div>
             <div className="mt-4 grid gap-4 border-b border-slate-200 pb-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -6697,12 +6725,14 @@ const PayslipPage = () => {
               </div>
               <div className="grid gap-2 text-sm sm:grid-cols-2">
                 {[
-                  ["Department", displayValue(employee?.department)],
-                  ["Month", payslip.month],
-                  ["Date of Joining", displayValue(employee?.joined)],
-                  ["Days Worked", payrollRow?.workingDays != null ? Math.max(0, Number(payrollRow.workingDays) - Number(payrollRow.unpaidDays || 0)) : "Not recorded"],
-                  ["PAN Number", displayValue(employee?.panNumber)],
-                  ["Payment Date", getPayrollPaymentDate(payslip.month)],
+                  ["Total No. of Days", payrollRow?.workingDays ?? "Not recorded"],
+                  ["UAN", displayValue(employee?.uanNumber)],
+                  ["Payable Days", payrollRow?.workingDays != null ? Math.max(0, Number(payrollRow.workingDays) - Number(payrollRow.unpaidDays || 0)) : "Not recorded"],
+                  ["ESI Number", displayValue(employee?.esiNumber)],
+                  ["LOP Days", payrollRow?.unpaidDays ?? "Not recorded"],
+                  ["DOJ", displayValue(employee?.joined)],
+                  ["Monthly Fixed Gross", money(payrollBreakup.monthlySalary)],
+                  ["Designation", displayValue(employee?.designation)],
                 ].map(([label, value]) => (
                   <div key={label} className="grid grid-cols-[120px_1fr] gap-3">
                     <span className="text-slate-500">{label}</span>
@@ -6720,6 +6750,8 @@ const PayslipPage = () => {
               <span>Net Pay</span>
               <span>{money(netPay)}</span>
             </div>
+            <p className="mt-3 text-xs text-slate-500">Not configured indicates a salary component that has not been configured.</p>
+            <p className="mt-4 text-center text-sm text-slate-500">This is the system generated Pay Slip and hence no signature is required.</p>
           </>
         )}
       </Panel>
@@ -6729,14 +6761,14 @@ const PayslipPage = () => {
 
 const PayrollBox = ({ title, rows, totalLabel, total }) => (
   <div className="rounded-lg border border-slate-200">
-    <h3 className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold">
-      {title}
+    <h3 className="flex justify-between gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold">
+      <span>{title}</span><span>Amount</span>
     </h3>
     <div className="grid gap-2 p-4 text-sm">
       {rows.map(([label, value]) => (
         <div key={label} className="flex justify-between gap-4">
           <span>{label}</span>
-          <strong>{money(value)}</strong>
+          <strong>{value == null ? "Not configured" : money(value)}</strong>
         </div>
       ))}
       <div className="mt-2 flex justify-between gap-4 border-t border-slate-100 pt-3 font-bold">
@@ -6748,6 +6780,7 @@ const PayrollBox = ({ title, rows, totalLabel, total }) => (
 );
 
 const RelievingLetterDocument = ({ record, employee }) => {
+  const settings = useSettings();
   const letter = getRelievingLetterData(record, employee);
   const checklist = Array.isArray(record?.checklist) ? record.checklist : [];
 
@@ -6755,9 +6788,9 @@ const RelievingLetterDocument = ({ record, employee }) => {
     <article className="rounded-md border border-slate-300 bg-white p-5 text-sm leading-7 text-slate-800">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-blue-700 pb-4">
         <div>
-          <img src={defaultBrandLogoUrl} alt="Company logo" className="h-16 w-auto mb-2" />
+          <img src={resolveBrandLogo(settings.company?.logo || "")} alt="Company logo" className="h-16 w-auto mb-2" />
           <h2 className="text-xl font-bold text-slate-950">
-            Bangalore Electronics
+            {resolveBrandName(settings.company?.name || "")}
           </h2>
           <p className="text-xs font-semibold text-slate-500">
             Human Resources Department
@@ -6931,6 +6964,7 @@ const RelievingLettersPage = () => {
 };
 
 const RelievingPage = () => {
+  const settings = useSettings();
   const [employees, setEmployees] = useHrmsEmployees({ includeRelieved: true });
   const [relievingRecords, setRelievingRecords, relievingState] =
     useHrmsRelieving();
@@ -7307,7 +7341,7 @@ const RelievingPage = () => {
               <Button
                 variant="secondary"
                 onClick={() =>
-                  printRelievingLetter(activeSelectedRelievingRecord, selectedLetterEmployee)
+                  printRelievingLetter(activeSelectedRelievingRecord, selectedLetterEmployee, settings.company)
                 }
               >
                 <AppIcon name="file" className="h-4 w-4" />
@@ -7315,7 +7349,7 @@ const RelievingPage = () => {
               </Button>
               <Button
                 onClick={() =>
-                  printRelievingLetter(activeSelectedRelievingRecord, selectedLetterEmployee)
+                  printRelievingLetter(activeSelectedRelievingRecord, selectedLetterEmployee, settings.company)
                 }
               >
                 <AppIcon name="download" className="h-4 w-4" />
@@ -7680,7 +7714,6 @@ const HrmsReportsPage = () => {
           ["Reporting Manager", employee.manager],
           ["Date of Joining", employee.joined],
           ["Employment Status", employee.status],
-          ["PAN Number", employee.panNumber],
           ["PAN Number", employee.panNumber],
           ["UAN Number", employee.uanNumber],
           ["ESI Number", employee.esiNumber],
@@ -8115,7 +8148,12 @@ const PermissionsPage = () => {
   );
 };
 
-const ReviewWorkspace = () => <SalaryReassessmentPage />;
+const ReviewWorkspace = () => {
+  const location = useLocation();
+  return location.pathname.endsWith("/history")
+    ? <ReviewsPage />
+    : <SalaryReassessmentPage reviewMode />;
+};
 
 const renderPage = (page) => {
   switch (page) {

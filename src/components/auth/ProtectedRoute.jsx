@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { getCurrentUser, loadCurrentUser } from "../../services/authService";
-import { isApiUnavailableError } from "../../services/api";
 
 const ProtectedRoute = () => {
   const location = useLocation();
@@ -18,7 +17,10 @@ const ProtectedRoute = () => {
         if (active) setState({ status: user ? "authenticated" : "anonymous", user });
       } catch (error) {
         if (!active) return;
-        setState({ status: isApiUnavailableError(error) ? "unavailable" : "anonymous", user: null });
+        // Only an explicit authentication rejection should send users to login.
+        // Server/database failures otherwise loop when AuthEntry redirects back
+        // here in password-free mode.
+        setState({ status: error?.response?.status === 401 ? "anonymous" : "unavailable", user: null });
       }
     };
     void checkSession();
