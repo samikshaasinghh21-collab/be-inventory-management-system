@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useOutletContext } from "react-router-dom";
 import { getSettings, hydrateSettings } from "../../services/settingsStore";
 import { getCurrentUser, loadCurrentUser } from "../../services/authService";
 import { isApiUnavailableError } from "../../services/api";
@@ -43,6 +43,7 @@ const safeReadSettings = () => {
 };
 
 const AppShell = ({ children }) => {
+  const { offlinePreview = false } = useOutletContext() || {};
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(readStoredCollapse);
   const [isDesktop, setIsDesktop] = useState(readDesktopState);
@@ -101,6 +102,7 @@ const AppShell = ({ children }) => {
     window.addEventListener("auth:changed", syncSettings);
     window.addEventListener("auth:expired", handleExpiredSession);
     const initializeShell = async () => {
+      if (offlinePreview) return;
       try {
         const user = getCurrentUser() || await loadCurrentUser();
         if (!active) return;
@@ -129,7 +131,7 @@ const AppShell = ({ children }) => {
       window.removeEventListener("auth:changed", syncSettings);
       window.removeEventListener("auth:expired", handleExpiredSession);
     };
-  }, []);
+  }, [offlinePreview]);
 
   useEffect(() => {
     if (typeof document === "undefined") {

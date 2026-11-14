@@ -16,7 +16,7 @@ export default function AuthEntry({ children }) {
     return () => { active = false; };
   }, []);
 
-  if (error) return <div role="alert">{error} <button type="button" onClick={() => window.location.reload()}>Retry</button></div>;
+  if (error) return <div role="alert">{error} <button type="button" onClick={() => window.location.reload()}>Retry</button> <a href="/">Open offline preview</a></div>;
   if (disabled === null) return <div role="status">Loading...</div>;
   return disabled ? <Navigate to="/" replace /> : children;
 }
